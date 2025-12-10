@@ -127,6 +127,27 @@ node dist/index.js --workspace /path/to/project --index
 
 4. Type `/mcp` in the TUI to verify the server is connected
 
+### With Other MCP Clients (Antigravity, Claude Desktop, Cursor)
+
+For other MCP clients, add this server to your client's MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "context-engine": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/context-engine/dist/index.js",
+        "--workspace",
+        "/path/to/your/project"
+      ]
+    }
+  }
+}
+```
+
+See [QUICKSTART.md - Step 5B](QUICKSTART.md#step-5b-configure-other-mcp-clients-antigravity-claude-desktop-cursor) for detailed instructions for each client.
+
 ## Development
 
 ```bash

@@ -45,6 +45,9 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 #### Configure Codex CLI
 → [QUICKSTART.md](QUICKSTART.md) - Step 5
 
+#### Configure Other MCP Clients (Antigravity, Claude Desktop, Cursor)
+→ [QUICKSTART.md](QUICKSTART.md) - Step 5B
+
 #### Understand the Architecture
 → [ARCHITECTURE.md](ARCHITECTURE.md) - Full details
 → [README.md](README.md) - Quick overview
