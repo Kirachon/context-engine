@@ -2,6 +2,20 @@
 
 All notable changes to the Context Engine MCP Server will be documented in this file.
 
+## [1.3.0] - 2025-12-11
+
+### Changed (BREAKING)
+- **`enhance_prompt` tool now always uses AI mode**: Removed `use_ai` and `max_files` parameters
+  - The tool now exclusively uses AI-powered enhancement via `searchAndAsk()`
+  - Template-based enhancement mode has been removed
+  - Requires authentication (`auggie login`) for all uses
+  - Migration: Remove `use_ai` and `max_files` parameters from tool calls; only `prompt` is now accepted
+
+### Removed
+- Template-based enhancement mode from `enhance_prompt` tool
+- `use_ai` parameter (was previously defaulted to `true`)
+- `max_files` parameter (no longer applicable without template mode)
+
 ## [1.2.0] - 2025-12-11
 
 ### Added

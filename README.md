@@ -53,7 +53,7 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 3. **`semantic_search(query, top_k)`** - Semantic code search across the codebase (markdown output)
 4. **`get_file(path)`** - Retrieve complete file contents
 5. **`get_context_for_prompt(query)`** - Get relevant context for prompt enhancement (primary tool)
-6. **`enhance_prompt(prompt, max_files, use_ai)`** - Transform simple prompts into detailed, structured prompts with codebase context
+6. **`enhance_prompt(prompt)`** - Transform simple prompts into detailed, structured prompts using AI-powered enhancement
 
 #### Management Tools (New in v1.1.0)
 7. **`index_status()`** - View index health metadata (status, fileCount, lastIndexed, isStale)
