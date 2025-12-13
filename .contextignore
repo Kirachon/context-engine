@@ -1,32 +1,198 @@
+# =============================================================================
 # Context Engine Ignore File
 # Files and patterns listed here will be excluded from context indexing
+# Based on AI_INDEXING_BEST_PRACTICES.md
+# =============================================================================
 
-# Dependencies (already excluded by default, but explicit is good)
+# === Dependencies & Package Managers ===
 node_modules/
+vendor/
+Pods/
+.pub-cache/
 
-# Build artifacts
+# === Build Artifacts & Outputs ===
 dist/
 build/
+out/
+target/
+bin/
+obj/
+release/
+debug/
+.output/
 
-# Test coverage
+# === Flutter/Dart Specific ===
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.g.dart
+*.freezed.dart
+*.mocks.dart
+*.gr.dart
+*.pb.dart
+*.pbjson.dart
+pubspec.lock
+ephemeral/
+.symlinks/
+
+# === Generated Code ===
+*.generated.ts
+*.generated.js
+*.pb.go
+*.pb.cc
+*_pb2.py
+*_pb2_grpc.py
+
+# === Test Coverage & Reports ===
 coverage/
+.nyc_output/
+htmlcov/
+test-results/
+.pytest_cache/
 
-# Logs
-*.log
+# === Python Virtual Environments ===
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
 
-# State files
-.augment-context-state.json
-
-# Lock files (large and not useful for context)
+# === Lock Files (auto-generated, verbose) ===
 package-lock.json
 yarn.lock
 pnpm-lock.yaml
+Cargo.lock
+Gemfile.lock
+poetry.lock
+composer.lock
+bun.lockb
 
-# IDE files
+# === Source Maps & Minified Files ===
+*.map
+*.js.map
+*.css.map
+*.min.js
+*.min.css
+*.bundle.js
+*.chunk.js
+
+# === Binary Images ===
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.webp
+*.ico
+*.icns
+*.svg
+*.psd
+
+# === Fonts ===
+*.ttf
+*.otf
+*.woff
+*.woff2
+*.eot
+
+# === Media Files ===
+*.mp3
+*.mp4
+*.wav
+*.ogg
+*.webm
+*.mov
+*.avi
+
+# === Documents & Archives ===
+*.pdf
+*.doc
+*.docx
+*.xls
+*.xlsx
+*.ppt
+*.pptx
+*.zip
+*.tar
+*.gz
+*.rar
+*.7z
+
+# === Compiled Binaries ===
+*.dll
+*.exe
+*.so
+*.dylib
+*.dill
+*.class
+*.jar
+*.war
+*.o
+*.obj
+*.wasm
+
+# === IDE & Editor Files ===
 .vscode/
 .idea/
+.vs/
+.fleet/
+*.iml
+.project
+.classpath
+*.swp
+*.swo
 
-# OS files
+# === OS Files ===
 .DS_Store
 Thumbs.db
+desktop.ini
 
+# === Version Control Internals ===
+.git/
+.svn/
+.hg/
+
+# === Secrets & Credentials (Security) ===
+.env
+.env.local
+.env.development
+.env.production
+.env.staging
+*.key
+*.pem
+*.p12
+*.jks
+secrets.yaml
+secrets.json
+
+# === Logs & Temporary Files ===
+*.log
+*.tmp
+*.temp
+*.bak
+logs/
+tmp/
+
+# === State Files ===
+.augment-context-state.json
+
+# === Modern Build Tool Caches ===
+.next/
+.nuxt/
+.svelte-kit/
+.cache/
+.parcel-cache/
+.turbo/
+.angular/
+.gradle/
+
+# === Platform-Specific Build Outputs ===
+android/build/
+android/.gradle/
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/ephemeral/
+macos/Flutter/ephemeral/
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/

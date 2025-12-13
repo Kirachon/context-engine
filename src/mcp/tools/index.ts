@@ -71,19 +71,31 @@ that enables fast, meaning-based code search.
 - After making significant changes to the codebase
 - When semantic_search or enhance_prompt returns no results
 
-**What gets indexed:**
+**What gets indexed (50+ file types):**
 - TypeScript/JavaScript (.ts, .tsx, .js, .jsx, .mjs, .cjs)
-- Python (.py)
+- Python (.py, .pyi)
+- Flutter/Dart (.dart, .arb)
 - Go (.go)
 - Rust (.rs)
-- Java/Kotlin (.java, .kt)
+- Java/Kotlin/Scala (.java, .kt, .kts, .scala)
 - C/C++ (.c, .cpp, .h, .hpp)
-- And many more...
+- .NET (.cs, .fs)
+- Swift/Objective-C (.swift, .m)
+- Web (.vue, .svelte, .astro, .html, .css, .scss)
+- Config (.json, .yaml, .yml, .toml, .xml, .plist, .gradle)
+- API schemas (.graphql, .proto)
+- Shell scripts (.sh, .bash, .ps1)
+- DevOps (Dockerfile, .tf, Makefile, Jenkinsfile)
+- Documentation (.md, .txt)
 
-**What is skipped:**
-- node_modules, dist, build directories
-- Hidden files/directories (starting with .)
-- Binary files and files over 10MB
+**What is excluded (optimized for AI context):**
+- Generated code (*.g.dart, *.freezed.dart, *.pb.*)
+- Dependencies (node_modules, vendor, Pods, .pub-cache)
+- Build outputs (dist, build, .dart_tool, .next)
+- Lock files (package-lock.json, pubspec.lock, yarn.lock)
+- Binary files (images, fonts, media, archives)
+- Files over 1MB (typically generated or data files)
+- Secrets (.env, *.key, *.pem)
 
 The index is saved to .augment-context-state.json in the workspace root
 and will be automatically restored on future server starts.`,

@@ -123,8 +123,57 @@ export interface ContextOptions {
 // Constants
 // ============================================================================
 
-/** Maximum file size to read (10MB) */
-const MAX_FILE_SIZE = 10 * 1024 * 1024;
+/** Maximum file size to read (1MB per best practices - larger files typically are generated/data) */
+const MAX_FILE_SIZE = 1 * 1024 * 1024;
+
+/** Special files to index by exact name (no extension-based matching) */
+const INDEXABLE_FILES_BY_NAME = new Set([
+  'Makefile',
+  'makefile',
+  'GNUmakefile',
+  'Dockerfile',
+  'dockerfile',
+  'Containerfile',
+  'Jenkinsfile',
+  'Vagrantfile',
+  'Procfile',
+  'Rakefile',
+  'Gemfile',
+  'Brewfile',
+  '.gitignore',
+  '.gitattributes',
+  '.dockerignore',
+  '.npmrc',
+  '.nvmrc',
+  '.npmignore',
+  '.prettierrc',
+  '.eslintrc',
+  '.babelrc',
+  '.browserslistrc',
+  '.editorconfig',
+  'tsconfig.json',
+  'jsconfig.json',
+  'package.json',
+  'composer.json',
+  'pubspec.yaml',
+  'analysis_options.yaml',
+  'pyproject.toml',
+  'setup.py',
+  'setup.cfg',
+  'requirements.txt',
+  'Pipfile',
+  'Cargo.toml',
+  'go.mod',
+  'go.sum',
+  'build.gradle',
+  'settings.gradle',
+  'pom.xml',
+  'CMakeLists.txt',
+  'meson.build',
+  'WORKSPACE',
+  'BUILD',
+  'BUILD.bazel',
+]);
 
 /** Default token budget for context */
 const DEFAULT_TOKEN_BUDGET = 8000;
@@ -141,50 +190,108 @@ const STATE_FILE_NAME = '.augment-context-state.json';
 /** Context ignore file names (in order of preference) */
 const CONTEXT_IGNORE_FILES = ['.contextignore', '.augment-ignore'];
 
-/** Default directories to always exclude */
+/** Default directories to always exclude - organized by category */
 const DEFAULT_EXCLUDED_DIRS = new Set([
+  // === Package/Dependency Directories ===
   'node_modules',
+  'vendor',          // Go, PHP, Ruby
+  'Pods',            // iOS/CocoaPods
+  '.pub-cache',      // Dart pub cache
+  'packages',        // Some package managers
+
+  // === Build Output Directories ===
   'dist',
   'build',
   'out',
+  'target',          // Rust, Java/Maven
+  'bin',             // Go, .NET
+  'obj',             // .NET
+  'release',
+  'debug',
+  '.output',
+
+  // === Version Control ===
   '.git',
   '.svn',
   '.hg',
+  '.fossil',
+
+  // === Python Virtual Environments & Caches ===
   '__pycache__',
   'venv',
   '.venv',
   'env',
-  '.env',
+  '.env',            // Also a directory in some cases
   '.tox',
   '.nox',
-  'target',          // Rust, Java/Maven
-  'bin',             // Go, .NET
-  'obj',             // .NET
-  'vendor',          // Go, PHP
-  'Pods',            // iOS/CocoaPods
+  '.pytest_cache',
+  '.mypy_cache',
+  '.ruff_cache',
+  'htmlcov',
+  '.eggs',
+  '*.egg-info',
+
+  // === Flutter/Dart Specific ===
+  '.dart_tool',      // Dart tooling cache (critical to exclude)
+  '.flutter-plugins',
+  '.flutter-plugins-dependencies',
+  'ephemeral',       // Flutter platform ephemeral directories
+  '.symlinks',       // iOS Flutter symlinks
+
+  // === Gradle/Android ===
   '.gradle',
+
+  // === IDE & Editor Directories ===
   '.idea',
   '.vscode',
   '.vs',
+  '.fleet',
+  '.zed',
+  '.cursor',
+  'resources',       // IDE resources (e.g., Antigravity)
+  'extensions',      // IDE extensions
+
+  // === Test Coverage & Reports ===
   'coverage',
   '.nyc_output',
-  '.next',
-  '.nuxt',
-  '.output',
+  'test-results',
+  'reports',
+
+  // === Modern Build Tools ===
+  '.next',           // Next.js
+  '.nuxt',           // Nuxt.js
+  '.svelte-kit',     // SvelteKit
+  '.astro',          // Astro
   '.cache',
   '.parcel-cache',
   '.turbo',
-  'resources',       // IDE resources (e.g., Antigravity)
-  'extensions',      // IDE extensions
+  '.angular',
+  '.webpack',
+  '.esbuild',
+  '.rollup.cache',
+
+  // === Temporary & Generated ===
+  'tmp',
+  'temp',
+  '.tmp',
+  '.temp',
+  'logs',
 ]);
 
-/** Default file patterns to always exclude */
+/** Default file patterns to always exclude - organized by category */
 const DEFAULT_EXCLUDED_PATTERNS = [
+  // === Minified/Bundled Files ===
   '*.min.js',
   '*.min.css',
   '*.bundle.js',
   '*.chunk.js',
+
+  // === Source Maps ===
   '*.map',
+  '*.js.map',
+  '*.css.map',
+
+  // === Lock Files (auto-generated, verbose, low AI value) ===
   '*.lock',
   'package-lock.json',
   'yarn.lock',
@@ -192,45 +299,214 @@ const DEFAULT_EXCLUDED_PATTERNS = [
   'Cargo.lock',
   'Gemfile.lock',
   'poetry.lock',
+  'composer.lock',
+  'pubspec.lock',      // Flutter/Dart
+  'bun.lockb',         // Bun (binary)
+  'shrinkwrap.yaml',
+
+  // === Generated Code - Dart/Flutter ===
+  '*.g.dart',          // json_serializable, build_runner
+  '*.freezed.dart',    // freezed package
+  '*.mocks.dart',      // mockito
+  '*.gr.dart',         // auto_route
+  '*.pb.dart',         // protobuf
+  '*.pbjson.dart',     // protobuf JSON
+  '*.pbserver.dart',   // protobuf server
+
+  // === Generated Code - Other Languages ===
+  '*.generated.ts',
+  '*.generated.js',
+  '*.pb.go',           // Go protobuf
+  '*.pb.cc',           // C++ protobuf
+  '*.pb.h',
+  '*_pb2.py',          // Python protobuf
+  '*_pb2_grpc.py',
+
+  // === Logs & Temporary Files ===
   '*.log',
   '*.tmp',
   '*.temp',
   '*.bak',
   '*.swp',
   '*.swo',
+  '*~',                // Backup files
+
+  // === Compiled Python ===
   '*.pyc',
   '*.pyo',
+  '*.pyd',
+
+  // === Compiled Java/JVM ===
   '*.class',
+  '*.jar',
+  '*.war',
+  '*.ear',
+
+  // === Compiled Binaries & Libraries ===
   '*.dll',
   '*.exe',
   '*.so',
   '*.dylib',
+  '*.a',
+  '*.lib',
   '*.o',
   '*.obj',
   '*.wasm',
+  '*.dill',            // Dart kernel
+
+  // === Binary Images ===
+  '*.png',
+  '*.jpg',
+  '*.jpeg',
+  '*.gif',
+  '*.bmp',
+  '*.webp',
+  '*.ico',
+  '*.icns',
+  '*.tiff',
+  '*.tif',
+  '*.svg',             // Often large, sometimes useful
+  '*.psd',
+  '*.ai',
+  '*.sketch',
+
+  // === Fonts ===
+  '*.ttf',
+  '*.otf',
+  '*.woff',
+  '*.woff2',
+  '*.eot',
+
+  // === Media Files ===
+  '*.mp3',
+  '*.mp4',
+  '*.wav',
+  '*.ogg',
+  '*.webm',
+  '*.mov',
+  '*.avi',
+  '*.flv',
+  '*.m4a',
+  '*.m4v',
+
+  // === Documents & Archives ===
+  '*.pdf',
+  '*.doc',
+  '*.docx',
+  '*.xls',
+  '*.xlsx',
+  '*.ppt',
+  '*.pptx',
+  '*.zip',
+  '*.tar',
+  '*.gz',
+  '*.rar',
+  '*.7z',
+
+  // === Secrets & Credentials (security) ===
+  '.env',
+  '.env.local',
+  '.env.development',
+  '.env.production',
+  '.env.staging',
+  '*.key',
+  '*.pem',
+  '*.p12',
+  '*.jks',
+  '*.keystore',
+  'secrets.yaml',
+  'secrets.json',
+
+  // === IDE-specific Files ===
+  '*.iml',
+  '.project',
+  '.classpath',
+
+  // === OS Files ===
+  '.DS_Store',
+  'Thumbs.db',
+  'desktop.ini',
+
+  // === Flutter-specific Generated ===
+  '.flutter-plugins',
+  '.flutter-plugins-dependencies',
+  '*.stamp',
 ];
 
-/** File extensions to index */
+/** File extensions to index - organized by category for maintainability */
 const INDEXABLE_EXTENSIONS = new Set([
+  // === TypeScript/JavaScript ===
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.pyw',
-  '.java', '.kt', '.kts', '.scala',
+
+  // === Python ===
+  '.py', '.pyw', '.pyi',  // Added .pyi for type stubs
+
+  // === JVM Languages ===
+  '.java', '.kt', '.kts', '.scala', '.groovy',
+
+  // === Go ===
   '.go',
+
+  // === Rust ===
   '.rs',
+
+  // === C/C++ ===
   '.c', '.cpp', '.cc', '.cxx', '.h', '.hpp', '.hxx',
-  '.cs',
-  '.rb',
+
+  // === .NET ===
+  '.cs', '.fs', '.fsx',  // Added F#
+
+  // === Ruby ===
+  '.rb', '.rake', '.gemspec',
+
+  // === PHP ===
   '.php',
+
+  // === Mobile Development ===
   '.swift',
-  '.m', '.mm',
-  '.vue', '.svelte',
+  '.m', '.mm',  // Objective-C
+  '.dart',      // Flutter/Dart (Essential per best practices)
+  '.arb',       // Flutter internationalization files
+
+  // === Frontend Frameworks ===
+  '.vue', '.svelte', '.astro',
+
+  // === Web Templates & Styles ===
+  '.html', '.htm',
+  '.css', '.scss', '.sass', '.less', '.styl',
+
+  // === Configuration Files ===
   '.json', '.yaml', '.yml', '.toml',
-  '.md', '.mdx',
-  '.sql',
+  '.xml',       // Android manifests, Maven configs, etc.
+  '.plist',     // iOS configuration files
+  '.gradle',    // Android build files
+  '.properties', // Java properties files
+  '.ini', '.cfg', '.conf',
+  '.editorconfig',
+  '.env.example', '.env.template', '.env.sample',  // Environment templates (NOT actual .env)
+
+  // === Documentation ===
+  '.md', '.mdx', '.txt', '.rst',
+
+  // === Database ===
+  '.sql', '.prisma',
+
+  // === API/Schema Definitions ===
+  '.graphql', '.gql',
+  '.proto',     // Protocol Buffers
+  '.openapi', '.swagger',
+
+  // === Shell Scripts ===
   '.sh', '.bash', '.zsh', '.fish',
-  '.ps1', '.psm1',
+  '.ps1', '.psm1', '.bat', '.cmd',
+
+  // === Infrastructure & DevOps ===
   '.dockerfile',
-  '.tf', '.hcl',
+  '.tf', '.hcl',  // Terraform
+  '.nix',         // Nix configuration
+
+  // === Build Files (by name, not extension - handled separately) ===
+  // Makefile, Dockerfile, Jenkinsfile - handled in shouldIndexFile
 ]);
 
 // ============================================================================
@@ -588,9 +864,17 @@ export class ContextServiceClient {
   // ==========================================================================
 
   /**
-   * Check if a file should be indexed based on extension
+   * Check if a file should be indexed based on extension or name
    */
   private shouldIndexFile(filePath: string): boolean {
+    const fileName = path.basename(filePath);
+
+    // Check if file matches by exact name first (Makefile, Dockerfile, etc.)
+    if (INDEXABLE_FILES_BY_NAME.has(fileName)) {
+      return true;
+    }
+
+    // Then check by extension
     const ext = path.extname(filePath).toLowerCase();
     return INDEXABLE_EXTENSIONS.has(ext);
   }
@@ -611,8 +895,8 @@ export class ContextServiceClient {
         const fullPath = path.join(dirPath, entry.name);
         const relativePath = path.relative(relativeTo, fullPath);
 
-        // Skip hidden files/directories (starting with .)
-        if (entry.name.startsWith('.')) {
+        // Skip hidden files/directories (starting with .) except for special dotfiles
+        if (entry.name.startsWith('.') && !INDEXABLE_FILES_BY_NAME.has(entry.name)) {
           continue;
         }
 
@@ -632,6 +916,16 @@ export class ContextServiceClient {
           const subFiles = await this.discoverFiles(fullPath, relativeTo);
           files.push(...subFiles);
         } else if (entry.isFile() && this.shouldIndexFile(entry.name)) {
+          // Early file size check during discovery for performance
+          try {
+            const stats = fs.statSync(fullPath);
+            if (stats.size > MAX_FILE_SIZE) {
+              console.error(`Skipping large file during discovery: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB > ${MAX_FILE_SIZE / 1024 / 1024}MB limit)`);
+              continue;
+            }
+          } catch {
+            // If stat fails, we'll catch it later during reading
+          }
           files.push(relativePath);
         }
       }
