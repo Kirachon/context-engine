@@ -31,16 +31,19 @@ export class ExecutionTrackingService {
    * Initialize execution state for a plan
    */
   initializeExecution(plan: EnhancedPlanOutput): PlanExecutionState {
-    const steps: StepExecutionState[] = plan.steps.map(step => ({
-      step_number: step.step_number,
-      step_id: step.id,
+    // Safely handle undefined steps array - ensure it's an array before calling map
+    const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
+
+    const steps: StepExecutionState[] = planSteps.map(step => ({
+      step_number: step.step_number || 0,
+      step_id: step.id || `step_${step.step_number || 'unknown'}`,
       status: 'pending' as StepExecutionStatus,
       retry_count: 0,
     }));
 
     const state: PlanExecutionState = {
-      plan_id: plan.id,
-      plan_version: plan.version,
+      plan_id: plan.id || `plan_${Date.now()}`,
+      plan_version: plan.version || 1,
       status: 'ready' as PlanStatus,
       steps,
       current_steps: [],
@@ -51,7 +54,7 @@ export class ExecutionTrackingService {
     // Calculate initial ready steps (steps with no dependencies)
     this.updateReadySteps(state, plan);
 
-    this.executionStates.set(plan.id, state);
+    this.executionStates.set(state.plan_id, state);
     return state;
   }
 
@@ -326,20 +329,26 @@ export class ExecutionTrackingService {
     const ready: number[] = [];
     const blocked: number[] = [];
 
+    // Safely handle undefined steps array
+    const planSteps = plan.steps || [];
+
     for (const step of state.steps) {
       if (step.status !== 'pending') continue;
 
-      const planStep = plan.steps.find(s => s.step_number === step.step_number);
+      const planStep = planSteps.find(s => s.step_number === step.step_number);
       if (!planStep) continue;
 
+      // Safely handle undefined depends_on array - ensure it's an array before calling methods
+      const dependsOn = Array.isArray(planStep.depends_on) ? planStep.depends_on : [];
+
       // Check if all dependencies are completed or skipped
-      const depsComplete = planStep.depends_on.every(depNum => {
+      const depsComplete = dependsOn.every(depNum => {
         const depState = state.steps.find(s => s.step_number === depNum);
         return depState && (depState.status === 'completed' || depState.status === 'skipped');
       });
 
       // Check if any dependencies failed
-      const depsFailed = planStep.depends_on.some(depNum => {
+      const depsFailed = dependsOn.some(depNum => {
         const depState = state.steps.find(s => s.step_number === depNum);
         return depState && depState.status === 'failed';
       });
@@ -382,10 +391,15 @@ export class ExecutionTrackingService {
     stepNumber: number,
     plan: EnhancedPlanOutput
   ): void {
-    const planStep = plan.steps.find(s => s.step_number === stepNumber);
+    // Safely handle undefined steps array
+    const steps = plan.steps || [];
+    const planStep = steps.find(s => s.step_number === stepNumber);
     if (!planStep) return;
 
-    for (const blockedNum of planStep.blocks) {
+    // Safely handle undefined blocks array - ensure it's an array before iteration
+    const blocks = Array.isArray(planStep.blocks) ? planStep.blocks : [];
+
+    for (const blockedNum of blocks) {
       const blockedState = state.steps.find(s => s.step_number === blockedNum);
       if (blockedState && blockedState.status === 'pending') {
         blockedState.status = 'skipped';

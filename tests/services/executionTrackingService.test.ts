@@ -182,5 +182,99 @@ describe('ExecutionTrackingService', () => {
       expect(progress?.total_steps).toBe(4);
     });
   });
+
+  describe('Defensive Programming - Null/Undefined Handling', () => {
+    it('should handle plan with undefined steps array', () => {
+      const planWithUndefinedSteps = {
+        id: 'plan_no_steps',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Test goal',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: undefined as unknown as any[],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] },
+        testing_strategy: { unit: '', integration: '', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: []
+      };
+
+      // Should not throw
+      const state = service.initializeExecution(planWithUndefinedSteps as any);
+      expect(state).toBeDefined();
+      expect(state.steps).toEqual([]);
+    });
+
+    it('should handle step with undefined depends_on array', () => {
+      const planWithUndefinedDependsOn = {
+        ...createTestPlan(),
+        steps: [
+          {
+            step_number: 1,
+            id: 'step_1',
+            title: 'Step 1',
+            description: 'First step',
+            files_to_modify: [],
+            files_to_create: [],
+            files_to_delete: [],
+            depends_on: undefined as unknown as number[],
+            blocks: [],
+            can_parallel_with: [],
+            priority: 'high' as const,
+            estimated_effort: '1h',
+            acceptance_criteria: []
+          }
+        ]
+      };
+
+      // Should not throw
+      const state = service.initializeExecution(planWithUndefinedDependsOn as any);
+      expect(state).toBeDefined();
+      expect(state.ready_steps).toContain(1); // Step should be ready since no dependencies
+    });
+
+    it('should handle step with undefined blocks array in failStep', () => {
+      const planWithUndefinedBlocks = {
+        ...createTestPlan(),
+        steps: [
+          {
+            step_number: 1,
+            id: 'step_1',
+            title: 'Step 1',
+            description: 'First step',
+            files_to_modify: [],
+            files_to_create: [],
+            files_to_delete: [],
+            depends_on: [],
+            blocks: undefined as unknown as number[],
+            can_parallel_with: [],
+            priority: 'high' as const,
+            estimated_effort: '1h',
+            acceptance_criteria: []
+          }
+        ]
+      };
+
+      service.initializeExecution(planWithUndefinedBlocks as any);
+      service.startStep(planWithUndefinedBlocks.id, 1);
+
+      // Should not throw when failing step with undefined blocks
+      const result = service.failStep(planWithUndefinedBlocks.id, 1, planWithUndefinedBlocks as any, {
+        error: 'Test error',
+        skip_dependents: true
+      });
+
+      expect(result).toBeDefined();
+      expect(result?.status).toBe('failed');
+    });
+  });
 });
 

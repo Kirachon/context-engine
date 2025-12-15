@@ -180,16 +180,20 @@ export class PlanHistoryService {
     const fromPlan = fromVer.plan;
     const toPlan = toVer.plan;
 
+    // Safely handle undefined steps arrays - ensure they are arrays before processing
+    const fromPlanSteps = Array.isArray(fromPlan.steps) ? fromPlan.steps : [];
+    const toPlanSteps = Array.isArray(toPlan.steps) ? toPlan.steps : [];
+
     // Calculate step changes
-    const fromSteps = new Set(fromPlan.steps.map(s => s.step_number));
-    const toSteps = new Set(toPlan.steps.map(s => s.step_number));
+    const fromSteps = new Set(fromPlanSteps.map(s => s.step_number));
+    const toSteps = new Set(toPlanSteps.map(s => s.step_number));
 
     const stepsAdded = [...toSteps].filter(s => !fromSteps.has(s));
     const stepsRemoved = [...fromSteps].filter(s => !toSteps.has(s));
     const stepsModified = [...toSteps].filter(s => {
       if (!fromSteps.has(s)) return false;
-      const fromStep = fromPlan.steps.find(st => st.step_number === s);
-      const toStep = toPlan.steps.find(st => st.step_number === s);
+      const fromStep = fromPlanSteps.find(st => st.step_number === s);
+      const toStep = toPlanSteps.find(st => st.step_number === s);
       return JSON.stringify(fromStep) !== JSON.stringify(toStep);
     });
 
@@ -199,17 +203,29 @@ export class PlanHistoryService {
     const filesAdded = toFiles.filter(f => !fromFiles.includes(f));
     const filesRemoved = fromFiles.filter(f => !toFiles.includes(f));
 
+    // Safely handle undefined scope arrays
+    const fromScope = fromPlan.scope || { included: [], excluded: [] };
+    const toScope = toPlan.scope || { included: [], excluded: [] };
+    const fromIncluded = Array.isArray(fromScope.included) ? fromScope.included : [];
+    const toIncluded = Array.isArray(toScope.included) ? toScope.included : [];
+    const fromExcluded = Array.isArray(fromScope.excluded) ? fromScope.excluded : [];
+    const toExcluded = Array.isArray(toScope.excluded) ? toScope.excluded : [];
+
     // Calculate scope changes
     const scopeChanges = {
-      included_added: toPlan.scope.included.filter(i => !fromPlan.scope.included.includes(i)),
-      included_removed: fromPlan.scope.included.filter(i => !toPlan.scope.included.includes(i)),
-      excluded_added: toPlan.scope.excluded.filter(e => !fromPlan.scope.excluded.includes(e)),
-      excluded_removed: fromPlan.scope.excluded.filter(e => !toPlan.scope.excluded.includes(e)),
+      included_added: toIncluded.filter(i => !fromIncluded.includes(i)),
+      included_removed: fromIncluded.filter(i => !toIncluded.includes(i)),
+      excluded_added: toExcluded.filter(e => !fromExcluded.includes(e)),
+      excluded_removed: fromExcluded.filter(e => !toExcluded.includes(e)),
     };
 
+    // Safely handle undefined risks arrays
+    const fromRisksArray = Array.isArray(fromPlan.risks) ? fromPlan.risks : [];
+    const toRisksArray = Array.isArray(toPlan.risks) ? toPlan.risks : [];
+
     // Calculate risk changes
-    const fromRisks = fromPlan.risks.map(r => r.issue);
-    const toRisks = toPlan.risks.map(r => r.issue);
+    const fromRisks = fromRisksArray.map(r => r?.issue || 'Unknown');
+    const toRisks = toRisksArray.map(r => r?.issue || 'Unknown');
     const risksAdded = toRisks.filter(r => !fromRisks.includes(r));
     const risksRemoved = fromRisks.filter(r => !toRisks.includes(r));
 
@@ -324,10 +340,25 @@ export class PlanHistoryService {
 
   private collectAllFiles(plan: EnhancedPlanOutput): string[] {
     const files = new Set<string>();
-    for (const step of plan.steps) {
-      for (const f of step.files_to_modify) files.add(f.path);
-      for (const f of step.files_to_create) files.add(f.path);
-      for (const f of step.files_to_delete) files.add(f);
+
+    // Safely handle undefined steps array
+    const steps = plan.steps || [];
+
+    for (const step of steps) {
+      // Safely handle undefined file arrays - ensure they are arrays before iteration
+      const filesToModify = Array.isArray(step.files_to_modify) ? step.files_to_modify : [];
+      const filesToCreate = Array.isArray(step.files_to_create) ? step.files_to_create : [];
+      const filesToDelete = Array.isArray(step.files_to_delete) ? step.files_to_delete : [];
+
+      for (const f of filesToModify) {
+        if (f?.path) files.add(f.path);
+      }
+      for (const f of filesToCreate) {
+        if (f?.path) files.add(f.path);
+      }
+      for (const f of filesToDelete) {
+        if (f) files.add(f);
+      }
     }
     return Array.from(files).sort();
   }
@@ -336,23 +367,32 @@ export class PlanHistoryService {
     const changes: FieldChange[] = [];
 
     // Check top-level fields
-    if (from.goal !== to.goal) {
-      changes.push({ path: 'goal', type: 'modified', old_value: from.goal, new_value: to.goal });
+    const fromGoal = from.goal || '';
+    const toGoal = to.goal || '';
+    if (fromGoal !== toGoal) {
+      changes.push({ path: 'goal', type: 'modified', old_value: fromGoal, new_value: toGoal });
     }
-    if (from.confidence_score !== to.confidence_score) {
+
+    const fromConfidence = from.confidence_score ?? 0;
+    const toConfidence = to.confidence_score ?? 0;
+    if (fromConfidence !== toConfidence) {
       changes.push({
         path: 'confidence_score',
         type: 'modified',
-        old_value: from.confidence_score,
-        new_value: to.confidence_score
+        old_value: fromConfidence,
+        new_value: toConfidence
       });
     }
-    if (from.steps.length !== to.steps.length) {
+
+    // Safely handle undefined steps arrays
+    const fromSteps = Array.isArray(from.steps) ? from.steps : [];
+    const toSteps = Array.isArray(to.steps) ? to.steps : [];
+    if (fromSteps.length !== toSteps.length) {
       changes.push({
         path: 'steps.length',
         type: 'modified',
-        old_value: from.steps.length,
-        new_value: to.steps.length,
+        old_value: fromSteps.length,
+        new_value: toSteps.length,
       });
     }
 

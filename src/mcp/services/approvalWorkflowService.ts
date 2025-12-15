@@ -38,11 +38,15 @@ export class ApprovalWorkflowService {
    * Create an approval request for a full plan
    */
   createPlanApprovalRequest(plan: EnhancedPlanOutput): ApprovalRequest {
+    // Safely handle undefined arrays - ensure they are arrays before processing
+    const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
+    const planRisks = Array.isArray(plan.risks) ? plan.risks : [];
+
     // Collect all affected files
-    const affectedFiles = this.collectAffectedFiles(plan.steps);
-    
+    const affectedFiles = this.collectAffectedFiles(planSteps);
+
     // Collect risks
-    const risks = plan.risks.map(r => `${r.issue} (${r.likelihood} likelihood)`);
+    const risks = planRisks.map(r => `${r?.issue || 'Unknown'} (${r?.likelihood || 'unknown'} likelihood)`);
 
     const request: ApprovalRequest = {
       id: generateApprovalId(),
@@ -67,20 +71,22 @@ export class ApprovalWorkflowService {
     plan: EnhancedPlanOutput,
     stepNumber: number
   ): ApprovalRequest {
-    const step = plan.steps.find(s => s.step_number === stepNumber);
+    // Safely handle undefined steps array
+    const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
+    const step = planSteps.find(s => s.step_number === stepNumber);
     if (!step) {
-      throw new Error(`Step ${stepNumber} not found in plan ${plan.id}`);
+      throw new Error(`Step ${stepNumber} not found in plan ${plan.id || 'unknown'}`);
     }
 
     const affectedFiles = this.collectStepFiles(step);
-    
+
     const request: ApprovalRequest = {
       id: generateApprovalId(),
-      plan_id: plan.id,
+      plan_id: plan.id || `plan_${Date.now()}`,
       step_number: stepNumber,
       type: 'step',
       status: 'pending',
-      summary: `Approve step ${stepNumber}: ${step.title}`,
+      summary: `Approve step ${stepNumber}: ${step.title || 'Untitled'}`,
       details: this.generateStepApprovalDetails(step),
       affected_files: affectedFiles,
       risks: step.rollback_strategy ? [`Rollback: ${step.rollback_strategy}`] : [],
@@ -98,7 +104,9 @@ export class ApprovalWorkflowService {
     plan: EnhancedPlanOutput,
     stepNumbers: number[]
   ): ApprovalRequest {
-    const steps = plan.steps.filter(s => stepNumbers.includes(s.step_number));
+    // Safely handle undefined steps array
+    const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
+    const steps = planSteps.filter(s => stepNumbers.includes(s.step_number));
     if (steps.length === 0) {
       throw new Error(`No valid steps found for numbers: ${stepNumbers.join(', ')}`);
     }
