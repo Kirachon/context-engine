@@ -37,6 +37,31 @@ import {
 } from './tools/lifecycle.js';
 import { toolManifestTool, handleToolManifest } from './tools/manifest.js';
 import { codebaseRetrievalTool, handleCodebaseRetrieval } from './tools/codebaseRetrieval.js';
+import {
+  createPlanTool,
+  refinePlanTool,
+  visualizePlanTool,
+  handleCreatePlan,
+  handleRefinePlan,
+  handleVisualizePlan,
+} from './tools/plan.js';
+import {
+  planManagementTools,
+  initializePlanManagementServices,
+  handleSavePlan,
+  handleLoadPlan,
+  handleListPlans,
+  handleDeletePlan,
+  handleRequestApproval,
+  handleRespondApproval,
+  handleStartStep,
+  handleCompleteStep,
+  handleFailStep,
+  handleViewProgress,
+  handleViewHistory,
+  handleComparePlanVersions,
+  handleRollbackPlan,
+} from './tools/planManagement.js';
 import { FileWatcher } from '../watcher/index.js';
 
 export class ContextEngineMCPServer {
@@ -54,6 +79,9 @@ export class ContextEngineMCPServer {
   ) {
     this.workspacePath = workspacePath;
     this.serviceClient = new ContextServiceClient(workspacePath);
+
+    // Initialize Phase 2 plan management services
+    initializePlanManagementServices(workspacePath);
     this.enableWatcher = options?.enableWatcher ?? false;
 
     this.server = new Server(
@@ -156,6 +184,12 @@ export class ContextEngineMCPServer {
           reindexWorkspaceTool,
           clearIndexTool,
           toolManifestTool,
+          // Planning tools (Phase 1)
+          createPlanTool,
+          refinePlanTool,
+          visualizePlanTool,
+          // Plan management tools (Phase 2)
+          ...planManagementTools,
         ],
       };
     });
@@ -210,6 +244,72 @@ export class ContextEngineMCPServer {
 
           case 'enhance_prompt':
             result = await handleEnhancePrompt(args as any, this.serviceClient);
+            break;
+
+          // Planning tools (Phase 1)
+          case 'create_plan':
+            result = await handleCreatePlan(args as any, this.serviceClient);
+            break;
+
+          case 'refine_plan':
+            result = await handleRefinePlan(args as any, this.serviceClient);
+            break;
+
+          case 'visualize_plan':
+            result = await handleVisualizePlan(args as any, this.serviceClient);
+            break;
+
+          // Plan management tools (Phase 2)
+          case 'save_plan':
+            result = await handleSavePlan(args as Record<string, unknown>);
+            break;
+
+          case 'load_plan':
+            result = await handleLoadPlan(args as Record<string, unknown>);
+            break;
+
+          case 'list_plans':
+            result = await handleListPlans(args as Record<string, unknown>);
+            break;
+
+          case 'delete_plan':
+            result = await handleDeletePlan(args as Record<string, unknown>);
+            break;
+
+          case 'request_approval':
+            result = await handleRequestApproval(args as Record<string, unknown>);
+            break;
+
+          case 'respond_approval':
+            result = await handleRespondApproval(args as Record<string, unknown>);
+            break;
+
+          case 'start_step':
+            result = await handleStartStep(args as Record<string, unknown>);
+            break;
+
+          case 'complete_step':
+            result = await handleCompleteStep(args as Record<string, unknown>);
+            break;
+
+          case 'fail_step':
+            result = await handleFailStep(args as Record<string, unknown>);
+            break;
+
+          case 'view_progress':
+            result = await handleViewProgress(args as Record<string, unknown>);
+            break;
+
+          case 'view_history':
+            result = await handleViewHistory(args as Record<string, unknown>);
+            break;
+
+          case 'compare_plan_versions':
+            result = await handleComparePlanVersions(args as Record<string, unknown>);
+            break;
+
+          case 'rollback_plan':
+            result = await handleRollbackPlan(args as Record<string, unknown>);
             break;
 
           default:
