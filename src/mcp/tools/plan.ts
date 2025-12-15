@@ -212,26 +212,37 @@ function formatPlanResult(result: PlanResult): string {
 
   const plan = result.plan;
 
+  // Safely extract arrays with defensive checks
+  const scope = plan.scope || { included: [], excluded: [] };
+  const scopeIncluded = Array.isArray(scope.included) ? scope.included : [];
+  const scopeExcluded = Array.isArray(scope.excluded) ? scope.excluded : [];
+  const steps = Array.isArray(plan.steps) ? plan.steps : [];
+  const risks = Array.isArray(plan.risks) ? plan.risks : [];
+  const questions = Array.isArray(plan.questions_for_clarification) ? plan.questions_for_clarification : [];
+  const depGraph = plan.dependency_graph || { parallel_groups: [], critical_path: [], nodes: [], edges: [], execution_order: [] };
+  const parallelGroups = Array.isArray(depGraph.parallel_groups) ? depGraph.parallel_groups : [];
+  const criticalPath = Array.isArray(depGraph.critical_path) ? depGraph.critical_path : [];
+
   // Build a formatted output with both summary and full JSON
   let output = `# Implementation Plan\n\n`;
-  output += `**ID:** ${plan.id}\n`;
-  output += `**Version:** ${plan.version}\n`;
-  output += `**Status:** ${result.status}\n`;
-  output += `**Confidence:** ${(plan.confidence_score * 100).toFixed(0)}%\n`;
-  output += `**Generated in:** ${result.duration_ms}ms\n\n`;
+  output += `**ID:** ${plan.id || 'unknown'}\n`;
+  output += `**Version:** ${plan.version || 1}\n`;
+  output += `**Status:** ${result.status || 'unknown'}\n`;
+  output += `**Confidence:** ${((plan.confidence_score || 0) * 100).toFixed(0)}%\n`;
+  output += `**Generated in:** ${result.duration_ms || 0}ms\n\n`;
 
-  output += `## Goal\n${plan.goal}\n\n`;
+  output += `## Goal\n${plan.goal || 'No goal specified'}\n\n`;
 
   // Scope
-  if (plan.scope.included.length > 0) {
+  if (scopeIncluded.length > 0) {
     output += `## Scope\n`;
     output += `### Included\n`;
-    for (const item of plan.scope.included) {
+    for (const item of scopeIncluded) {
       output += `- ${item}\n`;
     }
-    if (plan.scope.excluded.length > 0) {
+    if (scopeExcluded.length > 0) {
       output += `### Excluded\n`;
-      for (const item of plan.scope.excluded) {
+      for (const item of scopeExcluded) {
         output += `- ${item}\n`;
       }
     }
@@ -239,56 +250,64 @@ function formatPlanResult(result: PlanResult): string {
   }
 
   // Steps summary
-  output += `## Steps (${plan.steps.length} total)\n\n`;
-  for (const step of plan.steps) {
+  output += `## Steps (${steps.length} total)\n\n`;
+  for (const step of steps) {
+    // Safely extract step arrays
+    const filesToModify = Array.isArray(step.files_to_modify) ? step.files_to_modify : [];
+    const filesToCreate = Array.isArray(step.files_to_create) ? step.files_to_create : [];
+    const dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+
     const priority = step.priority === 'critical' ? '🔴' :
                      step.priority === 'high' ? '🟠' :
                      step.priority === 'medium' ? '🟡' : '🟢';
-    output += `### ${step.step_number}. ${step.title} ${priority}\n`;
-    output += `${step.description}\n`;
-    if (step.files_to_modify.length > 0) {
-      output += `- **Modify:** ${step.files_to_modify.map(f => f.path).join(', ')}\n`;
+    output += `### ${step.step_number || 0}. ${step.title || 'Untitled'} ${priority}\n`;
+    output += `${step.description || ''}\n`;
+    if (filesToModify.length > 0) {
+      output += `- **Modify:** ${filesToModify.map(f => f?.path || 'unknown').join(', ')}\n`;
     }
-    if (step.files_to_create.length > 0) {
-      output += `- **Create:** ${step.files_to_create.map(f => f.path).join(', ')}\n`;
+    if (filesToCreate.length > 0) {
+      output += `- **Create:** ${filesToCreate.map(f => f?.path || 'unknown').join(', ')}\n`;
     }
-    if (step.depends_on.length > 0) {
-      output += `- **Depends on:** Step(s) ${step.depends_on.join(', ')}\n`;
+    if (dependsOn.length > 0) {
+      output += `- **Depends on:** Step(s) ${dependsOn.join(', ')}\n`;
     }
-    output += `- **Effort:** ${step.estimated_effort}\n\n`;
+    output += `- **Effort:** ${step.estimated_effort || 'unknown'}\n\n`;
   }
 
   // Parallel execution opportunities
-  if (plan.dependency_graph.parallel_groups.length > 0) {
+  if (parallelGroups.length > 0) {
     output += `## Parallel Execution Opportunities\n`;
-    for (const group of plan.dependency_graph.parallel_groups) {
-      output += `- Steps ${group.join(', ')} can run in parallel\n`;
+    for (const group of parallelGroups) {
+      if (Array.isArray(group)) {
+        output += `- Steps ${group.join(', ')} can run in parallel\n`;
+      }
     }
     output += '\n';
   }
 
   // Critical path
-  if (plan.dependency_graph.critical_path.length > 0) {
+  if (criticalPath.length > 0) {
     output += `## Critical Path\n`;
-    output += `Steps ${plan.dependency_graph.critical_path.join(' → ')}\n\n`;
+    output += `Steps ${criticalPath.join(' → ')}\n\n`;
   }
 
   // Risks
-  if (plan.risks.length > 0) {
+  if (risks.length > 0) {
     output += `## Risks\n`;
-    for (const risk of plan.risks) {
+    for (const risk of risks) {
+      if (!risk) continue;
       const likelihood = risk.likelihood === 'high' ? '🔴' :
                          risk.likelihood === 'medium' ? '🟠' : '🟢';
-      output += `- ${likelihood} **${risk.issue}**\n`;
-      output += `  - Mitigation: ${risk.mitigation}\n`;
+      output += `- ${likelihood} **${risk.issue || 'Unknown issue'}**\n`;
+      output += `  - Mitigation: ${risk.mitigation || 'None specified'}\n`;
     }
     output += '\n';
   }
 
   // Questions needing clarification
-  if (plan.questions_for_clarification.length > 0) {
+  if (questions.length > 0) {
     output += `## ⚠️ Questions Needing Clarification\n`;
-    for (const q of plan.questions_for_clarification) {
+    for (const q of questions) {
       output += `- ${q}\n`;
     }
     output += '\n';

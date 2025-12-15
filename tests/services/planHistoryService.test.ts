@@ -205,5 +205,53 @@ describe('PlanHistoryService', () => {
       const history = service.getHistory('non_existent_plan');
       expect(history).toBeNull();
     });
+
+    it('should handle plan with undefined file arrays in collectAllFiles', () => {
+      const planWithUndefinedFiles = {
+        ...createTestPlan(),
+        steps: [
+          {
+            step_number: 1,
+            id: 'step_1',
+            title: 'Step 1',
+            description: 'First step',
+            files_to_modify: undefined as unknown as any[],
+            files_to_create: undefined as unknown as any[],
+            files_to_delete: undefined as unknown as any[],
+            depends_on: [],
+            blocks: [],
+            can_parallel_with: [],
+            priority: 'high' as const,
+            estimated_effort: '1h',
+            acceptance_criteria: []
+          }
+        ]
+      };
+
+      // Should not throw when recording version with undefined file arrays
+      service.recordVersion(planWithUndefinedFiles as any, 'created', 'Test version');
+      const history = service.getHistory(planWithUndefinedFiles.id);
+      expect(history).toBeDefined();
+    });
+
+    it('should handle generateDiff with undefined steps arrays', () => {
+      const basePlan = createTestPlan();
+
+      // Record first version
+      service.recordVersion(basePlan, 'created', 'Version 1');
+
+      // Create plan with undefined steps for second version
+      const planV2 = {
+        ...basePlan,
+        version: 2,
+        steps: undefined as unknown as any[]
+      };
+
+      service.recordVersion(planV2 as any, 'modified', 'Version 2');
+
+      // Should not throw when generating diff
+      const diff = service.generateDiff(basePlan.id, 1, 2);
+      expect(diff).toBeDefined();
+    });
   });
 });

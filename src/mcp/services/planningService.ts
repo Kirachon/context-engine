@@ -484,19 +484,26 @@ export class PlanningService {
    * Analyze step dependencies and build the dependency graph
    */
   analyzeDependencies(steps: EnhancedPlanStep[]): DependencyGraph {
+    // Safely handle undefined/null steps array
+    const safeSteps = Array.isArray(steps) ? steps : [];
+
     // Build nodes
-    const nodes: DependencyNode[] = steps.map(s => ({
-      id: s.id,
-      step_number: s.step_number,
+    const nodes: DependencyNode[] = safeSteps.map(s => ({
+      id: s.id || `step_${s.step_number || 'unknown'}`,
+      step_number: s.step_number || 0,
     }));
 
     // Build edges from depends_on and blocks relationships
     const edges: DependencyEdge[] = [];
-    const stepMap = new Map(steps.map(s => [s.step_number, s]));
+    const stepMap = new Map(safeSteps.map(s => [s.step_number, s]));
 
-    for (const step of steps) {
+    for (const step of safeSteps) {
+      // Safely handle undefined depends_on and blocks arrays
+      const dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+      const blocks = Array.isArray(step.blocks) ? step.blocks : [];
+
       // Add edges for dependencies
-      for (const depNum of step.depends_on) {
+      for (const depNum of dependsOn) {
         const depStep = stepMap.get(depNum);
         if (depStep) {
           edges.push({
@@ -508,7 +515,7 @@ export class PlanningService {
       }
 
       // Add edges for blocks (if not already covered by depends_on)
-      for (const blockedNum of step.blocks) {
+      for (const blockedNum of blocks) {
         const blockedStep = stepMap.get(blockedNum);
         if (blockedStep) {
           const exists = edges.some(
@@ -590,24 +597,36 @@ export class PlanningService {
    * Find the critical path (longest dependency chain)
    */
   private findCriticalPath(steps: EnhancedPlanStep[], edges: DependencyEdge[]): number[] {
-    const stepMap = new Map(steps.map(s => [s.id, s]));
+    // Safely handle undefined/null arrays
+    const safeSteps = Array.isArray(steps) ? steps : [];
+    const safeEdges = Array.isArray(edges) ? edges : [];
+
+    if (safeSteps.length === 0) return [];
+
+    const stepMap = new Map(safeSteps.map(s => [s.id, s]));
     const distances = new Map<string, number>();
     const predecessors = new Map<string, string | null>();
 
     // Initialize distances
-    for (const step of steps) {
-      distances.set(step.id, step.depends_on.length === 0 ? 0 : -Infinity);
+    for (const step of safeSteps) {
+      // Safely check depends_on array
+      const dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+      distances.set(step.id, dependsOn.length === 0 ? 0 : -Infinity);
       predecessors.set(step.id, null);
     }
 
     // Topological order
-    const order = this.topologicalSort(steps, edges);
-    const idOrder = order.map(n => steps.find(s => s.step_number === n)!.id);
+    const order = this.topologicalSort(safeSteps, safeEdges);
+    const idOrder = order.map(n => {
+      const found = safeSteps.find(s => s.step_number === n);
+      return found?.id || `step_${n}`;
+    });
 
     // Relax edges in topological order
     for (const id of idOrder) {
-      const step = stepMap.get(id)!;
-      for (const edge of edges) {
+      const step = stepMap.get(id);
+      if (!step) continue;
+      for (const edge of safeEdges) {
         if (edge.from === id) {
           const newDist = (distances.get(id) || 0) + 1;
           if (newDist > (distances.get(edge.to) || -Infinity)) {
@@ -632,7 +651,10 @@ export class PlanningService {
     const path: number[] = [];
     let current: string | null = endId;
     while (current) {
-      path.unshift(stepMap.get(current)!.step_number);
+      const step = stepMap.get(current);
+      if (step) {
+        path.unshift(step.step_number);
+      }
       current = predecessors.get(current) || null;
     }
 
@@ -643,15 +665,23 @@ export class PlanningService {
    * Find groups of steps that can run in parallel
    */
   private findParallelGroups(steps: EnhancedPlanStep[], edges: DependencyEdge[]): number[][] {
+    // Safely handle undefined/null arrays
+    const safeSteps = Array.isArray(steps) ? steps : [];
+    const safeEdges = Array.isArray(edges) ? edges : [];
+
+    if (safeSteps.length === 0) return [];
+
     const groups: number[][] = [];
     const assigned = new Set<number>();
 
     // Group by dependency level
     const levels = new Map<string, number>();
-    const stepMap = new Map(steps.map(s => [s.id, s]));
+    const stepMap = new Map(safeSteps.map(s => [s.id, s]));
 
-    for (const step of steps) {
-      if (step.depends_on.length === 0) {
+    for (const step of safeSteps) {
+      // Safely check depends_on array
+      const dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+      if (dependsOn.length === 0) {
         levels.set(step.id, 0);
       }
     }
@@ -660,7 +690,7 @@ export class PlanningService {
     let changed = true;
     while (changed) {
       changed = false;
-      for (const edge of edges) {
+      for (const edge of safeEdges) {
         const fromLevel = levels.get(edge.from);
         if (fromLevel !== undefined) {
           const currentLevel = levels.get(edge.to);
@@ -676,7 +706,9 @@ export class PlanningService {
     // Group by level
     const levelGroups = new Map<number, number[]>();
     for (const [id, level] of levels) {
-      const stepNum = stepMap.get(id)!.step_number;
+      const step = stepMap.get(id);
+      if (!step) continue;
+      const stepNum = step.step_number;
       if (!levelGroups.has(level)) {
         levelGroups.set(level, []);
       }
