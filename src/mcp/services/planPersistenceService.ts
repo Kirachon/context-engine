@@ -225,9 +225,15 @@ export class PlanPersistenceService {
    * Load a plan by name
    */
   async loadPlanByName(name: string): Promise<EnhancedPlanOutput | null> {
+    // Handle undefined/null name
+    if (!name || typeof name !== 'string') {
+      return null;
+    }
+
     const index = await this.loadIndex();
+    const searchName = name.toLowerCase();
     const metadata = index.plans.find(
-      p => p.name.toLowerCase() === name.toLowerCase()
+      p => (p.name || '').toLowerCase() === searchName
     );
 
     if (!metadata) {
@@ -307,17 +313,18 @@ export class PlanPersistenceService {
 
       switch (sortField) {
         case 'name':
-          aVal = a.name.toLowerCase();
-          bVal = b.name.toLowerCase();
+          // Handle undefined/null names safely
+          aVal = (a.name || '').toLowerCase();
+          bVal = (b.name || '').toLowerCase();
           break;
         case 'created_at':
-          aVal = a.created_at;
-          bVal = b.created_at;
+          aVal = a.created_at || '';
+          bVal = b.created_at || '';
           break;
         case 'updated_at':
         default:
-          aVal = a.updated_at;
-          bVal = b.updated_at;
+          aVal = a.updated_at || '';
+          bVal = b.updated_at || '';
           break;
       }
 

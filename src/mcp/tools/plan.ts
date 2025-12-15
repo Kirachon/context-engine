@@ -313,27 +313,41 @@ function generateGanttDiagram(plan: EnhancedPlanOutput): string {
   mermaid += '    dateFormat YYYY-MM-DD\n';
   mermaid += '    excludes weekends\n\n';
 
+  // Safely handle undefined arrays
+  const milestones = plan.milestones || [];
+  const steps = plan.steps || [];
+
+  // Helper to get safe title
+  const getSafeTitle = (step: EnhancedPlanOutput['steps'][0]): string => {
+    const title = step.title || `Step ${step.step_number || 'unknown'}`;
+    return title.substring(0, 20);
+  };
+
   // Group by milestones if available
-  if (plan.milestones.length > 0) {
-    for (const milestone of plan.milestones) {
-      mermaid += `    section ${milestone.name}\n`;
-      for (const stepNum of milestone.steps_included) {
-        const step = plan.steps.find(s => s.step_number === stepNum);
+  if (milestones.length > 0) {
+    for (const milestone of milestones) {
+      const milestoneName = milestone.name || 'Milestone';
+      mermaid += `    section ${milestoneName}\n`;
+      const stepsIncluded = milestone.steps_included || [];
+      for (const stepNum of stepsIncluded) {
+        const step = steps.find(s => s.step_number === stepNum);
         if (step) {
-          const deps = step.depends_on.length > 0
-            ? `after step${step.depends_on[0]}`
+          const dependsOn = step.depends_on || [];
+          const deps = dependsOn.length > 0
+            ? `after step${dependsOn[0]}`
             : '';
-          mermaid += `    ${step.title.substring(0, 20)} :step${step.step_number}, ${deps || 'a1'}, 1d\n`;
+          mermaid += `    ${getSafeTitle(step)} :step${step.step_number}, ${deps || 'a1'}, 1d\n`;
         }
       }
     }
   } else {
     mermaid += '    section All Steps\n';
-    for (const step of plan.steps) {
-      const deps = step.depends_on.length > 0
-        ? `after step${step.depends_on[0]}`
+    for (const step of steps) {
+      const dependsOn = step.depends_on || [];
+      const deps = dependsOn.length > 0
+        ? `after step${dependsOn[0]}`
         : '';
-      mermaid += `    ${step.title.substring(0, 20)} :step${step.step_number}, ${deps || 'a1'}, 1d\n`;
+      mermaid += `    ${getSafeTitle(step)} :step${step.step_number}, ${deps || 'a1'}, 1d\n`;
     }
   }
 

@@ -304,15 +304,25 @@ export class ApprovalWorkflowService {
   private collectAffectedFiles(steps: EnhancedPlanStep[]): string[] {
     const files = new Set<string>();
 
+    // Handle undefined/null steps array
+    if (!steps || !Array.isArray(steps)) {
+      return [];
+    }
+
     for (const step of steps) {
-      for (const file of step.files_to_modify) {
-        files.add(file.path);
+      // Safely handle undefined file arrays
+      const filesToModify = step.files_to_modify || [];
+      const filesToCreate = step.files_to_create || [];
+      const filesToDelete = step.files_to_delete || [];
+
+      for (const file of filesToModify) {
+        if (file?.path) files.add(file.path);
       }
-      for (const file of step.files_to_create) {
-        files.add(file.path);
+      for (const file of filesToCreate) {
+        if (file?.path) files.add(file.path);
       }
-      for (const file of step.files_to_delete) {
-        files.add(file);
+      for (const file of filesToDelete) {
+        if (file) files.add(file);
       }
     }
 
@@ -330,28 +340,38 @@ export class ApprovalWorkflowService {
    * Generate detailed description for plan approval
    */
   private generatePlanApprovalDetails(plan: EnhancedPlanOutput): string {
+    // Safely access plan properties
+    const goal = plan.goal || 'No goal specified';
+    const version = plan.version || 1;
+    const steps = plan.steps || [];
+    const confidenceScore = plan.confidence_score || 0;
+    const scope = plan.scope || { included: [], excluded: [], assumptions: [], constraints: [] };
+    const included = scope.included || [];
+    const excluded = scope.excluded || [];
+    const risks = plan.risks || [];
+
     const lines: string[] = [
-      `## Plan: ${plan.goal}`,
+      `## Plan: ${goal}`,
       '',
-      `**Version:** ${plan.version}`,
-      `**Steps:** ${plan.steps.length}`,
-      `**Confidence:** ${(plan.confidence_score * 100).toFixed(0)}%`,
+      `**Version:** ${version}`,
+      `**Steps:** ${steps.length}`,
+      `**Confidence:** ${(confidenceScore * 100).toFixed(0)}%`,
       '',
       '### Scope',
       '**Included:**',
-      ...plan.scope.included.map(i => `- ${i}`),
+      ...included.map(i => `- ${i}`),
       '',
       '**Excluded:**',
-      ...plan.scope.excluded.map(e => `- ${e}`),
+      ...excluded.map(e => `- ${e}`),
       '',
       '### Steps Overview',
-      ...plan.steps.map(s => `${s.step_number}. **${s.title}** (${s.priority} priority, ${s.estimated_effort})`),
+      ...steps.map(s => `${s.step_number || '?'}. **${s.title || 'Untitled'}** (${s.priority || 'medium'} priority, ${s.estimated_effort || 'unknown'})`),
     ];
 
-    if (plan.risks.length > 0) {
+    if (risks.length > 0) {
       lines.push('', '### Risks');
-      for (const risk of plan.risks) {
-        lines.push(`- **${risk.issue}** (${risk.likelihood}): ${risk.mitigation}`);
+      for (const risk of risks) {
+        lines.push(`- **${risk.issue || 'Unknown risk'}** (${risk.likelihood || 'unknown'}): ${risk.mitigation || 'No mitigation'}`);
       }
     }
 
@@ -362,40 +382,55 @@ export class ApprovalWorkflowService {
    * Generate detailed description for step approval
    */
   private generateStepApprovalDetails(step: EnhancedPlanStep): string {
+    // Safely access step properties
+    const stepNumber = step.step_number || '?';
+    const title = step.title || 'Untitled Step';
+    const description = step.description || 'No description';
+    const priority = step.priority || 'medium';
+    const estimatedEffort = step.estimated_effort || 'unknown';
+    const filesToModify = step.files_to_modify || [];
+    const filesToCreate = step.files_to_create || [];
+    const filesToDelete = step.files_to_delete || [];
+    const acceptanceCriteria = step.acceptance_criteria || [];
+
     const lines: string[] = [
-      `## Step ${step.step_number}: ${step.title}`,
+      `## Step ${stepNumber}: ${title}`,
       '',
-      step.description,
+      description,
       '',
-      `**Priority:** ${step.priority}`,
-      `**Estimated Effort:** ${step.estimated_effort}`,
+      `**Priority:** ${priority}`,
+      `**Estimated Effort:** ${estimatedEffort}`,
     ];
 
-    if (step.files_to_modify.length > 0) {
+    if (filesToModify.length > 0) {
       lines.push('', '### Files to Modify');
-      for (const file of step.files_to_modify) {
-        lines.push(`- ${file.path} (${file.complexity}): ${file.reason}`);
+      for (const file of filesToModify) {
+        if (file?.path) {
+          lines.push(`- ${file.path} (${file.complexity || 'unknown'}): ${file.reason || 'No reason'}`);
+        }
       }
     }
 
-    if (step.files_to_create.length > 0) {
+    if (filesToCreate.length > 0) {
       lines.push('', '### Files to Create');
-      for (const file of step.files_to_create) {
-        lines.push(`- ${file.path} (${file.complexity}): ${file.reason}`);
+      for (const file of filesToCreate) {
+        if (file?.path) {
+          lines.push(`- ${file.path} (${file.complexity || 'unknown'}): ${file.reason || 'No reason'}`);
+        }
       }
     }
 
-    if (step.files_to_delete.length > 0) {
+    if (filesToDelete.length > 0) {
       lines.push('', '### Files to Delete');
-      for (const file of step.files_to_delete) {
-        lines.push(`- ${file}`);
+      for (const file of filesToDelete) {
+        if (file) lines.push(`- ${file}`);
       }
     }
 
-    if (step.acceptance_criteria.length > 0) {
+    if (acceptanceCriteria.length > 0) {
       lines.push('', '### Acceptance Criteria');
-      for (const criterion of step.acceptance_criteria) {
-        lines.push(`- ${criterion}`);
+      for (const criterion of acceptanceCriteria) {
+        if (criterion) lines.push(`- ${criterion}`);
       }
     }
 

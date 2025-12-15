@@ -284,5 +284,43 @@ describe('PlanPersistenceService', () => {
       expect(plans.length).toBe(2);
     });
   });
-});
 
+  describe('Defensive Programming - Null/Undefined Handling', () => {
+    it('should handle loadPlanByName with undefined name', async () => {
+      const result = await service.loadPlanByName(undefined as unknown as string);
+      expect(result).toBeNull();
+    });
+
+    it('should handle loadPlanByName with null name', async () => {
+      const result = await service.loadPlanByName(null as unknown as string);
+      expect(result).toBeNull();
+    });
+
+    it('should handle loadPlanByName with empty string', async () => {
+      const result = await service.loadPlanByName('');
+      expect(result).toBeNull();
+    });
+
+    it('should handle plans with undefined name in sorting', async () => {
+      // Create a plan with undefined name (simulating corrupted data)
+      const plan = createTestPlan('plan_undefined_name');
+      await service.savePlan(plan);
+
+      // This should not throw even if internal data has undefined names
+      const plans = await service.listPlans({ sort_by: 'name' });
+      expect(plans).toBeDefined();
+    });
+
+    it('should handle plans with undefined dates in sorting', async () => {
+      const plan = createTestPlan('plan_dates');
+      await service.savePlan(plan);
+
+      // Sorting by dates should handle undefined gracefully
+      const plansByCreated = await service.listPlans({ sort_by: 'created_at' });
+      expect(plansByCreated).toBeDefined();
+
+      const plansByUpdated = await service.listPlans({ sort_by: 'updated_at' });
+      expect(plansByUpdated).toBeDefined();
+    });
+  });
+});

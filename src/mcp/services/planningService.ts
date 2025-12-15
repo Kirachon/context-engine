@@ -77,7 +77,9 @@ export class PlanningService {
     const startTime = Date.now();
     const opts = { ...DEFAULT_OPTIONS, ...options };
 
-    console.error(`[PlanningService] Generating plan for: "${task.substring(0, 100)}..."`);
+    // Safely handle potentially undefined task
+    const taskPreview = task && typeof task === 'string' ? task.substring(0, 100) : 'undefined task';
+    console.error(`[PlanningService] Generating plan for: "${taskPreview}..."`);
 
     try {
       // Step 1: Get relevant codebase context
@@ -702,21 +704,41 @@ export class PlanningService {
    */
   getPlanSummary(plan: EnhancedPlanOutput): PlanSummary {
     const filesAffected = new Set<string>();
-    for (const step of plan.steps) {
-      for (const file of step.files_to_modify) filesAffected.add(file.path);
-      for (const file of step.files_to_create) filesAffected.add(file.path);
-      for (const file of step.files_to_delete) filesAffected.add(file);
+
+    // Safely handle potentially undefined arrays
+    const steps = plan.steps || [];
+    const questions = plan.questions_for_clarification || [];
+
+    for (const step of steps) {
+      // Safely iterate file arrays
+      const filesToModify = step.files_to_modify || [];
+      const filesToCreate = step.files_to_create || [];
+      const filesToDelete = step.files_to_delete || [];
+
+      for (const file of filesToModify) {
+        if (file?.path) filesAffected.add(file.path);
+      }
+      for (const file of filesToCreate) {
+        if (file?.path) filesAffected.add(file.path);
+      }
+      for (const file of filesToDelete) {
+        if (file) filesAffected.add(file);
+      }
     }
 
+    // Safely handle potentially undefined goal
+    const goal = plan.goal || '';
+    const goalSummary = goal.length > 100 ? goal.substring(0, 97) + '...' : goal;
+
     return {
-      id: plan.id,
-      goal: plan.goal.length > 100 ? plan.goal.substring(0, 97) + '...' : plan.goal,
-      status: plan.questions_for_clarification.length > 0 ? 'needs_clarification' : 'ready',
-      step_count: plan.steps.length,
+      id: plan.id || '',
+      goal: goalSummary,
+      status: questions.length > 0 ? 'needs_clarification' : 'ready',
+      step_count: steps.length,
       files_affected: filesAffected.size,
-      total_estimated_effort: this.sumEstimatedEffort(plan.steps),
-      confidence_score: plan.confidence_score,
-      created_at: plan.created_at,
+      total_estimated_effort: this.sumEstimatedEffort(steps),
+      confidence_score: plan.confidence_score || 0,
+      created_at: plan.created_at || new Date().toISOString(),
     };
   }
 
@@ -738,20 +760,31 @@ export class PlanningService {
   generateDependencyDiagram(plan: EnhancedPlanOutput): string {
     let mermaid = 'graph TD\n';
 
+    // Safely handle undefined steps and dependency_graph
+    const steps = plan.steps || [];
+    const dependencyGraph = plan.dependency_graph || { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] };
+    const edges = dependencyGraph.edges || [];
+    const criticalPath = dependencyGraph.critical_path || [];
+
     // Add nodes
-    for (const step of plan.steps) {
-      const label = step.title.length > 30 ? step.title.substring(0, 27) + '...' : step.title;
+    for (const step of steps) {
+      // Safely handle potentially undefined title
+      const title = step.title || `Step ${step.step_number || 'unknown'}`;
+      const label = title.length > 30 ? title.substring(0, 27) + '...' : title;
       const style = step.priority === 'critical' ? ':::critical' : '';
-      mermaid += `    ${step.id}["${step.step_number}. ${label}"]${style}\n`;
+      const stepId = step.id || `step_${step.step_number || Date.now()}`;
+      mermaid += `    ${stepId}["${step.step_number || '?'}. ${label}"]${style}\n`;
     }
 
     // Add edges
-    for (const edge of plan.dependency_graph.edges) {
-      mermaid += `    ${edge.from} --> ${edge.to}\n`;
+    for (const edge of edges) {
+      if (edge.from && edge.to) {
+        mermaid += `    ${edge.from} --> ${edge.to}\n`;
+      }
     }
 
     // Add styling for critical path
-    if (plan.dependency_graph.critical_path.length > 0) {
+    if (criticalPath.length > 0) {
       mermaid += '\n    classDef critical fill:#ff6b6b,stroke:#c0392b\n';
     }
 

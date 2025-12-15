@@ -168,7 +168,7 @@ describe('ApprovalWorkflowService', () => {
     it('should return all requests for a plan', () => {
       const plan = createTestPlan();
       const request = service.createPlanApprovalRequest(plan);
-      
+
       service.processApprovalResponse({
         request_id: request.id,
         action: 'approve'
@@ -179,5 +179,86 @@ describe('ApprovalWorkflowService', () => {
       expect(history[0].status).toBe('approved');
     });
   });
-});
 
+  describe('Defensive Programming - Null/Undefined Handling', () => {
+    it('should handle plan with undefined goal', () => {
+      const basePlan = createTestPlan();
+      const planWithUndefinedGoal = {
+        ...basePlan,
+        goal: undefined as unknown as string
+      };
+
+      // Should not throw
+      const request = service.createPlanApprovalRequest(planWithUndefinedGoal as any);
+      expect(request).toBeDefined();
+      expect(request.details).toContain('No goal specified');
+    });
+
+    it('should handle plan with undefined steps', () => {
+      const basePlan = createTestPlan();
+      const planWithUndefinedSteps = {
+        ...basePlan,
+        steps: undefined as unknown as any[]
+      };
+
+      // Should not throw
+      const request = service.createPlanApprovalRequest(planWithUndefinedSteps as any);
+      expect(request).toBeDefined();
+      expect(request.details).toContain('Steps:** 0');
+    });
+
+    it('should handle step with undefined properties', () => {
+      const basePlan = createTestPlan();
+      // Replace the first step with one that has undefined properties
+      basePlan.steps[0] = {
+        step_number: 1,
+        id: 'step_1',
+        title: undefined as unknown as string,
+        description: undefined as unknown as string,
+        files_to_modify: undefined as unknown as any[],
+        files_to_create: undefined as unknown as any[],
+        files_to_delete: undefined as unknown as any[],
+        depends_on: [],
+        blocks: [],
+        can_parallel_with: [],
+        priority: 'high' as const,
+        estimated_effort: undefined as unknown as string,
+        acceptance_criteria: undefined as unknown as any[]
+      };
+
+      // Should not throw - pass the plan and step number
+      const request = service.createStepApprovalRequest(basePlan, 1);
+      expect(request).toBeDefined();
+    });
+
+    it('should handle collectAffectedFiles with undefined file arrays', () => {
+      const basePlan = createTestPlan();
+      const stepsWithUndefinedFiles = [
+        {
+          step_number: 1,
+          id: 'step_1',
+          title: 'Test',
+          description: 'Test',
+          files_to_modify: undefined as unknown as any[],
+          files_to_create: undefined as unknown as any[],
+          files_to_delete: undefined as unknown as any[],
+          depends_on: [],
+          blocks: [],
+          can_parallel_with: [],
+          priority: 'high' as const,
+          estimated_effort: '1h',
+          acceptance_criteria: []
+        }
+      ];
+
+      const planWithBadSteps = {
+        ...basePlan,
+        steps: stepsWithUndefinedFiles
+      };
+
+      // Should not throw
+      const request = service.createPlanApprovalRequest(planWithBadSteps as any);
+      expect(request).toBeDefined();
+    });
+  });
+});

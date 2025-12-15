@@ -180,5 +180,30 @@ describe('PlanHistoryService', () => {
       expect(history).toBeNull();
     });
   });
-});
 
+  describe('Defensive Programming - Null/Undefined Handling', () => {
+    it('should handle undefined planId in getHistoryFilePath', () => {
+      // Access private method through any cast for testing
+      const serviceAny = service as any;
+
+      // Should not throw, should return fallback path
+      const path = serviceAny.getHistoryFilePath(undefined);
+      expect(path).toBeDefined();
+      expect(path).toContain('history_');
+    });
+
+    it('should handle null planId in getHistoryFilePath', () => {
+      const serviceAny = service as any;
+
+      // Should not throw, should return fallback path
+      const path = serviceAny.getHistoryFilePath(null);
+      expect(path).toBeDefined();
+      expect(path).toContain('history_');
+    });
+
+    it('should handle getHistory with non-existent planId', () => {
+      const history = service.getHistory('non_existent_plan');
+      expect(history).toBeNull();
+    });
+  });
+});

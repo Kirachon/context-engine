@@ -173,5 +173,135 @@ describe('PlanningService', () => {
       });
     });
   });
-});
 
+  describe('Defensive Programming - Null/Undefined Handling', () => {
+    it('should handle getPlanSummary with undefined goal', () => {
+      const plan = {
+        id: 'test_plan',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: undefined as unknown as string,
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: [],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] },
+        testing_strategy: { unit: '', integration: '', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: []
+      };
+
+      // Should not throw
+      const summary = planningService.getPlanSummary(plan as any);
+      expect(summary.goal).toBe('');
+    });
+
+    it('should handle getPlanSummary with undefined steps', () => {
+      const plan = {
+        id: 'test_plan',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Test goal',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: undefined as unknown as any[],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] },
+        testing_strategy: { unit: '', integration: '', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: []
+      };
+
+      // Should not throw
+      const summary = planningService.getPlanSummary(plan as any);
+      expect(summary.step_count).toBe(0);
+    });
+
+    it('should handle generateDependencyDiagram with undefined steps', () => {
+      const plan = {
+        id: 'test_plan',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Test goal',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: undefined as unknown as any[],
+        dependency_graph: undefined as unknown as any,
+        testing_strategy: { unit: '', integration: '', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: []
+      };
+
+      // Should not throw
+      const diagram = planningService.generateDependencyDiagram(plan as any);
+      expect(diagram).toContain('graph TD');
+    });
+
+    it('should handle step with undefined title in diagram', () => {
+      const plan = {
+        id: 'test_plan',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Test goal',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: [
+          {
+            step_number: 1,
+            id: 'step_1',
+            title: undefined as unknown as string,
+            description: 'Test',
+            files_to_modify: [],
+            files_to_create: [],
+            files_to_delete: [],
+            depends_on: [],
+            blocks: [],
+            can_parallel_with: [],
+            priority: 'high' as const,
+            estimated_effort: '1h',
+            acceptance_criteria: []
+          }
+        ],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] },
+        testing_strategy: { unit: '', integration: '', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: []
+      };
+
+      // Should not throw
+      const diagram = planningService.generateDependencyDiagram(plan as any);
+      expect(diagram).toContain('graph TD');
+      expect(diagram).toContain('Step 1'); // Fallback title
+    });
+  });
+});

@@ -46,7 +46,12 @@ export class PlanHistoryService {
     }
   }
 
-  private getHistoryFilePath(planId: string): string {
+  private getHistoryFilePath(planId: string | undefined | null): string {
+    // Handle undefined/null planId
+    if (!planId || typeof planId !== 'string') {
+      const fallbackId = `history_${Date.now()}`;
+      return path.join(this.historyDir, `${fallbackId}${HISTORY_FILE_SUFFIX}`);
+    }
     const safeId = planId.replace(/[^a-zA-Z0-9_-]/g, '_');
     return path.join(this.historyDir, `${safeId}${HISTORY_FILE_SUFFIX}`);
   }
