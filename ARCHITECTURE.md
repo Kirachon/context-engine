@@ -30,9 +30,9 @@ This project implements a **local-first, agent-agnostic context engine** using t
 
 ### Layer 2: Context Service Layer
 
-**Location**: `src/mcp/serviceClient.ts`
+**Location**: `src/mcp/serviceClient.ts`, `src/mcp/services/`
 
-**Purpose**: Adapts raw retrieval into agent-friendly context.
+**Purpose**: Adapts raw retrieval into agent-friendly context and provides planning capabilities.
 
 **Responsibilities**:
 - Decide how much context to return
@@ -40,17 +40,60 @@ This project implements a **local-first, agent-agnostic context engine** using t
 - Deduplicate results by file
 - Enforce limits (max files, max tokens)
 - Apply heuristics (importance, recency)
+- Generate and manage implementation plans (v1.4.0+)
+- Track plan execution and versioning (v1.4.0+)
 
 **What it does NOT do**:
 - ❌ Index files
 - ❌ Store vectors
 - ❌ Talk to agents directly
 
-**Key Methods**:
+**Key Services**:
+
+#### ContextServiceClient (`serviceClient.ts`)
 ```typescript
 semanticSearch(query, topK): SearchResult[]
 getFile(path): string
 getContextForPrompt(query, maxFiles): ContextBundle
+```
+
+#### PlanningService (`services/planningService.ts`) - v1.4.0+
+```typescript
+generatePlan(task, options): PlanResult
+refinePlan(currentPlan, feedback): PlanResult
+analyzeDependencies(steps): DependencyGraph
+```
+
+#### PlanPersistenceService (`services/planPersistenceService.ts`) - v1.4.0+
+```typescript
+savePlan(plan, options): SaveResult
+loadPlan(planId): EnhancedPlanOutput
+listPlans(filters): PlanMetadata[]
+deletePlan(planId): boolean
+```
+
+#### ExecutionTrackingService (`services/executionTrackingService.ts`) - v1.4.0+
+```typescript
+initializeExecution(plan): PlanExecutionState
+startStep(planId, stepNumber): StepExecutionState
+completeStep(planId, stepNumber, options): StepExecutionState
+failStep(planId, stepNumber, options): StepExecutionState
+getProgress(planId): ExecutionProgress
+```
+
+#### ApprovalWorkflowService (`services/approvalWorkflowService.ts`) - v1.4.0+
+```typescript
+createPlanApprovalRequest(plan): ApprovalRequest
+createStepApprovalRequest(plan, stepNumber): ApprovalRequest
+respondToApproval(requestId, action, comments): ApprovalResult
+```
+
+#### PlanHistoryService (`services/planHistoryService.ts`) - v1.4.0+
+```typescript
+recordVersion(plan, changeType, description): void
+getHistory(planId, options): PlanHistory
+generateDiff(planId, fromVersion, toVersion): PlanDiff
+rollback(planId, version, reason): EnhancedPlanOutput
 ```
 
 **Context Bundle Format**:
@@ -85,7 +128,49 @@ getContextForPrompt(query, maxFiles): ContextBundle
 - ❌ Retrieval logic
 - ❌ Formatting decisions
 
-**Tools Exposed**:
+**Tools Exposed** (26 total):
+
+#### Core Context Tools
+1. **index_workspace** - Index workspace files
+2. **codebase_retrieval** - Semantic search (JSON output)
+3. **semantic_search** - Semantic search (markdown output)
+4. **get_file** - Retrieve file contents
+5. **get_context_for_prompt** - Get context bundle
+6. **enhance_prompt** - AI-powered prompt enhancement
+
+#### Index Management Tools
+7. **index_status** - View index health
+8. **reindex_workspace** - Rebuild index
+9. **clear_index** - Clear index state
+10. **tool_manifest** - List available tools
+
+#### Planning Tools (v1.4.0+)
+11. **create_plan** - Generate implementation plans
+12. **refine_plan** - Refine existing plans
+13. **visualize_plan** - Generate diagrams
+
+#### Plan Persistence Tools (v1.4.0+)
+14. **save_plan** - Save plans to storage
+15. **load_plan** - Load saved plans
+16. **list_plans** - List plans with filters
+17. **delete_plan** - Delete plans
+
+#### Approval Workflow Tools (v1.4.0+)
+18. **request_approval** - Create approval requests
+19. **respond_approval** - Respond to approvals
+
+#### Execution Tracking Tools (v1.4.0+)
+20. **start_step** - Mark step as in-progress
+21. **complete_step** - Mark step as completed
+22. **fail_step** - Mark step as failed
+23. **view_progress** - View execution progress
+
+#### History & Versioning Tools (v1.4.0+)
+24. **view_history** - View plan version history
+25. **compare_plan_versions** - Compare versions
+26. **rollback_plan** - Rollback to previous version
+
+**Example Tool Definitions**:
 
 1. **semantic_search**
    - Input: `{ query: string, top_k?: number }`
@@ -97,7 +182,12 @@ getContextForPrompt(query, maxFiles): ContextBundle
    - Output: Complete file contents
    - Use case: Retrieve full file after search
 
-3. **get_context_for_prompt**
+3. **create_plan** (v1.4.0+)
+   - Input: `{ task: string, max_context_files?: number, generate_diagrams?: boolean }`
+   - Output: Structured plan with steps, dependencies, diagrams
+   - Use case: Generate implementation plans
+
+4. **get_context_for_prompt**
    - Input: `{ query: string, max_files?: number }`
    - Output: Rich context bundle
    - Use case: Primary tool for prompt enhancement
@@ -193,6 +283,143 @@ No LLM-specific logic anywhere in the stack. Works with any MCP client.
 - No exposed network ports
 - No data leaves the machine
 - All processing happens locally
+
+## Planning Mode Architecture (v1.4.0+)
+
+The planning system adds a complete workflow for AI-assisted software planning and execution tracking.
+
+### Planning Services Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    MCP Tools Layer                          │
+│  create_plan | refine_plan | visualize_plan                 │
+│  save_plan | load_plan | list_plans | delete_plan           │
+│  request_approval | respond_approval                        │
+│  start_step | complete_step | fail_step | view_progress     │
+│  view_history | compare_plan_versions | rollback_plan       │
+└────────────────────┬────────────────────────────────────────┘
+                     │
+┌────────────────────┴────────────────────────────────────────┐
+│                 Planning Services Layer                     │
+│                                                              │
+│  ┌──────────────────┐  ┌──────────────────────┐            │
+│  │ PlanningService  │  │ PlanPersistenceService│            │
+│  │ - generatePlan() │  │ - savePlan()          │            │
+│  │ - refinePlan()   │  │ - loadPlan()          │            │
+│  │ - analyzeDeps()  │  │ - listPlans()         │            │
+│  └──────────────────┘  └──────────────────────┘            │
+│                                                              │
+│  ┌──────────────────┐  ┌──────────────────────┐            │
+│  │ExecutionTracking │  │ApprovalWorkflow      │            │
+│  │ - startStep()    │  │ - createRequest()    │            │
+│  │ - completeStep() │  │ - respondApproval()  │            │
+│  │ - getProgress()  │  │ - trackHistory()     │            │
+│  └──────────────────┘  └──────────────────────┘            │
+│                                                              │
+│  ┌──────────────────┐                                       │
+│  │ PlanHistory      │                                       │
+│  │ - recordVersion()│                                       │
+│  │ - generateDiff() │                                       │
+│  │ - rollback()     │                                       │
+│  └──────────────────┘                                       │
+└─────────────────────────────────────────────────────────────┘
+                     │
+┌────────────────────┴────────────────────────────────────────┐
+│                  Storage Layer                              │
+│  .context-engine/plans/                                     │
+│  ├── index.json (plan metadata)                             │
+│  ├── plan_abc123.json (plan data)                           │
+│  └── history/                                               │
+│      └── plan_abc123.json (version history)                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Planning Workflow
+
+1. **Plan Generation**
+   - User provides task description
+   - `PlanningService` retrieves relevant codebase context
+   - AI generates structured plan with steps, dependencies, diagrams
+   - Plan includes DAG analysis (topological sort, critical path, parallel groups)
+
+2. **Plan Persistence**
+   - Plans saved to `.context-engine/plans/` directory
+   - Metadata tracked in `index.json`
+   - Each plan has unique ID and version number
+
+3. **Approval Workflow** (Optional)
+   - Create approval requests for full plans or specific steps
+   - Track approval status and comments
+   - Support approve/reject/request_changes actions
+
+4. **Execution Tracking**
+   - Initialize execution state from saved plan
+   - Track step states: pending → ready → in_progress → completed/failed/skipped
+   - Automatically unlock dependent steps when prerequisites complete
+   - Calculate real-time progress percentage
+
+5. **Version History**
+   - Every plan modification creates new version
+   - Track changes with timestamps and descriptions
+   - Generate diffs between versions
+   - Support rollback to previous versions
+
+### Key Data Structures
+
+**EnhancedPlanOutput**:
+```typescript
+{
+  id: string;
+  version: number;
+  goal: string;
+  scope: { included, excluded, assumptions, constraints };
+  mvp_features: string[];
+  nice_to_have_features: string[];
+  architecture: { notes, patterns_used, diagrams };
+  risks: Array<{ issue, mitigation, likelihood }>;
+  milestones: Array<{ name, steps_included, estimated_time }>;
+  steps: Array<{
+    step_number: number;
+    title: string;
+    description: string;
+    files_to_modify: string[];
+    files_to_create: string[];
+    depends_on: number[];
+    blocks: number[];
+    can_parallel_with: number[];
+    priority: 'high' | 'medium' | 'low';
+    estimated_effort: string;
+    acceptance_criteria: string[];
+  }>;
+  dependency_graph: {
+    nodes, edges, critical_path, parallel_groups, execution_order
+  };
+  testing_strategy: { unit, integration, coverage_target };
+  confidence_score: number;
+  questions_for_clarification: string[];
+}
+```
+
+**PlanExecutionState**:
+```typescript
+{
+  plan_id: string;
+  status: 'ready' | 'executing' | 'completed' | 'failed';
+  steps: Array<{
+    step_number: number;
+    status: 'pending' | 'ready' | 'in_progress' | 'completed' | 'failed' | 'skipped';
+    started_at?: string;
+    completed_at?: string;
+    duration_ms?: number;
+    error?: string;
+    notes?: string;
+  }>;
+  current_steps: number[];
+  ready_steps: number[];
+  blocked_steps: number[];
+}
+```
 
 ## Extension Points
 

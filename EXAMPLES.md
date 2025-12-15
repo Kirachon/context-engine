@@ -463,6 +463,408 @@ Start broad, then narrow down:
 - Use `get_context_for_prompt` instead of `semantic_search`
 - Check if files are actually indexed
 
+## Planning and Execution Examples (v1.4.0+)
+
+### Example 7: Creating an Implementation Plan
+
+**User Query:**
+> "Create a plan to implement user authentication with JWT tokens"
+
+**What Happens:**
+1. AI calls `create_plan` tool
+2. Analyzes codebase for existing patterns
+3. Generates structured plan with steps, dependencies, and diagrams
+
+**Example Tool Call:**
+```json
+{
+  "name": "create_plan",
+  "arguments": {
+    "task": "Implement user authentication with JWT tokens",
+    "max_context_files": 10,
+    "generate_diagrams": true,
+    "mvp_only": false
+  }
+}
+```
+
+**Expected Response:**
+```markdown
+# Implementation Plan
+
+**ID:** plan_abc123
+**Version:** 1
+**Status:** ready
+**Confidence:** 85%
+
+## Goal
+Implement user authentication with JWT tokens
+
+## MVP Features
+- User login endpoint
+- JWT token generation
+- Token validation middleware
+- Secure password hashing
+
+## Steps
+
+### Step 1: Create User Model
+**Description:** Define user schema with email and password fields
+**Files to Create:** src/models/User.ts
+**Estimated Effort:** 2-3 hours
+
+### Step 2: Implement Password Hashing
+**Description:** Add bcrypt for secure password storage
+**Files to Modify:** src/models/User.ts
+**Depends On:** Step 1
+**Estimated Effort:** 1-2 hours
+
+### Step 3: Create JWT Service
+**Description:** Implement token generation and validation
+**Files to Create:** src/services/jwtService.ts
+**Depends On:** Step 1
+**Estimated Effort:** 3-4 hours
+
+...
+
+## Dependency Graph
+[Mermaid diagram showing step dependencies]
+```
+
+### Example 8: Saving and Loading Plans
+
+**Saving a Plan:**
+```json
+{
+  "name": "save_plan",
+  "arguments": {
+    "plan": "<Full Plan JSON from create_plan>",
+    "name": "JWT Authentication Implementation",
+    "tags": ["authentication", "security", "backend"]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "planId": "plan_abc123",
+  "message": "Plan saved successfully",
+  "metadata": {
+    "name": "JWT Authentication Implementation",
+    "tags": ["authentication", "security", "backend"],
+    "status": "ready",
+    "filesAffected": 8
+  }
+}
+```
+
+**Loading a Plan:**
+```json
+{
+  "name": "load_plan",
+  "arguments": {
+    "plan_id": "plan_abc123"
+  }
+}
+```
+
+**Listing Plans:**
+```json
+{
+  "name": "list_plans",
+  "arguments": {
+    "status": "ready",
+    "tags": ["authentication"],
+    "limit": 10
+  }
+}
+```
+
+### Example 9: Executing a Plan Step-by-Step
+
+**Step 1: Start a Step**
+```json
+{
+  "name": "start_step",
+  "arguments": {
+    "plan_id": "plan_abc123",
+    "step_number": 1
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "step": {
+    "step_number": 1,
+    "step_id": "step_1",
+    "status": "in_progress",
+    "started_at": "2025-12-15T10:30:00Z"
+  }
+}
+```
+
+**Step 2: Complete the Step**
+```json
+{
+  "name": "complete_step",
+  "arguments": {
+    "plan_id": "plan_abc123",
+    "step_number": 1,
+    "notes": "Created User model with email, password, and timestamps",
+    "files_modified": ["src/models/User.ts", "src/models/index.ts"]
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "step": {
+    "step_number": 1,
+    "status": "completed",
+    "completed_at": "2025-12-15T11:15:00Z",
+    "duration_ms": 2700000,
+    "notes": "Created User model with email, password, and timestamps"
+  },
+  "progress": {
+    "percentage": 12,
+    "completed_steps": 1,
+    "total_steps": 8,
+    "ready_steps": [2, 3]
+  }
+}
+```
+
+**Step 3: View Progress**
+```json
+{
+  "name": "view_progress",
+  "arguments": {
+    "plan_id": "plan_abc123"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "progress": {
+    "percentage": 12,
+    "completed_steps": 1,
+    "failed_steps": 0,
+    "in_progress_steps": 0,
+    "ready_steps": [2, 3],
+    "blocked_steps": [4, 5, 6, 7, 8],
+    "total_steps": 8
+  },
+  "ready_steps": [2, 3],
+  "current_steps": []
+}
+```
+
+### Example 10: Handling Step Failures
+
+**Mark a Step as Failed:**
+```json
+{
+  "name": "fail_step",
+  "arguments": {
+    "plan_id": "plan_abc123",
+    "step_number": 3,
+    "error": "JWT library not compatible with current Node version",
+    "retry": false,
+    "skip": true,
+    "skip_dependents": false
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "step": {
+    "step_number": 3,
+    "status": "skipped",
+    "error": "JWT library not compatible with current Node version",
+    "completed_at": "2025-12-15T12:00:00Z"
+  },
+  "progress": {
+    "percentage": 25,
+    "completed_steps": 2,
+    "failed_steps": 0,
+    "skipped_steps": 1,
+    "total_steps": 8
+  }
+}
+```
+
+### Example 11: Approval Workflow
+
+**Request Approval for a Plan:**
+```json
+{
+  "name": "request_approval",
+  "arguments": {
+    "plan_id": "plan_abc123"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "request": {
+    "id": "approval_xyz789",
+    "plan_id": "plan_abc123",
+    "type": "plan",
+    "status": "pending",
+    "summary": "Approve plan: Implement user authentication with JWT tokens",
+    "details": "This plan includes 8 steps affecting 12 files...",
+    "affected_files": ["src/models/User.ts", "src/services/jwtService.ts", ...],
+    "risks": [
+      "Password security (high likelihood)",
+      "Token expiration handling (medium likelihood)"
+    ]
+  }
+}
+```
+
+**Approve the Plan:**
+```json
+{
+  "name": "respond_approval",
+  "arguments": {
+    "request_id": "approval_xyz789",
+    "action": "approve",
+    "comments": "Plan looks good. Proceed with implementation."
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "result": {
+    "request_id": "approval_xyz789",
+    "status": "approved",
+    "approved_at": "2025-12-15T09:00:00Z",
+    "approved_by": "user",
+    "comments": "Plan looks good. Proceed with implementation."
+  }
+}
+```
+
+### Example 12: Version History and Rollback
+
+**View Plan History:**
+```json
+{
+  "name": "view_history",
+  "arguments": {
+    "plan_id": "plan_abc123",
+    "limit": 5,
+    "include_plans": false
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "history": {
+    "plan_id": "plan_abc123",
+    "versions": [
+      {
+        "version": 3,
+        "timestamp": "2025-12-15T14:00:00Z",
+        "change_type": "refined",
+        "description": "Added error handling steps"
+      },
+      {
+        "version": 2,
+        "timestamp": "2025-12-15T12:00:00Z",
+        "change_type": "modified",
+        "description": "Updated JWT library version"
+      },
+      {
+        "version": 1,
+        "timestamp": "2025-12-15T10:00:00Z",
+        "change_type": "created",
+        "description": "Plan created"
+      }
+    ]
+  }
+}
+```
+
+**Compare Versions:**
+```json
+{
+  "name": "compare_plan_versions",
+  "arguments": {
+    "plan_id": "plan_abc123",
+    "from_version": 1,
+    "to_version": 3
+  }
+}
+```
+
+**Rollback to Previous Version:**
+```json
+{
+  "name": "rollback_plan",
+  "arguments": {
+    "plan_id": "plan_abc123",
+    "version": 2,
+    "reason": "Version 3 introduced breaking changes"
+  }
+}
+```
+
+## Planning Workflow Best Practices
+
+### 1. Complete Planning Workflow
+
+```
+1. create_plan → Generate initial plan
+2. save_plan → Persist the plan
+3. request_approval → Get stakeholder approval (optional)
+4. respond_approval → Approve/reject
+5. start_step → Begin execution
+6. complete_step → Mark steps as done
+7. view_progress → Monitor progress
+8. view_history → Track changes
+```
+
+### 2. Handling Plan Refinements
+
+```
+1. create_plan → Initial plan
+2. refine_plan → Improve based on feedback
+3. save_plan → Save refined version
+4. compare_plan_versions → Review changes
+```
+
+### 3. Error Recovery
+
+```
+1. fail_step → Mark step as failed
+2. view_progress → Check impact
+3. refine_plan → Adjust plan
+4. start_step → Retry or continue
+```
+
 ---
 
 For more examples and use cases, see the [TESTING.md](TESTING.md) guide.

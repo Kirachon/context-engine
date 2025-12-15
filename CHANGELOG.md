@@ -2,6 +2,54 @@
 
 All notable changes to the Context Engine MCP Server will be documented in this file.
 
+## [1.4.1] - 2025-12-15
+
+### Fixed
+
+#### Defensive Programming Improvements
+- **ApprovalWorkflowService**: Added comprehensive null/undefined handling
+  - Safely handle undefined `steps` and `risks` arrays in `createPlanApprovalRequest()`
+  - Added fallback values for missing `plan.id` and `step.title` properties
+  - Prevent crashes when processing malformed plan data
+
+- **ExecutionTrackingService**: Enhanced robustness for execution tracking
+  - Safely handle undefined `steps`, `depends_on`, and `blocks` arrays
+  - Added defensive checks in `initializeExecution()`, `startStep()`, `completeStep()`, and `failStep()`
+  - Prevent runtime errors when processing incomplete plan data
+
+- **PlanHistoryService**: Improved version tracking reliability
+  - Safely handle undefined `steps` array in `recordVersion()`
+  - Added null checks in `getHistoryFilePath()` and `collectAllFiles()`
+  - Enhanced `generateDiff()` to handle undefined steps arrays
+
+- **PlanningService**: Strengthened plan generation
+  - Safely handle undefined/null task strings in `generatePlan()`
+  - Added safe array handling for `mvp_features`, `nice_to_have_features`, and `risks`
+  - Improved error messages with better context
+
+- **plan.ts tool**: Enhanced visualization safety
+  - Safely handle undefined `steps` array in `visualize_plan` tool
+  - Prevent crashes during diagram generation
+
+### Tests Added
+- **ExecutionTrackingService**: 3 new defensive programming tests
+  - Test handling of undefined steps array
+  - Test handling of undefined depends_on array
+  - Test handling of undefined blocks array in failStep
+
+- **PlanHistoryService**: 5 new defensive programming tests
+  - Test handling of undefined/null planId in getHistoryFilePath
+  - Test handling of non-existent planId in getHistory
+  - Test handling of undefined file arrays in collectAllFiles
+  - Test handling of undefined steps arrays in generateDiff
+
+**Total test count: 194 (all passing)**
+
+### New Files
+- `scripts/test-defensive-checks.ts` - Manual verification script for defensive programming patterns
+
+---
+
 ## [1.4.0] - 2025-12-15
 
 ### Added

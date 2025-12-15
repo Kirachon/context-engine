@@ -391,12 +391,24 @@ codex
 
 ## Step 8: Try It Out!
 
+### Basic Context Queries
+
 Ask Codex:
 
 - "Search for authentication logic in the codebase"
 - "Get context about the database schema"
 - "Show me the main entry point file"
 - "Find error handling patterns"
+
+### Planning and Execution (v1.4.0+)
+
+Try the new planning features:
+
+- "Create a plan to implement user authentication"
+- "Create a plan to add a new API endpoint for user profiles"
+- "Show me the saved plans"
+- "Start executing step 1 of plan_abc123"
+- "What's the progress on plan_abc123?"
 
 ## Troubleshooting
 
@@ -455,6 +467,12 @@ auggie index /path/to/project
 
 ### 4. Code Review
 "Find all database query patterns in the codebase"
+
+### 5. Implementation Planning (v1.4.0+)
+"Create a detailed plan to implement JWT authentication with refresh tokens"
+
+### 6. Execution Tracking (v1.4.0+)
+"Start executing the authentication plan step by step and track progress"
 
 ## Tips
 

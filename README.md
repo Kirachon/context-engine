@@ -45,47 +45,103 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 
 ## Features
 
-### MCP Tools (23 tools)
+### MCP Tools (26 tools available)
 
-#### Core Tools
-1. **`index_workspace(force)`** - Index workspace files for semantic search
-2. **`codebase_retrieval(query, top_k)`** - PRIMARY semantic search, JSON output for programmatic use
-3. **`semantic_search(query, top_k)`** - Semantic code search across the codebase (markdown output)
+#### Core Context Tools
+1. **`index_workspace(force?)`** - Index workspace files for semantic search
+   - `force` (optional): Force re-indexing even if files haven't changed
+2. **`codebase_retrieval(query, top_k?)`** - PRIMARY semantic search with JSON output for programmatic use
+   - `query`: Natural language search query
+   - `top_k` (optional): Number of results to return (default: 5)
+3. **`semantic_search(query, top_k?)`** - Semantic code search with markdown-formatted output
+   - `query`: Natural language search query
+   - `top_k` (optional): Number of results to return (default: 5)
 4. **`get_file(path)`** - Retrieve complete file contents
-5. **`get_context_for_prompt(query)`** - Get relevant context for prompt enhancement (primary tool)
-6. **`enhance_prompt(prompt)`** - Transform simple prompts into detailed, structured prompts using AI-powered enhancement
+   - `path`: Relative path to file from workspace root
+5. **`get_context_for_prompt(query, max_files?)`** - Get comprehensive context bundle for prompt enhancement
+   - `query`: Context request description
+   - `max_files` (optional): Maximum files to include (default: 5)
+6. **`enhance_prompt(prompt)`** - AI-powered prompt enhancement with codebase context
+   - `prompt`: Simple prompt to enhance
 
-#### Management Tools (v1.1.0)
+#### Index Management Tools (v1.1.0)
 7. **`index_status()`** - View index health metadata (status, fileCount, lastIndexed, isStale)
-8. **`reindex_workspace()`** - Clear and rebuild the entire index
+8. **`reindex_workspace()`** - Clear and rebuild the entire index from scratch
 9. **`clear_index()`** - Remove index state without rebuilding
-10. **`tool_manifest()`** - Capability discovery for agents (lists all available tools)
+10. **`tool_manifest()`** - Capability discovery for agents (lists all available tools and capabilities)
 
-#### Planning Tools (New in v1.4.0)
-11. **`create_plan(goal, context_files)`** - Generate structured execution plans with DAG analysis
-12. **`refine_plan(plan_id, refinements)`** - Refine existing plans based on feedback
-13. **`visualize_plan(plan_id, format)`** - Generate visual representations of plans (text, mermaid)
+#### Planning Tools (v1.4.0)
+11. **`create_plan(task, options?)`** - Generate structured execution plans with DAG analysis
+    - `task`: Task or goal to plan for
+    - `max_context_files` (optional): Max files for context (default: 10)
+    - `context_token_budget` (optional): Token budget (default: 12000)
+    - `generate_diagrams` (optional): Generate Mermaid diagrams (default: true)
+    - `mvp_only` (optional): Focus on MVP features only (default: false)
+12. **`refine_plan(current_plan, feedback?, clarifications?)`** - Refine existing plans based on feedback
+    - `current_plan`: JSON string of current plan
+    - `feedback` (optional): Feedback on what to change
+    - `clarifications` (optional): Answers to clarifying questions
+    - `focus_steps` (optional): Specific step numbers to refine
+13. **`visualize_plan(plan, diagram_type?)`** - Generate visual representations (Mermaid diagrams)
+    - `plan`: JSON string of the plan
+    - `diagram_type` (optional): 'dependencies', 'architecture', or 'gantt' (default: 'dependencies')
 
-#### Plan Persistence Tools (New in v1.4.0)
-14. **`save_plan(plan, name, tags)`** - Save plans to persistent storage with metadata
+#### Plan Persistence Tools (v1.4.0)
+14. **`save_plan(plan, name?, tags?, overwrite?)`** - Save plans to persistent storage
+    - `plan`: JSON string of EnhancedPlanOutput
+    - `name` (optional): Custom name for the plan
+    - `tags` (optional): Array of tags for organization
+    - `overwrite` (optional): Overwrite existing plan with same ID
 15. **`load_plan(plan_id)`** - Load previously saved plans
-16. **`list_plans(status, tags, limit)`** - List saved plans with filtering options
+    - `plan_id`: ID of the plan to load
+16. **`list_plans(status?, tags?, limit?)`** - List saved plans with filtering
+    - `status` (optional): Filter by status ('ready', 'approved', 'executing', 'completed', 'failed')
+    - `tags` (optional): Filter by tags
+    - `limit` (optional): Maximum number of plans to return
 17. **`delete_plan(plan_id)`** - Delete saved plans from storage
+    - `plan_id`: ID of the plan to delete
 
-#### Approval Workflow Tools (New in v1.4.0)
-18. **`request_approval(plan_id, type, step_numbers)`** - Create approval requests for plans/steps
-19. **`respond_approval(request_id, action, comments)`** - Approve, reject, or request modifications
+#### Approval Workflow Tools (v1.4.0)
+18. **`request_approval(plan_id, step_numbers?)`** - Create approval requests for plans or specific steps
+    - `plan_id`: ID of the plan
+    - `step_numbers` (optional): Specific steps to approve (omit for full plan approval)
+19. **`respond_approval(request_id, action, comments?)`** - Respond to approval requests
+    - `request_id`: ID of the approval request
+    - `action`: 'approve', 'reject', or 'request_changes'
+    - `comments` (optional): Comments or feedback
 
-#### Execution Tracking Tools (New in v1.4.0)
+#### Execution Tracking Tools (v1.4.0)
 20. **`start_step(plan_id, step_number)`** - Mark a step as in-progress
-21. **`complete_step(plan_id, step_number, notes)`** - Mark a step as completed
-22. **`fail_step(plan_id, step_number, reason)`** - Mark a step as failed with reason
+    - `plan_id`: ID of the plan
+    - `step_number`: Step number to start
+21. **`complete_step(plan_id, step_number, notes?, files_modified?)`** - Mark a step as completed
+    - `plan_id`: ID of the plan
+    - `step_number`: Step number to complete
+    - `notes` (optional): Completion notes
+    - `files_modified` (optional): Array of files actually modified
+22. **`fail_step(plan_id, step_number, error, retry?, skip?, skip_dependents?)`** - Mark a step as failed
+    - `plan_id`: ID of the plan
+    - `step_number`: Step number that failed
+    - `error`: Error message or reason
+    - `retry` (optional): Whether to retry the step
+    - `skip` (optional): Whether to skip the step
+    - `skip_dependents` (optional): Whether to skip dependent steps
 23. **`view_progress(plan_id)`** - View execution progress and statistics
+    - `plan_id`: ID of the plan
 
-#### History & Versioning Tools (New in v1.4.0)
-24. **`view_history(plan_id, limit)`** - View version history of a plan
+#### History & Versioning Tools (v1.4.0)
+24. **`view_history(plan_id, limit?, include_plans?)`** - View version history of a plan
+    - `plan_id`: ID of the plan
+    - `limit` (optional): Number of versions to retrieve
+    - `include_plans` (optional): Include full plan content in each version
 25. **`compare_plan_versions(plan_id, from_version, to_version)`** - Generate diff between versions
-26. **`rollback_plan(plan_id, version)`** - Rollback to a previous plan version
+    - `plan_id`: ID of the plan
+    - `from_version`: Starting version number
+    - `to_version`: Ending version number
+26. **`rollback_plan(plan_id, version, reason?)`** - Rollback to a previous plan version
+    - `plan_id`: ID of the plan
+    - `version`: Version number to rollback to
+    - `reason` (optional): Reason for rollback
 
 ### Key Characteristics
 
@@ -97,10 +153,66 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 - ✅ **Real-time watching**: Automatic incremental indexing on file changes (v1.1.0)
 - ✅ **Background indexing**: Non-blocking indexing via worker threads (v1.1.0)
 - ✅ **Offline policy**: Enforce local-only operation with environment variable (v1.1.0)
-- ✅ **Planning mode**: DAG-based task planning with dependencies (v1.4.0)
-- ✅ **Plan persistence**: Save, load, and manage execution plans (v1.4.0)
-- ✅ **Approval workflows**: Request and respond to plan approvals (v1.4.0)
-- ✅ **Execution tracking**: Track step progress and completion status (v1.4.0)
+- ✅ **Planning mode**: AI-powered implementation planning with DAG analysis (v1.4.0)
+- ✅ **Execution tracking**: Step-by-step execution with dependency management (v1.4.0)
+- ✅ **Version control**: Plan versioning with diff and rollback support (v1.4.0)
+- ✅ **Approval workflows**: Built-in approval system for plans and steps (v1.4.0)
+- ✅ **Defensive programming**: Comprehensive null/undefined handling (v1.4.1)
+
+## Planning Workflow (v1.4.0+)
+
+The Context Engine now includes a complete planning and execution system:
+
+### 1. Create a Plan
+```javascript
+create_plan({
+  task: "Implement user authentication with JWT tokens",
+  generate_diagrams: true
+})
+```
+
+### 2. Save the Plan
+```javascript
+save_plan({
+  plan: "<plan JSON>",
+  name: "JWT Authentication",
+  tags: ["auth", "security"]
+})
+```
+
+### 3. Execute Step-by-Step
+```javascript
+// Start a step
+start_step({ plan_id: "plan_abc123", step_number: 1 })
+
+// Complete it
+complete_step({
+  plan_id: "plan_abc123",
+  step_number: 1,
+  notes: "Created User model"
+})
+
+// Check progress
+view_progress({ plan_id: "plan_abc123" })
+```
+
+### 4. Track History
+```javascript
+// View version history
+view_history({ plan_id: "plan_abc123" })
+
+// Compare versions
+compare_plan_versions({
+  plan_id: "plan_abc123",
+  from_version: 1,
+  to_version: 2
+})
+
+// Rollback if needed
+rollback_plan({ plan_id: "plan_abc123", version: 1 })
+```
+
+See [EXAMPLES.md](EXAMPLES.md) for complete planning workflow examples.
 
 ## Prerequisites
 
