@@ -129,6 +129,85 @@ describe('PlanPersistenceService', () => {
       expect(result.success).toBe(true);
       expect(result.plan_id).toMatch(/^plan_\d+$/); // Generated ID
     });
+
+    it('should handle plan with null goal', async () => {
+      const plan = createTestPlan('plan_null_goal');
+      // @ts-expect-error - Testing null goal scenario
+      plan.goal = null;
+
+      const result = await service.savePlan(plan);
+
+      expect(result.success).toBe(true);
+      const metadata = await service.getPlanMetadata('plan_null_goal');
+      expect(metadata?.goal).toBe('No goal specified');
+    });
+
+    it('should handle plan with empty goal string', async () => {
+      const plan = createTestPlan('plan_empty_goal');
+      plan.goal = '';
+
+      const result = await service.savePlan(plan);
+
+      expect(result.success).toBe(true);
+      const metadata = await service.getPlanMetadata('plan_empty_goal');
+      expect(metadata?.goal).toBe('No goal specified');
+    });
+
+    it('should handle plan with undefined steps', async () => {
+      const plan = createTestPlan('plan_no_steps');
+      // @ts-expect-error - Testing undefined steps scenario
+      plan.steps = undefined;
+
+      const result = await service.savePlan(plan);
+
+      expect(result.success).toBe(true);
+      const metadata = await service.getPlanMetadata('plan_no_steps');
+      expect(metadata?.step_count).toBe(0);
+    });
+
+    it('should handle plan with steps containing undefined file arrays', async () => {
+      const plan = createTestPlan('plan_undefined_files');
+      plan.steps = [
+        {
+          step_number: 1, id: 'step_1', title: 'Step 1', description: 'Test step',
+          // @ts-expect-error - Testing undefined file arrays
+          files_to_modify: undefined,
+          // @ts-expect-error - Testing undefined file arrays
+          files_to_create: undefined,
+          // @ts-expect-error - Testing undefined file arrays
+          files_to_delete: undefined,
+          depends_on: [], blocks: [], can_parallel_with: [],
+          priority: 'high', estimated_effort: '1h', acceptance_criteria: []
+        }
+      ];
+
+      const result = await service.savePlan(plan);
+
+      expect(result.success).toBe(true);
+      expect(result.plan_id).toBe('plan_undefined_files');
+    });
+
+    it('should handle goal with special characters only', async () => {
+      const plan = createTestPlan('plan_special_chars');
+      plan.goal = '!@#$%^&*()';
+
+      const result = await service.savePlan(plan);
+
+      expect(result.success).toBe(true);
+      const metadata = await service.getPlanMetadata('plan_special_chars');
+      // Name should be generated from date since special chars are stripped
+      expect(metadata?.name).toMatch(/^Plan \d{4}-\d{2}-\d{2}$/);
+    });
+
+    it('should handle completely empty plan object', async () => {
+      // @ts-expect-error - Testing empty plan object
+      const plan: EnhancedPlanOutput = {};
+
+      const result = await service.savePlan(plan);
+
+      expect(result.success).toBe(true);
+      expect(result.plan_id).toMatch(/^plan_\d+$/); // Generated ID
+    });
   });
 
   describe('loadPlan', () => {

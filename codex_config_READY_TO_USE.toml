@@ -1,0 +1,66 @@
+# ============================================================================
+# CODEX CLI CONFIGURATION - READY TO USE
+# ============================================================================
+# 
+# File Location: C:\Users\preda\.codex\config.toml
+#
+# Instructions:
+# 1. Copy this entire file content
+# 2. Paste it into C:\Users\preda\.codex\config.toml
+# 3. Replace "YOUR-PROJECT-NAME" with your actual project folder name
+# 4. Save and restart Codex CLI
+#
+# ============================================================================
+
+# Context Engine MCP Server with Automatic File Watching
+[mcp_servers.context-engine]
+command = "node"
+args = [
+    "D:\\GitProjects\\context-engine\\dist\\index.js",
+    "--workspace",
+    "D:\\GitProjects\\YOUR-PROJECT-NAME",    # ← CHANGE THIS to your project path
+    "--index",                                # Indexes all files on startup
+    "--watch"                                 # Auto-reindexes when files change
+]
+
+# Optional: Environment variables (uncomment if not using 'auggie login')
+# [mcp_servers.context-engine.env]
+# AUGMENT_API_TOKEN = "your-token-here"
+# AUGMENT_API_URL = "https://api.augmentcode.com"
+
+# ============================================================================
+# EXAMPLE: Multiple Projects
+# ============================================================================
+# Uncomment and customize if you want to index multiple projects:
+
+# [mcp_servers.context-engine-project1]
+# command = "node"
+# args = [
+#     "D:\\GitProjects\\context-engine\\dist\\index.js",
+#     "--workspace",
+#     "D:\\Projects\\my-first-project",
+#     "--index",
+#     "--watch"
+# ]
+
+# [mcp_servers.context-engine-project2]
+# command = "node"
+# args = [
+#     "D:\\GitProjects\\context-engine\\dist\\index.js",
+#     "--workspace",
+#     "D:\\Projects\\my-second-project",
+#     "--index",
+#     "--watch"
+# ]
+
+# ============================================================================
+# VERIFICATION
+# ============================================================================
+# After saving and restarting Codex CLI, run:
+#   codex mcp list
+# 
+# You should see:
+#   context-engine: connected
+#
+# ============================================================================
+

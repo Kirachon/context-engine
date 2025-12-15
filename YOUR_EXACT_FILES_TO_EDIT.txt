@@ -1,0 +1,76 @@
+================================================================================
+YOUR EXACT FILES TO EDIT
+================================================================================
+
+You need to edit these 2 files:
+
+1. CODEX CLI CONFIG:
+   Location: C:\Users\preda\.codex\config.toml
+   
+2. ANTIGRAVITY CONFIG:
+   Location: C:\Users\preda\.gemini\antigravity\mcp_config.json
+
+================================================================================
+WHAT TO COPY INTO EACH FILE
+================================================================================
+
+---
+FILE 1: C:\Users\preda\.codex\config.toml
+---
+
+Copy this into the file (replace YOUR-PROJECT-NAME with your actual project):
+
+[mcp_servers.context-engine]
+command = "node"
+args = [
+    "D:\\GitProjects\\context-engine\\dist\\index.js",
+    "--workspace",
+    "D:\\GitProjects\\YOUR-PROJECT-NAME",
+    "--index",
+    "--watch"
+]
+
+---
+FILE 2: C:\Users\preda\.gemini\antigravity\mcp_config.json
+---
+
+Copy this into the file (replace YOUR-PROJECT-NAME with your actual project):
+
+{
+  "mcpServers": {
+    "context-engine": {
+      "command": "node",
+      "args": [
+        "D:\\GitProjects\\context-engine\\dist\\index.js",
+        "--workspace",
+        "D:\\GitProjects\\YOUR-PROJECT-NAME",
+        "--index",
+        "--watch"
+      ]
+    }
+  }
+}
+
+================================================================================
+EXAMPLE: If your project is at D:\Projects\my-website
+================================================================================
+
+FILE 1 would have:
+    "--workspace",
+    "D:\\Projects\\my-website",
+
+FILE 2 would have:
+        "--workspace",
+        "D:\\Projects\\my-website",
+
+================================================================================
+AFTER EDITING
+================================================================================
+
+1. Save both files
+2. Restart Codex CLI
+3. Restart Antigravity
+4. Done!
+
+================================================================================
+
