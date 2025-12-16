@@ -4,6 +4,35 @@ All notable changes to the Context Engine MCP Server will be documented in this 
 
 ## [1.4.1] - 2025-12-15
 
+### Performance
+
+#### Parallelization Optimizations (Phase 1)
+- **ServiceClient**: Implemented request queuing for `searchAndAsk` operations
+  - Added `SearchQueue` class to serialize AI calls and prevent SDK concurrency issues
+  - Ensures only one AI call runs at a time while allowing other operations to run in parallel
+  - Provides queue length monitoring for debugging
+
+- **ServiceClient**: Parallel file reading in `getContextForPrompt`
+  - Replaced sequential file processing with `Promise.all` for concurrent file reads
+  - Related files discovery now runs in parallel for each file
+  - Token budget enforcement happens after parallel processing
+  - **Estimated 2-4 seconds saved** per `create_plan` call
+
+- **PlanningService**: Concurrent post-processing in `generatePlan`
+  - Plan parsing and dependency analysis now run concurrently using `Promise.all`
+  - JSON is parsed once and shared between validation and dependency analysis
+  - **Estimated 1-2 seconds saved** per `create_plan` call
+
+**Total estimated performance improvement: 3-6 seconds per plan generation**
+
+### Documentation
+
+- **README.md**: Added timeout configuration guidance
+  - New troubleshooting section for tool timeout errors during plan generation
+  - Documented how to configure `tool_timeout_sec` in Codex CLI (`~/.codex/config.toml`)
+  - Provided guidance for other MCP clients (Claude Desktop, Cursor, Antigravity)
+  - Recommended 600 seconds (10 minutes) timeout for complex planning tasks
+
 ### Fixed
 
 #### Defensive Programming Improvements

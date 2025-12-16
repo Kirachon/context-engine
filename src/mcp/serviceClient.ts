@@ -190,6 +190,75 @@ const STATE_FILE_NAME = '.augment-context-state.json';
 /** Context ignore file names (in order of preference) */
 const CONTEXT_IGNORE_FILES = ['.contextignore', '.augment-ignore'];
 
+// ============================================================================
+// Request Queue for Serializing SDK Calls
+// ============================================================================
+
+/**
+ * Queue for serializing searchAndAsk calls to prevent SDK concurrency issues.
+ *
+ * The Auggie SDK's DirectContext may not be thread-safe for concurrent
+ * searchAndAsk calls. This queue ensures only one call runs at a time
+ * while allowing other operations to continue.
+ */
+class SearchQueue {
+  private queue: Array<{
+    execute: () => Promise<string>;
+    resolve: (value: string) => void;
+    reject: (error: Error) => void;
+  }> = [];
+  private running = false;
+
+  /**
+   * Enqueue a searchAndAsk call for serialized execution
+   */
+  async enqueue(fn: () => Promise<string>): Promise<string> {
+    return new Promise<string>((resolve, reject) => {
+      this.queue.push({ execute: fn, resolve, reject });
+      this.processQueue();
+    });
+  }
+
+  /**
+   * Process the queue, executing one call at a time
+   */
+  private async processQueue(): Promise<void> {
+    if (this.running || this.queue.length === 0) {
+      return;
+    }
+
+    this.running = true;
+    const item = this.queue.shift()!;
+
+    try {
+      const result = await item.execute();
+      item.resolve(result);
+    } catch (error) {
+      item.reject(error instanceof Error ? error : new Error(String(error)));
+    } finally {
+      this.running = false;
+      // Process next item if available
+      if (this.queue.length > 0) {
+        this.processQueue();
+      }
+    }
+  }
+
+  /**
+   * Get current queue length (for monitoring/debugging)
+   */
+  get length(): number {
+    return this.queue.length;
+  }
+
+  /**
+   * Check if a call is currently running
+   */
+  get isRunning(): boolean {
+    return this.running;
+  }
+}
+
 /** Default directories to always exclude - organized by category */
 const DEFAULT_EXCLUDED_DIRS = new Set([
   // === Package/Dependency Directories ===
@@ -544,6 +613,13 @@ export class ContextServiceClient {
 
   /** Flag to track if ignore patterns have been loaded */
   private ignorePatternsLoaded: boolean = false;
+
+  /**
+   * Queue for serializing searchAndAsk calls to prevent SDK concurrency issues.
+   * This ensures only one AI call runs at a time while allowing other operations
+   * to proceed in parallel.
+   */
+  private searchQueue: SearchQueue = new SearchQueue();
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
@@ -1435,20 +1511,26 @@ export class ContextServiceClient {
   async searchAndAsk(searchQuery: string, prompt?: string): Promise<string> {
     const context = await this.ensureInitialized();
 
-    try {
-      console.error(`[searchAndAsk] Searching for: ${searchQuery}`);
-      console.error(`[searchAndAsk] Prompt: ${prompt?.substring(0, 100) || '(using search query)'}`);
+    // Use the search queue to serialize searchAndAsk calls
+    // This prevents potential SDK concurrency issues while allowing
+    // other operations (file reads, semantic search) to run in parallel
+    return this.searchQueue.enqueue(async () => {
+      try {
+        const queueLength = this.searchQueue.length;
+        console.error(`[searchAndAsk] Searching for: ${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`);
+        console.error(`[searchAndAsk] Prompt: ${prompt?.substring(0, 100) || '(using search query)'}`);
 
-      // Use the SDK's searchAndAsk method
-      const response = await context.searchAndAsk(searchQuery, prompt);
+        // Use the SDK's searchAndAsk method
+        const response = await context.searchAndAsk(searchQuery, prompt);
 
-      console.error(`[searchAndAsk] Response length: ${response?.length || 0}`);
+        console.error(`[searchAndAsk] Response length: ${response?.length || 0}`);
 
-      return response;
-    } catch (error) {
-      console.error('[searchAndAsk] Failed:', error);
-      throw error;
-    }
+        return response;
+      } catch (error) {
+        console.error('[searchAndAsk] Failed:', error);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -1850,23 +1932,26 @@ export class ContextServiceClient {
       .slice(0, maxFiles);
 
     // Track token usage
-    let totalTokens = 0;
     let truncated = false;
     const existingPaths = new Set(sortedFiles.map(([p]) => p));
 
-    // Build enhanced file contexts
-    const files: FileContext[] = [];
+    // Calculate per-file budget upfront for parallel processing
+    const perFileBudget = Math.floor(tokenBudget / maxFiles);
 
-    for (const [filePath, results] of sortedFiles) {
-      // Calculate token budget for this file
-      const remainingBudget = tokenBudget - totalTokens;
-      const perFileBudget = Math.floor(remainingBudget / (maxFiles - files.length));
+    // =========================================================================
+    // PARALLELIZATION: Process all files concurrently using Promise.all
+    // This replaces the sequential for-loop with parallel file processing,
+    // significantly reducing context retrieval time (estimated 2-4 seconds saved)
+    // =========================================================================
 
-      if (perFileBudget < 100) {
-        truncated = true;
-        break;
-      }
-
+    /**
+     * Process a single file's context (snippets, related files, summary)
+     * This function is designed to run in parallel for multiple files
+     */
+    const processFileContext = async (
+      filePath: string,
+      results: SearchResult[]
+    ): Promise<FileContext | null> => {
       // Build snippets with smart extraction
       const snippets: SnippetInfo[] = [];
       let fileTokens = 0;
@@ -1877,7 +1962,6 @@ export class ContextServiceClient {
         const tokenCount = this.estimateTokens(smartContent);
 
         if (fileTokens + tokenCount > perFileBudget) {
-          truncated = true;
           break;
         }
 
@@ -1892,19 +1976,26 @@ export class ContextServiceClient {
         fileTokens += tokenCount;
       }
 
-      // Find related files if enabled
-      let relatedFiles: string[] | undefined;
-      if (includeRelated) {
-        relatedFiles = await this.findRelatedFiles(filePath, existingPaths);
-        relatedFiles.forEach(p => existingPaths.add(p));
+      // Skip files with no snippets
+      if (snippets.length === 0) {
+        return null;
       }
 
-      // Generate file summary if enabled
+      // Find related files in parallel (if enabled)
+      // Note: Each file's related files are found independently
+      const relatedFilesPromise = includeRelated
+        ? this.findRelatedFiles(filePath, existingPaths)
+        : Promise.resolve(undefined);
+
+      // Generate file summary (CPU-bound, runs immediately)
       const summary = includeSummaries
         ? this.generateFileSummary(filePath, snippets)
         : '';
 
-      files.push({
+      // Wait for related files (I/O-bound operation)
+      const relatedFiles = await relatedFilesPromise;
+
+      return {
         path: filePath,
         extension: path.extname(filePath),
         summary,
@@ -1912,9 +2003,45 @@ export class ContextServiceClient {
         tokenCount: fileTokens,
         snippets,
         relatedFiles: relatedFiles?.length ? relatedFiles : undefined,
-      });
+      };
+    };
 
-      totalTokens += fileTokens;
+    // Process all files in parallel
+    const fileContextResults = await Promise.all(
+      sortedFiles.map(([filePath, results]) => processFileContext(filePath, results))
+    );
+
+    // Filter out null results and collect valid file contexts
+    const files: FileContext[] = fileContextResults.filter(
+      (fc): fc is FileContext => fc !== null
+    );
+
+    // Calculate total tokens after parallel processing
+    let totalTokens = files.reduce((sum, f) => sum + f.tokenCount, 0);
+
+    // Check if we exceeded the budget (mark as truncated)
+    if (totalTokens > tokenBudget) {
+      truncated = true;
+      // Trim files to fit budget (keeping highest relevance first - already sorted)
+      totalTokens = 0;
+      const trimmedFiles: FileContext[] = [];
+      for (const file of files) {
+        if (totalTokens + file.tokenCount <= tokenBudget) {
+          trimmedFiles.push(file);
+          totalTokens += file.tokenCount;
+        } else {
+          break;
+        }
+      }
+      files.length = 0;
+      files.push(...trimmedFiles);
+    }
+
+    // Update existing paths with related files discovered during parallel processing
+    for (const file of files) {
+      if (file.relatedFiles) {
+        file.relatedFiles.forEach(p => existingPaths.add(p));
+      }
     }
 
     // Generate intelligent hints

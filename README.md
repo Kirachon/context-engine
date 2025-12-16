@@ -435,6 +435,30 @@ If you see an error about offline-only mode:
 1. Remove the `CONTEXT_ENGINE_OFFLINE_ONLY` environment variable, or
 2. Configure a localhost API URL in `AUGMENT_API_URL`
 
+### Tool timeout errors during plan generation (v1.4.0)
+
+The `create_plan` tool can take longer than default MCP client timeouts for complex tasks. If you experience timeout errors, increase the timeout in your MCP client configuration:
+
+#### For Codex CLI
+
+Edit `~/.codex/config.toml` and add or modify the `tool_timeout_sec` setting under the `[mcp_servers.context-engine]` section:
+
+```toml
+[mcp_servers.context-engine]
+command = "node"
+args = ["/absolute/path/to/context-engine/dist/index.js", "--workspace", "/path/to/your/project"]
+tool_timeout_sec = 600  # 10 minutes for complex planning tasks
+```
+
+#### For Other MCP Clients
+
+Consult your client's documentation for timeout configuration. Common locations:
+- **Claude Desktop**: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) or `%APPDATA%\Claude\claude_desktop_config.json` (Windows)
+- **Cursor**: `.cursor/mcp.json` in your workspace
+- **Antigravity**: Check client-specific configuration files
+
+Add a timeout setting appropriate for your client's configuration format. A value of **600 seconds (10 minutes)** is recommended for complex planning tasks.
+
 ## Testing
 
 ```bash
