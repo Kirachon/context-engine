@@ -127,6 +127,9 @@ export async function handleGetContext(
   output += `**Stats:** ${contextBundle.metadata.totalFiles} files, `;
   output += `${contextBundle.metadata.totalSnippets} snippets, `;
   output += `~${contextBundle.metadata.totalTokens} tokens`;
+  if (contextBundle.metadata.memoriesIncluded && contextBundle.metadata.memoriesIncluded > 0) {
+    output += `, ${contextBundle.metadata.memoriesIncluded} memories`;
+  }
   if (contextBundle.metadata.truncated) {
     output += ` (truncated to fit ${contextBundle.metadata.tokenBudget} token budget)`;
   }
@@ -141,6 +144,21 @@ export async function handleGetContext(
       output += `- ${hint}\n`;
     }
     output += '\n';
+  }
+
+  // =========================================================================
+  // Memories (cross-session context)
+  // =========================================================================
+  if (contextBundle.memories && contextBundle.memories.length > 0) {
+    output += `## 🧠 Relevant Memories\n\n`;
+    output += `_Persistent context from previous sessions that may be relevant:_\n\n`;
+
+    for (const memory of contextBundle.memories) {
+      const relevanceIcon = memory.relevanceScore >= 0.7 ? '🔥' :
+        memory.relevanceScore >= 0.5 ? '✅' : '📌';
+      output += `### ${relevanceIcon} ${memory.category.charAt(0).toUpperCase() + memory.category.slice(1)}\n\n`;
+      output += `${memory.content}\n\n`;
+    }
   }
 
   // =========================================================================
@@ -240,13 +258,15 @@ Returns:
 - File summaries and relevance scores
 - Smart-extracted code snippets (most relevant parts)
 - Related file suggestions for dependency awareness
+- Relevant memories from previous sessions (preferences, decisions, facts)
 - Token-aware output (respects context window limits)
 
 Use this tool when you need to:
 - Understand how a feature is implemented
 - Find relevant code before making changes
 - Get context about a specific concept or pattern
-- Explore unfamiliar parts of the codebase`,
+- Explore unfamiliar parts of the codebase
+- Recall user preferences and past decisions`,
   inputSchema: {
     type: 'object',
     properties: {

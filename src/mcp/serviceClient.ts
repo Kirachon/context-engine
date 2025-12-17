@@ -86,6 +86,16 @@ export interface FileContext {
   relatedFiles?: string[];
 }
 
+/** A memory entry retrieved from .memories/ directory */
+export interface MemoryEntry {
+  /** Category of the memory (preferences, decisions, facts) */
+  category: string;
+  /** Content of the memory */
+  content: string;
+  /** Relevance score (0-1) */
+  relevanceScore: number;
+}
+
 export interface ContextBundle {
   /** High-level summary of the context */
   summary: string;
@@ -95,6 +105,8 @@ export interface ContextBundle {
   files: FileContext[];
   /** Key insights and hints for the LLM */
   hints: string[];
+  /** Relevant memories from .memories/ directory */
+  memories?: MemoryEntry[];
   /** Metadata about the context bundle */
   metadata: {
     totalFiles: number;
@@ -103,6 +115,7 @@ export interface ContextBundle {
     tokenBudget: number;
     truncated: boolean;
     searchTimeMs: number;
+    memoriesIncluded?: number;
   };
 }
 
@@ -117,6 +130,8 @@ export interface ContextOptions {
   minRelevance?: number;
   /** Include file summaries (default: true) */
   includeSummaries?: boolean;
+  /** Include memories from .memories/ directory (default: true) */
+  includeMemories?: boolean;
 }
 
 // ============================================================================
@@ -189,6 +204,9 @@ const STATE_FILE_NAME = '.augment-context-state.json';
 
 /** Context ignore file names (in order of preference) */
 const CONTEXT_IGNORE_FILES = ['.contextignore', '.augment-ignore'];
+
+/** Memory directory for persistent cross-session memories */
+const MEMORIES_DIR = '.memories';
 
 // ============================================================================
 // Request Queue for Serializing SDK Calls
@@ -630,6 +648,13 @@ export class ContextServiceClient {
       fileCount: 0,
       isStale: true,
     };
+  }
+
+  /**
+   * Get the workspace path for this client
+   */
+  getWorkspacePath(): string {
+    return this.workspacePath;
   }
 
   /**
@@ -1878,6 +1903,45 @@ export class ContextServiceClient {
   }
 
   /**
+   * Retrieve relevant memories from .memories/ directory
+   * Memories are searched semantically alongside code context
+   */
+  private async getRelevantMemories(query: string, maxMemories: number = 5): Promise<MemoryEntry[]> {
+    const memoriesPath = path.join(this.workspacePath, MEMORIES_DIR);
+
+    // Check if memories directory exists
+    if (!fs.existsSync(memoriesPath)) {
+      return [];
+    }
+
+    const memories: MemoryEntry[] = [];
+
+    // Search for memories in the indexed content
+    try {
+      const searchResults = await this.semanticSearch(query, maxMemories * 2);
+
+      // Filter to only memory files
+      const memoryResults = searchResults.filter(r =>
+        r.path.startsWith(MEMORIES_DIR + '/') || r.path.startsWith(MEMORIES_DIR + '\\')
+      );
+
+      // Extract category from file path and build memory entries
+      for (const result of memoryResults.slice(0, maxMemories)) {
+        const fileName = path.basename(result.path, '.md');
+        memories.push({
+          category: fileName,
+          content: result.content,
+          relevanceScore: result.relevanceScore || 0.5,
+        });
+      }
+    } catch (error) {
+      console.error('[getRelevantMemories] Error searching memories:', error);
+    }
+
+    return memories;
+  }
+
+  /**
    * Get enhanced context bundle for prompt enhancement
    * This is the primary method for Layer 2 - Context Service
    */
@@ -1900,10 +1964,14 @@ export class ContextServiceClient {
       includeRelated = true,
       minRelevance = 0.3,
       includeSummaries = true,
+      includeMemories = true,
     } = options;
 
-    // Perform semantic search (get more results than needed for filtering)
-    const searchResults = await this.semanticSearch(query, maxFiles * 3);
+    // Perform semantic search and memory retrieval in parallel
+    const [searchResults, memories] = await Promise.all([
+      this.semanticSearch(query, maxFiles * 3),
+      includeMemories ? this.getRelevantMemories(query, 5) : Promise.resolve([]),
+    ]);
 
     // Filter by minimum relevance
     const relevantResults = searchResults.filter(
@@ -2047,6 +2115,12 @@ export class ContextServiceClient {
     // Generate intelligent hints
     const hints = this.generateContextHints(query, files, searchResults.length);
 
+    // Add memory hint if memories were found
+    if (memories.length > 0) {
+      const categories = [...new Set(memories.map(m => m.category))];
+      hints.push(`Memories: ${memories.length} relevant entries from ${categories.join(', ')}`);
+    }
+
     // Build context summary
     const summary = this.generateContextSummary(query, files);
 
@@ -2057,6 +2131,7 @@ export class ContextServiceClient {
       query,
       files,
       hints,
+      memories: memories.length > 0 ? memories : undefined,
       metadata: {
         totalFiles: files.length,
         totalSnippets: files.reduce((sum, f) => sum + f.snippets.length, 0),
@@ -2064,6 +2139,7 @@ export class ContextServiceClient {
         tokenBudget,
         truncated,
         searchTimeMs,
+        memoriesIncluded: memories.length,
       },
     };
   }

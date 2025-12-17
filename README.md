@@ -45,7 +45,7 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 
 ## Features
 
-### MCP Tools (26 tools available)
+### MCP Tools (28 tools available)
 
 #### Core Context Tools
 1. **`index_workspace(force?)`** - Index workspace files for semantic search
@@ -143,6 +143,14 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
     - `version`: Version number to rollback to
     - `reason` (optional): Reason for rollback
 
+#### Memory Tools (v1.4.1)
+27. **`add_memory(category, content, title?)`** - Store persistent memories for future sessions
+    - `category`: 'preferences', 'decisions', or 'facts'
+    - `content`: The memory content to store (max 5000 characters)
+    - `title` (optional): Title for the memory
+28. **`list_memories(category?)`** - List all stored memories
+    - `category` (optional): Filter to a specific category
+
 ### Key Characteristics
 
 - ✅ **Local-first**: No cloud dependencies, no exposed ports, no data leakage
@@ -158,6 +166,7 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 - ✅ **Version control**: Plan versioning with diff and rollback support (v1.4.0)
 - ✅ **Approval workflows**: Built-in approval system for plans and steps (v1.4.0)
 - ✅ **Defensive programming**: Comprehensive null/undefined handling (v1.4.1)
+- ✅ **Cross-session memory**: Persistent memory system for preferences, decisions, and facts (v1.4.1)
 
 ## Planning Workflow (v1.4.0+)
 
@@ -214,6 +223,62 @@ rollback_plan({ plan_id: "plan_abc123", version: 1 })
 
 See [EXAMPLES.md](EXAMPLES.md) for complete planning workflow examples.
 
+## Memory System (v1.4.1)
+
+The Context Engine includes a cross-session memory system that persists preferences, decisions, and project facts across sessions.
+
+### Memory Categories
+
+| Category | Purpose | Examples |
+|----------|---------|----------|
+| `preferences` | Coding style and tool preferences | "Prefer TypeScript strict mode", "Use Jest for testing" |
+| `decisions` | Architecture and design decisions | "Chose JWT over sessions", "Using PostgreSQL" |
+| `facts` | Project facts and environment info | "API runs on port 3000", "Uses monorepo structure" |
+
+### Adding Memories
+
+```javascript
+// Store a preference
+add_memory({
+  category: "preferences",
+  content: "Prefers functional programming patterns over OOP"
+})
+
+// Store an architecture decision with a title
+add_memory({
+  category: "decisions",
+  title: "Authentication Strategy",
+  content: "Chose JWT with refresh tokens for stateless authentication. Sessions were considered but rejected due to horizontal scaling requirements."
+})
+
+// Store a project fact
+add_memory({
+  category: "facts",
+  content: "The API uses PostgreSQL 15 with pgvector extension for embeddings"
+})
+```
+
+### Automatic Memory Retrieval
+
+Memories are automatically included in `get_context_for_prompt` results when relevant:
+
+```javascript
+// Memories are retrieved alongside code context
+const context = await get_context_for_prompt({
+  query: "How should I implement authentication?"
+})
+// Returns: code context + relevant memories about auth decisions
+```
+
+### Memory Files
+
+Memories are stored in `.memories/` as markdown files:
+- `preferences.md` - Coding style preferences
+- `decisions.md` - Architecture decisions
+- `facts.md` - Project facts
+
+These files are human-editable and can be version controlled with Git.
+
 ## Prerequisites
 
 1. **Node.js 18+**
@@ -243,6 +308,33 @@ npm run build
 ## Usage
 
 ### Standalone Mode
+
+#### Using the Management Script (Windows)
+
+For Windows users, a convenient batch file is provided for managing the server:
+
+```batch
+# Start the server with indexing and file watching
+manage-server.bat start
+
+# Check server status
+manage-server.bat status
+
+# Restart the server
+manage-server.bat restart
+
+# Stop the server
+manage-server.bat stop
+```
+
+The management script automatically:
+- Uses the current directory as workspace
+- Enables indexing (`--index`)
+- Enables file watching (`--watch`)
+- Logs output to `.server.log`
+- Tracks the process ID in `.server.pid`
+
+#### Manual Start (All Platforms)
 
 ```bash
 # Start server with current directory

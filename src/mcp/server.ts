@@ -46,6 +46,12 @@ import {
   handleVisualizePlan,
 } from './tools/plan.js';
 import {
+  addMemoryTool,
+  listMemoriesTool,
+  handleAddMemory,
+  handleListMemories,
+} from './tools/memory.js';
+import {
   planManagementTools,
   initializePlanManagementServices,
   handleSavePlan,
@@ -184,6 +190,9 @@ export class ContextEngineMCPServer {
           reindexWorkspaceTool,
           clearIndexTool,
           toolManifestTool,
+          // Memory tools (v1.4.1)
+          addMemoryTool,
+          listMemoriesTool,
           // Planning tools (Phase 1)
           createPlanTool,
           refinePlanTool,
@@ -244,6 +253,15 @@ export class ContextEngineMCPServer {
 
           case 'enhance_prompt':
             result = await handleEnhancePrompt(args as any, this.serviceClient);
+            break;
+
+          // Memory tools (v1.4.1)
+          case 'add_memory':
+            result = await handleAddMemory(args as any, this.serviceClient);
+            break;
+
+          case 'list_memories':
+            result = await handleListMemories(args as any, this.serviceClient);
             break;
 
           // Planning tools (Phase 1)
@@ -357,12 +375,14 @@ export class ContextEngineMCPServer {
     console.error('Transport: stdio');
     console.error(`Watcher: ${this.enableWatcher ? 'enabled' : 'disabled'}`);
     console.error('');
-    console.error('Available tools (26 total):');
+    console.error('Available tools (28 total):');
     console.error('  Core Context:');
     console.error('    - index_workspace, codebase_retrieval, semantic_search');
     console.error('    - get_file, get_context_for_prompt, enhance_prompt');
     console.error('  Index Management:');
     console.error('    - index_status, reindex_workspace, clear_index, tool_manifest');
+    console.error('  Memory (v1.4.1):');
+    console.error('    - add_memory, list_memories');
     console.error('  Planning (v1.4.0):');
     console.error('    - create_plan, refine_plan, visualize_plan');
     console.error('    - save_plan, load_plan, list_plans, delete_plan');

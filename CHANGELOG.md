@@ -2,7 +2,26 @@
 
 All notable changes to the Context Engine MCP Server will be documented in this file.
 
-## [1.4.1] - 2025-12-15
+## [1.4.1] - 2025-12-17
+
+### Added
+
+#### Cross-Session Memory System
+- **New MCP Tools**: `add_memory` and `list_memories` for persistent memory management
+  - Store preferences, architecture decisions, and project facts across sessions
+  - Memories are indexed by Auggie and retrieved via semantic search
+  - Human-editable markdown files in `.memories/` directory
+  - Version-controllable via Git for team sharing
+
+- **Memory Integration**: Enhanced `get_context_for_prompt` to include relevant memories
+  - Memories are automatically retrieved alongside code context
+  - New `memories` field in ContextBundle with relevance scores
+  - Memory hints displayed in context output
+
+- **Memory Categories**:
+  - `preferences`: Coding style, tool preferences, workflow choices
+  - `decisions`: Architecture decisions, technology choices, design rationale
+  - `facts`: Project facts, environment info, codebase structure
 
 ### Performance
 
