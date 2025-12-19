@@ -11,7 +11,7 @@ export interface ToolManifestArgs {
 }
 
 const manifest = {
-  version: '1.4.1',
+  version: '1.5.0',
   capabilities: [
     'semantic_search',
     'file_retrieval',
@@ -94,6 +94,17 @@ const manifest = {
         'Safe array handling in all planning services',
         'Fallback values for missing properties',
         'Enhanced error messages with context',
+      ],
+    },
+    internal_handlers: {
+      description: 'Layer 2.5 - Internal shared handlers for code consolidation',
+      version: '1.5.0',
+      improvements: [
+        'Shared retrieval, context, and enhancement handlers',
+        'Advanced retrieval features (dedupe, expand, rerank)',
+        'Snapshot testing infrastructure for regression checks',
+        'Reduced code duplication (~100 lines in enhance.ts)',
+        'Tool inventory generator and documentation',
       ],
     },
   },

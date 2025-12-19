@@ -1,6 +1,6 @@
 {
   "name": "context-engine-mcp-server",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "MCP server implementation using Auggie SDK for local context engine with planning and execution features",
   "type": "module",
   "main": "dist/index.js",

@@ -2,6 +2,107 @@
 
 All notable changes to the Context Engine MCP Server will be documented in this file.
 
+## [1.5.0] - 2025-12-19
+
+### Added
+
+#### Layer 2.5: Internal Shared Handlers (Phase 2)
+- **New Architecture Layer**: `src/internal/handlers/` for shared internal logic
+  - `retrieval.ts` - Shared retrieval wrapper with timing and caching hooks
+  - `context.ts` - Context bundle and snippet assembly helpers
+  - `enhancement.ts` - AI prompt enhancement logic (extracted from enhance.ts)
+  - `utilities.ts` - Shared file and index status helpers
+  - `performance.ts` - Disabled-by-default performance hooks (cache/batching/embedding reuse)
+  - `types.ts` - Shared handler type definitions
+
+- **Advanced Retrieval Features**: `src/internal/retrieval/` for enhanced retrieval pipeline
+  - `retrieve.ts` - Core retrieval orchestration
+  - `dedupe.ts` - Result deduplication logic
+  - `expandQuery.ts` - Query expansion for better recall
+  - `rerank.ts` - Result re-ranking for improved relevance
+  - `types.ts` - Retrieval type definitions
+
+#### Snapshot Testing Infrastructure
+- **Snapshot Harness**: `tests/snapshots/snapshot-harness.ts`
+  - Byte-for-byte regression testing for MCP tool outputs
+  - 22 baseline snapshots covering core tools and error cases
+  - Supports baseline creation (`--update`) and verification modes
+  - Test workspace with sample files and memories
+
+- **Test Inputs**: `tests/snapshots/test-inputs.ts`
+  - Comprehensive test cases for codebase_retrieval, semantic_search, get_context_for_prompt
+  - Error validation tests for edge cases
+  - Tool manifest and visualization tests
+
+#### Development Tools
+- **Tool Inventory Generator**: `scripts/extract-tool-inventory.ts`
+  - Automated extraction of all 28 MCP tools from source code
+  - Generates comprehensive tool documentation table
+  - Outputs to `docs/PHASE2_TOOL_INVENTORY.md`
+
+### Changed
+
+#### Code Consolidation
+- **Refactored MCP Tools** to use internal handlers (no output changes):
+  - `codebase_retrieval` - Now uses `internalRetrieveCode()` and `internalIndexStatus()`
+  - `semantic_search` - Now uses `internalRetrieveCode()`
+  - `get_context_for_prompt` - Now uses `internalContextBundle()`
+  - `enhance_prompt` - Now uses `internalPromptEnhancer()` (~100 lines of duplicate code removed)
+
+#### Configuration
+- **Test Configuration**: Added `tsconfig.test.json` for test-specific TypeScript settings
+  - ES2022 module system for Jest compatibility
+  - Separate from production TypeScript configuration
+
+- **Jest Configuration**: Updated `jest.config.js`
+  - Uses `tsconfig.test.json` for test compilation
+  - Suppresses diagnostic warnings (codes 1343, 1378)
+
+- **Git Ignore**: Updated `.gitignore`
+  - Excludes `.augment-plans/` (runtime plan storage)
+  - Excludes `plan/` (personal planning notes)
+
+### Documentation
+
+#### New Documents
+1. **docs/PHASE2_SAFE_TOOL_CONSOLIDATION_PLAN.md**
+   - Phase 2 implementation strategy and goals
+   - Non-negotiables (preserve all MCP contracts)
+   - Validation checklist and rollback plan
+
+2. **docs/PHASE2_TOOL_INVENTORY.md**
+   - Complete inventory of all 28 MCP tools
+   - Tool names, handlers, file locations, and schemas
+   - Generated automatically from source code
+
+#### Updated Documents
+1. **ARCHITECTURE.md**
+   - Added Layer 2.5 documentation with responsibilities and key handlers
+   - Updated tool count from 26 to 28 (added memory tools)
+   - Updated architecture flow diagram to include Layer 2.5
+
+2. **README.md**
+   - Updated test count from 186 to 213 tests passing
+   - Added alternative test command for quieter ESM runs
+
+3. **TESTING.md**
+   - Added automated testing section with commands
+   - Documented Phase 2 snapshot baseline verification
+   - Added quieter test run option for stream/pipe error avoidance
+
+### Testing
+- **Test Count**: 213 tests passing (up from 186)
+- **New Tests**: 27 additional tests
+- **Snapshot Baselines**: 22 baseline files for regression testing
+
+### Performance
+- **Code Reduction**: ~100 lines removed from `enhance.ts` through consolidation
+- **Maintainability**: Shared handlers reduce duplication across 4 MCP tools
+
+### Internal
+- **No Breaking Changes**: All MCP tool schemas, names, and outputs preserved
+- **Backward Compatible**: External contracts unchanged
+
 ## [1.4.1] - 2025-12-17
 
 ### Added

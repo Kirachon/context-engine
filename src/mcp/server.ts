@@ -369,7 +369,7 @@ export class ContextEngineMCPServer {
     await this.server.connect(transport);
 
     console.error('='.repeat(60));
-    console.error('Context Engine MCP Server v1.4.1');
+    console.error('Context Engine MCP Server v1.5.0');
     console.error('='.repeat(60));
     console.error(`Workspace: ${this.workspacePath}`);
     console.error('Transport: stdio');
