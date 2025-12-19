@@ -16,6 +16,10 @@ build/
 # Augment SDK state files
 .augment/
 .augment-context-state.json
+.augment-plans/
+
+# Personal planning notes
+plan/
 
 # Logs
 *.log

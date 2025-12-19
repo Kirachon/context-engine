@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "file": "src/auth/login.ts",
+      "content": "export function login(user) {\n  return user;\n}\n",
+      "score": 0.92,
+      "lines": "1-3",
+      "reason": "Semantic match for: \"login\""
+    }
+  ],
+  "metadata": {
+    "workspace": "D:/mock-workspace",
+    "lastIndexed": "2025-01-01T00:00:00.000Z",
+    "queryTimeMs": 0,
+    "totalResults": 1
+  }
+}

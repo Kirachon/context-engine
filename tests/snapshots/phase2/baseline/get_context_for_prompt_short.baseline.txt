@@ -1,0 +1,61 @@
+# 📚 Codebase Context
+
+**Query:** "login"
+
+> Context for "login" with 2 files
+
+**Stats:** 2 files, 2 snippets, ~200 tokens, 1 memories
+
+## 💡 Key Insights
+
+- Focus on login flow
+- Schema defines users
+
+## 🧠 Relevant Memories
+
+_Persistent context from previous sessions that may be relevant:_
+
+### ✅ Facts
+
+Uses SQLite in tests
+
+## 📁 Files Overview
+
+| # | File | Relevance | Summary |
+|---|------|-----------|----------|
+| 1 | `src/auth/login.ts` | 🔥 High | Login handler and helpers |
+| 2 | `src/db/schema.ts` | ✅ Good | Database schema definitions |
+
+## 📝 Detailed Code Context
+
+### 1. `src/auth/login.ts`
+
+> **Login handler and helpers** (Relevance: 🔥 High)
+
+📎 _Related files: src/auth/hash.ts_
+
+**Lines: 1-3** _(function)_
+
+```typescript
+export function login(user) {
+  return user;
+}
+```
+
+---
+
+### 2. `src/db/schema.ts`
+
+> **Database schema definitions** (Relevance: ✅ Good)
+
+**Lines: 1-3**
+
+```typescript
+export const schema = {
+  users: {}
+};
+```
+
+---
+
+_Context retrieved in 12ms. Use `semantic_search` for more targeted queries or `get_file` for complete file contents._

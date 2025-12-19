@@ -18,6 +18,7 @@
  */
 
 import { ContextServiceClient, ContextOptions } from '../serviceClient.js';
+import { internalContextBundle } from '../../internal/handlers/context.js';
 
 export interface GetContextArgs {
   query: string;
@@ -111,7 +112,7 @@ export async function handleGetContext(
     includeSummaries: true,
   };
 
-  const contextBundle = await serviceClient.getContextForPrompt(query, options);
+  const contextBundle = await internalContextBundle(query, serviceClient, options);
 
   // Format enhanced context bundle for agent consumption
   let output = '';

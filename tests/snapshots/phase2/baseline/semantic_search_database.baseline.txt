@@ -1,0 +1,38 @@
+# 🔍 Search Results
+
+**Query:** "database schema"
+**Found:** 2 matching snippets
+
+## Results by File
+
+### 1. `src/db/connection.ts` 🔥
+
+**Lines 1-3** (88% match)
+
+```
+export function connect() {
+  return true;
+}
+
+```
+
+### 2. `src/db/schema.ts` ✅
+
+**Lines 1-3** (72% match)
+
+```
+export const schema = {
+  users: {}
+};
+
+```
+
+## Retrieval Audit
+
+| File | Score | Type | Retrieved |
+|------|-------|------|-----------|
+| `src/db/connection.ts` | 88% | semantic | 2025-01-01T00:00:00.000Z |
+| `src/db/schema.ts` | 72% | semantic | 2025-01-01T00:00:00.000Z |
+
+---
+_Use `get_context_for_prompt` for more comprehensive context or `get_file` for complete file contents._

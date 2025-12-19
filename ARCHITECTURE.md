@@ -111,6 +111,32 @@ rollback(planId, version, reason): EnhancedPlanOutput
 }
 ```
 
+### Layer 2.5: Internal Shared Handlers
+
+**Location**: `src/internal/handlers/`
+
+**Purpose**: Provide shared internal logic used by multiple MCP tools while preserving
+tool-specific formatting in Layer 3.
+
+**Responsibilities**:
+- Wrap retrieval pipeline with consistent timing and caching hooks
+- Provide shared context assembly helpers (bundles + snippets)
+- Provide prompt enhancement helpers used by AI tools
+- Offer disabled-by-default performance hooks (cache/batching/embedding reuse)
+
+**What it does NOT do**:
+- ❌ Expose MCP tools directly
+- ❌ Change tool schemas or outputs
+- ❌ Apply tool-specific formatting
+
+**Key Handlers**:
+```typescript
+internalRetrieveCode(query, serviceClient, options): InternalRetrieveResult
+internalContextBundle(query, serviceClient, options): ContextBundle
+internalContextSnippet(results, maxFiles, maxChars): string | null
+internalPromptEnhancer(prompt, serviceClient): string
+```
+
 ### Layer 3: MCP Interface Layer
 
 **Location**: `src/mcp/server.ts`, `src/mcp/tools/`
@@ -128,7 +154,7 @@ rollback(planId, version, reason): EnhancedPlanOutput
 - ❌ Retrieval logic
 - ❌ Formatting decisions
 
-**Tools Exposed** (26 total):
+**Tools Exposed** (28 total):
 
 #### Core Context Tools
 1. **index_workspace** - Index workspace files
@@ -144,31 +170,35 @@ rollback(planId, version, reason): EnhancedPlanOutput
 9. **clear_index** - Clear index state
 10. **tool_manifest** - List available tools
 
+#### Memory Tools (v1.4.1)
+11. **add_memory** - Store persistent memory
+12. **list_memories** - List stored memories
+
 #### Planning Tools (v1.4.0+)
-11. **create_plan** - Generate implementation plans
-12. **refine_plan** - Refine existing plans
-13. **visualize_plan** - Generate diagrams
+13. **create_plan** - Generate implementation plans
+14. **refine_plan** - Refine existing plans
+15. **visualize_plan** - Generate diagrams
 
 #### Plan Persistence Tools (v1.4.0+)
-14. **save_plan** - Save plans to storage
-15. **load_plan** - Load saved plans
-16. **list_plans** - List plans with filters
-17. **delete_plan** - Delete plans
+16. **save_plan** - Save plans to storage
+17. **load_plan** - Load saved plans
+18. **list_plans** - List plans with filters
+19. **delete_plan** - Delete plans
 
 #### Approval Workflow Tools (v1.4.0+)
-18. **request_approval** - Create approval requests
-19. **respond_approval** - Respond to approvals
+20. **request_approval** - Create approval requests
+21. **respond_approval** - Respond to approvals
 
 #### Execution Tracking Tools (v1.4.0+)
-20. **start_step** - Mark step as in-progress
-21. **complete_step** - Mark step as completed
-22. **fail_step** - Mark step as failed
-23. **view_progress** - View execution progress
+22. **start_step** - Mark step as in-progress
+23. **complete_step** - Mark step as completed
+24. **fail_step** - Mark step as failed
+25. **view_progress** - View execution progress
 
 #### History & Versioning Tools (v1.4.0+)
-24. **view_history** - View plan version history
-25. **compare_plan_versions** - Compare versions
-26. **rollback_plan** - Rollback to previous version
+26. **view_history** - View plan version history
+27. **compare_plan_versions** - Compare versions
+28. **rollback_plan** - Rollback to previous version
 
 **Example Tool Definitions**:
 
@@ -246,6 +276,8 @@ Vector Store (Layer 5)
 Agent Prompt
     ↓
 MCP Tool Call (Layer 3)
+    ↓
+Internal Handlers (Layer 2.5)
     ↓
 Context Service (Layer 2)
     ↓
