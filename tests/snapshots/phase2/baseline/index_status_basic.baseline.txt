@@ -1,0 +1,10 @@
+# 🩺 Index Status
+
+| Property | Value |
+|----------|-------|
+| **Workspace** | `D:/mock-workspace` |
+| **Status** | ✅ idle |
+| **Last Indexed** | 2025-01-01T00:00:00.000Z |
+| **File Count** | 42 |
+| **Is Stale** | No |
+| **Last Error** | None |

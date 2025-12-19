@@ -1,0 +1,1 @@
+ENHANCED: refactor the auth module to separate validation from persistence and add tests

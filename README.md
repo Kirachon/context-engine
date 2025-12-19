@@ -557,6 +557,9 @@ Add a timeout setting appropriate for your client's configuration format. A valu
 # Run all tests
 npm test
 
+# Quieter ESM run (use if you see pipe/stream errors)
+node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --silent
+
 # Run tests in watch mode
 npm run test:watch
 
@@ -567,7 +570,7 @@ npm run test:coverage
 npm run inspector
 ```
 
-**Test Status:** 186 tests passing ✅
+**Test Status:** 213 tests passing ✅
 
 ## License
 

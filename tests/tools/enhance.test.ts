@@ -15,6 +15,7 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockServiceClient = {
+      semanticSearch: jest.fn(() => Promise.resolve([])),
       searchAndAsk: jest.fn(),
     };
   });
@@ -182,4 +183,3 @@ Here is an enhanced version of the original instruction that is more specific an
     });
   });
 });
-

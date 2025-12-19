@@ -1,0 +1,62 @@
+# 📚 Memories
+
+## Preferences
+
+| Property | Value |
+|----------|-------|
+| **File** | `.memories\preferences.md` |
+| **Size** | 69 bytes |
+| **Last Modified** | 2025-01-01T00:00:00.000Z |
+| **Entries** | ~1 |
+
+**Preview:**
+```markdown
+# Preferences
+
+This file stores coding style.
+- Prefer strict typing
+
+```
+
+## Decisions
+
+| Property | Value |
+|----------|-------|
+| **File** | `.memories\decisions.md` |
+| **Size** | 102 bytes |
+| **Last Modified** | 2025-01-01T00:00:00.000Z |
+| **Entries** | ~2 |
+
+**Preview:**
+```markdown
+# Decisions
+
+This file stores architecture decisions.
+### [2025-01-01] Use adapters
+- Keep tools thin
+
+```
+
+## Facts
+
+| Property | Value |
+|----------|-------|
+| **File** | `.memories\facts.md` |
+| **Size** | 64 bytes |
+| **Last Modified** | 2025-01-01T00:00:00.000Z |
+| **Entries** | ~1 |
+
+**Preview:**
+```markdown
+# Facts
+
+This file stores project facts.
+- Uses SQLite in tests
+
+```
+
+---
+
+**Total:** ~4 memory entries across 3 categories.
+
+_Use `add_memory` to add new memories or edit files directly._

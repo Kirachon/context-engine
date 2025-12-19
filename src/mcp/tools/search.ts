@@ -15,6 +15,7 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
+import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 
 export interface SemanticSearchArgs {
   query: string;
@@ -51,7 +52,8 @@ export async function handleSemanticSearch(
     throw new Error('Invalid top_k parameter: must be a number between 1 and 50');
   }
 
-  const results = await serviceClient.semanticSearch(query, top_k);
+  const retrieval = await internalRetrieveCode(query, serviceClient, { topK: top_k });
+  const results = retrieval.results;
 
   // Format results for agent consumption
   if (results.length === 0) {

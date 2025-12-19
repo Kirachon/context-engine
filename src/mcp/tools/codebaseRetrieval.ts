@@ -6,6 +6,8 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
+import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
+import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 
 export interface CodebaseRetrievalArgs {
   query: string;
@@ -50,9 +52,9 @@ export async function handleCodebaseRetrieval(
     throw new Error('Invalid top_k parameter: must be a number between 1 and 50');
   }
 
-  // Delegate to existing semantic search
-  const searchResults = await serviceClient.semanticSearch(query, top_k);
-  const status = serviceClient.getIndexStatus();
+  const retrieval = await internalRetrieveCode(query, serviceClient, { topK: top_k });
+  const searchResults = retrieval.results;
+  const status = internalIndexStatus(serviceClient);
 
   const results: CodebaseRetrievalResult[] = searchResults.map((r) => ({
     file: r.path,

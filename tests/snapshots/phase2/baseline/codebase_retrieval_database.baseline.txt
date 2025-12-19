@@ -1,0 +1,24 @@
+{
+  "results": [
+    {
+      "file": "src/db/connection.ts",
+      "content": "export function connect() {\n  return true;\n}\n",
+      "score": 0.88,
+      "lines": "1-3",
+      "reason": "Semantic match for: \"database schema\""
+    },
+    {
+      "file": "src/db/schema.ts",
+      "content": "export const schema = {\n  users: {}\n};\n",
+      "score": 0.72,
+      "lines": "1-3",
+      "reason": "Semantic match for: \"database schema\""
+    }
+  ],
+  "metadata": {
+    "workspace": "D:/mock-workspace",
+    "lastIndexed": "2025-01-01T00:00:00.000Z",
+    "queryTimeMs": 0,
+    "totalResults": 2
+  }
+}

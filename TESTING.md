@@ -2,6 +2,23 @@
 
 How to test the Context Engine MCP Server implementation.
 
+## Automated Testing
+
+```bash
+# Run all tests (ESM)
+npm test
+```
+
+If you see stream/pipe errors or want a quieter run:
+```bash
+node --experimental-vm-modules node_modules/jest/bin/jest.js --runInBand --silent
+```
+
+Phase 2 snapshot baselines are verified separately:
+```bash
+npx --no-install tsx tests/snapshots/snapshot-harness.ts
+```
+
 ## Manual Testing
 
 ### 1. Test Server Startup
@@ -251,4 +268,3 @@ If you find bugs:
 2. Try to reproduce with MCP Inspector
 3. Document the steps to reproduce
 4. Include error messages and stack traces
-

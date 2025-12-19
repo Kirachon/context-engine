@@ -7,10 +7,14 @@ export default {
     '^(\\.{1,2}/.*)\\.js$': '$1',
   },
   transform: {
-    '^.+\\.tsx?$': [
+  '^.+\\.tsx?$': [
       'ts-jest',
       {
         useESM: true,
+        tsconfig: 'tsconfig.test.json',
+        diagnostics: {
+          ignoreCodes: [1343, 1378],
+        },
       },
     ],
   },
@@ -28,4 +32,3 @@ export default {
   // Setup file to import jest globally
   setupFilesAfterEnv: ['<rootDir>/tests/setup.ts'],
 };
-
