@@ -1,7 +1,12 @@
 # Reactive Review Configuration Summary
 
-## Configuration Location
+## Configuration Locations
+
+### 1. Codex CLI Configuration
 `C:\Users\preda\.codex\config.toml`
+
+### 2. Gemini Antigravity Configuration
+`C:\Users\preda\.gemini\antigravity\mcp_config.json`
 
 ## Environment Variables Added
 
@@ -50,13 +55,22 @@ With `REACTIVE_GUARDRAILS="true"`, secret scanning, token limits, and validation
 
 To test the zombie session detection and plan recovery:
 
+### For Codex CLI:
 1. **Restart Codex CLI** for changes to take effect
 2. **Start a reactive review** using the `reactive_review_pr` MCP tool
 3. **Check session status** using the `get_review_status` tool
-4. **Monitor logs** for plan recovery messages:
-   - `[ReactiveReviewService] Attempting to recover plan ... from disk`
-   - `[ReactiveReviewService] Successfully recovered plan ... from disk`
-   - `[ReactiveReviewService] Zombie detected: Session ... has plan_id ... but plan not found on disk`
+4. **Monitor logs** for plan recovery messages
+
+### For Gemini Antigravity:
+1. **Restart Gemini Antigravity** for changes to take effect
+2. **Start a reactive review** using the `reactive_review_pr` MCP tool
+3. **Check session status** using the `get_review_status` tool
+4. **Monitor logs** for plan recovery messages
+
+### Expected Log Messages:
+- `[ReactiveReviewService] Attempting to recover plan ... from disk`
+- `[ReactiveReviewService] Successfully recovered plan ... from disk`
+- `[ReactiveReviewService] Zombie detected: Session ... has plan_id ... but plan not found on disk`
 
 ## Related Commits
 
@@ -74,8 +88,14 @@ To test the zombie session detection and plan recovery:
 
 ## Next Steps
 
-1. Restart Codex CLI to apply the new configuration
+1. **Restart both AI assistants** to apply the new configuration:
+   - Restart Codex CLI
+   - Restart Gemini Antigravity
 2. Test reactive review functionality with real PR data
 3. Monitor session telemetry and cache hit rates
 4. Verify plan persistence and recovery in production scenarios
+
+## Summary
+
+Both Codex CLI and Gemini Antigravity configurations have been updated with comprehensive reactive review settings. All features including zombie session detection, plan persistence recovery, parallel execution, and guardrails are now enabled on both platforms.
 
