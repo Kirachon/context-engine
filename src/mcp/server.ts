@@ -72,6 +72,16 @@ import {
 } from './tools/planManagement.js';
 import { reviewChangesTool, handleReviewChanges } from './tools/codeReview.js';
 import { reviewGitDiffTool, handleReviewGitDiff } from './tools/gitReview.js';
+import {
+  reactiveReviewTools,
+  handleReactiveReviewPR,
+  handleGetReviewStatus,
+  handlePauseReview,
+  handleResumeReview,
+  handleGetReviewTelemetry,
+  handleScrubSecrets,
+  handleValidateContent,
+} from './tools/reactiveReview.js';
 import { FileWatcher } from '../watcher/index.js';
 
 export class ContextEngineMCPServer {
@@ -110,6 +120,37 @@ export class ContextEngineMCPServer {
     this.setupGracefulShutdown();
 
     if (this.enableWatcher) {
+      // Get ignore patterns from serviceClient to sync with indexing behavior
+      const ignorePatterns = this.serviceClient.getIgnorePatterns();
+      const excludedDirs = this.serviceClient.getExcludedDirectories();
+
+      // Normalize workspace path for pattern matching (use forward slashes)
+      const normalizedWorkspacePath = workspacePath.replace(/\\/g, '/');
+
+      // Convert patterns to chokidar-compatible format
+      // Chokidar accepts strings, RegExp, or functions
+      const watcherIgnored: (string | RegExp)[] = [
+        // Exclude directories (match anywhere in path)
+        ...excludedDirs.map(dir => `**/${dir}/**`),
+        // Include gitignore/contextignore patterns
+        ...ignorePatterns.map(pattern => {
+          // Handle root-anchored patterns (e.g., /.env should match only at workspace root)
+          if (pattern.startsWith('/')) {
+            // For root-anchored patterns, prepend workspace path for absolute matching
+            // Chokidar uses absolute paths, so we need to match against workspace root
+            return `${normalizedWorkspacePath}${pattern}`;
+          }
+          // Handle directory-only patterns
+          if (pattern.endsWith('/')) {
+            return `**/${pattern}**`;
+          }
+          // Match anywhere in path
+          return `**/${pattern}`;
+        }),
+      ];
+
+      console.error(`[watcher] Loaded ${watcherIgnored.length} ignore patterns`);
+
       this.fileWatcher = new FileWatcher(
         workspacePath,
         {
@@ -128,6 +169,7 @@ export class ContextEngineMCPServer {
         },
         {
           debounceMs: options?.watchDebounceMs ?? 500,
+          ignored: watcherIgnored,
         }
       );
       this.fileWatcher.start();
@@ -207,6 +249,8 @@ export class ContextEngineMCPServer {
           // Code Review tools (v1.5.0)
           reviewChangesTool,
           reviewGitDiffTool,
+          // Reactive Review tools (Phase 4)
+          ...reactiveReviewTools,
         ],
       };
     });
@@ -351,6 +395,35 @@ export class ContextEngineMCPServer {
             result = await handleReviewGitDiff(args as any, this.serviceClient);
             break;
 
+          // Reactive Review tools (Phase 4)
+          case 'reactive_review_pr':
+            result = await handleReactiveReviewPR(args as any, this.serviceClient);
+            break;
+
+          case 'get_review_status':
+            result = await handleGetReviewStatus(args as any, this.serviceClient);
+            break;
+
+          case 'pause_review':
+            result = await handlePauseReview(args as any, this.serviceClient);
+            break;
+
+          case 'resume_review':
+            result = await handleResumeReview(args as any, this.serviceClient);
+            break;
+
+          case 'get_review_telemetry':
+            result = await handleGetReviewTelemetry(args as any, this.serviceClient);
+            break;
+
+          case 'scrub_secrets':
+            result = await handleScrubSecrets(args as any);
+            break;
+
+          case 'validate_content':
+            result = await handleValidateContent(args as any);
+            break;
+
           default:
             throw new Error(`Unknown tool: ${name}`);
         }
@@ -390,13 +463,13 @@ export class ContextEngineMCPServer {
     await this.server.connect(transport);
 
     console.error('='.repeat(60));
-    console.error('Context Engine MCP Server v1.5.0');
+    console.error('Context Engine MCP Server v1.6.0');
     console.error('='.repeat(60));
     console.error(`Workspace: ${this.workspacePath}`);
     console.error('Transport: stdio');
     console.error(`Watcher: ${this.enableWatcher ? 'enabled' : 'disabled'}`);
     console.error('');
-    console.error('Available tools (29 total):');
+    console.error('Available tools (36 total):');
     console.error('  Core Context:');
     console.error('    - index_workspace, codebase_retrieval, semantic_search');
     console.error('    - get_file, get_context_for_prompt, enhance_prompt');
@@ -411,7 +484,11 @@ export class ContextEngineMCPServer {
     console.error('    - start_step, complete_step, fail_step, view_progress');
     console.error('    - view_history, compare_plan_versions, rollback_plan');
     console.error('  Code Review (v1.5.0):');
-    console.error('    - review_changes');
+    console.error('    - review_changes, review_git_diff');
+    console.error('  Reactive Review (v1.6.0):');
+    console.error('    - reactive_review_pr, get_review_status');
+    console.error('    - pause_review, resume_review, get_review_telemetry');
+    console.error('    - scrub_secrets, validate_content');
     console.error('');
     console.error('Server ready. Waiting for requests...');
     console.error('='.repeat(60));

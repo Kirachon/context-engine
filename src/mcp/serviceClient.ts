@@ -640,6 +640,53 @@ const INDEXABLE_EXTENSIONS = new Set([
   '.tf', '.hcl',  // Terraform
   '.nix',         // Nix configuration
 
+  // ============================================================================
+  // NEW EXTENSIONS (44 additions - 2025-12-22)
+  // ============================================================================
+
+  // === Functional Programming Languages ===
+  '.ex', '.exs',            // Elixir (Phoenix framework, distributed systems)
+  '.erl', '.hrl',           // Erlang (OTP, telecom, distributed systems)
+  '.hs', '.lhs',            // Haskell (functional programming, Pandoc)
+  '.clj', '.cljs', '.cljc', // Clojure (JVM functional, ClojureScript)
+  '.ml', '.mli',            // OCaml (functional, type systems, compilers)
+
+  // === Scientific & Data Languages ===
+  '.r', '.R',               // R language (statistics, data science, academia)
+  '.jl',                    // Julia (scientific computing, ML, high-performance)
+
+  // === Scripting Languages ===
+  '.lua',                   // Lua (game dev, Neovim, embedded scripting)
+  '.pl', '.pm', '.pod',     // Perl (system admin, text processing, legacy)
+
+  // === Modern Systems Languages ===
+  '.zig',                   // Zig (modern C replacement, growing adoption)
+  '.nim',                   // Nim (efficient, expressive, Python-like syntax)
+  '.cr',                    // Crystal (Ruby-like syntax, compiled performance)
+  '.v',                     // V language (simple, fast compilation)
+
+  // === Build Systems ===
+  '.cmake',                 // CMake (cross-platform C/C++ builds)
+  '.mk', '.mak',            // Make (alternative Makefile extensions)
+  '.bazel', '.bzl',         // Bazel (Google's build tool, monorepos)
+  '.ninja',                 // Ninja (fast build system)
+  '.sbt',                   // Scala Build Tool
+  '.podspec',               // CocoaPods (iOS dependency management)
+
+  // === Documentation Formats ===
+  '.adoc', '.asciidoc',     // AsciiDoc (technical docs, books)
+  '.tex', '.latex',         // LaTeX (academic papers, technical docs)
+  '.org',                   // Org-mode (Emacs docs, literate programming)
+  '.wiki',                  // Wiki markup
+
+  // === Web Templates ===
+  '.hbs', '.handlebars',    // Handlebars (template engine)
+  '.ejs',                   // Embedded JavaScript templates
+  '.pug', '.jade',          // Pug templates (Node.js, formerly Jade)
+  '.jsp',                   // JavaServer Pages
+  '.erb',                   // Embedded Ruby (Rails views)
+  '.twig',                  // Twig (PHP/Symfony templates)
+
   // === Build Files (by name, not extension - handled separately) ===
   // Makefile, Dockerfile, Jenkinsfile - handled in shouldIndexFile
 ]);
@@ -686,6 +733,22 @@ export class ContextServiceClient {
    * to proceed in parallel.
    */
   private searchQueue: SearchQueue = new SearchQueue();
+
+  // ============================================================================
+  // Reactive Commit Cache (Phase 1)
+  // ============================================================================
+
+  /** Enable commit-based cache keying for reactive reviews */
+  private commitCacheEnabled: boolean = false;
+
+  /** Current commit hash for cache key generation */
+  private currentCommitHash: string | null = null;
+
+  /** Cache hit counter for telemetry */
+  private cacheHits: number = 0;
+
+  /** Cache miss counter for telemetry */
+  private cacheMisses: number = 0;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
@@ -782,6 +845,24 @@ export class ContextServiceClient {
       .split('\n')
       .map(line => line.trim())
       .filter(line => line && !line.startsWith('#')); // Remove empty lines and comments
+  }
+
+  /**
+   * Get the loaded ignore patterns for use by external components (e.g., FileWatcher).
+   * Loads patterns from .gitignore and .contextignore if not already loaded.
+   * Returns patterns suitable for chokidar's ignored option.
+   */
+  getIgnorePatterns(): string[] {
+    this.loadIgnorePatterns();
+    return [...this.ignorePatterns];
+  }
+
+  /**
+   * Get the default excluded directories as an array.
+   * Useful for file watchers that need to ignore these directories.
+   */
+  getExcludedDirectories(): string[] {
+    return Array.from(DEFAULT_EXCLUDED_DIRS);
   }
 
   // ==========================================================================
@@ -1164,6 +1245,129 @@ export class ContextServiceClient {
    */
   clearCache(): void {
     this.searchCache.clear();
+    this.cacheHits = 0;
+    this.cacheMisses = 0;
+  }
+
+  // ==========================================================================
+  // Reactive Commit Cache Methods (Phase 1)
+  // ==========================================================================
+
+  /**
+   * Enable commit-based cache keying for reactive mode.
+   * When enabled, cache keys are prefixed with the commit hash for consistency.
+   * 
+   * @param commitHash Git commit hash to use as cache key prefix
+   */
+  enableCommitCache(commitHash: string): void {
+    if (process.env.REACTIVE_COMMIT_CACHE !== 'true') {
+      console.error('[ContextServiceClient] Commit cache feature flag not enabled (set REACTIVE_COMMIT_CACHE=true)');
+      return;
+    }
+    this.commitCacheEnabled = true;
+    this.currentCommitHash = commitHash;
+    console.error(`[ContextServiceClient] Commit cache enabled for ${commitHash.substring(0, 12)}`);
+  }
+
+  /**
+   * Disable commit-based cache keying and clear the current commit hash.
+   */
+  disableCommitCache(): void {
+    if (this.commitCacheEnabled) {
+      console.error('[ContextServiceClient] Commit cache disabled');
+    }
+    this.commitCacheEnabled = false;
+    this.currentCommitHash = null;
+  }
+
+  /**
+   * Generate cache key with optional commit hash prefix.
+   * Used internally by semanticSearch when commit cache is enabled.
+   * 
+   * @param query Search query
+   * @param topK Number of results
+   * @returns Cache key string
+   */
+  private getCommitAwareCacheKey(query: string, topK: number): string {
+    const baseKey = `${query}:${topK}`;
+    if (this.commitCacheEnabled && this.currentCommitHash) {
+      return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
+    }
+    return baseKey;
+  }
+
+  /**
+   * Prefetch context for files in background (non-blocking).
+   * Useful for warming the cache before a review starts.
+   * 
+   * @param filePaths Array of file paths to prefetch
+   * @param commitHash Optional commit hash for cache keying
+   */
+  async prefetchFilesContext(filePaths: string[], commitHash?: string): Promise<void> {
+    if (commitHash) {
+      this.enableCommitCache(commitHash);
+    }
+
+    // Use setImmediate to avoid blocking the event loop
+    setImmediate(async () => {
+      console.error(`[prefetch] Starting prefetch for ${filePaths.length} files`);
+      const startTime = Date.now();
+      let successCount = 0;
+
+      for (const filePath of filePaths) {
+        try {
+          await this.semanticSearch(`file:${filePath}`, 5);
+          successCount++;
+        } catch (e) {
+          console.error(`[prefetch] Failed for ${filePath}:`, e);
+        }
+      }
+
+      const elapsed = Date.now() - startTime;
+      console.error(`[prefetch] Completed: ${successCount}/${filePaths.length} files in ${elapsed}ms`);
+    });
+  }
+
+  /**
+   * Invalidate cache entries for a specific commit or all entries.
+   * 
+   * @param commitHash Optional commit hash to invalidate (all if not provided)
+   */
+  invalidateCommitCache(commitHash?: string): void {
+    if (!commitHash) {
+      this.clearCache();
+      console.error('[ContextServiceClient] Cleared entire cache');
+      return;
+    }
+
+    const prefix = commitHash.substring(0, 12);
+    let invalidated = 0;
+
+    for (const key of this.searchCache.keys()) {
+      if (key.startsWith(prefix)) {
+        this.searchCache.delete(key);
+        invalidated++;
+      }
+    }
+
+    console.error(`[ContextServiceClient] Invalidated ${invalidated} cache entries for commit ${prefix}`);
+  }
+
+  /**
+   * Get cache statistics for telemetry and monitoring.
+   * 
+   * @returns Cache statistics object
+   */
+  getCacheStats(): { size: number; hitRate: number; commitKeyed: boolean; currentCommit: string | null; hits: number; misses: number } {
+    const total = this.cacheHits + this.cacheMisses;
+    return {
+      size: this.searchCache.size,
+      hitRate: total > 0 ? this.cacheHits / total : 0,
+      commitKeyed: this.commitCacheEnabled,
+      currentCommit: this.currentCommitHash,
+      hits: this.cacheHits,
+      misses: this.cacheMisses,
+    };
   }
 
   // ==========================================================================
@@ -1209,51 +1413,44 @@ export class ContextServiceClient {
       };
     }
 
-    // Log all discovered files for debugging
-    console.error('Files to index:');
-    for (const fp of filePaths) {
+    // Log all discovered files for debugging (only first 50 to avoid log spam)
+    console.error('Files to index (showing first 50):');
+    for (const fp of filePaths.slice(0, 50)) {
       console.error(`  - ${fp}`);
     }
-
-    // Read file contents and prepare for indexing
-    const files: Array<{ path: string; contents: string }> = [];
-    let skippedCount = 0;
-    for (const relativePath of filePaths) {
-      const contents = this.readFileContents(relativePath);
-      if (contents !== null) {
-        files.push({ path: relativePath, contents });
-      } else {
-        skippedCount++;
-      }
+    if (filePaths.length > 50) {
+      console.error(`  ... and ${filePaths.length - 50} more files`);
     }
 
-    console.error(`Prepared ${files.length} files for indexing (skipped ${skippedCount})`);
-
-    if (files.length === 0) {
-      console.error('No files to index after filtering');
-      this.updateIndexStatus({
-        status: 'error',
-        lastError: 'No indexable files found',
-        fileCount: 0,
-      });
-      return {
-        indexed: 0,
-        skipped: skippedCount,
-        errors: ['No indexable files found'],
-        duration: Date.now() - startTime,
-      };
-    }
-
-    // Add files to index in batches with error handling
-    const BATCH_SIZE = 10; // Reduced batch size for better error isolation
+    // STREAMING APPROACH: Read and index files in batches to minimize memory usage
+    // Instead of loading all files into memory, we read files just-in-time for each batch
+    const BATCH_SIZE = 10; // Reduced batch size for better error isolation and memory efficiency
+    const totalBatches = Math.ceil(filePaths.length / BATCH_SIZE);
     let successCount = 0;
     let errorCount = 0;
+    let skippedCount = 0;
     const errors: string[] = [];
 
-    for (let i = 0; i < files.length; i += BATCH_SIZE) {
-      const batch = files.slice(i, i + BATCH_SIZE);
+    for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
+      const batchPaths = filePaths.slice(i, i + BATCH_SIZE);
       const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      const totalBatches = Math.ceil(files.length / BATCH_SIZE);
+      const isLastBatch = i + BATCH_SIZE >= filePaths.length;
+
+      // Read file contents for this batch only (streaming approach)
+      const batch: Array<{ path: string; contents: string }> = [];
+      for (const relativePath of batchPaths) {
+        const contents = this.readFileContents(relativePath);
+        if (contents !== null) {
+          batch.push({ path: relativePath, contents });
+        } else {
+          skippedCount++;
+        }
+      }
+
+      if (batch.length === 0) {
+        console.error(`  Batch ${batchNum}/${totalBatches}: All files skipped`);
+        continue;
+      }
 
       console.error(`\nIndexing batch ${batchNum}/${totalBatches}:`);
       for (const file of batch) {
@@ -1262,7 +1459,6 @@ export class ContextServiceClient {
 
       try {
         // Don't wait for indexing on intermediate batches
-        const isLastBatch = i + BATCH_SIZE >= files.length;
         await context.addToIndex(batch, { waitForIndexing: isLastBatch });
         successCount += batch.length;
         console.error(`  ✓ Batch ${batchNum} indexed successfully`);
@@ -1287,9 +1483,28 @@ export class ContextServiceClient {
           }
         }
       }
+
+      // Allow GC to reclaim memory from this batch before loading the next
+      // The batch array goes out of scope at end of loop iteration
     }
 
-    console.error(`\nIndexing complete: ${successCount} succeeded, ${errorCount} had errors`);
+    // Check if any files were actually indexed
+    if (successCount === 0) {
+      console.error('No files were successfully indexed');
+      this.updateIndexStatus({
+        status: 'error',
+        lastError: errors[0] || 'No files could be indexed',
+        fileCount: 0,
+      });
+      return {
+        indexed: 0,
+        skipped: skippedCount + errorCount,
+        errors: errors.length > 0 ? errors : ['No files could be indexed'],
+        duration: Date.now() - startTime,
+      };
+    }
+
+    console.error(`\nIndexing complete: ${successCount} succeeded, ${errorCount} had errors, ${skippedCount} skipped`);
 
     // Save state after indexing (even if some files failed)
     if (successCount > 0) {
@@ -1535,14 +1750,16 @@ export class ContextServiceClient {
    * Perform semantic search using DirectContext SDK
    */
   async semanticSearch(query: string, topK: number = 10): Promise<SearchResult[]> {
-    // Check cache first
-    const cacheKey = `${query}:${topK}`;
+    // Use commit-aware cache key when reactive mode is enabled
+    const cacheKey = this.getCommitAwareCacheKey(query, topK);
     const cached = this.getCachedSearch(cacheKey);
     if (cached) {
+      this.cacheHits++;
       console.error(`[semanticSearch] Cache hit for query: ${query}`);
       return cached;
     }
 
+    this.cacheMisses++;
     const context = await this.ensureInitialized();
 
     try {
@@ -2274,8 +2491,8 @@ export class ContextServiceClient {
     const allCodeTypes = files.flatMap(f => f.snippets.map(s => s.codeType)).filter(Boolean);
     const dominantType = allCodeTypes.length > 0
       ? allCodeTypes.sort((a, b) =>
-          allCodeTypes.filter(t => t === b).length - allCodeTypes.filter(t => t === a).length
-        )[0]
+        allCodeTypes.filter(t => t === b).length - allCodeTypes.filter(t => t === a).length
+      )[0]
       : 'code';
 
     return `Context for "${query}": ${files.length} files from ${topDir || 'multiple directories'}, primarily containing ${dominantType} definitions`;

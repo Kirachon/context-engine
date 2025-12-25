@@ -25,6 +25,16 @@ import {
 const HISTORY_FILE_SUFFIX = '.history.json';
 
 // ============================================================================
+// Memory Management Constants
+// ============================================================================
+
+/** Maximum number of histories to keep in memory */
+const MAX_HISTORIES_IN_MEMORY = 50;
+
+/** Maximum number of versions to keep per history */
+const MAX_VERSIONS_PER_HISTORY = 20;
+
+// ============================================================================
 // PlanHistoryService
 // ============================================================================
 
@@ -32,8 +42,81 @@ export class PlanHistoryService {
   private histories: Map<string, PlanHistory> = new Map();
   private historyDir: string;
 
+  /** Track last access time for LRU eviction */
+  private lastAccessTime: Map<string, number> = new Map();
+
   constructor(workspaceRoot: string, historyDir?: string) {
     this.historyDir = path.join(workspaceRoot, historyDir || '.augment-plans', 'history');
+  }
+
+  // ============================================================================
+  // Memory Management
+  // ============================================================================
+
+  /**
+   * Evict least recently used histories if over the limit.
+   */
+  private evictIfNeeded(): void {
+    if (this.histories.size <= MAX_HISTORIES_IN_MEMORY) {
+      return;
+    }
+
+    // Sort by last access time (oldest first)
+    const entries = Array.from(this.lastAccessTime.entries())
+      .sort((a, b) => a[1] - b[1]);
+
+    const toEvict = this.histories.size - MAX_HISTORIES_IN_MEMORY;
+    for (let i = 0; i < toEvict && i < entries.length; i++) {
+      const planId = entries[i][0];
+      this.histories.delete(planId);
+      this.lastAccessTime.delete(planId);
+    }
+
+    if (toEvict > 0) {
+      console.error(`[PlanHistoryService] Evicted ${toEvict} histories, ${this.histories.size} remaining`);
+    }
+  }
+
+  /**
+   * Prune old versions from a history to stay within limits.
+   */
+  private pruneVersions(history: PlanHistory): void {
+    if (history.versions.length <= MAX_VERSIONS_PER_HISTORY) {
+      return;
+    }
+
+    // Keep the most recent versions
+    const toRemove = history.versions.length - MAX_VERSIONS_PER_HISTORY;
+    history.versions = history.versions.slice(toRemove);
+
+    console.error(`[PlanHistoryService] Pruned ${toRemove} old versions from history ${history.plan_id}`);
+  }
+
+  /**
+   * Update last access time for a history.
+   */
+  private touchHistory(planId: string): void {
+    this.lastAccessTime.set(planId, Date.now());
+  }
+
+  /**
+   * Get the current memory usage stats.
+   */
+  getMemoryStats(): { historiesInMemory: number; maxHistories: number; maxVersionsPerHistory: number } {
+    return {
+      historiesInMemory: this.histories.size,
+      maxHistories: MAX_HISTORIES_IN_MEMORY,
+      maxVersionsPerHistory: MAX_VERSIONS_PER_HISTORY,
+    };
+  }
+
+  /**
+   * Clear all in-memory histories (for testing or memory pressure).
+   */
+  clearMemoryCache(): void {
+    this.histories.clear();
+    this.lastAccessTime.clear();
+    console.error('[PlanHistoryService] Cleared in-memory history cache');
   }
 
   // ============================================================================
@@ -70,7 +153,7 @@ export class PlanHistoryService {
     changedBy?: string
   ): PlanVersion {
     let history = this.histories.get(plan.id);
-    
+
     if (!history) {
       history = {
         plan_id: plan.id,
@@ -80,6 +163,10 @@ export class PlanHistoryService {
         last_modified_at: new Date().toISOString(),
       };
       this.histories.set(plan.id, history);
+      // Touch the history first so it has an access time for LRU eviction
+      this.touchHistory(plan.id);
+      // Check if we need to evict old histories
+      this.evictIfNeeded();
     }
 
     const version: PlanVersion = {
@@ -94,6 +181,12 @@ export class PlanHistoryService {
     history.versions.push(version);
     history.current_version = plan.version;
     history.last_modified_at = new Date().toISOString();
+
+    // Prune old versions if over limit
+    this.pruneVersions(history);
+
+    // Update access time
+    this.touchHistory(plan.id);
 
     // Persist to disk
     this.saveHistory(history);
@@ -113,10 +206,17 @@ export class PlanHistoryService {
       history = this.loadHistory(planId);
       if (history) {
         this.histories.set(planId, history);
+        // Touch the history first so it has an access time for LRU eviction
+        this.touchHistory(planId);
+        // Check if we need to evict old histories
+        this.evictIfNeeded();
       }
     }
 
     if (!history) return null;
+
+    // Update access time (for already-cached histories)
+    this.touchHistory(planId);
 
     // Apply filters
     let versions = [...history.versions];

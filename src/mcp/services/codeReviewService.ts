@@ -220,7 +220,7 @@ export class CodeReviewService {
       const newStart = parseInt(hunkMatch[3], 10);
       const newLines = parseInt(hunkMatch[4] || '1', 10);
 
-      const lines = this.parseHunkLines(hunkContent, newStart, changedLines);
+      const lines = this.parseHunkLines(hunkContent, oldStart, newStart, changedLines);
 
       hunks.push({
         old_start: oldStart,
@@ -244,13 +244,22 @@ export class CodeReviewService {
 
   /**
    * Parse lines within a hunk
+   * @param hunkContent - The raw hunk content including the @@ header
+   * @param oldStart - Starting line number in the old file
+   * @param newStart - Starting line number in the new file
+   * @param changedLines - Set to accumulate changed line numbers (in new file)
    */
-  private parseHunkLines(hunkContent: string, newStart: number, changedLines: Set<number>): DiffLine[] {
+  private parseHunkLines(
+    hunkContent: string,
+    oldStart: number,
+    newStart: number,
+    changedLines: Set<number>
+  ): DiffLine[] {
     const lines: DiffLine[] = [];
     const contentLines = hunkContent.split('\n').slice(1); // Skip the @@ header
 
     let newLineNum = newStart;
-    let oldLineNum = newStart; // Simplified - would need proper tracking
+    let oldLineNum = oldStart; // Properly track old file line numbers
 
     for (const line of contentLines) {
       if (line.startsWith('+')) {

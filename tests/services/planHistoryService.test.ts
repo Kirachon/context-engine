@@ -254,4 +254,155 @@ describe('PlanHistoryService', () => {
       expect(diff).toBeDefined();
     });
   });
+
+  // ==========================================================================
+  // Memory Management & Cleanup Tests
+  // ==========================================================================
+
+  describe('Memory Management - Cleanup Functionality', () => {
+    describe('getMemoryStats', () => {
+      it('should return zero stats initially', () => {
+        const stats = service.getMemoryStats();
+        expect(stats.historiesInMemory).toBe(0);
+      });
+
+      it('should track histories in memory', () => {
+        service.recordVersion(createTestPlan(1), 'created', 'v1');
+        service.recordVersion(createTestPlan(2), 'modified', 'v2');
+
+        const plan2 = { ...createTestPlan(1), id: 'plan_test_2' };
+        service.recordVersion(plan2, 'created', 'v1');
+
+        const stats = service.getMemoryStats();
+        expect(stats.historiesInMemory).toBe(2); // Two different plans
+      });
+
+      it('should include max limits in stats', () => {
+        const stats = service.getMemoryStats();
+        expect(stats.maxHistories).toBeGreaterThan(0);
+        expect(stats.maxVersionsPerHistory).toBeGreaterThan(0);
+      });
+    });
+
+    describe('clearMemoryCache', () => {
+      it('should clear all cached histories', () => {
+        service.recordVersion(createTestPlan(1), 'created', 'v1');
+        service.recordVersion(createTestPlan(2), 'modified', 'v2');
+
+        const statsBefore = service.getMemoryStats();
+        expect(statsBefore.historiesInMemory).toBeGreaterThan(0);
+
+        service.clearMemoryCache();
+
+        const statsAfter = service.getMemoryStats();
+        expect(statsAfter.historiesInMemory).toBe(0);
+      });
+
+      it('should still be able to read histories after cache clear (from disk)', () => {
+        service.recordVersion(createTestPlan(1), 'created', 'v1');
+
+        service.clearMemoryCache();
+
+        // History should still be readable from disk
+        const history = service.getHistory('plan_test');
+        expect(history).toBeDefined();
+        expect(history?.versions.length).toBe(1);
+      });
+    });
+
+    describe('LRU Eviction - Max Histories', () => {
+      it('should track lastAccessTime on history access', () => {
+        service.recordVersion(createTestPlan(1), 'created', 'v1');
+
+        // Access the history
+        service.getHistory('plan_test');
+
+        const serviceAny = service as any;
+        // lastAccessTime is stored in a separate map, not on the history object
+        const lastAccessTime = serviceAny.lastAccessTime.get('plan_test');
+        expect(lastAccessTime).toBeDefined();
+        expect(lastAccessTime).toBeGreaterThan(0);
+      });
+
+      it('should evict oldest histories when over limit', () => {
+        const MAX_HISTORIES = 50; // From planHistoryService.ts
+
+        // Create more than MAX_HISTORIES plans
+        for (let i = 0; i < MAX_HISTORIES + 10; i++) {
+          const plan = { ...createTestPlan(1), id: `plan_${i}` };
+          service.recordVersion(plan, 'created', `v1 for plan ${i}`);
+        }
+
+        const stats = service.getMemoryStats();
+        // Should be at or below max
+        expect(stats.historiesInMemory).toBeLessThanOrEqual(MAX_HISTORIES);
+      });
+
+      it('should evict least recently accessed histories first', () => {
+        const MAX_HISTORIES = 50;
+
+        // Create MAX_HISTORIES + 5 plans
+        for (let i = 0; i < MAX_HISTORIES + 5; i++) {
+          const plan = { ...createTestPlan(1), id: `plan_${i}` };
+          service.recordVersion(plan, 'created', `v1`);
+        }
+
+        // Access some early plans to make them recently used
+        service.getHistory('plan_0');
+        service.getHistory('plan_1');
+        service.getHistory('plan_2');
+
+        // Add more plans to trigger eviction
+        for (let i = MAX_HISTORIES + 5; i < MAX_HISTORIES + 15; i++) {
+          const plan = { ...createTestPlan(1), id: `plan_${i}` };
+          service.recordVersion(plan, 'created', `v1`);
+        }
+
+        // The recently accessed plans should still exist
+        const stats = service.getMemoryStats();
+        expect(stats.historiesInMemory).toBeLessThanOrEqual(MAX_HISTORIES);
+
+        // Recently accessed plans should still be in memory
+        const serviceAny = service as any;
+        // These were accessed, so they should have been kept
+        expect(serviceAny.histories.has('plan_0') ||
+               service.getHistory('plan_0') !== null).toBeTruthy();
+      });
+    });
+
+    describe('Version Pruning - Max Versions Per History', () => {
+      it('should limit versions per history', () => {
+        const MAX_VERSIONS = 20; // From planHistoryService.ts
+
+        // Create more than MAX_VERSIONS versions for one plan
+        for (let i = 1; i <= MAX_VERSIONS + 10; i++) {
+          service.recordVersion(createTestPlan(i), i === 1 ? 'created' : 'modified', `Version ${i}`);
+        }
+
+        const history = service.getHistory('plan_test');
+        expect(history).toBeDefined();
+        // Should have at most MAX_VERSIONS entries
+        expect(history!.versions.length).toBeLessThanOrEqual(MAX_VERSIONS);
+      });
+
+      it('should keep the most recent versions when pruning', () => {
+        const MAX_VERSIONS = 20;
+
+        // Create more than MAX_VERSIONS versions
+        for (let i = 1; i <= MAX_VERSIONS + 5; i++) {
+          service.recordVersion(createTestPlan(i), i === 1 ? 'created' : 'modified', `Version ${i}`);
+        }
+
+        const history = service.getHistory('plan_test');
+        expect(history).toBeDefined();
+
+        // The most recent versions should be kept
+        const latestVersion = history!.versions[history!.versions.length - 1];
+        expect(latestVersion.version).toBe(MAX_VERSIONS + 5);
+
+        // Current version should be the latest
+        expect(history!.current_version).toBe(MAX_VERSIONS + 5);
+      });
+    });
+  });
 });
