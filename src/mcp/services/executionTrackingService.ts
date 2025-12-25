@@ -91,6 +91,33 @@ export class ExecutionTrackingService {
   private abortedPlans: Set<string> = new Set();
 
   // ============================================================================
+  // Circuit Breaker State
+  // ============================================================================
+
+  /** Circuit breaker state: 'closed' (normal), 'open' (failing), 'half-open' (testing) */
+  private circuitBreakerState: 'closed' | 'open' | 'half-open' = 'closed';
+
+  /** Consecutive timeout/failure count for circuit breaker */
+  private consecutiveFailures: number = 0;
+
+  /** Consecutive successes count (for half-open state) */
+  private consecutiveSuccesses: number = 0;
+
+  /** Timestamp when circuit was opened */
+  private circuitOpenedAt: number = 0;
+
+  /** Circuit breaker configuration */
+  private circuitBreakerConfig = {
+    failureThreshold: 3,      // Open circuit after 3 consecutive failures
+    resetTimeout: 60000,      // Try to reset after 1 minute
+    successThreshold: 2,      // Close circuit after 2 successes in half-open
+    fallbackToSequential: true,
+  };
+
+  /** Whether circuit breaker triggered fallback to sequential */
+  private circuitBreakerFallbackActive: boolean = false;
+
+  // ============================================================================
   // Memory Management
   // ============================================================================
 
@@ -697,6 +724,149 @@ export class ExecutionTrackingService {
     return { ...this.parallelOptions };
   }
 
+  // ============================================================================
+  // Circuit Breaker Methods
+  // ============================================================================
+
+  /**
+   * Configure the circuit breaker.
+   * @param config Partial configuration to merge with defaults
+   */
+  configureCircuitBreaker(config: Partial<typeof this.circuitBreakerConfig>): void {
+    this.circuitBreakerConfig = { ...this.circuitBreakerConfig, ...config };
+    console.error(`[ExecutionTrackingService] Circuit breaker configured: ${JSON.stringify(this.circuitBreakerConfig)}`);
+  }
+
+  /**
+   * Get current circuit breaker state.
+   */
+  getCircuitBreakerState(): {
+    state: 'closed' | 'open' | 'half-open';
+    consecutiveFailures: number;
+    consecutiveSuccesses: number;
+    fallbackActive: boolean;
+  } {
+    return {
+      state: this.circuitBreakerState,
+      consecutiveFailures: this.consecutiveFailures,
+      consecutiveSuccesses: this.consecutiveSuccesses,
+      fallbackActive: this.circuitBreakerFallbackActive,
+    };
+  }
+
+  /**
+   * Record a successful step execution for circuit breaker.
+   */
+  recordCircuitBreakerSuccess(): void {
+    this.consecutiveFailures = 0;
+    this.consecutiveSuccesses++;
+
+    if (this.circuitBreakerState === 'half-open') {
+      if (this.consecutiveSuccesses >= this.circuitBreakerConfig.successThreshold) {
+        this.closeCircuit();
+      }
+    }
+  }
+
+  /**
+   * Record a failed step execution for circuit breaker.
+   * @param isTimeout Whether the failure was due to timeout
+   */
+  recordCircuitBreakerFailure(isTimeout: boolean = false): void {
+    this.consecutiveSuccesses = 0;
+    this.consecutiveFailures++;
+
+    console.error(`[CircuitBreaker] Failure recorded: count=${this.consecutiveFailures}, isTimeout=${isTimeout}, state=${this.circuitBreakerState}`);
+
+    if (this.circuitBreakerState === 'closed') {
+      if (this.consecutiveFailures >= this.circuitBreakerConfig.failureThreshold) {
+        this.openCircuit();
+      }
+    } else if (this.circuitBreakerState === 'half-open') {
+      // Any failure in half-open state reopens the circuit
+      this.openCircuit();
+    }
+  }
+
+  /**
+   * Check if circuit breaker allows execution.
+   * Also handles state transitions from open to half-open.
+   */
+  isCircuitBreakerAllowing(): boolean {
+    if (this.circuitBreakerState === 'closed') {
+      return true;
+    }
+
+    if (this.circuitBreakerState === 'open') {
+      const elapsed = Date.now() - this.circuitOpenedAt;
+      if (elapsed >= this.circuitBreakerConfig.resetTimeout) {
+        this.halfOpenCircuit();
+        return true;
+      }
+      return false;
+    }
+
+    // Half-open state - allow limited testing
+    return true;
+  }
+
+  /**
+   * Open the circuit breaker (trigger fallback).
+   */
+  private openCircuit(): void {
+    this.circuitBreakerState = 'open';
+    this.circuitOpenedAt = Date.now();
+    this.consecutiveSuccesses = 0;
+
+    console.error(`[CircuitBreaker] OPENED after ${this.consecutiveFailures} consecutive failures`);
+
+    if (this.circuitBreakerConfig.fallbackToSequential && this.parallelOptions.enabled) {
+      console.error('[CircuitBreaker] Falling back to sequential execution');
+      this.circuitBreakerFallbackActive = true;
+      // Don't fully disable parallel - just mark fallback active
+      // so we can restore after circuit closes
+    }
+  }
+
+  /**
+   * Transition circuit to half-open state.
+   */
+  private halfOpenCircuit(): void {
+    this.circuitBreakerState = 'half-open';
+    this.consecutiveSuccesses = 0;
+    console.error('[CircuitBreaker] Transitioned to HALF-OPEN state, testing recovery');
+  }
+
+  /**
+   * Close the circuit breaker (restore normal operation).
+   */
+  private closeCircuit(): void {
+    this.circuitBreakerState = 'closed';
+    this.consecutiveFailures = 0;
+    this.consecutiveSuccesses = 0;
+    this.circuitBreakerFallbackActive = false;
+    console.error('[CircuitBreaker] CLOSED - normal operation restored');
+  }
+
+  /**
+   * Reset circuit breaker to initial state.
+   */
+  resetCircuitBreaker(): void {
+    this.circuitBreakerState = 'closed';
+    this.consecutiveFailures = 0;
+    this.consecutiveSuccesses = 0;
+    this.circuitOpenedAt = 0;
+    this.circuitBreakerFallbackActive = false;
+    console.error('[CircuitBreaker] Reset to initial state');
+  }
+
+  /**
+   * Check if circuit breaker fallback to sequential is active.
+   */
+  isCircuitBreakerFallbackActive(): boolean {
+    return this.circuitBreakerFallbackActive;
+  }
+
   /**
    * Execute a single step with timeout protection.
    * 
@@ -754,6 +924,8 @@ export class ExecutionTrackingService {
         const duration = Date.now() - startTime;
 
         if (result.success) {
+          // Record success for circuit breaker
+          this.recordCircuitBreakerSuccess();
           return {
             step_number: stepNumber,
             success: true,
@@ -768,6 +940,8 @@ export class ExecutionTrackingService {
             console.error(`[ExecutionTrackingService] Retrying step ${stepNumber} (attempt ${retries + 1})`);
             return executeWithRetry();
           }
+          // Record failure for circuit breaker (non-timeout)
+          this.recordCircuitBreakerFailure(false);
           return {
             step_number: stepNumber,
             success: false,
@@ -785,6 +959,7 @@ export class ExecutionTrackingService {
 
         const duration = Date.now() - startTime;
         const errorMessage = error instanceof Error ? error.message : String(error);
+        const isTimeout = errorMessage.includes('timed out');
 
         // Retry on non-abort errors
         if (retries < this.parallelOptions.max_retries && !this.abortedPlans.has(planId)) {
@@ -793,6 +968,8 @@ export class ExecutionTrackingService {
           return executeWithRetry();
         }
 
+        // Record failure for circuit breaker (with timeout flag)
+        this.recordCircuitBreakerFailure(isTimeout);
         return {
           step_number: stepNumber,
           success: false,
@@ -835,6 +1012,18 @@ export class ExecutionTrackingService {
       return this.executeStepsSequentially(planId, plan, executor);
     }
 
+    // Check circuit breaker state - fall back to sequential if triggered
+    if (this.circuitBreakerFallbackActive) {
+      console.error('[ExecutionTrackingService] Circuit breaker fallback active, using sequential execution');
+      return this.executeStepsSequentially(planId, plan, executor);
+    }
+
+    // Check if circuit breaker allows parallel execution
+    if (!this.isCircuitBreakerAllowing()) {
+      console.error('[ExecutionTrackingService] Circuit breaker OPEN, using sequential execution');
+      return this.executeStepsSequentially(planId, plan, executor);
+    }
+
     const results: StepExecutionResult[] = [];
     const state = this.getExecutionState(planId);
     if (!state) {
@@ -845,7 +1034,8 @@ export class ExecutionTrackingService {
     // Clear any previous abort state
     this.abortedPlans.delete(planId);
 
-    console.error(`[ExecutionTrackingService] Starting parallel execution for plan ${planId}`);
+    const cbState = this.getCircuitBreakerState();
+    console.error(`[ExecutionTrackingService] Starting parallel execution for plan ${planId} (circuit breaker: ${cbState.state})`);
 
     // Process steps until all are complete or aborted
     while (!this.abortedPlans.has(planId)) {

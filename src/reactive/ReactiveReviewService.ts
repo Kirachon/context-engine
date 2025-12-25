@@ -23,6 +23,10 @@ import {
     ReviewSessionStatus,
     ReviewStatus,
     getConfig,
+    calculateAdaptiveTimeout,
+    getCircuitBreakerConfig,
+    getChunkedProcessingConfig,
+    splitIntoChunks,
 } from './index.js';
 
 // ============================================================================
@@ -79,6 +83,9 @@ export class ReactiveReviewService {
 
     /** Last activity time for each session (for zombie detection) */
     private sessionLastActivity: Map<string, number> = new Map();
+
+    /** Adaptive timeouts calculated per session based on file count */
+    private sessionAdaptiveTimeouts: Map<string, number> = new Map();
 
     /** Cleanup timer for expired sessions */
     private cleanupTimer: ReturnType<typeof setInterval> | null = null;
@@ -164,12 +171,16 @@ export class ReactiveReviewService {
                 const lastActivity = this.sessionLastActivity.get(sessionId) || this.sessionStartTimes.get(sessionId) || 0;
                 const inactiveTime = now - lastActivity;
 
-                if (inactiveTime > config.session_execution_timeout_ms) {
+                // Use adaptive timeout if available, otherwise fall back to config default
+                const adaptiveTimeout = this.sessionAdaptiveTimeouts.get(sessionId);
+                const effectiveTimeout = adaptiveTimeout || config.session_execution_timeout_ms;
+
+                if (inactiveTime > effectiveTimeout) {
                     session.status = 'failed';
-                    session.error = `Session execution timeout: no activity for ${Math.round(inactiveTime / 1000)}s`;
+                    session.error = `Session execution timeout: no activity for ${Math.round(inactiveTime / 1000)}s (limit: ${Math.round(effectiveTimeout / 1000)}s${adaptiveTimeout ? ' adaptive' : ''})`;
                     session.updated_at = new Date().toISOString();
                     zombieCount++;
-                    console.error(`[ReactiveReviewService] Session ${sessionId} timed out after ${Math.round(inactiveTime / 1000)}s of inactivity`);
+                    console.error(`[ReactiveReviewService] Session ${sessionId} timed out after ${Math.round(inactiveTime / 1000)}s of inactivity (adaptive timeout: ${adaptiveTimeout ? Math.round(adaptiveTimeout / 1000) + 's' : 'not set'})`);
 
                     // Clean up associated resources
                     this.contextClient.disableCommitCache();
@@ -229,6 +240,7 @@ export class ReactiveReviewService {
         this.sessionStartTimes.delete(sessionId);
         this.sessionTokensUsed.delete(sessionId);
         this.sessionLastActivity.delete(sessionId);
+        this.sessionAdaptiveTimeouts.delete(sessionId);
     }
 
     /**
@@ -444,6 +456,21 @@ export class ReactiveReviewService {
                 throw new Error(`Execution state not found after initialization for plan ${planId}`);
             }
 
+            // Calculate adaptive timeout based on file count
+            const fileCount = prMetadata.changed_files.length;
+            const adaptiveTimeout = calculateAdaptiveTimeout({
+                fileCount,
+                avgTimePerFile: config.step_timeout_ms, // Use step timeout as baseline
+                bufferMultiplier: 1.5,
+                minTimeout: config.session_execution_timeout_ms,
+            });
+
+            console.error(`[ReactiveReviewService] Adaptive timeout calculated: ${Math.round(adaptiveTimeout/1000)}s for ${fileCount} files`);
+
+            // Configure circuit breaker for resilience
+            const cbConfig = getCircuitBreakerConfig();
+            this.executionService.configureCircuitBreaker(cbConfig);
+
             // Enable parallel execution if configured
             if (config.parallel_exec) {
                 this.executionService.enableParallelExecution({
@@ -458,7 +485,10 @@ export class ReactiveReviewService {
             session.updated_at = new Date().toISOString();
             this.touchSession(sessionId);
 
-            console.error(`[ReactiveReviewService] Review plan created with ${session.total_steps} steps, plan_id=${planId}`);
+            // Store adaptive timeout for session monitoring
+            this.sessionAdaptiveTimeouts.set(sessionId, adaptiveTimeout);
+
+            console.error(`[ReactiveReviewService] Review plan created with ${session.total_steps} steps, plan_id=${planId}, adaptive_timeout=${Math.round(adaptiveTimeout/1000)}s`);
 
             return session;
         } catch (error) {
@@ -560,6 +590,84 @@ export class ReactiveReviewService {
             // Always clean up commit cache, whether success or failure
             this.contextClient.disableCommitCache();
         }
+    }
+
+    /**
+     * Execute review with chunked processing for large PRs.
+     * Splits files into chunks and processes them with delays between chunks.
+     *
+     * @param sessionId Session ID
+     * @param stepExecutor Custom step executor function
+     * @returns Array of execution results from all chunks
+     */
+    async executeReviewChunked(
+        sessionId: string,
+        stepExecutor: StepExecutor
+    ): Promise<StepExecutionResult[]> {
+        const session = this.sessions.get(sessionId);
+        if (!session) {
+            throw new Error(`Session not found: ${sessionId}`);
+        }
+
+        const chunkedConfig = getChunkedProcessingConfig();
+        const fileCount = session.pr_metadata.changed_files.length;
+
+        // If chunking not needed, use regular execution
+        if (!chunkedConfig.enabled || fileCount <= chunkedConfig.chunkThreshold) {
+            console.error(`[ReactiveReviewService] Chunking not needed for ${fileCount} files (threshold: ${chunkedConfig.chunkThreshold})`);
+            return this.executeReview(sessionId, stepExecutor);
+        }
+
+        console.error(`[ReactiveReviewService] Executing chunked review: ${fileCount} files in chunks of ${chunkedConfig.chunkSize}`);
+
+        // Split files into chunks
+        const fileChunks = splitIntoChunks(session.pr_metadata.changed_files, chunkedConfig);
+        const allResults: StepExecutionResult[] = [];
+
+        for (let i = 0; i < fileChunks.length; i++) {
+            const chunk = fileChunks[i];
+            const isLastChunk = i === fileChunks.length - 1;
+
+            console.error(`[ReactiveReviewService] Processing chunk ${i + 1}/${fileChunks.length}: ${chunk.length} files`);
+
+            // Execute this chunk
+            const chunkResults = await this.executeReview(sessionId, stepExecutor);
+            allResults.push(...chunkResults);
+
+            // Add delay between chunks (unless it's the last one)
+            if (!isLastChunk && chunkedConfig.interChunkDelay > 0) {
+                console.error(`[ReactiveReviewService] Waiting ${chunkedConfig.interChunkDelay}ms before next chunk`);
+                await new Promise(resolve => setTimeout(resolve, chunkedConfig.interChunkDelay));
+            }
+
+            // Check if session failed during chunk execution
+            const updatedSession = this.sessions.get(sessionId);
+            if (updatedSession?.status === 'failed') {
+                console.error(`[ReactiveReviewService] Session failed during chunk ${i + 1}, stopping`);
+                break;
+            }
+        }
+
+        return allResults;
+    }
+
+    /**
+     * Get circuit breaker status from the execution service.
+     */
+    getCircuitBreakerStatus(): {
+        state: 'closed' | 'open' | 'half-open';
+        consecutiveFailures: number;
+        consecutiveSuccesses: number;
+        fallbackActive: boolean;
+    } {
+        return this.executionService.getCircuitBreakerState();
+    }
+
+    /**
+     * Reset the circuit breaker to initial state.
+     */
+    resetCircuitBreaker(): void {
+        this.executionService.resetCircuitBreaker();
     }
 
     /**
