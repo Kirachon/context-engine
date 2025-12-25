@@ -16,6 +16,7 @@ import { ContextServiceClient } from '../mcp/serviceClient.js';
 import { PlanningService } from '../mcp/services/planningService.js';
 import { ExecutionTrackingService, StepExecutor, StepExecutionResult } from '../mcp/services/executionTrackingService.js';
 import { PlanPersistenceService } from '../mcp/services/planPersistenceService.js';
+import { CodeReviewService } from '../mcp/services/codeReviewService.js';
 import { EnhancedPlanOutput } from '../mcp/types/planning.js';
 import {
     PRMetadata,
@@ -45,6 +46,9 @@ export interface StartReviewOptions {
 
     /** Enable verbose logging */
     verbose?: boolean;
+
+    /** Auto-execute the review in background after session creation (default: true) */
+    auto_execute?: boolean;
 }
 
 /**
@@ -558,9 +562,10 @@ export class ReactiveReviewService {
 
         try {
             // Create a wrapped executor that tracks activity
-            const wrappedExecutor: StepExecutor = async (step, context) => {
+            // Note: StepExecutor signature is (planId: string, stepNumber: number)
+            const wrappedExecutor: StepExecutor = async (planId, stepNumber) => {
                 this.touchSession(sessionId);
-                const result = await stepExecutor(step, context);
+                const result = await stepExecutor(planId, stepNumber);
                 this.touchSession(sessionId);
                 return result;
             };
@@ -649,6 +654,185 @@ export class ReactiveReviewService {
         }
 
         return allResults;
+    }
+
+    /**
+     * Execute review in background using the default step executor.
+     * This is called when auto_execute is enabled.
+     *
+     * @param sessionId Session ID to execute
+     * @param prMetadata PR metadata for creating file diffs
+     */
+    private async executeReviewInBackground(
+        sessionId: string,
+        prMetadata: PRMetadata
+    ): Promise<void> {
+        console.error(`[ReactiveReviewService] Starting background execution for session ${sessionId}`);
+
+        try {
+            // Create a default step executor that uses CodeReviewService
+            const stepExecutor = this.createDefaultStepExecutor(sessionId, prMetadata);
+
+            // Execute the review with chunked processing for large PRs
+            const chunkedConfig = getChunkedProcessingConfig();
+            const fileCount = prMetadata.changed_files.length;
+
+            let results: StepExecutionResult[];
+            if (chunkedConfig.enabled && fileCount > chunkedConfig.chunkThreshold) {
+                console.error(`[ReactiveReviewService] Using chunked execution for ${fileCount} files`);
+                results = await this.executeReviewChunked(sessionId, stepExecutor);
+            } else {
+                results = await this.executeReview(sessionId, stepExecutor);
+            }
+
+            console.error(`[ReactiveReviewService] Background execution completed for session ${sessionId}: ${results.length} steps, ${results.filter(r => r.success).length} successful`);
+        } catch (error) {
+            console.error(`[ReactiveReviewService] Background execution error for session ${sessionId}:`, error);
+
+            // Update session status to failed if not already
+            const session = this.sessions.get(sessionId);
+            if (session && session.status !== 'failed') {
+                session.status = 'failed';
+                session.error = error instanceof Error ? error.message : String(error);
+                session.updated_at = new Date().toISOString();
+            }
+        }
+    }
+
+    /**
+     * Create a default step executor that uses CodeReviewService to review files.
+     * Each step reviews a subset of the changed files based on the plan.
+     *
+     * @param sessionId Session ID for tracking
+     * @param prMetadata PR metadata containing the changed files
+     * @returns A StepExecutor function
+     */
+    private createDefaultStepExecutor(
+        sessionId: string,
+        prMetadata: PRMetadata
+    ): StepExecutor {
+        const codeReviewService = new CodeReviewService(this.contextClient);
+
+        return async (planId: string, stepNumber: number): Promise<{ success: boolean; error?: string; files_modified?: string[] }> => {
+            const startTime = Date.now();
+            console.error(`[ReactiveReviewService] Executing step ${stepNumber} for plan ${planId}`);
+
+            try {
+                // Get the plan and step
+                const plan = this.sessionPlans.get(sessionId);
+                if (!plan) {
+                    return { success: false, error: 'Plan not found in session' };
+                }
+
+                const step = plan.steps?.find(s => s.step_number === stepNumber);
+                if (!step) {
+                    return { success: false, error: `Step ${stepNumber} not found in plan` };
+                }
+
+                // Track activity
+                this.touchSession(sessionId);
+
+                // Determine which files this step should review
+                const filesToReview = this.getFilesForStep(step, prMetadata.changed_files);
+
+                if (filesToReview.length === 0) {
+                    console.error(`[ReactiveReviewService] Step ${stepNumber} has no files to review, marking as complete`);
+                    return { success: true, files_modified: [] };
+                }
+
+                console.error(`[ReactiveReviewService] Step ${stepNumber} reviewing ${filesToReview.length} files: ${filesToReview.slice(0, 3).join(', ')}${filesToReview.length > 3 ? '...' : ''}`);
+
+                // Generate a diff for the files in this step
+                // For now, we'll use a placeholder diff since actual git operations would require shell access
+                // In production, this would be replaced with actual git diff generation
+                const diffPlaceholder = this.generateFileDiffPlaceholder(filesToReview, prMetadata);
+
+                // Perform the code review
+                const reviewResult = await codeReviewService.reviewChanges({
+                    diff: diffPlaceholder,
+                    options: {
+                        categories: ['correctness', 'security', 'performance', 'maintainability'],
+                        max_findings: 10,
+                        confidence_threshold: 0.6,
+                    },
+                });
+
+                // Update session metrics
+                const findingsCount = this.sessionFindings.get(sessionId) || 0;
+                this.sessionFindings.set(sessionId, findingsCount + reviewResult.findings.length);
+
+                // Estimate tokens used (rough approximation)
+                const tokensUsed = this.sessionTokensUsed.get(sessionId) || 0;
+                const estimatedTokens = diffPlaceholder.length / 4; // Rough token estimate
+                this.sessionTokensUsed.set(sessionId, tokensUsed + estimatedTokens);
+
+                // Track activity after review
+                this.touchSession(sessionId);
+
+                const duration = Date.now() - startTime;
+                console.error(`[ReactiveReviewService] Step ${stepNumber} completed in ${duration}ms with ${reviewResult.findings.length} findings`);
+
+                return {
+                    success: true,
+                    files_modified: filesToReview,
+                };
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.error(`[ReactiveReviewService] Step ${stepNumber} failed: ${errorMessage}`);
+                return {
+                    success: false,
+                    error: errorMessage,
+                };
+            }
+        };
+    }
+
+    /**
+     * Get files relevant to a specific step based on step metadata.
+     */
+    private getFilesForStep(step: EnhancedPlanOutput['steps'][0], allFiles: string[]): string[] {
+        // If step has explicit files to modify/create, use those
+        const stepFiles = [
+            ...(step.files_to_modify?.map(f => f.path) || []),
+            ...(step.files_to_create?.map(f => f.path) || []),
+            ...(step.files_to_delete || []),
+        ];
+
+        if (stepFiles.length > 0) {
+            // Filter to only files that are in the changed files list
+            return stepFiles.filter(f => allFiles.includes(f));
+        }
+
+        // If no specific files, distribute all files evenly across steps
+        // This is a fallback for plans that don't specify files per step
+        const totalSteps = 12; // Default assumption
+        const stepIndex = (step.step_number || 1) - 1;
+        const filesPerStep = Math.ceil(allFiles.length / totalSteps);
+        const startIdx = stepIndex * filesPerStep;
+        const endIdx = Math.min(startIdx + filesPerStep, allFiles.length);
+
+        return allFiles.slice(startIdx, endIdx);
+    }
+
+    /**
+     * Generate a placeholder diff for the given files.
+     * In production, this would use actual git operations.
+     */
+    private generateFileDiffPlaceholder(files: string[], prMetadata: PRMetadata): string {
+        // Generate a placeholder diff that includes file paths
+        // The CodeReviewService will use this as context
+        const diffLines: string[] = [];
+
+        for (const file of files) {
+            diffLines.push(`diff --git a/${file} b/${file}`);
+            diffLines.push(`--- a/${file}`);
+            diffLines.push(`+++ b/${file}`);
+            diffLines.push(`@@ -1,1 +1,1 @@`);
+            diffLines.push(`-// Placeholder for actual file content`);
+            diffLines.push(`+// Modified in commit ${prMetadata.commit_hash.substring(0, 8)}`);
+        }
+
+        return diffLines.join('\n');
     }
 
     /**
