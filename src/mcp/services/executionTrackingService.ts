@@ -1070,8 +1070,27 @@ export class ExecutionTrackingService {
       if (readySteps.length === 0) {
         // Check if there are still running workers
         if (this.activeWorkers.size === 0) {
-          console.error(`[ExecutionTrackingService] No ready steps and no active workers - exiting loop`);
-          break; // All done
+          // Before exiting, verify all steps are actually complete
+          const allComplete = state.steps.every(step =>
+            step.status === 'completed' || step.status === 'skipped'
+          );
+
+          if (allComplete) {
+            console.error(`[ExecutionTrackingService] All ${state.steps.length} steps completed - exiting loop`);
+            break; // All done
+          } else {
+            // Some steps are stuck - log details and exit
+            const pending = state.steps.filter(s => s.status === 'pending').length;
+            const running = state.steps.filter(s => s.status === 'in_progress').length;
+            const completed = state.steps.filter(s => s.status === 'completed').length;
+            const failed = state.steps.filter(s => s.status === 'failed').length;
+            const skipped = state.steps.filter(s => s.status === 'skipped').length;
+
+            console.error(`[ExecutionTrackingService] WARNING: Execution stopping with incomplete steps`);
+            console.error(`[ExecutionTrackingService] Status: ${completed} completed, ${failed} failed, ${skipped} skipped, ${pending} pending, ${running} running`);
+            console.error(`[ExecutionTrackingService] ${pending} steps may have unmet dependencies or planning issues`);
+            break; // Exit anyway - steps are stuck
+          }
         }
         // Wait for at least one worker to complete
         await Promise.race(Array.from(this.activeWorkers.values()));
