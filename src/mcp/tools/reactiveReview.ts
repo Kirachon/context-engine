@@ -71,6 +71,15 @@ function getValidationPipeline(): ValidationPipeline {
     return cachedValidationPipeline;
 }
 
+function getPlanningService(serviceClient: ContextServiceClient): PlanningService {
+    // Ensure the reactive service is initialized first (which creates the planning service)
+    getReactiveReviewService(serviceClient);
+    if (!cachedPlanningService) {
+        cachedPlanningService = new PlanningService(serviceClient);
+    }
+    return cachedPlanningService;
+}
+
 // ============================================================================
 // Tool Argument Types
 // ============================================================================
@@ -132,6 +141,10 @@ export interface ValidateContentArgs {
 
 /**
  * Handle the reactive_review_pr tool call
+ *
+ * IMPORTANT: This now automatically starts step execution after creating the session.
+ * Previously, the session was created but execution was never started, causing
+ * sessions to stall at 0% progress.
  */
 export async function handleReactiveReviewPR(
     args: ReactiveReviewPRArgs,
@@ -174,21 +187,33 @@ export async function handleReactiveReviewPR(
             max_workers: args.max_workers,
         };
 
-        // Get service and start review
+        // Get services
         const service = getReactiveReviewService(serviceClient);
+        const planningService = getPlanningService(serviceClient);
+
+        // Start the review session (creates plan)
         const session = await service.startReactiveReview(prMetadata, options);
 
-        const elapsed = Date.now() - startTime;
-        console.error(`[reactive_review_pr] Session started in ${elapsed}ms: ${session.session_id}`);
+        const planCreationTime = Date.now() - startTime;
+        console.error(`[reactive_review_pr] Session created in ${planCreationTime}ms: ${session.session_id}`);
+        console.error(`[reactive_review_pr] Plan has ${session.total_steps} steps, starting execution...`);
 
+        // Create a step executor that uses the planning service
+        const stepExecutor = createDefaultStepExecutor(service, planningService, session.session_id);
+
+        // Start execution asynchronously (don't await - let it run in background)
+        // This prevents the MCP call from timing out while steps execute
+        executeReviewInBackground(service, session.session_id, stepExecutor);
+
+        const elapsed = Date.now() - startTime;
         return JSON.stringify({
             success: true,
             session_id: session.session_id,
             plan_id: session.plan_id,
-            status: session.status,
+            status: 'executing',
             total_steps: session.total_steps || 0,
             elapsed_ms: elapsed,
-            message: 'Reactive review session started. Use get_review_status to monitor progress.',
+            message: `Review session started with ${session.total_steps} steps. Execution running in background. Use get_review_status to monitor progress.`,
         }, null, 2);
 
     } catch (error) {
@@ -196,6 +221,72 @@ export async function handleReactiveReviewPR(
         console.error(`[reactive_review_pr] Failed: ${errorMessage}`);
         throw new Error(`Reactive review failed: ${errorMessage}`);
     }
+}
+
+/**
+ * Create a default step executor using the PlanningService
+ */
+function createDefaultStepExecutor(
+    service: ReactiveReviewService,
+    planningService: PlanningService,
+    sessionId: string
+): (planId: string, stepNumber: number) => Promise<{ success: boolean; error?: string; files_modified?: string[] }> {
+    return async (planId: string, stepNumber: number) => {
+        try {
+            console.error(`[reactive_review_pr] Executing step ${stepNumber} for plan ${planId}`);
+
+            // Get the plan from the session
+            const status = service.getReviewStatus(sessionId);
+            if (!status) {
+                return { success: false, error: 'Session not found' };
+            }
+
+            // Get the plan from the service
+            const plan = service.getSessionPlan(sessionId);
+            if (!plan) {
+                return { success: false, error: 'Plan not found for session' };
+            }
+
+            // Execute the step using the planning service
+            const result = await planningService.executeStep(plan, stepNumber);
+
+            console.error(`[reactive_review_pr] Step ${stepNumber} ${result.success ? 'completed' : 'failed'}: ${result.error || 'OK'}`);
+
+            // Extract files from generated_code if present
+            const filesModified = result.generated_code?.map(gc => gc.path) || [];
+
+            return {
+                success: result.success,
+                error: result.error,
+                files_modified: filesModified,
+            };
+        } catch (error) {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[reactive_review_pr] Step ${stepNumber} error: ${errorMessage}`);
+            return { success: false, error: errorMessage };
+        }
+    };
+}
+
+/**
+ * Execute the review in the background without blocking the MCP response
+ */
+function executeReviewInBackground(
+    service: ReactiveReviewService,
+    sessionId: string,
+    stepExecutor: (planId: string, stepNumber: number) => Promise<{ success: boolean; error?: string; files_modified?: string[] }>
+): void {
+    // Don't await - let it run in background
+    service.executeReview(sessionId, stepExecutor)
+        .then((results) => {
+            const succeeded = results.filter(r => r.success).length;
+            const failed = results.filter(r => !r.success).length;
+            console.error(`[reactive_review_pr] Background execution completed: ${succeeded} succeeded, ${failed} failed`);
+        })
+        .catch((error) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[reactive_review_pr] Background execution failed: ${errorMessage}`);
+        });
 }
 
 /**

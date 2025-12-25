@@ -602,6 +602,14 @@ export class ReactiveReviewService {
     }
 
     /**
+     * Get the plan associated with a session.
+     * Returns undefined if the session or plan is not found.
+     */
+    getSessionPlan(sessionId: string): EnhancedPlanOutput | undefined {
+        return this.sessionPlans.get(sessionId);
+    }
+
+    /**
      * Build the ReviewStatus object from session data.
      */
     private buildReviewStatus(sessionId: string, session: ReviewSession): ReviewStatus {
