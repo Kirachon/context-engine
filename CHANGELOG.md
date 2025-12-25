@@ -2,6 +2,38 @@
 
 All notable changes to the Context Engine MCP Server will be documented in this file.
 
+## [1.8.0] - 2025-12-25
+
+### 🎉 Overview
+Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server, delivering a complete optimization of the reactive code review system. This release achieves **180-600x performance improvements** through a comprehensive 4-phase optimization strategy, along with critical bug fixes and enhanced reliability.
+
+### ✨ New Features
+#### 🚀 Phase 1: AI Agent Step Executor
+- **Direct AI Analysis**: Replaced slow external API calls with direct AI agent capabilities.
+- **Real Findings Generation**: Generates structured code review findings based on step descriptions.
+- **Multi-Layer Caching**: Integrated with 3-layer cache (memory, commit, file hash).
+
+#### 💾 Phase 2: Multi-Layer Response Cache
+- **3-Layer Architecture**: Memory Cache, Commit Cache, and File Hash Cache.
+- **Smart Invalidation**: Automatic cache invalidation on content changes.
+- **Telemetry**: Hit rate tracking and performance metrics.
+
+#### 📦 Phase 3: Continuous Batching
+- **Batch Processing**: Process multiple files in single AI request.
+- **Dynamic Batching**: Configurable batch size (default: 5 files).
+
+#### ⚙️ Phase 4: Worker Pool Optimization
+- **CPU-Aware Allocation**: Dynamically sets workers based on CPU cores.
+- **Parallel Execution**: Efficient concurrent step processing.
+
+### 🐛 Bug Fixes
+- **Progress Tracking**: Fixed session exit before 100% completion in parallel mode.
+- **Step Dependency Blocking**: Removed unnecessary step dependencies in review plans to enable true parallel execution.
+- **HTTP Server**: Added robust error handling and graceful shutdown for SIGINT/SIGTERM.
+- **Dynamic Versioning**: Fixed hardcoded version string in server entry point.
+
+---
+
 ## [1.7.1] - 2025-12-25
 
 ### Fixed

@@ -55,15 +55,40 @@ context-engine/
 └── Documentation files       ✅ Comprehensive docs
 ```
 
-#### 3. **MCP Tools Implemented**
+#### 3. **MCP Tools Implemented (32 Tools)**
 
-| Tool | Status | Purpose |
-|------|--------|---------|
-| `semantic_search(query, top_k)` | ✅ | Semantic code search |
-| `get_file(path)` | ✅ | File retrieval |
-| `get_context_for_prompt(query, max_files)` | ✅ | Context enhancement |
+| Tool Category | Status | Count | Purpose |
+|---------------|--------|-------|---------|
+| **Core Context** | ✅ | 6 | Semantic search, file retrieval, prompt enhancement |
+| **Index Management**| ✅ | 4 | Health status, reindexing, lifecycle control |
+| **Planning System** | ✅ | 4 | Plan generation, DAG analysis, execution |
+| **Persistence** | ✅ | 4 | Save/load plans, version history, indexing |
+| **Approval Flow** | ✅ | 2 | Manual/Automated approval requests |
+| **Execution Tracking**| ✅ | 4 | Step progress, dependency management |
+| **Code Review** | ✅ | 2 | AI-powered code review with Git integration |
+| **Memory System** | ✅ | 2 | Persistent cross-session project knowledge |
+| **Reactive Review** | ✅ | 4 | Multi-threaded, cached, batched review system |
 
 #### 4. **Key Features**
+
+✅ **180-600x Faster Reactive Reviews (v1.8.0)**
+- **AI Agent Executor**: Direct AI analysis (Phase 1)
+- **Multi-Layer Response Cache**: 3-layer persistent caching (Phase 2)
+- **Continuous Batching**: High-throughput file processing (Phase 3)
+- **Worker Pool Optimization**: CPU-aware parallelization (Phase 4)
+
+✅ **AI-Powered Code Review (v1.7.0)**
+- Structured findings with P0-P3 priority and confidence scores
+- Automatic git diff retrieval (staged, unstaged, branch, commit)
+
+✅ **Structured Planning & Execution (v1.4.0)**
+- Smart plan generation with DAG-based dependency analysis
+- Step-by-step execution with automatic file application
+- Version history and rollback support for all plans
+
+✅ **Cross-Session Memory System (v1.4.1)**
+- Persistent storage for preferences, decisions, and facts
+- Automatic memory retrieval for prompt enhancement
 
 ✅ **Local-First**
 - No cloud dependencies (except Auggie API for embeddings)

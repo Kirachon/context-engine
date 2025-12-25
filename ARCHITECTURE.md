@@ -96,10 +96,24 @@ generateDiff(planId, fromVersion, toVersion): PlanDiff
 rollback(planId, version, reason): EnhancedPlanOutput
 ```
 
+#### ReactiveReviewService (`ReactiveReviewService.ts`) - v1.7.1+
+```typescript
+createReviewSession(metadata): string
+startReview(sessionId): void
+getReviewStatus(sessionId): ReviewStatus
+pauseReview(sessionId): void
+resumeReview(sessionId): void
+```
+
+#### CodeReviewService (`services/CodeReviewService.ts`) - v1.7.0+
+```typescript
+reviewChanges(diff, options): ReviewResult
+reviewGitDiff(options): ReviewResult
+```
+
+
 **Context Bundle Format**:
 ```typescript
-{
-  summary: string;
   files: Array<{
     path: string;
     snippets: Array<{
@@ -199,6 +213,17 @@ internalPromptEnhancer(prompt, serviceClient): string
 26. **view_history** - View plan version history
 27. **compare_plan_versions** - Compare versions
 28. **rollback_plan** - Rollback to previous version
+
+#### Code Review Tools (v1.7.0+)
+29. **review_changes** - AI-powered code review from diff
+30. **review_git_diff** - Automatic git review
+
+#### Reactive Review Tools (v1.7.1 - v1.8.0)
+31. **reactive_review_pr** - Start reactive review session
+32. **get_review_status** - Track reactive progress
+33. **pause_review** - Pause active session
+34. **resume_review** - Resume session
+35. **get_review_telemetry** - Performance metrics
 
 **Example Tool Definitions**:
 

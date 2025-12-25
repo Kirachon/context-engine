@@ -410,6 +410,15 @@ Try the new planning features:
 - "Start executing step 1 of plan_abc123"
 - "What's the progress on plan_abc123?"
 
+### Reactive Code Review (v1.8.0+)
+
+Try the high-performance reactive review:
+
+- "Perform a reactive code review on my staged changes"
+- "Start a reactive search and review session for the login-feature branch"
+- "Show me the status of the active reactive review"
+- "What is the cache hit rate for the current review?"
+
 ## Troubleshooting
 
 ### Tools not showing up in /mcp
