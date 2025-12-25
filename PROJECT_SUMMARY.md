@@ -55,7 +55,7 @@ context-engine/
 └── Documentation files       ✅ Comprehensive docs
 ```
 
-#### 3. **MCP Tools Implemented (32 Tools)**
+#### 3. **MCP Tools Implemented (38 Tools)**
 
 | Tool Category | Status | Count | Purpose |
 |---------------|--------|-------|---------|
@@ -65,9 +65,10 @@ context-engine/
 | **Persistence** | ✅ | 4 | Save/load plans, version history, indexing |
 | **Approval Flow** | ✅ | 2 | Manual/Automated approval requests |
 | **Execution Tracking**| ✅ | 4 | Step progress, dependency management |
-| **Code Review** | ✅ | 2 | AI-powered code review with Git integration |
+| **Plan History** | ✅ | 3 | Versioning, diffs, rollbacks |
+| **Code Review** | ✅ | 2 | AI-powered code review from git diffs |
 | **Memory System** | ✅ | 2 | Persistent cross-session project knowledge |
-| **Reactive Review** | ✅ | 4 | Multi-threaded, cached, batched review system |
+| **Reactive Review** | ✅ | 7 | Multi-threaded, cached, batched review system |
 
 #### 4. **Key Features**
 

@@ -469,7 +469,7 @@ export class ContextEngineMCPServer {
     console.error('Transport: stdio');
     console.error(`Watcher: ${this.enableWatcher ? 'enabled' : 'disabled'}`);
     console.error('');
-    console.error('Available tools (36 total):');
+    console.error('Available tools (38 total):');
     console.error('  Core Context:');
     console.error('    - index_workspace, codebase_retrieval, semantic_search');
     console.error('    - get_file, get_context_for_prompt, enhance_prompt');

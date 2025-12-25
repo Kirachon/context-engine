@@ -168,7 +168,7 @@ internalPromptEnhancer(prompt, serviceClient): string
 - ❌ Retrieval logic
 - ❌ Formatting decisions
 
-**Tools Exposed** (28 total):
+**Tools Exposed** (38 total):
 
 #### Core Context Tools
 1. **index_workspace** - Index workspace files
@@ -177,12 +177,12 @@ internalPromptEnhancer(prompt, serviceClient): string
 4. **get_file** - Retrieve file contents
 5. **get_context_for_prompt** - Get context bundle
 6. **enhance_prompt** - AI-powered prompt enhancement
+7. **tool_manifest** - List available tools
 
 #### Index Management Tools
-7. **index_status** - View index health
-8. **reindex_workspace** - Rebuild index
-9. **clear_index** - Clear index state
-10. **tool_manifest** - List available tools
+8. **index_status** - View index health
+9. **reindex_workspace** - Rebuild index
+10. **clear_index** - Clear index state
 
 #### Memory Tools (v1.4.1)
 11. **add_memory** - Store persistent memory
@@ -192,38 +192,41 @@ internalPromptEnhancer(prompt, serviceClient): string
 13. **create_plan** - Generate implementation plans
 14. **refine_plan** - Refine existing plans
 15. **visualize_plan** - Generate diagrams
+16. **execute_plan** - Execute plan steps (automated)
 
 #### Plan Persistence Tools (v1.4.0+)
-16. **save_plan** - Save plans to storage
-17. **load_plan** - Load saved plans
-18. **list_plans** - List plans with filters
-19. **delete_plan** - Delete plans
+17. **save_plan** - Save plans to storage
+18. **load_plan** - Load saved plans
+19. **list_plans** - List plans with filters
+20. **delete_plan** - Delete plans
 
 #### Approval Workflow Tools (v1.4.0+)
-20. **request_approval** - Create approval requests
-21. **respond_approval** - Respond to approvals
+21. **request_approval** - Create approval requests
+22. **respond_approval** - Respond to approvals
 
 #### Execution Tracking Tools (v1.4.0+)
-22. **start_step** - Mark step as in-progress
-23. **complete_step** - Mark step as completed
-24. **fail_step** - Mark step as failed
-25. **view_progress** - View execution progress
+23. **start_step** - Mark step as in-progress
+24. **complete_step** - Mark step as completed
+25. **fail_step** - Mark step as failed
+26. **view_progress** - View execution progress
 
 #### History & Versioning Tools (v1.4.0+)
-26. **view_history** - View plan version history
-27. **compare_plan_versions** - Compare versions
-28. **rollback_plan** - Rollback to previous version
+27. **view_history** - View plan version history
+28. **compare_plan_versions** - Compare versions
+29. **rollback_plan** - Rollback to previous version
 
 #### Code Review Tools (v1.7.0+)
-29. **review_changes** - AI-powered code review from diff
-30. **review_git_diff** - Automatic git review
+30. **review_changes** - AI-powered code review from diff
+31. **review_git_diff** - Automatic git review
 
 #### Reactive Review Tools (v1.7.1 - v1.8.0)
-31. **reactive_review_pr** - Start reactive review session
-32. **get_review_status** - Track reactive progress
-33. **pause_review** - Pause active session
-34. **resume_review** - Resume session
-35. **get_review_telemetry** - Performance metrics
+32. **reactive_review_pr** - Start reactive review session
+33. **get_review_status** - Track reactive progress
+34. **pause_review** - Pause active session
+35. **resume_review** - Resume session
+36. **get_review_telemetry** - Performance metrics
+37. **scrub_secrets** - Remove secrets from content
+38. **validate_content** - Multi-tier content validation
 
 **Example Tool Definitions**:
 
