@@ -27,6 +27,8 @@ import {
     type PRMetadata,
     type StartReviewOptions,
 } from '../../reactive/index.js';
+import { createAIAgentStepExecutor } from '../../reactive/executors/AIAgentStepExecutor.js';
+import { createBatchReviewExecutor } from '../../reactive/executors/BatchReviewExecutor.js';
 
 // ============================================================================
 // Service Instance Reuse (Lazy Singleton Pattern)
@@ -198,8 +200,24 @@ export async function handleReactiveReviewPR(
         console.error(`[reactive_review_pr] Session created in ${planCreationTime}ms: ${session.session_id}`);
         console.error(`[reactive_review_pr] Plan has ${session.total_steps} steps, starting execution...`);
 
-        // Create a step executor that uses the planning service
-        const stepExecutor = createDefaultStepExecutor(service, planningService, session.session_id);
+        // Select executor based on configuration
+        const config = getConfig();
+        const stepExecutor = config.enable_batching
+            ? createBatchReviewExecutor(service, session.session_id, {
+                max_batch_size: config.batch_size,
+            })
+            : config.use_ai_agent_executor
+                ? createAIAgentStepExecutor(service, session.session_id)
+                : createDefaultStepExecutor(service, planningService, session.session_id);
+
+        // Log executor mode
+        if (config.enable_batching) {
+            console.error(`[reactive_review_pr] Using Batch Review Executor (fastest mode, batch_size=${config.batch_size})`);
+        } else if (config.use_ai_agent_executor) {
+            console.error('[reactive_review_pr] Using AI Agent Step Executor (fast mode)');
+        } else {
+            console.error('[reactive_review_pr] Using Default Step Executor (API mode)');
+        }
 
         // Start execution asynchronously (don't await - let it run in background)
         // This prevents the MCP call from timing out while steps execute
