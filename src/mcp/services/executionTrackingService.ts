@@ -250,6 +250,8 @@ export class ExecutionTrackingService {
     // Safely handle undefined steps array - ensure it's an array before calling map
     const planSteps = Array.isArray(plan.steps) ? plan.steps : [];
 
+    console.error(`[ExecutionTrackingService] Initializing execution for plan ${plan.id} with ${planSteps.length} steps`);
+
     const steps: StepExecutionState[] = planSteps.map(step => ({
       step_number: step.step_number || 0,
       step_id: step.id || `step_${step.step_number || 'unknown'}`,
@@ -269,6 +271,18 @@ export class ExecutionTrackingService {
 
     // Calculate initial ready steps (steps with no dependencies)
     this.updateReadySteps(state, plan);
+
+    console.error(`[ExecutionTrackingService] After initialization: ${state.ready_steps.length} ready steps, ${state.blocked_steps.length} blocked steps`);
+    if (state.ready_steps.length > 0) {
+      console.error(`[ExecutionTrackingService] Ready steps: [${state.ready_steps.join(', ')}]`);
+    }
+    if (state.ready_steps.length === 0 && planSteps.length > 0) {
+      // Debug: Check why no steps are ready
+      for (const step of planSteps.slice(0, 3)) {
+        const dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+        console.error(`[ExecutionTrackingService] Step ${step.step_number} depends_on: [${dependsOn.join(', ')}]`);
+      }
+    }
 
     this.executionStates.set(state.plan_id, state);
     return state;
@@ -1036,6 +1050,18 @@ export class ExecutionTrackingService {
 
     const cbState = this.getCircuitBreakerState();
     console.error(`[ExecutionTrackingService] Starting parallel execution for plan ${planId} (circuit breaker: ${cbState.state})`);
+    console.error(`[ExecutionTrackingService] Initial state: ${state.ready_steps.length} ready, ${state.steps.length} total steps`);
+
+    // Check for immediate exit condition - no ready steps from the start
+    if (state.ready_steps.length === 0 && state.steps.length > 0) {
+      console.error(`[ExecutionTrackingService] WARNING: No steps are ready at start! This may indicate a dependency cycle or all steps have dependencies.`);
+      // Log step dependencies for debugging
+      const planSteps = plan.steps || [];
+      for (const step of planSteps.slice(0, 5)) {
+        const dependsOn = Array.isArray(step.depends_on) ? step.depends_on : [];
+        console.error(`[ExecutionTrackingService]   Step ${step.step_number} depends on: [${dependsOn.join(', ')}]`);
+      }
+    }
 
     // Process steps until all are complete or aborted
     while (!this.abortedPlans.has(planId)) {
@@ -1044,6 +1070,7 @@ export class ExecutionTrackingService {
       if (readySteps.length === 0) {
         // Check if there are still running workers
         if (this.activeWorkers.size === 0) {
+          console.error(`[ExecutionTrackingService] No ready steps and no active workers - exiting loop`);
           break; // All done
         }
         // Wait for at least one worker to complete
