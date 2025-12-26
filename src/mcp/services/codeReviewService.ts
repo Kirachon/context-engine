@@ -28,6 +28,7 @@ import {
   ReviewCategory,
   ReviewMetadata,
 } from '../types/codeReview.js';
+import { parseUnifiedDiff } from '../../reviewer/diff/parse.js';
 import {
   CODE_REVIEW_SYSTEM_PROMPT,
   buildCodeReviewPrompt,
@@ -165,33 +166,7 @@ export class CodeReviewService {
    * Parse a unified diff into a structured format
    */
   parseDiff(diffContent: string): ParsedDiff {
-    const files: ParsedDiffFile[] = [];
-    let totalAdded = 0;
-    let totalRemoved = 0;
-
-    // Split by file headers
-    const fileRegex = /^diff --git a\/(.+?) b\/(.+?)$/gm;
-    const matches = [...diffContent.matchAll(fileRegex)];
-
-    for (let i = 0; i < matches.length; i++) {
-      const match = matches[i];
-      const oldPath = match[1];
-      const newPath = match[2];
-      const startIdx = match.index!;
-      const endIdx = matches[i + 1]?.index ?? diffContent.length;
-      const fileSection = diffContent.slice(startIdx, endIdx);
-
-      const file = this.parseFileSection(fileSection, oldPath, newPath);
-      files.push(file);
-      totalAdded += file.hunks.reduce((sum, h) => sum + h.lines.filter(l => l.type === 'add').length, 0);
-      totalRemoved += file.hunks.reduce((sum, h) => sum + h.lines.filter(l => l.type === 'remove').length, 0);
-    }
-
-    return {
-      files,
-      lines_added: totalAdded,
-      lines_removed: totalRemoved,
-    };
+    return parseUnifiedDiff(diffContent);
   }
 
   /**

@@ -36,7 +36,8 @@
     "cors": "^2.8.5",
     "express": "^5.2.1",
     "minimatch": "^10.1.1",
-    "tsx": "^4.21.0"
+    "tsx": "^4.21.0",
+    "yaml": "^2.3.0"
   },
   "devDependencies": {
     "@types/chokidar": "^2.1.3",

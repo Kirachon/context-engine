@@ -11,7 +11,7 @@ export interface ToolManifestArgs {
 }
 
 const manifest = {
-  version: '1.7.0',
+  version: '1.8.0',
   capabilities: [
     'semantic_search',
     'file_retrieval',
@@ -26,6 +26,7 @@ const manifest = {
     'execution_tracking',
     'version_history',
     'code_review',
+    'enterprise_review',
   ],
   tools: [
     // Core Context Tools
@@ -64,6 +65,8 @@ const manifest = {
     // Code Review Tools (v1.7.0)
     'review_changes',
     'review_git_diff',
+    // Enterprise Review (v1.8.0)
+    'review_diff',
   ],
   features: {
     planning: {
@@ -124,6 +127,17 @@ const manifest = {
         'Actionable fix suggestions',
         'Git integration (automatic diff retrieval)',
         'Support for staged, unstaged, branch, and commit diffs',
+      ],
+    },
+    enterprise_review: {
+      description: 'Deterministic diff-first preflight review with risk scoring',
+      version: '1.8.0',
+      tools: ['review_diff'],
+      features: [
+        'Risk scoring (1-5) based on deterministic preflight',
+        'Change classification (feature/bugfix/refactor/infra/docs)',
+        'Hotspot detection for sensitive areas',
+        'Structured JSON output suitable for CI/IDE integrations',
       ],
     },
   },
