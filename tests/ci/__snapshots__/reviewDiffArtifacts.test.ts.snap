@@ -1,0 +1,847 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable artifacts for a PASS case (no invariant violations): [PASS/invariants-present] review_diff.md 1`] = `
+"## Code Review Summary
+
+- Risk: **4/5**
+- Classification: **feature**
+- CI gate: **PASS**
+
+Classified as feature. Risk 4/5. 1 files changed (+1/-1). 2 deterministic findings.
+
+## Findings
+
+- **HIGH** \`PRE002\` (architecture) at \`src/a.ts:1\`: Possible public API surface change detected
+- **MEDIUM** \`PRE001\` (reliability) at \`src/a.ts:1\`: No tests appear to be touched by this change"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable artifacts for a PASS case (no invariant violations): [PASS/invariants-present] review_diff.sarif 1`] = `
+"{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "context-engine-review",
+          "version": "1.9.0",
+          "rules": [
+            {
+              "id": "PRE001",
+              "name": "PRE001",
+              "shortDescription": {
+                "text": "No tests appear to be touched by this change"
+              },
+              "fullDescription": {
+                "text": "Add or update tests covering the modified behavior, or justify why no tests are needed."
+              },
+              "properties": {
+                "category": "reliability",
+                "severity": "MEDIUM",
+                "confidence": 0.95
+              }
+            },
+            {
+              "id": "PRE002",
+              "name": "PRE002",
+              "shortDescription": {
+                "text": "Possible public API surface change detected"
+              },
+              "fullDescription": {
+                "text": "Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+              },
+              "properties": {
+                "category": "architecture",
+                "severity": "HIGH",
+                "confidence": 0.9
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "PRE001",
+          "level": "warning",
+          "message": {
+            "text": "No tests appear to be touched by this change\\n\\nImpact: Risk of regressions is higher without test changes or additions.\\n\\nRecommendation: Add or update tests covering the modified behavior, or justify why no tests are needed."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "id": "PRE001",
+            "category": "reliability",
+            "severity": "MEDIUM",
+            "confidence": 0.95
+          }
+        },
+        {
+          "ruleId": "PRE002",
+          "level": "error",
+          "message": {
+            "text": "Possible public API surface change detected\\n\\nImpact: Downstream clients may break if the API change is not backward compatible.\\n\\nRecommendation: Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "id": "PRE002",
+            "category": "architecture",
+            "severity": "HIGH",
+            "confidence": 0.9
+          }
+        }
+      ]
+    }
+  ]
+}"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable artifacts for a PASS case (no invariant violations): [PASS/invariants-present] review_diff_result.json (normalized) 1`] = `
+"{
+  "risk_score": 4,
+  "classification": "feature",
+  "hotspots": [],
+  "summary": "Classified as feature. Risk 4/5. 1 files changed (+1/-1). 2 deterministic findings.",
+  "findings": [
+    {
+      "id": "PRE001",
+      "severity": "MEDIUM",
+      "category": "reliability",
+      "confidence": 0.95,
+      "title": "No tests appear to be touched by this change",
+      "evidence": [
+        "changed_files: src/a.ts"
+      ],
+      "impact": "Risk of regressions is higher without test changes or additions.",
+      "recommendation": "Add or update tests covering the modified behavior, or justify why no tests are needed.",
+      "location": {
+        "file": "src/a.ts",
+        "startLine": 1,
+        "endLine": 1
+      }
+    },
+    {
+      "id": "PRE002",
+      "severity": "HIGH",
+      "category": "architecture",
+      "confidence": 0.9,
+      "title": "Possible public API surface change detected",
+      "evidence": [
+        "Detected export-related changes or updates to entry/tool registration paths."
+      ],
+      "impact": "Downstream clients may break if the API change is not backward compatible.",
+      "recommendation": "Review API compatibility, update documentation, and ensure semantic versioning expectations are met.",
+      "location": {
+        "file": "src/a.ts",
+        "startLine": 1,
+        "endLine": 1
+      }
+    }
+  ],
+  "should_fail": false,
+  "fail_reasons": [],
+  "stats": {
+    "files_changed": 1,
+    "lines_added": 1,
+    "lines_removed": 1,
+    "deterministic_checks_executed": 5,
+    "invariants_executed": 1,
+    "static_analyzers_executed": 0,
+    "llm_passes_executed": 0,
+    "llm_findings_added": 0
+  },
+  "metadata": {
+    "tool_version": "1.9.0",
+    "warnings": []
+  },
+  "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "version": "2.1.0",
+    "runs": [
+      {
+        "tool": {
+          "driver": {
+            "name": "context-engine-review",
+            "version": "1.9.0",
+            "rules": [
+              {
+                "id": "PRE001",
+                "name": "PRE001",
+                "shortDescription": {
+                  "text": "No tests appear to be touched by this change"
+                },
+                "fullDescription": {
+                  "text": "Add or update tests covering the modified behavior, or justify why no tests are needed."
+                },
+                "properties": {
+                  "category": "reliability",
+                  "severity": "MEDIUM",
+                  "confidence": 0.95
+                }
+              },
+              {
+                "id": "PRE002",
+                "name": "PRE002",
+                "shortDescription": {
+                  "text": "Possible public API surface change detected"
+                },
+                "fullDescription": {
+                  "text": "Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+                },
+                "properties": {
+                  "category": "architecture",
+                  "severity": "HIGH",
+                  "confidence": 0.9
+                }
+              }
+            ]
+          }
+        },
+        "results": [
+          {
+            "ruleId": "PRE001",
+            "level": "warning",
+            "message": {
+              "text": "No tests appear to be touched by this change\\n\\nImpact: Risk of regressions is higher without test changes or additions.\\n\\nRecommendation: Add or update tests covering the modified behavior, or justify why no tests are needed."
+            },
+            "locations": [
+              {
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "src/a.ts"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "id": "PRE001",
+              "category": "reliability",
+              "severity": "MEDIUM",
+              "confidence": 0.95
+            }
+          },
+          {
+            "ruleId": "PRE002",
+            "level": "error",
+            "message": {
+              "text": "Possible public API surface change detected\\n\\nImpact: Downstream clients may break if the API change is not backward compatible.\\n\\nRecommendation: Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+            },
+            "locations": [
+              {
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "src/a.ts"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "id": "PRE002",
+              "category": "architecture",
+              "severity": "HIGH",
+              "confidence": 0.9
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "markdown": "## Code Review Summary\\n\\n- Risk: **4/5**\\n- Classification: **feature**\\n- CI gate: **PASS**\\n\\nClassified as feature. Risk 4/5. 1 files changed (+1/-1). 2 deterministic findings.\\n\\n## Findings\\n\\n- **HIGH** \`PRE002\` (architecture) at \`src/a.ts:1\`: Possible public API surface change detected\\n- **MEDIUM** \`PRE001\` (reliability) at \`src/a.ts:1\`: No tests appear to be touched by this change"
+}"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable artifacts when no invariants file exists (invariants skipped): [PASS/no-invariants] review_diff.md 1`] = `
+"## Code Review Summary
+
+- Risk: **4/5**
+- Classification: **feature**
+- CI gate: **PASS**
+
+Classified as feature. Risk 4/5. 1 files changed (+1/-1). 2 deterministic findings.
+
+## Findings
+
+- **HIGH** \`PRE002\` (architecture) at \`src/a.ts:1\`: Possible public API surface change detected
+- **MEDIUM** \`PRE001\` (reliability) at \`src/a.ts:1\`: No tests appear to be touched by this change"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable artifacts when no invariants file exists (invariants skipped): [PASS/no-invariants] review_diff.sarif 1`] = `
+"{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "context-engine-review",
+          "version": "1.9.0",
+          "rules": [
+            {
+              "id": "PRE001",
+              "name": "PRE001",
+              "shortDescription": {
+                "text": "No tests appear to be touched by this change"
+              },
+              "fullDescription": {
+                "text": "Add or update tests covering the modified behavior, or justify why no tests are needed."
+              },
+              "properties": {
+                "category": "reliability",
+                "severity": "MEDIUM",
+                "confidence": 0.95
+              }
+            },
+            {
+              "id": "PRE002",
+              "name": "PRE002",
+              "shortDescription": {
+                "text": "Possible public API surface change detected"
+              },
+              "fullDescription": {
+                "text": "Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+              },
+              "properties": {
+                "category": "architecture",
+                "severity": "HIGH",
+                "confidence": 0.9
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "PRE001",
+          "level": "warning",
+          "message": {
+            "text": "No tests appear to be touched by this change\\n\\nImpact: Risk of regressions is higher without test changes or additions.\\n\\nRecommendation: Add or update tests covering the modified behavior, or justify why no tests are needed."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "id": "PRE001",
+            "category": "reliability",
+            "severity": "MEDIUM",
+            "confidence": 0.95
+          }
+        },
+        {
+          "ruleId": "PRE002",
+          "level": "error",
+          "message": {
+            "text": "Possible public API surface change detected\\n\\nImpact: Downstream clients may break if the API change is not backward compatible.\\n\\nRecommendation: Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "id": "PRE002",
+            "category": "architecture",
+            "severity": "HIGH",
+            "confidence": 0.9
+          }
+        }
+      ]
+    }
+  ]
+}"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable artifacts when no invariants file exists (invariants skipped): [PASS/no-invariants] review_diff_result.json (normalized) 1`] = `
+"{
+  "risk_score": 4,
+  "classification": "feature",
+  "hotspots": [],
+  "summary": "Classified as feature. Risk 4/5. 1 files changed (+1/-1). 2 deterministic findings.",
+  "findings": [
+    {
+      "id": "PRE001",
+      "severity": "MEDIUM",
+      "category": "reliability",
+      "confidence": 0.95,
+      "title": "No tests appear to be touched by this change",
+      "evidence": [
+        "changed_files: src/a.ts"
+      ],
+      "impact": "Risk of regressions is higher without test changes or additions.",
+      "recommendation": "Add or update tests covering the modified behavior, or justify why no tests are needed.",
+      "location": {
+        "file": "src/a.ts",
+        "startLine": 1,
+        "endLine": 1
+      }
+    },
+    {
+      "id": "PRE002",
+      "severity": "HIGH",
+      "category": "architecture",
+      "confidence": 0.9,
+      "title": "Possible public API surface change detected",
+      "evidence": [
+        "Detected export-related changes or updates to entry/tool registration paths."
+      ],
+      "impact": "Downstream clients may break if the API change is not backward compatible.",
+      "recommendation": "Review API compatibility, update documentation, and ensure semantic versioning expectations are met.",
+      "location": {
+        "file": "src/a.ts",
+        "startLine": 1,
+        "endLine": 1
+      }
+    }
+  ],
+  "should_fail": false,
+  "fail_reasons": [],
+  "stats": {
+    "files_changed": 1,
+    "lines_added": 1,
+    "lines_removed": 1,
+    "deterministic_checks_executed": 5,
+    "invariants_executed": 0,
+    "static_analyzers_executed": 0,
+    "llm_passes_executed": 0,
+    "llm_findings_added": 0
+  },
+  "metadata": {
+    "tool_version": "1.9.0",
+    "warnings": []
+  },
+  "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "version": "2.1.0",
+    "runs": [
+      {
+        "tool": {
+          "driver": {
+            "name": "context-engine-review",
+            "version": "1.9.0",
+            "rules": [
+              {
+                "id": "PRE001",
+                "name": "PRE001",
+                "shortDescription": {
+                  "text": "No tests appear to be touched by this change"
+                },
+                "fullDescription": {
+                  "text": "Add or update tests covering the modified behavior, or justify why no tests are needed."
+                },
+                "properties": {
+                  "category": "reliability",
+                  "severity": "MEDIUM",
+                  "confidence": 0.95
+                }
+              },
+              {
+                "id": "PRE002",
+                "name": "PRE002",
+                "shortDescription": {
+                  "text": "Possible public API surface change detected"
+                },
+                "fullDescription": {
+                  "text": "Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+                },
+                "properties": {
+                  "category": "architecture",
+                  "severity": "HIGH",
+                  "confidence": 0.9
+                }
+              }
+            ]
+          }
+        },
+        "results": [
+          {
+            "ruleId": "PRE001",
+            "level": "warning",
+            "message": {
+              "text": "No tests appear to be touched by this change\\n\\nImpact: Risk of regressions is higher without test changes or additions.\\n\\nRecommendation: Add or update tests covering the modified behavior, or justify why no tests are needed."
+            },
+            "locations": [
+              {
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "src/a.ts"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "id": "PRE001",
+              "category": "reliability",
+              "severity": "MEDIUM",
+              "confidence": 0.95
+            }
+          },
+          {
+            "ruleId": "PRE002",
+            "level": "error",
+            "message": {
+              "text": "Possible public API surface change detected\\n\\nImpact: Downstream clients may break if the API change is not backward compatible.\\n\\nRecommendation: Review API compatibility, update documentation, and ensure semantic versioning expectations are met."
+            },
+            "locations": [
+              {
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "src/a.ts"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "id": "PRE002",
+              "category": "architecture",
+              "severity": "HIGH",
+              "confidence": 0.9
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "markdown": "## Code Review Summary\\n\\n- Risk: **4/5**\\n- Classification: **feature**\\n- CI gate: **PASS**\\n\\nClassified as feature. Risk 4/5. 1 files changed (+1/-1). 2 deterministic findings.\\n\\n## Findings\\n\\n- **HIGH** \`PRE002\` (architecture) at \`src/a.ts:1\`: Possible public API surface change detected\\n- **MEDIUM** \`PRE001\` (reliability) at \`src/a.ts:1\`: No tests appear to be touched by this change"
+}"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable review_diff_result.json + sarif + markdown for a simple invariant violation: [FAIL/invariant] review_diff.md 1`] = `
+"## Code Review Summary
+
+- Risk: **2/5**
+- Classification: **feature**
+- CI gate: **FAIL**
+
+Classified as feature. Risk 2/5. 1 files changed (+1/-0). 2 deterministic findings.
+
+## Findings
+
+- **CRITICAL** \`SEC001\` (security) at \`src/a.ts:1\`: No eval() usage in source code
+- **MEDIUM** \`PRE001\` (reliability) at \`src/a.ts:1\`: No tests appear to be touched by this change
+
+## CI Gate Reasons
+
+- CRITICAL SEC001: No eval() usage in source code"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable review_diff_result.json + sarif + markdown for a simple invariant violation: [FAIL/invariant] review_diff.sarif 1`] = `
+"{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "version": "2.1.0",
+  "runs": [
+    {
+      "tool": {
+        "driver": {
+          "name": "context-engine-review",
+          "version": "1.9.0",
+          "rules": [
+            {
+              "id": "SEC001",
+              "name": "SEC001",
+              "shortDescription": {
+                "text": "No eval() usage in source code"
+              },
+              "fullDescription": {
+                "text": "Refactor the change to comply with the invariant or update the policy intentionally."
+              },
+              "properties": {
+                "category": "security",
+                "severity": "CRITICAL",
+                "confidence": 0.95
+              }
+            },
+            {
+              "id": "PRE001",
+              "name": "PRE001",
+              "shortDescription": {
+                "text": "No tests appear to be touched by this change"
+              },
+              "fullDescription": {
+                "text": "Add or update tests covering the modified behavior, or justify why no tests are needed."
+              },
+              "properties": {
+                "category": "reliability",
+                "severity": "MEDIUM",
+                "confidence": 0.95
+              }
+            }
+          ]
+        }
+      },
+      "results": [
+        {
+          "ruleId": "SEC001",
+          "level": "error",
+          "message": {
+            "text": "No eval() usage in source code\\n\\nImpact: A project invariant was violated by newly added code.\\n\\nRecommendation: Refactor the change to comply with the invariant or update the policy intentionally."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "id": "SEC001",
+            "category": "security",
+            "severity": "CRITICAL",
+            "confidence": 0.95
+          }
+        },
+        {
+          "ruleId": "PRE001",
+          "level": "warning",
+          "message": {
+            "text": "No tests appear to be touched by this change\\n\\nImpact: Risk of regressions is higher without test changes or additions.\\n\\nRecommendation: Add or update tests covering the modified behavior, or justify why no tests are needed."
+          },
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "src/a.ts"
+                },
+                "region": {
+                  "startLine": 1,
+                  "endLine": 1
+                }
+              }
+            }
+          ],
+          "properties": {
+            "id": "PRE001",
+            "category": "reliability",
+            "severity": "MEDIUM",
+            "confidence": 0.95
+          }
+        }
+      ]
+    }
+  ]
+}"
+`;
+
+exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produces stable review_diff_result.json + sarif + markdown for a simple invariant violation: [FAIL/invariant] review_diff_result.json (normalized) 1`] = `
+"{
+  "risk_score": 2,
+  "classification": "feature",
+  "hotspots": [],
+  "summary": "Classified as feature. Risk 2/5. 1 files changed (+1/-0). 2 deterministic findings.",
+  "findings": [
+    {
+      "id": "SEC001",
+      "severity": "CRITICAL",
+      "category": "security",
+      "confidence": 0.95,
+      "title": "No eval() usage in source code",
+      "location": {
+        "file": "src/a.ts",
+        "startLine": 1,
+        "endLine": 1
+      },
+      "evidence": [
+        "deny.regex matched: /\\\\beval\\\\(/"
+      ],
+      "impact": "A project invariant was violated by newly added code.",
+      "recommendation": "Refactor the change to comply with the invariant or update the policy intentionally."
+    },
+    {
+      "id": "PRE001",
+      "severity": "MEDIUM",
+      "category": "reliability",
+      "confidence": 0.95,
+      "title": "No tests appear to be touched by this change",
+      "evidence": [
+        "changed_files: src/a.ts"
+      ],
+      "impact": "Risk of regressions is higher without test changes or additions.",
+      "recommendation": "Add or update tests covering the modified behavior, or justify why no tests are needed.",
+      "location": {
+        "file": "src/a.ts",
+        "startLine": 1,
+        "endLine": 1
+      }
+    }
+  ],
+  "should_fail": true,
+  "fail_reasons": [
+    "CRITICAL SEC001: No eval() usage in source code"
+  ],
+  "stats": {
+    "files_changed": 1,
+    "lines_added": 1,
+    "lines_removed": 0,
+    "deterministic_checks_executed": 5,
+    "invariants_executed": 1,
+    "static_analyzers_executed": 0,
+    "llm_passes_executed": 0,
+    "llm_findings_added": 0
+  },
+  "metadata": {
+    "tool_version": "1.9.0",
+    "warnings": []
+  },
+  "sarif": {
+    "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+    "version": "2.1.0",
+    "runs": [
+      {
+        "tool": {
+          "driver": {
+            "name": "context-engine-review",
+            "version": "1.9.0",
+            "rules": [
+              {
+                "id": "SEC001",
+                "name": "SEC001",
+                "shortDescription": {
+                  "text": "No eval() usage in source code"
+                },
+                "fullDescription": {
+                  "text": "Refactor the change to comply with the invariant or update the policy intentionally."
+                },
+                "properties": {
+                  "category": "security",
+                  "severity": "CRITICAL",
+                  "confidence": 0.95
+                }
+              },
+              {
+                "id": "PRE001",
+                "name": "PRE001",
+                "shortDescription": {
+                  "text": "No tests appear to be touched by this change"
+                },
+                "fullDescription": {
+                  "text": "Add or update tests covering the modified behavior, or justify why no tests are needed."
+                },
+                "properties": {
+                  "category": "reliability",
+                  "severity": "MEDIUM",
+                  "confidence": 0.95
+                }
+              }
+            ]
+          }
+        },
+        "results": [
+          {
+            "ruleId": "SEC001",
+            "level": "error",
+            "message": {
+              "text": "No eval() usage in source code\\n\\nImpact: A project invariant was violated by newly added code.\\n\\nRecommendation: Refactor the change to comply with the invariant or update the policy intentionally."
+            },
+            "locations": [
+              {
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "src/a.ts"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "id": "SEC001",
+              "category": "security",
+              "severity": "CRITICAL",
+              "confidence": 0.95
+            }
+          },
+          {
+            "ruleId": "PRE001",
+            "level": "warning",
+            "message": {
+              "text": "No tests appear to be touched by this change\\n\\nImpact: Risk of regressions is higher without test changes or additions.\\n\\nRecommendation: Add or update tests covering the modified behavior, or justify why no tests are needed."
+            },
+            "locations": [
+              {
+                "physicalLocation": {
+                  "artifactLocation": {
+                    "uri": "src/a.ts"
+                  },
+                  "region": {
+                    "startLine": 1,
+                    "endLine": 1
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "id": "PRE001",
+              "category": "reliability",
+              "severity": "MEDIUM",
+              "confidence": 0.95
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "markdown": "## Code Review Summary\\n\\n- Risk: **2/5**\\n- Classification: **feature**\\n- CI gate: **FAIL**\\n\\nClassified as feature. Risk 2/5. 1 files changed (+1/-0). 2 deterministic findings.\\n\\n## Findings\\n\\n- **CRITICAL** \`SEC001\` (security) at \`src/a.ts:1\`: No eval() usage in source code\\n- **MEDIUM** \`PRE001\` (reliability) at \`src/a.ts:1\`: No tests appear to be touched by this change\\n\\n## CI Gate Reasons\\n\\n- CRITICAL SEC001: No eval() usage in source code"
+}"
+`;

@@ -16,6 +16,8 @@ import { toSarif } from './output/sarif.js';
 import { formatGitHubComment } from './output/github.js';
 import { runStaticAnalyzers } from './checks/adapters/index.js';
 import type { StaticAnalyzerId } from './checks/adapters/types.js';
+import { evaluateFailurePolicy, postProcessFindings } from './post/normalize.js';
+import { dedupeFindingsById } from './post/findings.js';
 
 const TOOL_VERSION = '1.9.0';
 
@@ -209,12 +211,13 @@ export async function reviewDiff(input: ReviewDiffInput): Promise<EnterpriseRevi
   }
 
   const mergedFindings = dedupeFindingsById([...invariantFindings, ...staticFindings, ...llmFindings, ...findings]);
-  const filtered = mergedFindings
-    .filter(f => f.confidence >= confidenceThreshold)
-    .filter(f => (categories && categories.length > 0 ? categories.includes(f.category as any) : true));
-  const allowlist = new Set((input.options?.allowlist_finding_ids ?? []).filter(Boolean));
-  const filteredForOutput = filtered.filter(f => !allowlist.has(f.id));
-  const limitedFindings = filteredForOutput.slice(0, Math.max(0, maxFindings));
+  const { filteredForOutput, limitedFindings } = postProcessFindings({
+    mergedFindings,
+    confidenceThreshold,
+    categories,
+    allowlistFindingIds: input.options?.allowlist_finding_ids,
+    maxFindings,
+  });
 
   const { shouldFail, reasons } = evaluateFailurePolicy({
     findings: filteredForOutput,
@@ -381,17 +384,6 @@ function buildDeterministicFindings(args: {
   return findings;
 }
 
-function dedupeFindingsById(findings: EnterpriseFinding[]): EnterpriseFinding[] {
-  const seen = new Set<string>();
-  const out: EnterpriseFinding[] = [];
-  for (const f of findings) {
-    if (seen.has(f.id)) continue;
-    seen.add(f.id);
-    out.push(f);
-  }
-  return out;
-}
-
 function formatInvariants(config: Record<string, Array<{ id: string; severity: string; category: string; rule: string }>>): string {
   const lines: string[] = [];
   for (const [section, invariants] of Object.entries(config)) {
@@ -404,33 +396,4 @@ function formatInvariants(config: Record<string, Array<{ id: string; severity: s
   return lines.join('\n').trim() || '(none)';
 }
 
-const SEVERITY_ORDER: Record<string, number> = {
-  CRITICAL: 5,
-  HIGH: 4,
-  MEDIUM: 3,
-  LOW: 2,
-  INFO: 1,
-};
-
-function evaluateFailurePolicy(args: {
-  findings: EnterpriseFinding[];
-  failOnSeverity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
-  failOnInvariantIds: string[];
-}): { shouldFail: boolean; reasons: string[] } {
-  const reasons: string[] = [];
-  const failIds = new Set(args.failOnInvariantIds.filter(Boolean));
-  const threshold = SEVERITY_ORDER[args.failOnSeverity] ?? SEVERITY_ORDER.CRITICAL;
-
-  for (const f of args.findings) {
-    if (failIds.has(f.id)) {
-      reasons.push(`Invariant ${f.id} forced-fail`);
-      continue;
-    }
-    const sev = SEVERITY_ORDER[f.severity] ?? 0;
-    if (sev >= threshold) {
-      reasons.push(`${f.severity} ${f.id}: ${f.title}`);
-    }
-  }
-
-  return { shouldFail: reasons.length > 0, reasons: reasons.slice(0, 20) };
-}
+// NOTE: Failure policy implementation moved to `src/reviewer/post/normalize.ts`.

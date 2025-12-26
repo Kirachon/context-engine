@@ -18,30 +18,31 @@ Context Engine is a sophisticated MCP (Model Context Protocol) server that provi
 
 **Tools Exposed**:
 ```typescript
-// Context & Search (6 tools)
-- semantic_search: Embedding-based code search
-- get_file: File content retrieval
-- get_context_for_prompt: Context bundling
-- codebase_retrieval: Advanced semantic search
-- git_commit_retrieval: Commit history search
-- get_workspace_info: Workspace metadata
+// Core Context
+- index_workspace, codebase_retrieval, semantic_search
+- get_file, get_context_for_prompt, enhance_prompt
 
-// Review System (4 tools)
-- review_diff: Enterprise code review
-- run_static_analysis: TypeScript/Semgrep analysis
-- check_invariants: Custom rule enforcement
-- get_review_telemetry: Performance metrics
+// Index Management
+- index_status, reindex_workspace, clear_index, tool_manifest
 
-// Planning & Execution (7 tools)
-- generate_plan: AI-powered planning
-- execute_plan_step: Step execution
-- get_plan_status: Progress tracking
-- save_plan, load_plan, list_plans, get_plan_history
+// Memory
+- add_memory, list_memories
 
-// Reactive Reviews (7 tools)
-- start_reactive_review: Session initialization
-- get_reactive_status: Progress monitoring
-- pause/resume/cancel_reactive_review: Session control
+// Planning (Phase 1)
+- create_plan, refine_plan, visualize_plan, execute_plan
+
+// Plan Management (Phase 2)
+- save_plan, load_plan, list_plans, delete_plan
+- request_approval, respond_approval
+- start_step, complete_step, fail_step
+- view_progress, view_history, compare_plan_versions, rollback_plan
+
+// Code Review
+- review_changes, review_git_diff, review_diff, check_invariants, run_static_analysis
+
+// Reactive Review (Phase 4)
+- reactive_review_pr, get_review_status, pause_review, resume_review, get_review_telemetry
+- scrub_secrets, validate_content
 ```
 
 ### Layer 2: Service Layer (`src/mcp/services/`)
@@ -283,7 +284,7 @@ class ReactiveReviewService {
   - getStatus(sessionId): ReviewStatus
   - pauseReview(sessionId): void
   - resumeReview(sessionId): void
-  - cancelReview(sessionId): void
+  // (Note: cancel is supported internally but not currently exposed as an MCP tool)
   
   // Execution
   - executeReviewStep(sessionId, stepNumber): StepResult
@@ -341,7 +342,7 @@ Return to User
 ```
 User Request (PR metadata)
   ↓
-start_reactive_review tool
+reactive_review_pr tool
   ↓
 ReactiveReviewService.startReview()
   ├→ Create session
@@ -355,7 +356,7 @@ Background Execution
   ├→ Update telemetry
   └→ Handle failures/retries
   ↓
-User polls get_reactive_status
+User polls get_review_status
   ↓
 Return progress + findings
 ```
@@ -364,7 +365,7 @@ Return progress + findings
 ```
 User Request (goal)
   ↓
-generate_plan tool
+create_plan tool
   ↓
 PlanningService.generatePlan()
   ├→ Analyze requirements
@@ -374,7 +375,7 @@ PlanningService.generatePlan()
   ↓
 save_plan tool (optional)
   ↓
-execute_plan_step tool (per step)
+execute_plan tool (per step or batch)
   ↓
 ExecutionTrackingService
   ├→ Check dependencies
@@ -383,7 +384,7 @@ ExecutionTrackingService
   ├→ Update state
   └→ Trigger dependent steps
   ↓
-get_plan_status tool
+view_progress tool
   ↓
 Return execution progress
 ```
@@ -520,11 +521,10 @@ interface ReviewStatus {
 - Health checks via `get_workspace_info`
 - Telemetry via `get_review_telemetry`
 - Cache stats via `getCacheStats()`
-- Session status via `get_reactive_status`
+- Session status via `get_review_status`
 
 ---
 
 **Version**: 1.8.0  
 **Last Updated**: 2025-12-26  
 **Maintainer**: Context Engine Team
-

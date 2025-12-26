@@ -14,38 +14,13 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
-import { CodeReviewService } from '../services/codeReviewService.js';
+import { internalCodeReviewService } from '../../internal/handlers/codeReview.js';
 import {
   ReviewResult,
   ReviewChangesInput,
   ReviewOptions,
   ReviewCategory,
 } from '../types/codeReview.js';
-
-// ============================================================================
-// Service Instance Reuse (Lazy Singleton Pattern)
-// ============================================================================
-
-/**
- * Cached CodeReviewService instance for reuse across requests.
- */
-let cachedReviewService: CodeReviewService | null = null;
-let cachedServiceClientRef: WeakRef<ContextServiceClient> | null = null;
-
-/**
- * Get or create a CodeReviewService instance.
- */
-function getCodeReviewService(serviceClient: ContextServiceClient): CodeReviewService {
-  const cachedClient = cachedServiceClientRef?.deref();
-  if (cachedReviewService && cachedClient === serviceClient) {
-    return cachedReviewService;
-  }
-
-  cachedReviewService = new CodeReviewService(serviceClient);
-  cachedServiceClientRef = new WeakRef(serviceClient);
-
-  return cachedReviewService;
-}
 
 // ============================================================================
 // Tool Argument Types
@@ -143,7 +118,7 @@ export async function handleReviewChanges(
     };
 
     // Get service and perform review
-    const service = getCodeReviewService(serviceClient);
+    const service = internalCodeReviewService(serviceClient);
     const result: ReviewResult = await service.reviewChanges(input);
 
     const elapsed = Date.now() - startTime;
@@ -253,4 +228,3 @@ overall_confidence_score, changes_summary, and metadata.
     required: ['diff'],
   },
 };
-

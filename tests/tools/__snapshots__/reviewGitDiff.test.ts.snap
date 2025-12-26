@@ -1,0 +1,121 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`review_git_diff tool returns an empty review when there is nothing staged 1`] = `
+{
+  "git_info": {
+    "command": "git diff --unified=3 --staged",
+    "files_changed": [],
+    "stats": {
+      "additions": 0,
+      "deletions": 0,
+      "files_count": 0,
+    },
+    "target": "staged",
+  },
+  "review": {
+    "changes_summary": {
+      "files_changed": 0,
+      "lines_added": 0,
+      "lines_removed": 0,
+    },
+    "findings": [],
+    "metadata": {
+      "categories_reviewed": [],
+      "confidence_threshold": 0.7,
+      "findings_filtered": 0,
+      "model_used": "none",
+      "review_duration_ms": 0,
+      "reviewed_at": "<fixed>",
+      "tool_version": "1.5.0",
+    },
+    "overall_confidence_score": 1,
+    "overall_correctness": "patch is correct",
+    "overall_explanation": "No changes to review.",
+  },
+}
+`;
+
+exports[`review_git_diff tool returns git_info + review (snapshot) for staged changes with mocked LLM response 1`] = `
+{
+  "git_info": {
+    "command": "git diff --unified=3 --staged",
+    "files_changed": [
+      "src/a.ts",
+    ],
+    "stats": {
+      "additions": 1,
+      "deletions": 0,
+      "files_count": 1,
+    },
+    "target": "staged",
+  },
+  "review": {
+    "changes_summary": {
+      "files_changed": 1,
+      "lines_added": 1,
+      "lines_removed": 0,
+    },
+    "findings": [
+      {
+        "body": "Mocked P0 finding.",
+        "category": "security",
+        "code_location": {
+          "file_path": "src/a.ts",
+          "line_range": {
+            "end": 1,
+            "start": 1,
+          },
+        },
+        "confidence_score": 0.95,
+        "id": "finding_p0",
+        "is_on_changed_line": false,
+        "priority": 0,
+        "suggestion": {
+          "can_auto_fix": false,
+          "description": "Fix it",
+        },
+        "title": "Critical issue even off changed lines",
+      },
+      {
+        "body": "Mocked P1 finding.",
+        "category": "correctness",
+        "code_location": {
+          "file_path": "src/a.ts",
+          "line_range": {
+            "end": 2,
+            "start": 2,
+          },
+        },
+        "confidence_score": 0.95,
+        "id": "finding_p1",
+        "is_on_changed_line": true,
+        "priority": 1,
+        "suggestion": {
+          "can_auto_fix": false,
+          "description": "Add a guard",
+        },
+        "title": "Add input validation",
+      },
+    ],
+    "metadata": {
+      "categories_reviewed": [
+        "correctness",
+        "security",
+        "performance",
+        "maintainability",
+        "style",
+        "documentation",
+      ],
+      "confidence_threshold": 0.7,
+      "findings_filtered": 2,
+      "model_used": "auggie-context-engine",
+      "review_duration_ms": 0,
+      "reviewed_at": "<fixed>",
+      "tool_version": "1.0.0",
+    },
+    "overall_confidence_score": 0.8,
+    "overall_correctness": "needs attention",
+    "overall_explanation": "Mocked output.",
+  },
+}
+`;

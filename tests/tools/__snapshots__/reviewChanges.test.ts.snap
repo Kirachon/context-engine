@@ -1,0 +1,52 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`review_changes tool returns structured JSON (snapshot) for a mocked LLM response 1`] = `
+{
+  "changes_summary": {
+    "files_changed": 1,
+    "lines_added": 1,
+    "lines_removed": 0,
+  },
+  "findings": [
+    {
+      "body": "This is a test finding.",
+      "category": "correctness",
+      "code_location": {
+        "file_path": "src/a.ts",
+        "line_range": {
+          "end": 2,
+          "start": 2,
+        },
+      },
+      "confidence_score": 0.95,
+      "id": "finding_1",
+      "is_on_changed_line": true,
+      "priority": 1,
+      "suggestion": {
+        "can_auto_fix": false,
+        "description": "Add a guard",
+      },
+      "title": "Add input validation",
+    },
+  ],
+  "metadata": {
+    "categories_reviewed": [
+      "correctness",
+      "security",
+      "performance",
+      "maintainability",
+      "style",
+      "documentation",
+    ],
+    "confidence_threshold": 0.7,
+    "findings_filtered": 1,
+    "model_used": "auggie-context-engine",
+    "review_duration_ms": 0,
+    "reviewed_at": "<fixed>",
+    "tool_version": "1.0.0",
+  },
+  "overall_confidence_score": 0.8,
+  "overall_correctness": "needs attention",
+  "overall_explanation": "Mocked output.",
+}
+`;

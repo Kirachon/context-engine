@@ -401,6 +401,22 @@ index 1234567..abcdefg 100644
       lines_removed: 0,
     };
 
+    const diffWithChangedLines: ParsedDiff = {
+      files: [
+        {
+          old_path: 'src/file.ts',
+          new_path: 'src/file.ts',
+          is_new: false,
+          is_deleted: false,
+          is_binary: false,
+          hunks: [],
+          changed_lines: new Set([10]),
+        },
+      ],
+      lines_added: 1,
+      lines_removed: 0,
+    };
+
     describe('Confidence Threshold Filtering', () => {
       it('should include findings above confidence threshold', () => {
         const findings = [
@@ -497,6 +513,38 @@ index 1234567..abcdefg 100644
         expect(result[0].id).toBe('f1');
         expect(result[0].priority).toBe(0);
       });
+
+      it('should backfill is_on_changed_line when missing and location is on a changed line', () => {
+        const findings = [
+          createFinding({
+            id: 'f1',
+            is_on_changed_line: undefined as any,
+            code_location: { file_path: 'src/file.ts', line_range: { start: 10, end: 10 } },
+          }),
+        ];
+        const opts = createOptions({ changed_lines_only: true });
+
+        const result = codeReviewService.filterFindings(findings, diffWithChangedLines, opts);
+
+        expect(result).toHaveLength(1);
+        expect(result[0].id).toBe('f1');
+        expect(result[0].is_on_changed_line).toBe(true);
+      });
+
+      it('should backfill is_on_changed_line when missing and exclude when not on a changed line', () => {
+        const findings = [
+          createFinding({
+            id: 'f1',
+            is_on_changed_line: undefined as any,
+            code_location: { file_path: 'src/file.ts', line_range: { start: 11, end: 11 } },
+          }),
+        ];
+        const opts = createOptions({ changed_lines_only: true });
+
+        const result = codeReviewService.filterFindings(findings, diffWithChangedLines, opts);
+
+        expect(result).toHaveLength(0);
+      });
     });
 
     describe('Category Filtering', () => {
@@ -544,4 +592,3 @@ index 1234567..abcdefg 100644
     });
   });
 });
-

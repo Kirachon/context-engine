@@ -204,138 +204,109 @@ This document provides detailed API specifications for all 20+ MCP tools exposed
 
 ### 7. `review_diff`
 
-**Description**: Enterprise-grade code review with multi-stage analysis.
+**Description**: Enterprise-grade diff-first review with deterministic preflight and structured JSON output. Optional static analysis (`tsc`/`semgrep`), optional LLM passes, optional SARIF/Markdown outputs, and CI gating via `should_fail`.
 
 **Input Schema**:
 ```typescript
 {
-  diff: string;               // Git diff (unified format)
-  workspace_path?: string;    // For static analysis
-  changed_files?: string[];   // Optional file list
+  diff: string;                    // Unified diff content (required)
+  changed_files?: string[];        // Optional list of changed file paths
+  base_sha?: string;              // Optional base commit SHA
+  head_sha?: string;              // Optional head commit SHA
   options?: {
-    confidence_threshold?: number;     // Min confidence (0-1, default: 0.7)
-    max_findings?: number;             // Limit findings (default: 50)
-    categories?: string[];             // Filter categories
-    fail_on_severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-    fail_on_invariant_ids?: string[];  // Fail on specific rules
-    allowlist_finding_ids?: string[];  // Suppress findings
-    
-    // Static analysis
-    enable_static_analysis?: boolean;  // Run tsc/semgrep (default: false)
-    static_analyzers?: ('tsc' | 'semgrep')[];
+    confidence_threshold?: number; // Default: 0.55
+    max_findings?: number;         // Default: 20
+    categories?: string[];
+    invariants_path?: string;      // Default: ".review-invariants.yml" (when used by CI)
+
+    enable_static_analysis?: boolean; // Default: false
+    static_analyzers?: ('tsc' | 'semgrep')[]; // Default: ['tsc']
     static_analysis_timeout_ms?: number; // Default: 60000
-    
-    // LLM analysis
-    enable_llm_review?: boolean;       // Run LLM passes (default: false)
-    two_pass?: boolean;                // Structural + detailed (default: true)
-    llm_risk_threshold?: number;       // Min risk for LLM (1-5, default: 3)
-    custom_instructions?: string;      // Additional context
-    
-    // Output formats
-    include_sarif?: boolean;           // SARIF output
-    include_markdown?: boolean;        // GitHub markdown
+    static_analysis_max_findings_per_analyzer?: number; // Default: 20
+    semgrep_args?: string[];
+
+    enable_llm?: boolean;          // Default: false
+    llm_force?: boolean;           // Default: false
+    two_pass?: boolean;            // Default: true
+    risk_threshold?: number;       // Default: 3
+    token_budget?: number;         // Default: 8000
+    max_context_files?: number;    // Default: 5
+    custom_instructions?: string;
+
+    fail_on_severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'; // Default: CRITICAL
+    fail_on_invariant_ids?: string[];
+    allowlist_finding_ids?: string[];
+
+    include_sarif?: boolean;       // Default: false
+    include_markdown?: boolean;    // Default: false
   };
+}
+```
+
+**Output**: `EnterpriseReviewResult` (see `src/reviewer/types.ts`)
+
+---
+
+### 8. `review_changes`
+
+**Description**: LLM-powered review of a unified diff returning a `ReviewResult` (Codex-style). This is a different schema/pipeline than `review_diff`.
+
+**Input Schema**:
+```typescript
+{
+  diff: string;                  // Required
+  file_contexts?: string;        // Optional JSON string: { [path]: content }
+  base_ref?: string;
+  confidence_threshold?: number; // Default: 0.7
+  max_findings?: number;         // Default: 20
+  categories?: string;           // Comma-separated categories
+  changed_lines_only?: boolean;  // Default: true
+  custom_instructions?: string;
+  exclude_patterns?: string;     // Comma-separated globs
+}
+```
+
+**Output**: `ReviewResult` (see `src/mcp/types/codeReview.ts`)
+
+---
+
+### 9. `review_git_diff`
+
+**Description**: Retrieve a git diff for a target (staged/unstaged/head/branch/commit) and then run `review_changes`.
+
+**Input Schema**:
+```typescript
+{
+  target?: string;              // Default: 'staged'
+  base?: string;                // For branch comparisons
+  include_patterns?: string[];  // Optional file globs
+  options?: object;             // Same shape as ReviewOptions (see `ReviewResult` types)
 }
 ```
 
 **Output**:
 ```typescript
 {
-  run_id: string;             // Unique review ID
-  risk_score: number;         // Overall risk (1-5)
-  classification: 'feature' | 'bugfix' | 'refactor' | 'infra' | 'docs';
-  hotspots: Array<{
-    file: string;
-    reason: string;
-    risk_contribution: number;
-  }>;
-  summary: {
-    total_findings: number;
-    by_severity: { CRITICAL: number; HIGH: number; MEDIUM: number; LOW: number };
-    by_category: { [category: string]: number };
-    should_fail: boolean;
-  };
-  findings: Array<{
-    id: string;               // Unique finding ID
-    severity: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW';
-    category: string;         // security, performance, maintainability, etc.
-    confidence: number;       // Confidence score (0-1)
-    title: string;            // Short description
-    description: string;      // Detailed explanation
-    file: string;             // Affected file
-    line: number;             // Line number
-    snippet?: string;         // Code snippet
-    impact: string;           // Impact description
-    recommendation: string;   // Fix suggestion
-    suggested_patch?: string; // Automated fix (if available)
-  }>;
-  should_fail: boolean;       // CI/CD failure recommendation
-  fail_reasons: string[];     // Reasons for failure
-  stats: {
-    files_changed: number;
-    lines_added: number;
-    lines_removed: number;
-    duration_ms: number;
-    deterministic_checks_executed: number;
-    invariants_executed?: number;
-    static_analyzers_executed?: number;
-    llm_passes_executed?: number;
-    llm_findings_added?: number;
-    llm_skipped_reason?: string;
-    timings_ms?: {
-      preflight?: number;
-      invariants?: number;
-      static_analysis?: number;
-      context_fetch?: number;
-      secrets_scrub?: number;
-      llm_structural?: number;
-      llm_detailed?: number;
-    };
-  };
-  metadata: {
-    reviewed_at: string;      // ISO timestamp
-    tool_version: string;     // Context Engine version
-    warnings: string[];       // Non-fatal warnings
-    llm_model?: string;       // LLM model used (if applicable)
-  };
-  sarif?: object;             // SARIF format (if requested)
-  markdown?: string;          // GitHub markdown (if requested)
-}
-```
-
-**Example**:
-```json
-{
-  "name": "review_diff",
-  "arguments": {
-    "diff": "diff --git a/src/auth.ts b/src/auth.ts\n...",
-    "workspace_path": "/path/to/project",
-    "options": {
-      "enable_static_analysis": true,
-      "static_analyzers": ["tsc"],
-      "enable_llm_review": true,
-      "confidence_threshold": 0.8,
-      "fail_on_severity": "HIGH"
-    }
-  }
+  git_info: object;
+  review: ReviewResult;
 }
 ```
 
 ---
 
-### 8. `run_static_analysis`
+### 10. `run_static_analysis`
 
-**Description**: Run local static analyzers (TypeScript, Semgrep) independently.
+**Description**: Run local static analyzers (TypeScript and optional Semgrep) independently.
 
 **Input Schema**:
 ```typescript
 {
-  changed_files?: string[];   // Files to analyze
+  changed_files?: string[];
   options?: {
     analyzers?: ('tsc' | 'semgrep')[];  // Default: ['tsc']
-    timeout_ms?: number;                // Default: 60000
-    max_findings_per_analyzer?: number; // Default: 20
-    semgrep_args?: string[];            // Additional semgrep flags
+    timeout_ms?: number;               // Default: 60000
+    max_findings_per_analyzer?: number;// Default: 20
+    semgrep_args?: string[];
   };
 }
 ```
@@ -344,74 +315,25 @@ This document provides detailed API specifications for all 20+ MCP tools exposed
 ```typescript
 {
   success: boolean;
-  analyzers: string[];        // Analyzers run
-  warnings: string[];         // Non-fatal warnings
-  results: Array<{
-    analyzer: string;
-    duration_ms: number;
-    findings: Finding[];      // Same format as review_diff findings
-    skipped_reason?: string;
-  }>;
-  findings: Finding[];        // All findings combined
-}
-```
-
----
-
-### 9. `check_invariants`
-
-**Description**: Check custom rules from `.review-invariants.yml`.
-
-**Input Schema**:
-```typescript
-{
-  diff: string;               // Git diff
-  workspace_path?: string;    // For invariants file lookup
-  invariants_path?: string;   // Custom path (default: .review-invariants.yml)
-}
-```
-
-**Output**:
-```typescript
-{
-  success: boolean;
-  findings: Finding[];        // Invariant violations
-  checked_invariants: number; // Total rules checked
+  analyzers: string[];
   warnings: string[];
+  results: unknown[];
+  findings: unknown[];
 }
-```
-
-**Invariants File Format**:
-```yaml
-security:
-  - id: SEC001
-    rule: "Description of the rule"
-    paths: ["src/**"]
-    severity: CRITICAL
-    category: security
-    action: deny | when_require | warn
-    deny:
-      regex:
-        pattern: "\\beval\\("
-    # OR
-    when:
-      regex:
-        pattern: "req\\.user"
-    require:
-      regex:
-        pattern: "requireAuth\\("
 ```
 
 ---
 
-### 10. `get_review_telemetry`
+### 11. `check_invariants`
 
-**Description**: Get performance metrics for review operations.
+**Description**: Run deterministic YAML invariants (`.review-invariants.yml`) against a unified diff.
 
 **Input Schema**:
 ```typescript
 {
-  session_id?: string;        // Optional session filter
+  diff: string;                // Required
+  changed_files?: string[];
+  invariants_path?: string;    // Default: ".review-invariants.yml"
 }
 ```
 
@@ -419,134 +341,68 @@ security:
 ```typescript
 {
   success: boolean;
-  session_id?: string;
-  telemetry: {
-    start_time: string;
-    elapsed_ms: number;
-    tokens_used: number;
-    cache_hit_rate: number;
-    last_activity_ms?: number;
-    appears_stalled?: boolean;
-  };
-  cache_stats: {
-    hit_rate: number;
-    total_entries: number;
-    commit_keyed: boolean;
-  };
-  reactive_config: {
-    max_concurrent_steps: number;
-    step_timeout_ms: number;
-    max_retries: number;
-    session_timeout_ms: number;
-  };
+  invariants_path: string;
+  checked_invariants: number;
+  warnings: string[];
+  findings: unknown[];
+  error?: string;
 }
 ```
-
----
 
 ## Planning Tools
 
-### 11. `generate_plan`
+### `create_plan`
 
-**Description**: Generate AI-powered execution plan with dependency analysis.
+**Description**: Generate a new implementation plan. Returns a **Markdown report** and includes the full plan JSON in a `<details>` block.
 
 **Input Schema**:
 ```typescript
 {
-  goal: string;               // High-level goal description
-  context?: string;           // Additional context
-  constraints?: string[];     // Constraints to consider
-  max_steps?: number;         // Step limit (default: 20)
-}
-```
-
-**Output**:
-```typescript
-{
-  id: string;                 // Unique plan ID
-  version: number;            // Plan version
-  created_at: string;         // ISO timestamp
-  updated_at: string;
-  goal: string;
-  scope: {
-    included: string[];       // In-scope items
-    excluded: string[];       // Out-of-scope items
-    assumptions: string[];
-    constraints: string[];
-  };
-  mvp_features: Array<{
-    name: string;
-    description: string;
-    steps: number[];          // Step numbers
-  }>;
-  nice_to_have_features: Array<{
-    name: string;
-    description: string;
-    steps: number[];
-  }>;
-  steps: Array<{
-    number: number;
-    description: string;
-    type: 'file_edit' | 'file_create' | 'command' | 'review';
-    dependencies: number[];   // Prerequisite steps
-    estimated_duration_ms?: number;
-    files_affected?: string[];
-  }>;
-  dependencies: {
-    [stepNumber: number]: number[];  // Dependency graph
-  };
-  architecture: {
-    notes: string;
-    patterns_used: string[];
-    diagrams: string[];       // Mermaid diagrams
-  };
-  risks: Array<{
-    issue: string;
-    mitigation: string;
-    likelihood: 'low' | 'medium' | 'high';
-    impact: string;
-  }>;
+  task: string;                 // Required
+  max_context_files?: number;   // Default: 10
+  context_token_budget?: number;// Default: 12000
+  generate_diagrams?: boolean;  // Default: true
+  mvp_only?: boolean;           // Default: false
 }
 ```
 
 ---
 
-### 12. `get_plan_status`
+### `refine_plan`
 
-**Description**: Get execution status for a plan.
+**Description**: Refine an existing plan (add detail, incorporate feedback, answer clarifying questions). Returns Markdown + full JSON plan.
 
 **Input Schema**:
 ```typescript
 {
-  plan_id: string;
+  current_plan: string;         // Required JSON string (EnhancedPlanOutput)
+  feedback?: string;
+  clarifications?: string;      // Optional JSON object as string
+  focus_steps?: number[];
+}
+```
+
+---
+
+### `visualize_plan`
+
+**Description**: Generate Mermaid diagrams from a plan (dependencies, architecture, gantt).
+
+**Input Schema**:
+```typescript
+{
+  plan: string;                 // Required JSON string (EnhancedPlanOutput)
+  diagram_type?: 'dependencies' | 'architecture' | 'gantt'; // Default: 'dependencies'
 }
 ```
 
 **Output**:
 ```typescript
 {
+  diagram_type: string;
+  mermaid: string;
   plan_id: string;
-  status: 'pending' | 'ready' | 'executing' | 'completed' | 'failed' | 'cancelled';
-  progress: {
-    completed_steps: number;
-    total_steps: number;
-    percentage: number;
-  };
-  current_steps: number[];    // Currently executing
-  ready_steps: number[];      // Ready to execute
-  blocked_steps: number[];    // Waiting on dependencies
-  steps: Array<{
-    step_number: number;
-    status: string;
-    started_at?: string;
-    completed_at?: string;
-    duration_ms?: number;
-    error?: string;
-    files_modified?: string[];
-  }>;
-  started_at?: string;
-  completed_at?: string;
-  total_duration_ms?: number;
+  plan_version: number;
 }
 ```
 
@@ -554,198 +410,145 @@ security:
 
 ## Execution Tools
 
-### 13. `execute_plan_step`
+### `execute_plan`
 
-**Description**: Execute a single step from a plan.
+**Description**: Execute steps from a plan. By default this is preview-only; set `apply_changes=true` to write to disk.
 
 **Input Schema**:
 ```typescript
 {
-  plan_id: string;
-  step_number: number;
-  options?: {
-    dry_run?: boolean;        // Preview without executing
-    timeout_ms?: number;      // Override default timeout
-  };
+  plan: string;                 // Required JSON string (EnhancedPlanOutput)
+  mode?: 'single_step' | 'all_ready' | 'full_plan'; // Default: 'single_step'
+  step_number?: number;         // Required when mode='single_step'
+  apply_changes?: boolean;      // Default: false
+  max_steps?: number;           // Default: 5
+  stop_on_failure?: boolean;    // Default: true
+  additional_context?: string;
 }
 ```
 
-**Output**:
-```typescript
-{
-  success: boolean;
-  step_number: number;
-  duration_ms: number;
-  files_modified?: string[];
-  error?: string;
-  retries?: number;
-}
-```
+**Output**: Markdown report + a `<details>` block containing full JSON execution results.
 
 ---
 
 ## Reactive Review Tools
 
-### 14. `start_reactive_review`
+### `reactive_review_pr`
 
-**Description**: Start asynchronous review session for large PRs.
-
-**Input Schema**:
-```typescript
-{
-  pr_metadata: {
-    pr_number: number;
-    title: string;
-    description?: string;
-    base_branch: string;
-    head_branch: string;
-    author?: string;
-  };
-  options?: {
-    max_concurrent_steps?: number;  // Default: CPU cores - 1
-    step_timeout_ms?: number;       // Default: 300000 (5 min)
-    enable_static_analysis?: boolean;
-    enable_llm_review?: boolean;
-  };
-}
-```
-
-**Output**:
-```typescript
-{
-  success: boolean;
-  session_id: string;         // Use for status checks
-  status: 'pending' | 'planning' | 'ready' | 'executing';
-  message: string;
-}
-```
-
----
-
-### 15. `get_reactive_status`
-
-**Description**: Get status of reactive review session.
+**Description**: Start a reactive PR review session (and begin execution). Returns a `session_id`.
 
 **Input Schema**:
 ```typescript
 {
-  session_id: string;
+  commit_hash: string;          // Required
+  base_ref: string;             // Required
+  changed_files: string;        // Required (comma-separated or JSON array string)
+  title?: string;
+  author?: string;
+  additions?: number;
+  deletions?: number;
+  parallel?: boolean;
+  max_workers?: number;
 }
 ```
 
-**Output**:
+---
+
+### `get_review_status`
+
+**Description**: Get status/progress for a reactive review session.
+
+**Input Schema**:
 ```typescript
-{
-  session: {
-    id: string;
-    pr_number: number;
-    status: string;
-    created_at: string;
-    updated_at: string;
-    total_steps?: number;
-  };
-  progress: {
-    completed_steps: number;
-    total_steps: number;
-    percentage: number;
-  };
-  telemetry: {
-    start_time: string;
-    elapsed_ms: number;
-    tokens_used: number;
-    cache_hit_rate: number;
-    last_activity_ms?: number;
-    appears_stalled?: boolean;
-  };
-  findings_count: number;
-}
+{ session_id: string }
 ```
 
 ---
 
-### 16-19. Session Control Tools
+### `pause_review` / `resume_review`
 
-**`pause_reactive_review`**: Pause active session
-**`resume_reactive_review`**: Resume paused session
-**`cancel_reactive_review`**: Cancel session
-**`get_reactive_findings`**: Get findings from completed session
-
-All follow similar patterns with `session_id` input.
+**Input Schema**:
+```typescript
+{ session_id: string }
+```
 
 ---
 
-## Persistence Tools
+### `get_review_telemetry`
 
-### 20. `save_plan`
+**Description**: Get detailed telemetry for a reactive review session.
 
-**Description**: Persist plan to disk.
+**Input Schema**:
+```typescript
+{ session_id: string }
+```
+
+---
+
+### `scrub_secrets`
+
+**Input Schema**:
+```typescript
+{ content: string; show_start?: number; show_end?: number }
+```
+
+---
+
+### `validate_content`
 
 **Input Schema**:
 ```typescript
 {
-  plan: EnhancedPlanOutput;   // Plan object from generate_plan
-  name?: string;              // Optional name
+  content: string;
+  content_type?: 'review_finding' | 'plan_output' | 'generated_code' | 'raw_text';
+  file_path?: string;
+  scrub_secrets?: boolean;
 }
 ```
 
 ---
 
-### 21. `load_plan`
+## Persistence Tools (Phase 2 plan management)
 
-**Description**: Load saved plan.
+### `save_plan`
 
 **Input Schema**:
 ```typescript
 {
-  plan_id: string;
+  plan: string;                 // Required JSON string (EnhancedPlanOutput)
+  name?: string;
+  tags?: string[];
+  overwrite?: boolean;
 }
 ```
 
 ---
 
-### 22. `list_plans`
-
-**Description**: List all saved plans.
-
-**Output**:
-```typescript
-{
-  plans: Array<{
-    id: string;
-    name?: string;
-    goal: string;
-    created_at: string;
-    version: number;
-  }>;
-}
-```
-
----
-
-### 23. `get_plan_history`
-
-**Description**: Get version history for a plan.
+### `load_plan`
 
 **Input Schema**:
 ```typescript
-{
-  plan_id: string;
-}
-```
-
-**Output**:
-```typescript
-{
-  plan_id: string;
-  versions: Array<{
-    version: number;
-    created_at: string;
-    changes: string;
-  }>;
-}
+{ plan_id?: string; name?: string }
 ```
 
 ---
+
+### `list_plans`
+
+**Input Schema**:
+```typescript
+{ status?: string; tags?: string[]; limit?: number }
+```
+
+---
+
+### Other plan management tools
+
+- `delete_plan`
+- `request_approval`, `respond_approval`
+- `start_step`, `complete_step`, `fail_step`
+- `view_progress`, `view_history`
+- `compare_plan_versions`, `rollback_plan`
 
 ## Error Handling
 
@@ -780,6 +583,5 @@ Common error codes:
 
 ---
 
-**Version**: 1.8.0  
+**Version**: 1.9.0  
 **Last Updated**: 2025-12-26
-

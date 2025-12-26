@@ -8,7 +8,7 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { getGitDiff, getGitStatus, getCommitDiff, GitDiffOptions } from '../utils/gitUtils.js';
 import { ReviewResult, ReviewOptions } from '../types/codeReview.js';
-import { CodeReviewService } from '../services/codeReviewService.js';
+import { internalCodeReviewService } from '../../internal/handlers/codeReview.js';
 
 // ============================================================================
 // Types
@@ -200,7 +200,7 @@ export async function handleReviewGitDiff(
   console.error(`[review_git_diff] Stats: +${diffResult.stats.additions}/-${diffResult.stats.deletions}`);
 
   // Perform the code review using CodeReviewService
-  const reviewService = new CodeReviewService(serviceClient);
+  const reviewService = internalCodeReviewService(serviceClient);
   const reviewResult = await reviewService.reviewChanges({
     diff: diffResult.diff,
     options: {
@@ -226,4 +226,3 @@ export async function handleReviewGitDiff(
 
   return JSON.stringify(output, null, 2);
 }
-

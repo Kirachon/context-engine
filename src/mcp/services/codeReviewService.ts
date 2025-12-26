@@ -22,10 +22,6 @@ import {
   ReviewOptions,
   ReviewChangesInput,
   ParsedDiff,
-  ParsedDiffFile,
-  DiffHunk,
-  DiffLine,
-  ReviewCategory,
   ReviewMetadata,
 } from '../types/codeReview.js';
 import { parseUnifiedDiff } from '../../reviewer/diff/parse.js';
@@ -35,6 +31,7 @@ import {
   extractJsonFromResponse,
   validateReviewResult,
 } from '../prompts/codeReview.js';
+import { postProcessReviewFindings } from './codeReviewPost.js';
 
 // ============================================================================
 // Constants
@@ -64,6 +61,17 @@ export class CodeReviewService {
     this.contextClient = contextClient;
   }
 
+  private resolveOptions(options?: ReviewOptions): Required<ReviewOptions> {
+    return {
+      confidence_threshold: options?.confidence_threshold ?? DEFAULT_OPTIONS.confidence_threshold,
+      max_findings: options?.max_findings ?? DEFAULT_OPTIONS.max_findings,
+      categories: options?.categories ? [...options.categories] : [...DEFAULT_OPTIONS.categories],
+      changed_lines_only: options?.changed_lines_only ?? DEFAULT_OPTIONS.changed_lines_only,
+      custom_instructions: options?.custom_instructions ?? DEFAULT_OPTIONS.custom_instructions,
+      exclude_patterns: options?.exclude_patterns ? [...options.exclude_patterns] : [...DEFAULT_OPTIONS.exclude_patterns],
+    };
+  }
+
   // ==========================================================================
   // Core Review Method
   // ==========================================================================
@@ -73,7 +81,7 @@ export class CodeReviewService {
    */
   async reviewChanges(input: ReviewChangesInput): Promise<ReviewResult> {
     const startTime = Date.now();
-    const opts = { ...DEFAULT_OPTIONS, ...input.options };
+    const opts = this.resolveOptions(input.options);
 
     console.error(`[CodeReviewService] Starting code review...`);
 
@@ -169,104 +177,6 @@ export class CodeReviewService {
     return parseUnifiedDiff(diffContent);
   }
 
-  /**
-   * Parse a single file section from a diff
-   */
-  private parseFileSection(section: string, oldPath: string, newPath: string): ParsedDiffFile {
-    const isNew = section.includes('new file mode');
-    const isDeleted = section.includes('deleted file mode');
-    const isBinary = section.includes('Binary files');
-
-    const hunks: DiffHunk[] = [];
-    const changedLines = new Set<number>();
-
-    // Parse hunks
-    const hunkRegex = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm;
-    const hunkMatches = [...section.matchAll(hunkRegex)];
-
-    for (let i = 0; i < hunkMatches.length; i++) {
-      const hunkMatch = hunkMatches[i];
-      const hunkStart = hunkMatch.index!;
-      const hunkEnd = hunkMatches[i + 1]?.index ?? section.length;
-      const hunkContent = section.slice(hunkStart, hunkEnd);
-
-      const oldStart = parseInt(hunkMatch[1], 10);
-      const oldLines = parseInt(hunkMatch[2] || '1', 10);
-      const newStart = parseInt(hunkMatch[3], 10);
-      const newLines = parseInt(hunkMatch[4] || '1', 10);
-
-      const lines = this.parseHunkLines(hunkContent, oldStart, newStart, changedLines);
-
-      hunks.push({
-        old_start: oldStart,
-        old_lines: oldLines,
-        new_start: newStart,
-        new_lines: newLines,
-        lines,
-      });
-    }
-
-    return {
-      old_path: oldPath,
-      new_path: newPath,
-      is_new: isNew,
-      is_deleted: isDeleted,
-      is_binary: isBinary,
-      hunks,
-      changed_lines: changedLines,
-    };
-  }
-
-  /**
-   * Parse lines within a hunk
-   * @param hunkContent - The raw hunk content including the @@ header
-   * @param oldStart - Starting line number in the old file
-   * @param newStart - Starting line number in the new file
-   * @param changedLines - Set to accumulate changed line numbers (in new file)
-   */
-  private parseHunkLines(
-    hunkContent: string,
-    oldStart: number,
-    newStart: number,
-    changedLines: Set<number>
-  ): DiffLine[] {
-    const lines: DiffLine[] = [];
-    const contentLines = hunkContent.split('\n').slice(1); // Skip the @@ header
-
-    let newLineNum = newStart;
-    let oldLineNum = oldStart; // Properly track old file line numbers
-
-    for (const line of contentLines) {
-      if (line.startsWith('+')) {
-        lines.push({
-          type: 'add',
-          content: line.slice(1),
-          new_line_number: newLineNum,
-        });
-        changedLines.add(newLineNum);
-        newLineNum++;
-      } else if (line.startsWith('-')) {
-        lines.push({
-          type: 'remove',
-          content: line.slice(1),
-          old_line_number: oldLineNum,
-        });
-        oldLineNum++;
-      } else if (line.startsWith(' ') || line === '') {
-        lines.push({
-          type: 'context',
-          content: line.slice(1) || '',
-          old_line_number: oldLineNum,
-          new_line_number: newLineNum,
-        });
-        oldLineNum++;
-        newLineNum++;
-      }
-    }
-
-    return lines;
-  }
-
   // ==========================================================================
   // Filtering Methods (Public for testing)
   // ==========================================================================
@@ -310,33 +220,9 @@ export class CodeReviewService {
     parsedDiff: ParsedDiff,
     opts: Required<ReviewOptions>
   ): ReviewFinding[] {
-    let filtered = findings;
-
-    // Filter by confidence threshold
-    filtered = filtered.filter(f => f.confidence_score >= opts.confidence_threshold);
-
-    // Filter by changed lines if enabled
-    if (opts.changed_lines_only) {
-      filtered = filtered.filter(f => {
-        // Always include P0 findings
-        if (f.priority === 0) return true;
-        // Include findings on changed lines
-        return f.is_on_changed_line;
-      });
-    }
-
-    // Filter by categories if specified
-    if (opts.categories.length > 0) {
-      filtered = filtered.filter(f => opts.categories.includes(f.category));
-    }
-
-    // Sort by priority (lower is higher priority)
-    filtered.sort((a, b) => a.priority - b.priority);
-
-    // Limit to max findings
-    filtered = filtered.slice(0, opts.max_findings);
-
-    return filtered;
+    // Preserve existing behavior by delegating to the shared post-processor.
+    // (parsedDiff currently isn't used in the filtering logic but is kept for API stability.)
+    return postProcessReviewFindings({ findings, parsedDiff, opts });
   }
 
   // ==========================================================================
