@@ -10,8 +10,10 @@
 
 import type { ContextServiceClient } from '../serviceClient.js';
 import type { ReviewOptions } from '../types/codeReview.js';
+import type { EnterpriseReviewResult } from '../../reviewer/types.js';
 import { handleReviewGitDiff, type ReviewGitDiffArgs } from './gitReview.js';
 import { handleReviewDiff, type ReviewDiffArgs } from './reviewDiff.js';
+import type { ReviewGitDiffOutput } from './gitReview.js';
 
 export type ReviewAutoSelectedTool = 'review_diff' | 'review_git_diff';
 
@@ -52,7 +54,7 @@ export interface ReviewAutoArgs {
 export interface ReviewAutoResult {
   selected_tool: ReviewAutoSelectedTool;
   rationale: string;
-  output: unknown;
+  output: EnterpriseReviewResult | ReviewGitDiffOutput;
 }
 
 function selectTool(args: ReviewAutoArgs): { selected: ReviewAutoSelectedTool; rationale: string } {
@@ -67,6 +69,24 @@ function selectTool(args: ReviewAutoArgs): { selected: ReviewAutoSelectedTool; r
   return { selected: 'review_git_diff', rationale: 'no diff provided -> using review_git_diff' };
 }
 
+function looksLikeUnifiedDiff(diff: string): boolean {
+  const d = diff.trimStart();
+  if (d.startsWith('diff --git ')) return true;
+  // Some diffs may be patch-style without the leading `diff --git` line.
+  const hasFileHeaders = d.includes('\n--- ') && d.includes('\n+++ ');
+  const hasHunkHeader = d.includes('\n@@ ');
+  return hasFileHeaders || hasHunkHeader;
+}
+
+function parseJsonOrThrow<T = unknown>(value: string, context: string): T {
+  try {
+    return JSON.parse(value) as T;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`${context}: failed to parse JSON (${message})`);
+  }
+}
+
 export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: ContextServiceClient): Promise<string> {
   const { selected, rationale } = selectTool(args);
 
@@ -74,21 +94,33 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
     if (!args.diff || typeof args.diff !== 'string') {
       throw new Error('review_diff selected but no valid diff provided');
     }
+    if (!looksLikeUnifiedDiff(args.diff)) {
+      throw new Error('review_diff selected but diff does not look like a unified diff');
+    }
     if (args.target || args.base || (args.include_patterns && args.include_patterns.length > 0)) {
       throw new Error('review_diff selected; git args (target/base/include_patterns) are not applicable');
+    }
+    if (args.review_git_diff_options) {
+      throw new Error('review_diff selected; review_git_diff_options is not applicable');
     }
 
     const resultStr = await handleReviewDiff(
       { diff: args.diff, changed_files: args.changed_files, options: args.review_diff_options } as ReviewDiffArgs,
       serviceClient
     );
-    const output = JSON.parse(resultStr);
+    const output = parseJsonOrThrow<EnterpriseReviewResult>(resultStr, 'review_diff output');
     const result: ReviewAutoResult = { selected_tool: selected, rationale, output };
     return JSON.stringify(result, null, 2);
   }
 
   if (typeof args.diff === 'string' && args.diff.trim().length > 0) {
     throw new Error('review_git_diff selected; diff argument is not applicable');
+  }
+  if (args.changed_files) {
+    throw new Error('review_git_diff selected; changed_files is not applicable');
+  }
+  if (args.review_diff_options) {
+    throw new Error('review_git_diff selected; review_diff_options is not applicable');
   }
 
   const resultStr = await handleReviewGitDiff(
@@ -100,7 +132,7 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
     } as ReviewGitDiffArgs,
     serviceClient
   );
-  const output = JSON.parse(resultStr);
+  const output = parseJsonOrThrow<ReviewGitDiffOutput>(resultStr, 'review_git_diff output');
   const result: ReviewAutoResult = { selected_tool: selected, rationale, output };
   return JSON.stringify(result, null, 2);
 }
@@ -129,4 +161,3 @@ export const reviewAutoTool = {
     required: [],
   },
 };
-
