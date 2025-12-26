@@ -3,6 +3,10 @@
 A **local-first**, **agent-agnostic** Model Context Protocol (MCP) server implementation using the Auggie SDK as the core context engine.
 
 > 📚 **New here?** Check out [INDEX.md](INDEX.md) for a complete documentation guide!
+>
+> 🚀 **Quick Start**: [QUICKSTART.md](QUICKSTART.md) → [GETTING_STARTED.md](GETTING_STARTED.md) → [API_REFERENCE.md](API_REFERENCE.md)
+>
+> 🏗️ **Architecture**: [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md) for deep technical dive
 
 ## Architecture
 
@@ -45,7 +49,7 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 
 ## Features
 
-### MCP Tools (38 tools available)
+### MCP Tools (41 tools available)
 
 #### Core Context Tools (10)
 1. **`index_workspace(force?)`** - Index workspace files for semantic search
@@ -99,18 +103,25 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 28. **`compare_plan_versions(plan_id, from_version, to_version)`** - Generate diff between versions
 29. **`rollback_plan(plan_id, version, reason?)`** - Rollback to a previous plan version
 
-#### Code Review (2)
+#### Code Review (5)
 30. **`review_changes(diff, file_contexts?, options?)`** - AI-powered code review with structured output
 31. **`review_git_diff(target?, base?, include_patterns?, options?)`** - Review code changes from git automatically
+32. **`review_diff(diff, changed_files?, options?)`** - Enterprise review with risk scoring and static analysis
+    - Risk scoring (1-5) based on deterministic preflight
+    - Change classification (feature/bugfix/refactor/infra/docs)
+    - Optional static analysis (TypeScript, Semgrep)
+    - Per-phase timing telemetry
+33. **`check_invariants(diff, changed_files?, invariants_path?)`** - Run YAML invariants deterministically (no LLM)
+34. **`run_static_analysis(changed_files?, options?)`** - Run local static analyzers (tsc, semgrep)
 
 #### Reactive Review (7)
-32. **`reactive_review_pr(...)`** - Start a session-based, parallelized code review
-33. **`get_review_status(session_id)`** - Track progress of a reactive review
-34. **`pause_review(session_id)`** - Pause a running review session
-35. **`resume_review(session_id)`** - Resume a paused session
-36. **`get_review_telemetry(session_id)`** - Detailed metrics (tokens, speed, cache hits)
-37. **`scrub_secrets(content)`** - Mask API keys and sensitive data
-38. **`validate_content(content, content_type, ...)`** - Multi-tier validation for AI-generated content
+35. **`reactive_review_pr(...)`** - Start a session-based, parallelized code review
+36. **`get_review_status(session_id)`** - Track progress of a reactive review
+37. **`pause_review(session_id)`** - Pause a running review session
+38. **`resume_review(session_id)`** - Resume a paused session
+39. **`get_review_telemetry(session_id)`** - Detailed metrics (tokens, speed, cache hits)
+40. **`scrub_secrets(content)`** - Mask API keys and sensitive data
+41. **`validate_content(content, content_type, ...)`** - Multi-tier validation for AI-generated content
 
 ### Key Characteristics
 
@@ -132,6 +143,9 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 - ✅ **Git integration**: Automatic diff retrieval for staged, unstaged, branch, and commit changes (v1.7.0)
 - ✅ **Reactive Optimization**: 180-600x faster reactive reviews via AI Agent Executor, Multi-layer Caching, Batching, and Worker Pool Optimization (v1.8.0)
 - ✅ **High Availability**: Circuit breakers, adaptive timeouts, and zombie session detection (v1.8.0)
+- ✅ **Static analysis integration**: Optional TypeScript and Semgrep analyzers for deterministic feedback (v1.9.0)
+- ✅ **Invariants checking**: YAML-based custom rules for deterministic code review (v1.9.0)
+- ✅ **Per-phase telemetry**: Detailed timing breakdowns for review pipeline optimization (v1.9.0)
 
 ## Reactive Review Optimizations (v1.8.0)
 
@@ -154,6 +168,112 @@ Version 1.8.0 introduces massive performance improvements to the reactive code r
 | **Cached Run** | 30-50 min | ~10-30 sec | **60-180x** ⚡ |
 | **Batched Run** | 30-50 min | ~5-15 sec | **120-360x** ⚡ |
 | **Full Optimization** | 30-50 min | **3-10 sec** | **180-600x** 🚀 |
+
+## Static Analysis & Invariants (v1.9.0)
+
+Version 1.9.0 introduces optional static analysis and deterministic invariants checking for enhanced code review capabilities.
+
+### Static Analysis Features
+
+| Analyzer | Description | Opt-in |
+|----------|-------------|--------|
+| **TypeScript** | Type checking via `tsc --noEmit` | Default |
+| **Semgrep** | Pattern-based security/quality checks | Optional (requires installation) |
+
+### Usage
+
+#### Enable Static Analysis in review_diff
+
+```javascript
+review_diff({
+  diff: "<unified diff>",
+  changed_files: ["src/file.ts"],
+  options: {
+    enable_static_analysis: true,
+    static_analyzers: ["tsc", "semgrep"],
+    static_analysis_timeout_ms: 60000
+  }
+})
+```
+
+#### Run Static Analysis Standalone
+
+```javascript
+run_static_analysis({
+  changed_files: ["src/file.ts"],
+  options: {
+    analyzers: ["tsc", "semgrep"],
+    timeout_ms: 60000,
+    max_findings_per_analyzer: 20
+  }
+})
+```
+
+#### Check Custom Invariants
+
+```javascript
+check_invariants({
+  diff: "<unified diff>",
+  changed_files: ["src/file.ts"],
+  invariants_path: ".review-invariants.yml"
+})
+```
+
+### Invariants Configuration
+
+Create `.review-invariants.yml` in your workspace root:
+
+```yaml
+invariants:
+  - id: no-console-log
+    pattern: "console\\.log"
+    message: "Remove console.log statements before committing"
+    severity: MEDIUM
+
+  - id: no-todo-comments
+    pattern: "TODO|FIXME"
+    message: "Resolve TODO/FIXME comments"
+    severity: LOW
+
+  - id: require-error-handling
+    pattern: "catch\\s*\\(\\s*\\)"
+    message: "Empty catch blocks should log or handle errors"
+    severity: HIGH
+```
+
+### Benefits
+
+- ✅ **Deterministic**: No LLM required for invariants/static analysis
+- ✅ **Fast**: Local execution, no API calls
+- ✅ **CI-Friendly**: Structured JSON output suitable for CI/CD pipelines
+- ✅ **Customizable**: YAML-based rules, configurable analyzers
+- ✅ **Opt-in**: Disabled by default, enable as needed
+
+### Per-Phase Telemetry
+
+The `review_diff` tool now reports detailed timing breakdowns in `stats.timings_ms`:
+
+```json
+{
+  "stats": {
+    "timings_ms": {
+      "preflight": 45,
+      "invariants": 12,
+      "static_analysis": 3200,
+      "context_fetch": 890,
+      "secrets_scrub": 5,
+      "llm_structural": 1200,
+      "llm_detailed": 2400
+    }
+  }
+}
+```
+
+This allows you to:
+- Identify performance bottlenecks in the review pipeline
+- Optimize timeout settings for your workflow
+- Monitor static analysis overhead
+- Track LLM usage patterns
 
 ## Planning Workflow (v1.4.0+)
 
@@ -566,7 +686,7 @@ npm run test:coverage
 npm run inspector
 ```
 
-**Test Status:** 379 tests passing (100% completion) ✅
+**Test Status:** 397 tests passing (100% completion) ✅
 
 ## License
 
