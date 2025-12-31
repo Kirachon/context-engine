@@ -329,6 +329,14 @@ export CE_PERSIST_SEARCH_CACHE=true
 # Persist get_context_for_prompt bundles to disk (default: enabled; disable for privacy/testing)
 export CE_PERSIST_CONTEXT_CACHE=true
 
+# Optional: per-file index state store + skip unchanged indexing (default: OFF)
+# - Speeds up repeated indexing runs on large repos.
+# - Requires `CE_INDEX_STATE_STORE=true`.
+export CE_INDEX_STATE_STORE=false
+export CE_SKIP_UNCHANGED_INDEXING=false
+# Normalize EOL (CRLF vs LF) when hashing (recommended when using the state store across Windows/Linux)
+export CE_HASH_NORMALIZE_EOL=false
+
 # Watcher: when enabled, schedule a full reindex if deletions are detected (prevents stale "ghost file" results)
 export CE_WATCHER_REINDEX_ON_DELETE=true
 # Debounce before triggering reindex after deletions (ms)

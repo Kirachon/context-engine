@@ -19,6 +19,7 @@ build/
 .augment-index-fingerprint.json
 .augment-search-cache.json
 .augment-context-cache.json
+.augment-index-state.json
 .augment-plans/
 
 # Personal planning notes

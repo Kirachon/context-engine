@@ -23,6 +23,8 @@ import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { Worker } from 'worker_threads';
 import type { WorkerMessage } from '../worker/messages.js';
+import { featureEnabled } from '../config/features.js';
+import { JsonIndexStateStore, type IndexStateFile } from './indexStateStore.js';
 
 // ============================================================================
 // Type Definitions
@@ -745,6 +747,7 @@ export class ContextServiceClient {
   private context: DirectContext | null = null;
   private initPromise: Promise<void> | null = null;
   private indexChain: Promise<void> = Promise.resolve();
+  private indexStateStore: JsonIndexStateStore | null = null;
 
   /** LRU cache for search results */
   private searchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
@@ -806,6 +809,27 @@ export class ContextServiceClient {
       fileCount: 0,
       isStale: true,
     };
+  }
+
+  private getIndexStateStore(): JsonIndexStateStore | null {
+    if (!featureEnabled('index_state_store')) {
+      return null;
+    }
+    if (!this.indexStateStore) {
+      this.indexStateStore = new JsonIndexStateStore(this.workspacePath);
+    }
+    return this.indexStateStore;
+  }
+
+  private normalizeEolForHash(contents: string): string {
+    // Normalize CRLF/CR to LF for stable hashing across OSes.
+    return contents.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  }
+
+  private hashContent(contents: string): string {
+    const normalize = featureEnabled('hash_normalize_eol');
+    const input = normalize ? this.normalizeEolForHash(contents) : contents;
+    return crypto.createHash('sha256').update(input).digest('hex');
   }
 
   /**
@@ -1898,7 +1922,15 @@ export class ContextServiceClient {
     let successCount = 0;
     let errorCount = 0;
     let skippedCount = 0;
+    let unchangedSkippedCount = 0;
     const errors: string[] = [];
+    const successfulPaths: Set<string> = new Set();
+    const contentHashes: Map<string, string> = new Map();
+
+    const store = this.getIndexStateStore();
+    const skipUnchanged = Boolean(store) && featureEnabled('skip_unchanged_indexing');
+    const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
+    const indexedAtIso = new Date().toISOString();
 
     for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
       const batchPaths = filePaths.slice(i, i + BATCH_SIZE);
@@ -1910,6 +1942,15 @@ export class ContextServiceClient {
       for (const relativePath of batchPaths) {
         const contents = this.readFileContents(relativePath);
         if (contents !== null) {
+          if (skipUnchanged && indexState) {
+            const hash = this.hashContent(contents);
+            contentHashes.set(relativePath, hash);
+            const previous = indexState.files[relativePath]?.hash;
+            if (previous && previous === hash) {
+              unchangedSkippedCount++;
+              continue;
+            }
+          }
           batch.push({ path: relativePath, contents });
         } else {
           skippedCount++;
@@ -1932,6 +1973,12 @@ export class ContextServiceClient {
         // Don't wait for indexing on intermediate batches
         await context.addToIndex(batch, { waitForIndexing: isLastBatch });
         successCount += batch.length;
+        for (const file of batch) {
+          successfulPaths.add(file.path);
+          if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
+            contentHashes.set(file.path, this.hashContent(file.contents));
+          }
+        }
         if (debugIndex) {
           console.error(`  ✓ Batch ${batchNum} indexed successfully`);
         }
@@ -1947,6 +1994,10 @@ export class ContextServiceClient {
           try {
             await context.addToIndex([file], { waitForIndexing: false });
             successCount++;
+            successfulPaths.add(file.path);
+            if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
+              contentHashes.set(file.path, this.hashContent(file.contents));
+            }
             if (debugIndex) {
               console.error(`    ✓ ${file.path}`);
             }
@@ -1984,6 +2035,31 @@ export class ContextServiceClient {
 
     console.error(`\nIndexing complete: ${successCount} succeeded, ${errorCount} had errors, ${skippedCount} skipped`);
 
+    if (store && successfulPaths.size > 0) {
+      const prior = store.load();
+      const nextFiles: Record<string, { hash: string; indexed_at: string }> = {};
+      const existingPaths = new Set(filePaths);
+
+      // Carry forward entries for files that still exist.
+      for (const [p, entry] of Object.entries(prior.files)) {
+        if (!existingPaths.has(p)) continue;
+        nextFiles[p] = entry;
+      }
+
+      // Update entries for successfully indexed files.
+      for (const p of successfulPaths) {
+        const hash = contentHashes.get(p);
+        if (!hash) continue;
+        nextFiles[p] = { hash, indexed_at: indexedAtIso };
+      }
+
+      store.save({
+        version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        updated_at: new Date().toISOString(),
+        files: nextFiles,
+      });
+    }
+
     // Save state after indexing (even if some files failed)
     if (successCount > 0) {
       await this.saveState();
@@ -2009,7 +2085,7 @@ export class ContextServiceClient {
 
       return {
         indexed: successCount,
-        skipped: skippedCount + errorCount,
+        skipped: skippedCount + errorCount + unchangedSkippedCount,
         errors,
         duration: Date.now() - startTime,
       };
@@ -2188,6 +2264,14 @@ export class ContextServiceClient {
       const files: Array<{ path: string; contents: string }> = [];
       const errors: string[] = [];
       let skipped = 0;
+      let unchangedSkippedCount = 0;
+      const successfulPaths: Set<string> = new Set();
+      const contentHashes: Map<string, string> = new Map();
+
+      const store = this.getIndexStateStore();
+      const skipUnchanged = Boolean(store) && featureEnabled('skip_unchanged_indexing');
+      const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
+      const indexedAtIso = new Date().toISOString();
 
       for (const rawPath of uniquePaths) {
         // Normalize and ensure path stays within workspace
@@ -2212,6 +2296,15 @@ export class ContextServiceClient {
 
         const contents = this.readFileContents(relativePath);
         if (contents !== null) {
+          if (skipUnchanged && indexState) {
+            const hash = this.hashContent(contents);
+            contentHashes.set(relativePath, hash);
+            const previous = indexState.files[relativePath]?.hash;
+            if (previous && previous === hash) {
+              unchangedSkippedCount++;
+              continue;
+            }
+          }
           files.push({ path: relativePath, contents });
         } else {
           skipped++;
@@ -2225,7 +2318,7 @@ export class ContextServiceClient {
         });
         return {
           indexed: 0,
-          skipped,
+          skipped: skipped + unchangedSkippedCount,
           errors: ['No indexable file changes provided'],
           duration: Date.now() - startTime,
         };
@@ -2239,6 +2332,12 @@ export class ContextServiceClient {
         try {
           await context.addToIndex(batch, { waitForIndexing: isLastBatch });
           successCount += batch.length;
+          for (const file of batch) {
+            successfulPaths.add(file.path);
+            if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
+              contentHashes.set(file.path, this.hashContent(file.contents));
+            }
+          }
         } catch (error) {
           errors.push(error instanceof Error ? error.message : String(error));
           // Attempt per-file indexing
@@ -2246,11 +2345,32 @@ export class ContextServiceClient {
             try {
               await context.addToIndex([file], { waitForIndexing: false });
               successCount++;
+              successfulPaths.add(file.path);
+              if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
+                contentHashes.set(file.path, this.hashContent(file.contents));
+              }
             } catch (fileError) {
               errors.push(`${file.path}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
             }
           }
         }
+      }
+
+      if (store && successfulPaths.size > 0) {
+        const prior = store.load();
+        const nextFiles: Record<string, { hash: string; indexed_at: string }> = { ...prior.files };
+
+        for (const p of successfulPaths) {
+          const hash = contentHashes.get(p);
+          if (!hash) continue;
+          nextFiles[p] = { hash, indexed_at: indexedAtIso };
+        }
+
+        store.save({
+          version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+          updated_at: new Date().toISOString(),
+          files: nextFiles,
+        });
       }
 
       if (successCount > 0) {
@@ -2272,7 +2392,7 @@ export class ContextServiceClient {
 
       return {
         indexed: successCount,
-        skipped,
+        skipped: skipped + unchangedSkippedCount,
         errors,
         duration: Date.now() - startTime,
       };
@@ -2306,6 +2426,16 @@ export class ContextServiceClient {
         console.error(`Deleted index fingerprint file: ${fingerprintPath}`);
       } catch (error) {
         console.error('Failed to delete index fingerprint file:', error);
+      }
+    }
+
+    const stateStorePath = path.join(this.workspacePath, '.augment-index-state.json');
+    if (fs.existsSync(stateStorePath)) {
+      try {
+        fs.unlinkSync(stateStorePath);
+        console.error(`Deleted index state store file: ${stateStorePath}`);
+      } catch (error) {
+        console.error('Failed to delete index state store file:', error);
       }
     }
 
