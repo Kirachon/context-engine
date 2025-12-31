@@ -605,6 +605,9 @@ The server will automatically use the appropriate tools to provide relevant cont
 | `REACTIVE_ENABLE_BATCHING`| Enable request batching (Phase 3) | `false` |
 | `REACTIVE_OPTIMIZE_WORKERS`| Enable CPU-aware worker optimization (Phase 4) | `false` |
 | `REACTIVE_PARALLEL_EXEC`| Enable concurrent worker execution | `false` |
+| `CE_INDEX_STATE_STORE` | Persist per-file index hashes to `.augment-index-state.json` | `false` |
+| `CE_SKIP_UNCHANGED_INDEXING` | Skip re-indexing unchanged files (requires `CE_INDEX_STATE_STORE=true`) | `false` |
+| `CE_HASH_NORMALIZE_EOL` | Normalize CRLF/LF when hashing (recommended with state store across Windows/Linux) | `false` |
 
 ### Offline-Only Mode (v1.1.0)
 
