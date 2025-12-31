@@ -1,6 +1,6 @@
 import { parentPort, workerData } from 'worker_threads';
-import type { WorkerPayload, WorkerMessage } from './messages.ts';
-import { ContextServiceClient } from '../mcp/serviceClient.ts';
+import type { WorkerPayload, WorkerMessage } from './messages.js';
+import { ContextServiceClient } from '../mcp/serviceClient.js';
 
 export async function runIndexJob(
   payload: WorkerPayload,
@@ -45,4 +45,3 @@ const port = parentPort;
 if (port && workerData) {
   void runIndexJob(workerData as WorkerPayload, (message) => port.postMessage(message));
 }
-
