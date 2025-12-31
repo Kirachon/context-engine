@@ -2,7 +2,9 @@
 
 ## MCP Tools Reference
 
-This document provides detailed API specifications for all 20+ MCP tools exposed by Context Engine.
+This document provides API specifications for MCP tools exposed by Context Engine.
+
+Note: treat `tool_manifest` (and the tools' `inputSchema` returned by MCP) as the source of truth if this document drifts.
 
 ## Table of Contents
 
@@ -26,26 +28,14 @@ This document provides detailed API specifications for all 20+ MCP tools exposed
 ```typescript
 {
   query: string;              // Natural language search query
-  top_k?: number;             // Number of results (default: 5)
-  file_filter?: string[];     // Optional file path filters
-  min_score?: number;         // Minimum relevance score (0-1)
+  top_k?: number;             // Number of results (default: 10, max: 50)
+  mode?: "fast" | "deep";     // fast (default) or deep (more recall, higher latency)
+  bypass_cache?: boolean;     // Bypass caches for this call (default: false)
+  timeout_ms?: number;        // Cap time spent in retrieval pipeline (ms)
 }
 ```
 
-**Output**:
-```typescript
-{
-  results: Array<{
-    file: string;             // File path
-    content: string;          // Code snippet
-    score: number;            // Relevance score (0-1)
-    line_start: number;       // Starting line number
-    line_end: number;         // Ending line number
-  }>;
-  query: string;              // Original query
-  total_results: number;      // Total matches found
-}
-```
+**Output**: Markdown string formatted for human/agent consumption.
 
 **Example**:
 ```json
@@ -53,7 +43,8 @@ This document provides detailed API specifications for all 20+ MCP tools exposed
   "name": "semantic_search",
   "arguments": {
     "query": "authentication logic",
-    "top_k": 5
+    "top_k": 10,
+    "mode": "fast"
   }
 }
 ```
@@ -96,27 +87,15 @@ This document provides detailed API specifications for all 20+ MCP tools exposed
 ```typescript
 {
   query: string;              // Context query
-  max_files?: number;         // Max files to include (default: 5)
-  max_tokens?: number;        // Token budget (default: 8000)
-  include_dependencies?: boolean; // Include imports (default: true)
-  file_hints?: string[];      // Priority files
+  max_files?: number;         // Max files to include (default: 5, max: 20)
+  token_budget?: number;      // Token budget (default: 8000)
+  include_related?: boolean;  // Include related/imported files (default: true)
+  min_relevance?: number;     // Minimum relevance score (default: 0.3)
+  bypass_cache?: boolean;     // Bypass caches for this call (default: false)
 }
 ```
 
-**Output**:
-```typescript
-{
-  context: string;            // Formatted context bundle
-  files_included: string[];   // List of included files
-  tokens_used: number;        // Estimated token count
-  truncated: boolean;         // Whether context was truncated
-  metadata: {
-    query: string;
-    strategy: string;         // Context bundling strategy used
-    timestamp: string;
-  };
-}
-```
+**Output**: Markdown string formatted for human/agent consumption.
 
 ---
 

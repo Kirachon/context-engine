@@ -312,6 +312,17 @@ export CE_INDEX_FILES_WORKER_THRESHOLD=200
 Note: worker-based indexing requires the built worker file (`dist/worker/IndexWorker.js`). When running from TypeScript sources (dev/tsx),
 the worker uses the `tsx` loader if available; if not, indexing falls back to in-process mode to avoid startup failures in some GUI clients.
 
+### CI: `TS5097` / “import path can only end with a '.ts' extension”
+
+If GitHub Actions fails with:
+
+`TS5097: An import path can only end with a '.ts' extension when 'allowImportingTsExtensions' is enabled.`
+
+It usually means a file imported another module with a `.ts` suffix (e.g. `./foo.ts`). This project’s `tsconfig.json` does not enable
+`allowImportingTsExtensions`, so `.ts`-suffixed import specifiers should be avoided.
+
+Also double-check the workflow run’s `head_sha`: sometimes you’re looking at an older `main` run before the fix was merged.
+
 # Persist semantic search results to disk (default: enabled; disable for privacy/testing)
 export CE_PERSIST_SEARCH_CACHE=true
 

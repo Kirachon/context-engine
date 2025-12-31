@@ -180,6 +180,7 @@ After configuration, verify everything works:
 1. Check paths are absolute (use `D:\\` not `D:/`)
 2. Verify `dist/index.js` exists: `dir D:\GitProjects\context-engine\dist\index.js`
 3. Check for syntax errors in config files
+4. Prefer running the built `dist/index.js` (recommended). Running from TypeScript sources may require the `tsx` loader for worker-based indexing.
 
 ### **Watcher not working:**
 1. Verify `--watch` flag is present in config
@@ -199,4 +200,3 @@ Both Codex CLI and Antigravity are now configured with:
 - ✅ Zero manual intervention required
 
 **Just code, and the index stays up-to-date automatically!**
-

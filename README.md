@@ -57,14 +57,21 @@ This implementation follows a clean 5-layer architecture as outlined in `plan.md
 2. **`codebase_retrieval(query, top_k?)`** - PRIMARY semantic search with JSON output for programmatic use
    - `query`: Natural language search query
    - `top_k` (optional): Number of results to return (default: 5)
-3. **`semantic_search(query, top_k?)`** - Semantic code search with markdown-formatted output
+3. **`semantic_search(query, top_k?, mode?, bypass_cache?, timeout_ms?)`** - Semantic code search with markdown-formatted output
    - `query`: Natural language search query
    - `top_k` (optional): Number of results to return (default: 5)
+   - `mode` (optional): `"fast"` (default) or `"deep"` for higher recall at higher latency
+   - `bypass_cache` (optional): When true, bypass caches for this call
+   - `timeout_ms` (optional): Cap time spent in retrieval pipeline (ms)
 4. **`get_file(path)`** - Retrieve complete file contents
    - `path`: Relative path to file from workspace root
-5. **`get_context_for_prompt(query, max_files?)`** - Get comprehensive context bundle for prompt enhancement
+5. **`get_context_for_prompt(query, max_files?, token_budget?, include_related?, min_relevance?, bypass_cache?)`** - Get comprehensive context bundle for prompt enhancement
    - `query`: Context request description
    - `max_files` (optional): Maximum files to include (default: 5)
+   - `token_budget` (optional): Token budget for the bundle (default: 8000)
+   - `include_related` (optional): Include related/imported files (default: true)
+   - `min_relevance` (optional): Minimum relevance score (default: 0.3)
+   - `bypass_cache` (optional): When true, bypass caches for this call
 6. **`enhance_prompt(prompt)`** - AI-powered prompt enhancement with codebase context
    - `prompt`: Simple prompt to enhance
 7. **`index_status()`** - View index health metadata (status, fileCount, lastIndexed, isStale)
