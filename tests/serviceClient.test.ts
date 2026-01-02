@@ -39,6 +39,7 @@ jest.unstable_mockModule('@augmentcode/auggie-sdk', () => ({
 
 // Import after mocking
 const { ContextServiceClient } = await import('../src/mcp/serviceClient.js');
+const { FEATURE_FLAGS } = await import('../src/config/features.js');
 
 describe('ContextServiceClient', () => {
   let client: InstanceType<typeof ContextServiceClient>;
@@ -66,6 +67,11 @@ describe('ContextServiceClient', () => {
     delete process.env.AUGMENT_API_TOKEN;
     delete process.env.AUGMENT_API_URL;
     delete process.env.CONTEXT_ENGINE_OFFLINE_ONLY;
+
+    // Reset feature flags that tests may override.
+    FEATURE_FLAGS.index_state_store = false;
+    FEATURE_FLAGS.skip_unchanged_indexing = false;
+    FEATURE_FLAGS.hash_normalize_eol = false;
   });
 
   describe('Path Validation', () => {
@@ -301,6 +307,84 @@ cached content
       await client.indexWorkspace();
 
       expect(mockContextInstance.exportToFile).toHaveBeenCalled();
+    });
+  });
+
+  describe('Indexing', () => {
+    it('should not skip unchanged files when there is no restored context state', async () => {
+      FEATURE_FLAGS.index_state_store = true;
+      FEATURE_FLAGS.skip_unchanged_indexing = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
+
+      // Pre-populate index state store with a matching hash to simulate "unchanged",
+      // but DO NOT provide a context state file. We must still index the file.
+      const crypto = await import('crypto');
+      const hash = crypto.createHash('sha256').update('export const a = 1;\n').digest('hex');
+      const indexStatePath = path.join(tempDir, '.augment-index-state.json');
+      fs.writeFileSync(
+        indexStatePath,
+        JSON.stringify(
+          {
+            version: 1,
+            updated_at: new Date().toISOString(),
+            files: { 'a.ts': { hash, indexed_at: new Date().toISOString() } },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const indexingClient = new ContextServiceClient(tempDir);
+      await indexingClient.indexWorkspace();
+
+      expect(mockContextInstance.addToIndex).toHaveBeenCalled();
+      const firstCallArgs = mockContextInstance.addToIndex.mock.calls[0]?.[0] as Array<{ path: string }>;
+      expect(firstCallArgs.map((x) => x.path)).toContain('a.ts');
+    });
+
+    it('should treat an all-unchanged workspace index run as a successful no-op', async () => {
+      FEATURE_FLAGS.index_state_store = true;
+      FEATURE_FLAGS.skip_unchanged_indexing = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
+
+      // Provide a context state file so initialization restores from disk.
+      const statePath = path.join(tempDir, '.augment-context-state.json');
+      fs.writeFileSync(statePath, '{}', 'utf-8');
+      mockDirectContext.importFromFile.mockResolvedValueOnce(mockContextInstance);
+
+      const crypto = await import('crypto');
+      const hash = crypto.createHash('sha256').update('export const a = 1;\n').digest('hex');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 1,
+            updated_at: new Date().toISOString(),
+            files: { 'a.ts': { hash, indexed_at: new Date().toISOString() } },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const indexingClient = new ContextServiceClient(tempDir);
+      const result = await indexingClient.indexWorkspace();
+
+      expect(result.indexed).toBe(0);
+      expect(result.errors).toEqual([]);
+      expect(result.totalIndexable).toBe(1);
+      expect(result.unchangedSkipped).toBe(1);
+      expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
+
+      const status = indexingClient.getIndexStatus();
+      expect(status.status).toBe('idle');
+      expect(status.fileCount).toBe(1);
     });
   });
 });

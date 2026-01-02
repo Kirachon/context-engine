@@ -32,6 +32,8 @@ export async function runIndexJob(
      count: result.indexed,
      skipped: result.skipped,
      errors: result.errors,
+     totalIndexable: result.totalIndexable,
+     unchangedSkipped: result.unchangedSkipped,
    });
  } catch (error) {
    send({

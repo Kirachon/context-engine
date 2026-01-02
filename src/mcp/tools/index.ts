@@ -28,6 +28,11 @@ export async function handleIndexWorkspace(
   try {
     console.error(`[index_workspace] Starting workspace indexing (force=${force})...`);
 
+    if (force) {
+      console.error('[index_workspace] Force enabled: clearing existing index state first...');
+      await serviceClient.clearIndex();
+    }
+
     if (background) {
       // Fire and forget background worker
       serviceClient.indexWorkspaceInBackground().catch((error) => {

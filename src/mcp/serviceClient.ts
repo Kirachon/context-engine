@@ -58,6 +58,13 @@ export interface IndexResult {
   skipped: number;
   errors: string[];
   duration: number;
+  /**
+   * Total number of indexable (non-ignored, supported) files discovered for the run.
+   * Useful when indexing is optimized to skip unchanged files.
+   */
+  totalIndexable?: number;
+  /** Number of files skipped because they were unchanged (when enabled). */
+  unchangedSkipped?: number;
 }
 
 export interface WatcherStatus {
@@ -752,6 +759,7 @@ export class ContextServiceClient {
   private initPromise: Promise<void> | null = null;
   private indexChain: Promise<void> = Promise.resolve();
   private indexStateStore: JsonIndexStateStore | null = null;
+  private restoredFromStateFile: boolean = false;
 
   /** LRU cache for search results */
   private searchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
@@ -1115,6 +1123,8 @@ export class ContextServiceClient {
               skipped: message.skipped ?? 0,
               errors: message.errors ?? [],
               duration: message.duration ?? (Date.now() - startTime),
+              totalIndexable: message.totalIndexable,
+              unchangedSkipped: message.unchangedSkipped,
             });
           });
         } else if (message.type === 'index_error') {
@@ -1195,6 +1205,7 @@ export class ContextServiceClient {
       if (fs.existsSync(stateFilePath)) {
         console.error(`Restoring context from ${stateFilePath}`);
         this.context = await DirectContext.importFromFile(stateFilePath);
+        this.restoredFromStateFile = true;
         console.error('Context restored successfully');
         try {
           const stats = fs.statSync(stateFilePath);
@@ -1230,6 +1241,7 @@ export class ContextServiceClient {
     console.error('Creating new DirectContext');
     try {
       this.context = await DirectContext.create();
+      this.restoredFromStateFile = false;
       console.error('DirectContext created successfully');
     } catch (createError) {
       console.error('Failed to create DirectContext:', createError);
@@ -1868,14 +1880,15 @@ export class ContextServiceClient {
             this.updateIndexStatus({
               status: result.errors.length ? 'error' : 'idle',
               lastIndexed: new Date().toISOString(),
-              fileCount: result.indexed,
+              fileCount: result.totalIndexable ?? result.indexed,
               lastError: result.errors.length ? result.errors[result.errors.length - 1] : undefined,
             });
           } else {
             this.updateIndexStatus({
-              status: 'error',
-              lastError: result.errors[0] || 'No files could be indexed',
-              fileCount: 0,
+              status: result.errors.length ? 'error' : 'idle',
+              lastIndexed: new Date().toISOString(),
+              fileCount: result.totalIndexable ?? 0,
+              lastError: result.errors[0],
             });
           }
 
@@ -1934,7 +1947,10 @@ export class ContextServiceClient {
     const contentHashes: Map<string, string> = new Map();
 
     const store = this.getIndexStateStore();
-    const skipUnchanged = Boolean(store) && featureEnabled('skip_unchanged_indexing');
+    // Skipping unchanged files is only safe when we have an existing context restored from disk.
+    // Otherwise we could "skip" everything and end up with an empty index.
+    const skipUnchanged =
+      Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.restoredFromStateFile;
     const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
     const indexedAtIso = new Date().toISOString();
 
@@ -2024,7 +2040,9 @@ export class ContextServiceClient {
     }
 
     // Check if any files were actually indexed
-    if (successCount === 0) {
+    const totalIndexable = filePaths.length - skippedCount;
+    const allUnchanged = successCount === 0 && unchangedSkippedCount > 0 && errorCount === 0;
+    if (successCount === 0 && !allUnchanged) {
       console.error('No files were successfully indexed');
       this.updateIndexStatus({
         status: 'error',
@@ -2033,9 +2051,11 @@ export class ContextServiceClient {
       });
       return {
         indexed: 0,
-        skipped: skippedCount + errorCount,
+        skipped: skippedCount + errorCount + unchangedSkippedCount,
         errors: errors.length > 0 ? errors : ['No files could be indexed'],
         duration: Date.now() - startTime,
+        totalIndexable,
+        unchangedSkipped: unchangedSkippedCount,
       };
     }
 
@@ -2074,14 +2094,16 @@ export class ContextServiceClient {
       this.updateIndexStatus({
         status: errorCount > 0 ? 'error' : 'idle',
         lastIndexed: new Date().toISOString(),
-        fileCount: successCount,
+        fileCount: totalIndexable,
         lastError: errors.length ? errors[errors.length - 1] : undefined,
       });
     } else {
+      // Nothing to write, but treat as a successful no-op when everything is unchanged.
       this.updateIndexStatus({
-        status: 'error',
-        lastError: errors[0] || 'Indexing failed',
-        fileCount: 0,
+        status: errorCount > 0 ? 'error' : 'idle',
+        lastIndexed: new Date().toISOString(),
+        fileCount: totalIndexable,
+        lastError: errors.length ? errors[errors.length - 1] : undefined,
       });
     }
 
@@ -2094,6 +2116,8 @@ export class ContextServiceClient {
 	        skipped: skippedCount + errorCount + unchangedSkippedCount,
 	        errors,
 	        duration: Date.now() - startTime,
+          totalIndexable,
+          unchangedSkipped: unchangedSkippedCount,
 	      };
       } catch (e) {
         metricsResult = 'error';
@@ -2152,7 +2176,7 @@ export class ContextServiceClient {
             this.updateIndexStatus({
               status: message.errors?.length ? 'error' : 'idle',
               lastIndexed: new Date().toISOString(),
-              fileCount: message.count,
+              fileCount: message.totalIndexable ?? message.count,
               lastError: message.errors?.[message.errors.length - 1],
             });
 
@@ -2292,7 +2316,8 @@ export class ContextServiceClient {
       const contentHashes: Map<string, string> = new Map();
 
       const store = this.getIndexStateStore();
-      const skipUnchanged = Boolean(store) && featureEnabled('skip_unchanged_indexing');
+      const skipUnchanged =
+        Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.restoredFromStateFile;
       const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
       const indexedAtIso = new Date().toISOString();
 
@@ -2405,10 +2430,18 @@ export class ContextServiceClient {
           lastError: errors[errors.length - 1],
         });
       } else {
-        this.updateIndexStatus({
-          status: 'error',
-          lastError: errors[0] || 'Incremental indexing failed',
-        });
+        if (unchangedSkippedCount > 0 && errors.length === 0) {
+          // Successful no-op (all requested files unchanged).
+          this.updateIndexStatus({
+            status: 'idle',
+            lastIndexed: new Date().toISOString(),
+          });
+        } else {
+          this.updateIndexStatus({
+            status: 'error',
+            lastError: errors[0] || 'Incremental indexing failed',
+          });
+        }
       }
 
       this.clearCache();
@@ -2418,6 +2451,7 @@ export class ContextServiceClient {
         skipped: skipped + unchangedSkippedCount,
         errors,
         duration: Date.now() - startTime,
+        unchangedSkipped: unchangedSkippedCount,
       };
     });
   }
@@ -2429,6 +2463,7 @@ export class ContextServiceClient {
     // Reset SDK instances
     this.context = null;
     this.initPromise = null;
+    this.restoredFromStateFile = false;
     this.skipAutoIndexOnce = true;
 
     // Delete persisted state file if it exists
