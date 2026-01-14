@@ -611,6 +611,10 @@ The server will automatically use the appropriate tools to provide relevant cont
 | `CE_METRICS` | Enable in-process metrics collection (Prometheus format) | `false` |
 | `CE_HTTP_METRICS` | Expose `GET /metrics` when running with `--http` | `false` |
 | `CE_AI_REQUEST_TIMEOUT_MS` | Default timeout for AI calls (`searchAndAsk`) in milliseconds | `120000` |
+| `CE_SEARCH_AND_ASK_QUEUE_MAX` | Max queued `searchAndAsk` requests before rejecting (0 = unlimited) | `50` |
+| `CE_TSC_INCREMENTAL` | Enable incremental `tsc` runs for static analysis | `true` |
+| `CE_TSC_BUILDINFO_DIR` | Directory to store `tsbuildinfo` cache (defaults to OS temp) | `(os tmp)` |
+| `CE_SEMGREP_MAX_FILES` | Max files per semgrep invocation before chunking | `100` |
 | `CE_PLAN_AI_REQUEST_TIMEOUT_MS` | Timeout for planning AI calls in milliseconds (`create_plan`, `refine_plan`, step execution) | `300000` |
 | `CE_HTTP_PLAN_TIMEOUT_MS` | HTTP `POST /api/v1/plan` request timeout in milliseconds | `360000` |
 

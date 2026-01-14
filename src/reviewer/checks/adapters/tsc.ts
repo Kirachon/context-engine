@@ -1,6 +1,10 @@
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import type { EnterpriseFinding } from '../../types.js';
 import type { StaticAnalyzerInput, StaticAnalyzerResult } from './types.js';
+import { envBool } from '../../../config/env.js';
 import { devNullPath, runCommand } from './exec.js';
 
 export interface TscError {
@@ -9,6 +13,31 @@ export interface TscError {
   column: number;
   code: string;
   message: string;
+}
+
+function getTscBuildInfoPath(workspacePath: string): string | null {
+  if (!envBool('CE_TSC_INCREMENTAL', true)) {
+    return null;
+  }
+
+  const overrideDir = process.env.CE_TSC_BUILDINFO_DIR?.trim();
+  const baseDir = overrideDir && overrideDir.length > 0
+    ? overrideDir
+    : path.join(os.tmpdir(), 'context-engine', 'tsc');
+  const workspaceHash = crypto
+    .createHash('sha256')
+    .update(workspacePath)
+    .digest('hex')
+    .slice(0, 12);
+  const buildDir = path.join(baseDir, workspaceHash);
+
+  try {
+    fs.mkdirSync(buildDir, { recursive: true });
+  } catch {
+    return null;
+  }
+
+  return path.join(buildDir, 'tsconfig.tsbuildinfo');
 }
 
 export function parseTscOutput(output: string): TscError[] {
@@ -34,7 +63,13 @@ export async function runTscAnalyzer(
   opts: { timeoutMs: number; maxFindings: number }
 ): Promise<StaticAnalyzerResult> {
   const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
-  const args = ['--no-install', 'tsc', '--noEmit', '--pretty', 'false', '--tsBuildInfoFile', devNullPath()];
+  const args = ['--no-install', 'tsc', '--noEmit', '--pretty', 'false'];
+  const buildInfoPath = getTscBuildInfoPath(input.workspace_path);
+  if (buildInfoPath) {
+    args.push('--incremental', '--tsBuildInfoFile', buildInfoPath);
+  } else {
+    args.push('--tsBuildInfoFile', devNullPath());
+  }
 
   const result = await runCommand({
     command,
@@ -85,4 +120,3 @@ export async function runTscAnalyzer(
     warnings,
   };
 }
-

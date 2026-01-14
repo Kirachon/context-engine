@@ -24,7 +24,7 @@ import { fileURLToPath } from 'url';
 import { Worker } from 'worker_threads';
 import type { WorkerMessage } from '../worker/messages.js';
 import { featureEnabled } from '../config/features.js';
-import { envMs } from '../config/env.js';
+import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
 import { JsonIndexStateStore, type IndexStateFile } from './indexStateStore.js';
 
@@ -219,6 +219,7 @@ const CACHE_TTL_MS = 60000;
 const DEFAULT_API_TIMEOUT_MS = 120000;
 const MIN_API_TIMEOUT_MS = 10_000;
 const MAX_API_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_SEARCH_QUEUE_MAX = 50;
 
 /** State file name for persisting index state */
 const STATE_FILE_NAME = '.augment-context-state.json';
@@ -254,6 +255,17 @@ const MEMORIES_DIR = '.memories';
  *
  * Includes timeout protection to prevent indefinite hangs on API calls.
  */
+class SearchQueueFullError extends Error {
+  readonly code = 'SEARCH_QUEUE_FULL';
+
+  constructor(maxQueueSize: number) {
+    super(
+      `Search queue is full (max ${maxQueueSize}). Try again later or increase CE_SEARCH_AND_ASK_QUEUE_MAX.`
+    );
+    this.name = 'SearchQueueFullError';
+  }
+}
+
 class SearchQueue {
   private queue: Array<{
     execute: () => Promise<string>;
@@ -262,6 +274,11 @@ class SearchQueue {
     timeoutMs: number;
   }> = [];
   private running = false;
+  private maxQueueSize: number;
+
+  constructor(maxQueueSize: number) {
+    this.maxQueueSize = maxQueueSize;
+  }
 
   /**
    * Create a promise that resolves with a timeout
@@ -290,6 +307,9 @@ class SearchQueue {
    * @param timeoutMs Timeout in milliseconds (default: 120000 = 2 minutes)
    */
   async enqueue(fn: () => Promise<string>, timeoutMs: number = DEFAULT_API_TIMEOUT_MS): Promise<string> {
+    if (this.maxQueueSize > 0 && this.queue.length >= this.maxQueueSize) {
+      return Promise.reject(new SearchQueueFullError(this.maxQueueSize));
+    }
     return new Promise<string>((resolve, reject) => {
       this.queue.push({ execute: fn, resolve, reject, timeoutMs });
       this.processQueue();
@@ -333,6 +353,13 @@ class SearchQueue {
    */
   get length(): number {
     return this.queue.length;
+  }
+
+  /**
+   * Total in-flight + waiting requests.
+   */
+  get depth(): number {
+    return this.queue.length + (this.running ? 1 : 0);
   }
 
   /**
@@ -794,7 +821,9 @@ export class ContextServiceClient {
    * This ensures only one AI call runs at a time while allowing other operations
    * to proceed in parallel.
    */
-  private searchQueue: SearchQueue = new SearchQueue();
+  private searchQueue: SearchQueue = new SearchQueue(
+    envInt('CE_SEARCH_AND_ASK_QUEUE_MAX', DEFAULT_SEARCH_QUEUE_MAX)
+  );
 
   // ============================================================================
   // Reactive Commit Cache (Phase 1)
@@ -2662,8 +2691,8 @@ export class ContextServiceClient {
     setGauge(
       'context_engine_search_and_ask_queue_depth',
       undefined,
-      this.searchQueue.length,
-      'Number of searchAndAsk requests waiting in the queue.'
+      this.searchQueue.depth,
+      'Number of searchAndAsk requests in-flight or waiting in the queue.'
     );
     incCounter('context_engine_search_and_ask_total', undefined, 1, 'Total searchAndAsk calls.');
 
@@ -2703,20 +2732,35 @@ export class ContextServiceClient {
       );
       return response;
     } catch (e) {
-      incCounter('context_engine_search_and_ask_errors_total', undefined, 1, 'Total searchAndAsk failures.');
-      observeDurationMs(
-        'context_engine_search_and_ask_duration_seconds',
-        { result: 'error' },
-        Date.now() - metricsStart,
-        { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
-      );
+      if (e instanceof SearchQueueFullError) {
+        incCounter(
+          'context_engine_search_and_ask_rejected_total',
+          { reason: 'queue_full' },
+          1,
+          'Total searchAndAsk calls rejected before execution.'
+        );
+        observeDurationMs(
+          'context_engine_search_and_ask_duration_seconds',
+          { result: 'queue_full' },
+          Date.now() - metricsStart,
+          { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
+        );
+      } else {
+        incCounter('context_engine_search_and_ask_errors_total', undefined, 1, 'Total searchAndAsk failures.');
+        observeDurationMs(
+          'context_engine_search_and_ask_duration_seconds',
+          { result: 'error' },
+          Date.now() - metricsStart,
+          { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
+        );
+      }
       throw e;
     } finally {
       setGauge(
         'context_engine_search_and_ask_queue_depth',
         undefined,
-        this.searchQueue.length,
-        'Number of searchAndAsk requests waiting in the queue.'
+        this.searchQueue.depth,
+        'Number of searchAndAsk requests in-flight or waiting in the queue.'
       );
     }
   }
