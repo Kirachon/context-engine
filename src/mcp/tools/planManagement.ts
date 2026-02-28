@@ -11,6 +11,7 @@ import { ApprovalWorkflowService } from '../services/approvalWorkflowService.js'
 import { ExecutionTrackingService } from '../services/executionTrackingService.js';
 import { PlanHistoryService } from '../services/planHistoryService.js';
 import { EnhancedPlanOutput, PlanStatus } from '../types/planning.js';
+import { parseJsonString, validateNonEmptyString } from '../tooling/validation.js';
 
 // ============================================================================
 // Service Instances (lazily initialized)
@@ -46,6 +47,16 @@ function getExecutionService(): ExecutionTrackingService {
 function getHistoryService(): PlanHistoryService {
   if (!historyService) throw new Error('Plan management services not initialized');
   return historyService;
+}
+
+function validateRequiredStringLike(value: unknown, errorMessage: string): string {
+  if (typeof value === 'string') {
+    return validateNonEmptyString(value, errorMessage);
+  }
+  if (!value) {
+    throw new Error(errorMessage);
+  }
+  return value as string;
 }
 
 // ============================================================================
@@ -258,17 +269,8 @@ export const planManagementTools: Tool[] = [
 // ============================================================================
 
 export async function handleSavePlan(args: Record<string, unknown>): Promise<string> {
-  const planJson = args.plan as string;
-  if (!planJson || typeof planJson !== 'string') {
-    throw new Error('plan is required and must be a JSON string');
-  }
-
-  let plan: EnhancedPlanOutput;
-  try {
-    plan = JSON.parse(planJson) as EnhancedPlanOutput;
-  } catch {
-    throw new Error('plan must be valid JSON');
-  }
+  const planJson = validateNonEmptyString(args.plan, 'plan is required and must be a JSON string');
+  const plan = parseJsonString<EnhancedPlanOutput>(planJson, 'plan must be valid JSON');
 
   const service = getPersistenceService();
   const result = await service.savePlan(plan, {
@@ -317,8 +319,7 @@ export async function handleListPlans(args: Record<string, unknown>): Promise<st
 }
 
 export async function handleDeletePlan(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
-  if (!planId) throw new Error('plan_id is required');
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
 
   const service = getPersistenceService();
   const result = await service.deletePlan(planId);
@@ -333,8 +334,7 @@ export async function handleDeletePlan(args: Record<string, unknown>): Promise<s
 }
 
 export async function handleRequestApproval(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
-  if (!planId) throw new Error('plan_id is required');
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
 
   const persistService = getPersistenceService();
   const plan = await persistService.loadPlan(planId);
@@ -358,11 +358,11 @@ export async function handleRequestApproval(args: Record<string, unknown>): Prom
 }
 
 export async function handleRespondApproval(args: Record<string, unknown>): Promise<string> {
-  const requestId = args.request_id as string;
-  if (!requestId) throw new Error('request_id is required');
-
-  const action = args.action as 'approve' | 'reject' | 'request_modification';
-  if (!action) throw new Error('action is required');
+  const requestId = validateRequiredStringLike(args.request_id, 'request_id is required');
+  const action = validateRequiredStringLike(
+    args.action,
+    'action is required'
+  ) as 'approve' | 'reject' | 'request_modification';
 
   const approvalSvc = getApprovalService();
   const result = approvalSvc.processApprovalResponse({
@@ -382,9 +382,8 @@ export async function handleRespondApproval(args: Record<string, unknown>): Prom
 }
 
 export async function handleStartStep(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
   const stepNumber = args.step_number as number;
-  if (!planId) throw new Error('plan_id is required');
   if (typeof stepNumber !== 'number') throw new Error('step_number is required');
 
   const execService = getExecutionService();
@@ -406,9 +405,8 @@ export async function handleStartStep(args: Record<string, unknown>): Promise<st
 }
 
 export async function handleCompleteStep(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
   const stepNumber = args.step_number as number;
-  if (!planId) throw new Error('plan_id is required');
   if (typeof stepNumber !== 'number') throw new Error('step_number is required');
 
   const persistService = getPersistenceService();
@@ -436,12 +434,10 @@ export async function handleCompleteStep(args: Record<string, unknown>): Promise
 }
 
 export async function handleFailStep(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
   const stepNumber = args.step_number as number;
-  const error = args.error as string;
-  if (!planId) throw new Error('plan_id is required');
   if (typeof stepNumber !== 'number') throw new Error('step_number is required');
-  if (!error) throw new Error('error is required');
+  const error = validateRequiredStringLike(args.error, 'error is required');
 
   const persistService = getPersistenceService();
   const plan = await persistService.loadPlan(planId);
@@ -464,8 +460,7 @@ export async function handleFailStep(args: Record<string, unknown>): Promise<str
 }
 
 export async function handleViewProgress(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
-  if (!planId) throw new Error('plan_id is required');
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
 
   const execService = getExecutionService();
   const progress = execService.getProgress(planId);
@@ -484,8 +479,7 @@ export async function handleViewProgress(args: Record<string, unknown>): Promise
 }
 
 export async function handleViewHistory(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
-  if (!planId) throw new Error('plan_id is required');
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
 
   const histService = getHistoryService();
   const history = histService.getHistory(planId, {
@@ -501,10 +495,9 @@ export async function handleViewHistory(args: Record<string, unknown>): Promise<
 }
 
 export async function handleComparePlanVersions(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
   const fromVersion = args.from_version as number;
   const toVersion = args.to_version as number;
-  if (!planId) throw new Error('plan_id is required');
   if (typeof fromVersion !== 'number') throw new Error('from_version is required');
   if (typeof toVersion !== 'number') throw new Error('to_version is required');
 
@@ -519,9 +512,8 @@ export async function handleComparePlanVersions(args: Record<string, unknown>): 
 }
 
 export async function handleRollbackPlan(args: Record<string, unknown>): Promise<string> {
-  const planId = args.plan_id as string;
+  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
   const targetVersion = args.target_version as number;
-  if (!planId) throw new Error('plan_id is required');
   if (typeof targetVersion !== 'number') throw new Error('target_version is required');
 
   const histService = getHistoryService();
@@ -538,4 +530,3 @@ export async function handleRollbackPlan(args: Record<string, unknown>): Promise
 
   return JSON.stringify(result, null, 2);
 }
-

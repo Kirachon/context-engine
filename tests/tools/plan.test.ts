@@ -37,7 +37,7 @@ describe('Planning MCP Tools', () => {
       it('should reject empty task', async () => {
         await expect(
           handleCreatePlan({ task: '' }, mockServiceClient)
-        ).rejects.toThrow(/task is required/i);
+        ).rejects.toThrow('Task is required and must be a non-empty string');
       });
 
       it('should reject null task', async () => {
@@ -87,13 +87,13 @@ describe('Planning MCP Tools', () => {
       it('should reject missing current_plan', async () => {
         await expect(
           handleRefinePlan({ current_plan: '' }, mockServiceClient)
-        ).rejects.toThrow(/current_plan is required/i);
+        ).rejects.toThrow('current_plan is required and must be a valid JSON string');
       });
 
       it('should reject invalid JSON in current_plan', async () => {
         await expect(
           handleRefinePlan({ current_plan: 'not json' }, mockServiceClient)
-        ).rejects.toThrow(/valid JSON/i);
+        ).rejects.toThrow('current_plan must be valid JSON');
       });
 
       it('should reject invalid JSON in clarifications', async () => {
@@ -103,7 +103,7 @@ describe('Planning MCP Tools', () => {
             { current_plan: validPlan, clarifications: 'not json' },
             mockServiceClient
           )
-        ).rejects.toThrow(/valid JSON/i);
+        ).rejects.toThrow('clarifications must be valid JSON');
       });
     });
 
@@ -172,6 +172,18 @@ describe('Planning MCP Tools', () => {
       expect(parsed.mermaid).toContain('graph TD');
       expect(parsed.mermaid).toContain('step_1');
       expect(parsed.mermaid).toContain('step_2');
+    });
+
+    it('should reject missing plan', async () => {
+      await expect(
+        handleVisualizePlan({ plan: '' }, mockServiceClient)
+      ).rejects.toThrow('plan is required and must be a valid JSON string');
+    });
+
+    it('should reject invalid JSON in plan', async () => {
+      await expect(
+        handleVisualizePlan({ plan: 'not json' }, mockServiceClient)
+      ).rejects.toThrow('plan must be valid JSON');
     });
 
     it('should generate gantt diagram', async () => {

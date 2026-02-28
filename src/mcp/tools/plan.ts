@@ -20,6 +20,7 @@ import * as path from 'path';
 import { ContextServiceClient } from '../serviceClient.js';
 import { PlanningService } from '../services/planningService.js';
 import { createClientBoundFactory } from '../tooling/serviceFactory.js';
+import { parseJsonString, validateNonEmptyString } from '../tooling/validation.js';
 import {
   EnhancedPlanOutput,
   PlanGenerationOptions,
@@ -125,7 +126,8 @@ export async function handleCreatePlan(
     save_overwrite,
   } = args;
 
-  if (!task || typeof task !== 'string' || task.trim().length === 0) {
+  const validatedTask = validateNonEmptyString(task, 'Task is required and must be a non-empty string');
+  if (validatedTask.trim().length === 0) {
     throw new Error('Task is required and must be a non-empty string');
   }
 
@@ -138,9 +140,9 @@ export async function handleCreatePlan(
     mvp_only,
   };
 
-  console.error(`[create_plan] Generating plan for: "${task.substring(0, 100)}..."`);
+  console.error(`[create_plan] Generating plan for: "${validatedTask.substring(0, 100)}..."`);
 
-  const result = await planningService.generatePlan(task, options);
+  const result = await planningService.generatePlan(validatedTask, options);
 
   if (!result.success) {
     throw new Error(`Failed to generate plan: ${result.error}`);
@@ -190,24 +192,18 @@ export async function handleRefinePlan(
 ): Promise<string> {
   const { current_plan, feedback, clarifications, focus_steps } = args;
 
-  if (!current_plan || typeof current_plan !== 'string') {
-    throw new Error('current_plan is required and must be a valid JSON string');
-  }
-
-  let plan: EnhancedPlanOutput;
-  try {
-    plan = JSON.parse(current_plan);
-  } catch {
-    throw new Error('current_plan must be valid JSON');
-  }
+  const currentPlan = validateNonEmptyString(
+    current_plan,
+    'current_plan is required and must be a valid JSON string'
+  );
+  const plan = parseJsonString<EnhancedPlanOutput>(currentPlan, 'current_plan must be valid JSON');
 
   let parsedClarifications: Record<string, string> | undefined;
   if (clarifications) {
-    try {
-      parsedClarifications = JSON.parse(clarifications);
-    } catch {
-      throw new Error('clarifications must be valid JSON');
-    }
+    parsedClarifications = parseJsonString<Record<string, string>>(
+      clarifications,
+      'clarifications must be valid JSON'
+    );
   }
 
   const planningService = getPlanningService(serviceClient);
@@ -238,16 +234,8 @@ export async function handleVisualizePlan(
 ): Promise<string> {
   const { plan: planJson, diagram_type = 'dependencies' } = args;
 
-  if (!planJson || typeof planJson !== 'string') {
-    throw new Error('plan is required and must be a valid JSON string');
-  }
-
-  let plan: EnhancedPlanOutput;
-  try {
-    plan = JSON.parse(planJson);
-  } catch {
-    throw new Error('plan must be valid JSON');
-  }
+  const planInput = validateNonEmptyString(planJson, 'plan is required and must be a valid JSON string');
+  const plan = parseJsonString<EnhancedPlanOutput>(planInput, 'plan must be valid JSON');
 
   const planningService = getPlanningService(serviceClient);
 
