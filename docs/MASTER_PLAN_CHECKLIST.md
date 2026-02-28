@@ -279,7 +279,7 @@ Checklist:
 - [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
 - [x] `node --import tsx scripts/ci/validate-master-plan.ts` (checklist/evidence validator)
 - [x] Compatibility replay suite pass
-- [ ] Benchmark/regression gate suite pass
+- [x] Benchmark/regression gate suite pass
 
 ## E) Rollback Triggers
 - [ ] Any gate in Section C fails after rollout stage advancement.
