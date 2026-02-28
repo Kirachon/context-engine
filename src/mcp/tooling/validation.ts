@@ -29,6 +29,20 @@ export function validateNumberInRange(
   }
 }
 
+export function validateFiniteNumberInRange(
+  value: unknown,
+  min: number,
+  max: number,
+  errorMessage: string
+): void {
+  if (
+    value !== undefined &&
+    (typeof value !== 'number' || !Number.isFinite(value) || value < min || value > max)
+  ) {
+    throw new Error(errorMessage);
+  }
+}
+
 export function validateBoolean(value: unknown, errorMessage: string): void {
   if (value !== undefined && typeof value !== 'boolean') {
     throw new Error(errorMessage);

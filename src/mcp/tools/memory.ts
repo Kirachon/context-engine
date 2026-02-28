@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ContextServiceClient } from '../serviceClient.js';
+import { validateMaxLength, validateNonEmptyString, validateOneOf } from '../tooling/validation.js';
 
 // ============================================================================
 // Type Definitions
@@ -95,20 +96,20 @@ export async function handleAddMemory(
   serviceClient: ContextServiceClient
 ): Promise<string> {
   const { category, content, title } = args;
+  const validContent = validateNonEmptyString(
+    content,
+    'Content is required and must be a non-empty string'
+  );
 
   // Validate inputs
-  if (!category || !CATEGORY_FILES[category]) {
-    const validCategories = Object.keys(CATEGORY_FILES).join(', ');
-    throw new Error(`Invalid category. Must be one of: ${validCategories}`);
+  if (!category || !CATEGORY_FILES[category as MemoryCategory]) {
+    validateOneOf(
+      category,
+      Object.keys(CATEGORY_FILES) as MemoryCategory[],
+      `Invalid category. Must be one of: ${Object.keys(CATEGORY_FILES).join(', ')}`
+    );
   }
-
-  if (!content || typeof content !== 'string' || content.trim().length === 0) {
-    throw new Error('Content is required and must be a non-empty string');
-  }
-
-  if (content.length > 5000) {
-    throw new Error('Content too long: maximum 5000 characters per memory');
-  }
+  validateMaxLength(validContent, 5000, 'Content too long: maximum 5000 characters per memory');
 
   // Get workspace path from service client
   const workspacePath = serviceClient.getWorkspacePath();
@@ -117,7 +118,7 @@ export async function handleAddMemory(
   const relativePath = path.join(MEMORIES_DIR, CATEGORY_FILES[category]);
 
   // Format and append the memory
-  const formattedEntry = formatMemoryEntry(content, title);
+  const formattedEntry = formatMemoryEntry(validContent, title);
 
   // Ensure file exists with header if it doesn't
   if (!fs.existsSync(filePath)) {
@@ -147,7 +148,7 @@ export async function handleAddMemory(
     `| **Title** | ${title || '(none)'} |\n` +
     `| **Timestamp** | ${timestamp} |\n` +
     `| **Indexed** | Yes |\n\n` +
-    `**Content:**\n\`\`\`\n${content.trim()}\n\`\`\`\n\n` +
+    `**Content:**\n\`\`\`\n${validContent.trim()}\n\`\`\`\n\n` +
     `_This memory will be automatically retrieved when relevant to future queries._`;
 }
 
@@ -269,4 +270,3 @@ Shows file stats, entry counts, and content preview for each memory category.`,
     required: [],
   },
 };
-

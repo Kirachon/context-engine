@@ -21,6 +21,12 @@ import { ContextServiceClient, ContextOptions } from '../serviceClient.js';
 import { internalContextBundle } from '../../internal/handlers/context.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
+import {
+  validateBoolean,
+  validateFiniteNumberInRange,
+  validateMaxLength,
+  validateNonEmptyString,
+} from '../tooling/validation.js';
 
 export interface GetContextArgs {
   query: string;
@@ -91,48 +97,32 @@ export async function handleGetContext(
     min_relevance = 0.3,
     bypass_cache = false,
   } = args;
-  const normalizedQuery = typeof query === 'string' ? query.trim() : query;
+  const normalizedQuery = validateNonEmptyString(
+    query,
+    'Invalid query parameter: must be a non-empty string'
+  ).trim();
 
   // Validate inputs
-  if (!normalizedQuery || typeof normalizedQuery !== 'string') {
+  if (!normalizedQuery) {
     throw new Error('Invalid query parameter: must be a non-empty string');
   }
 
-  if (normalizedQuery.length > MAX_QUERY_LENGTH) {
-    throw new Error(`Query too long: maximum ${MAX_QUERY_LENGTH} characters`);
-  }
-
-  if (
-    max_files !== undefined &&
-    (typeof max_files !== 'number' || !Number.isFinite(max_files) || max_files < 1 || max_files > 20)
-  ) {
-    throw new Error('Invalid max_files parameter: must be a number between 1 and 20');
-  }
-
-  if (
-    token_budget !== undefined &&
-    (typeof token_budget !== 'number' ||
-      !Number.isFinite(token_budget) ||
-      token_budget < 500 ||
-      token_budget > 100000)
-  ) {
-    throw new Error('Invalid token_budget parameter: must be a number between 500 and 100000');
-  }
-
-  if (bypass_cache !== undefined && typeof bypass_cache !== 'boolean') {
-    throw new Error('Invalid bypass_cache parameter: must be a boolean');
-  }
-
-  if (include_related !== undefined && typeof include_related !== 'boolean') {
-    throw new Error('Invalid include_related parameter: must be a boolean');
-  }
-
-  if (
-    min_relevance !== undefined &&
-    (typeof min_relevance !== 'number' || !Number.isFinite(min_relevance) || min_relevance < 0 || min_relevance > 1)
-  ) {
-    throw new Error('Invalid min_relevance parameter: must be a number between 0 and 1');
-  }
+  validateMaxLength(normalizedQuery, MAX_QUERY_LENGTH, `Query too long: maximum ${MAX_QUERY_LENGTH} characters`);
+  validateFiniteNumberInRange(max_files, 1, 20, 'Invalid max_files parameter: must be a number between 1 and 20');
+  validateFiniteNumberInRange(
+    token_budget,
+    500,
+    100000,
+    'Invalid token_budget parameter: must be a number between 500 and 100000'
+  );
+  validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
+  validateBoolean(include_related, 'Invalid include_related parameter: must be a boolean');
+  validateFiniteNumberInRange(
+    min_relevance,
+    0,
+    1,
+    'Invalid min_relevance parameter: must be a number between 0 and 1'
+  );
 
   // Build options
   const options: ContextOptions = {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from '@jest/globals';
 import {
+  validateFiniteNumberInRange,
   parseJsonString,
   validateBoolean,
   validateLineRange,
@@ -28,6 +29,11 @@ describe('mcp tooling validation helpers', () => {
 
   it('validateNumberInRange throws for out-of-range values', () => {
     expect(() => validateNumberInRange(11, 1, 10, 'bad')).toThrow('bad');
+  });
+
+  it('validateFiniteNumberInRange rejects non-finite values', () => {
+    expect(() => validateFiniteNumberInRange(Number.NaN, 0, 10, 'bad')).toThrow('bad');
+    expect(() => validateFiniteNumberInRange(Number.POSITIVE_INFINITY, 0, 10, 'bad')).toThrow('bad');
   });
 
   it('validateBoolean throws for non-boolean values', () => {

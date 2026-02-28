@@ -9,6 +9,7 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
+import { validateFiniteNumberInRange, validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
 
 export interface CodebaseRetrievalArgs {
   query: string;
@@ -46,23 +47,15 @@ export async function handleCodebaseRetrieval(
 ): Promise<string> {
   const startTime = Date.now();
   const { query, top_k = 10 } = args;
-  const normalizedQuery = typeof query === 'string' ? query.trim() : query;
+  const normalizedQuery = validateNonEmptyString(query, 'Invalid query parameter: must be a non-empty string').trim();
 
   // Validate inputs
-  if (!normalizedQuery || typeof normalizedQuery !== 'string') {
+  if (!normalizedQuery) {
     throw new Error('Invalid query parameter: must be a non-empty string');
   }
 
-  if (normalizedQuery.length > 1000) {
-    throw new Error('Query too long: maximum 1000 characters');
-  }
-
-  if (
-    top_k !== undefined &&
-    (typeof top_k !== 'number' || !Number.isFinite(top_k) || top_k < 1 || top_k > 50)
-  ) {
-    throw new Error('Invalid top_k parameter: must be a number between 1 and 50');
-  }
+  validateMaxLength(normalizedQuery, 1000, 'Query too long: maximum 1000 characters');
+  validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
 
   const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, { topK: top_k });
   const searchResults = retrieval.results;

@@ -20,6 +20,7 @@ import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateBoolean,
+  validateFiniteNumberInRange,
   validateMaxLength,
   validateNonEmptyString,
   validateOneOf,
@@ -60,17 +61,15 @@ export async function handleSemanticSearch(
     throw new Error('Invalid query parameter: must be a non-empty string');
   }
   validateMaxLength(validQuery, 500, 'Query too long: maximum 500 characters');
-  if (typeof top_k !== 'number' || !Number.isFinite(top_k) || top_k < 1 || top_k > 50) {
-    throw new Error('Invalid top_k parameter: must be a number between 1 and 50');
-  }
+  validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
   validateOneOf(mode, ['fast', 'deep'] as const, 'Invalid mode parameter: must be "fast" or "deep"');
   validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
-  if (
-    timeout_ms !== undefined &&
-    (typeof timeout_ms !== 'number' || !Number.isFinite(timeout_ms) || timeout_ms < 0 || timeout_ms > 120000)
-  ) {
-    throw new Error('Invalid timeout_ms parameter: must be a number between 0 and 120000');
-  }
+  validateFiniteNumberInRange(
+    timeout_ms,
+    0,
+    120000,
+    'Invalid timeout_ms parameter: must be a number between 0 and 120000'
+  );
 
   const effectiveTimeoutMs = timeout_ms ?? (bypass_cache ? 10000 : 0);
 

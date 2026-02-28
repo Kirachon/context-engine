@@ -79,6 +79,7 @@ Progress notes:
 - 2026-02-28: Validator edge-case tests added at `tests/tooling/validation.test.ts`.
 - 2026-02-28: Second migration slice complete for `check_invariants`, `review_diff`, and `review_changes`.
 - 2026-02-28: Added focused validation tests for review tool diff/file-context/category paths.
+- 2026-02-28: Third migration slice applied shared finite-range validation to `codebase_retrieval`, `semantic_search`, and `get_context_for_prompt`; added memory validation coverage in `tests/tools/memory.test.ts`.
 
 ### WS14 - Shared Tool Runtime Wrapper
 Owner: _TBD_ (blocker until assigned in B0)
