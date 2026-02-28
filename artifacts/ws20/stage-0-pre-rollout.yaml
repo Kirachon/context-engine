@@ -1,0 +1,10 @@
+rollout_id: single-user-rollout-2026-02-28
+stage: 0
+stage_name: pre_rollout
+status: PASS
+window:
+  start_utc: 2026-02-28T06:30:00Z
+  end_utc: 2026-02-28T06:45:00Z
+pre_rollout:
+  baseline_snapshot_id: baseline-single-user-20260228T0630Z
+  checklist_complete: true

@@ -1,0 +1,9 @@
+rollout_id: single-user-rollout-2026-02-28
+stage: 3
+stage_name: ga_hardening
+status: PASS
+ga_hardening:
+  soak_hours: 24
+  stability_confirmed: true
+  closeout_evidence_ref: artifacts/governance/final-release-summary.md
+  signed_by: preda

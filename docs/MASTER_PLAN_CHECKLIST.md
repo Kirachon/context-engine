@@ -340,6 +340,11 @@ Progress notes:
   - `npx tsc --noEmit`
   - `node --import tsx scripts/ci/validate-master-plan.ts`
 - 2026-02-28: Added pre-rollout baseline operator checklist template (`docs/templates/pre-rollout-baseline-checklist.template.md`) for stage 0 readiness evidence.
+- 2026-02-28: Single-user dry-run evidence artifacts generated under `artifacts/ws20/` (`stage-0-pre-rollout.yaml`, `stage-1-canary.yaml`, `stage-2-controlled-ramp.yaml`, `stage-3-ga-hardening.yaml`) and validated with:
+  - `node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20/stage-0-pre-rollout.yaml --stage 0`
+  - `node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20/stage-1-canary.yaml --stage 1`
+  - `node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20/stage-2-controlled-ramp.yaml --stage 2`
+  - `node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20/stage-3-ga-hardening.yaml --stage 3`
 
 ### WS21 - Rollback Drill + Evidence Completeness
 Owner: rollback-drill-owner
@@ -360,6 +365,7 @@ Progress notes:
 - 2026-02-28: Added operator artifacts `docs/WS21_ROLLBACK_DRILL_TEMPLATE.md` and `docs/WS21_ROLLBACK_DRILL_SAMPLE.md`; wired CI script `npm run ci:check:ws21-rollback-drill`.
 - 2026-02-28: Added governance artifact templates (`docs/templates/freeze-checklist.template.md`, `docs/templates/final-release-summary.template.md`, `docs/templates/rollout-evidence-entry.template.md`) and rollout evidence update path section in `docs/ROLLOUT_EVIDENCE_LOG.md`.
 - 2026-02-28: Added deterministic checker `scripts/ci/check-governance-artifacts.ts` with focused tests in `tests/ci/checkGovernanceArtifacts.test.ts`, package script `npm run ci:check:governance-artifacts`, and non-destructive workflow wiring in `.github/workflows/review_diff.yml` (optional runtime-artifact validation step).
+- 2026-02-28: Single-user dry-run rollback drill evidence created at `artifacts/governance/ws21-rollback-drill-single-user.md` (with recovery pointer `artifacts/governance/ws21-recovery-evidence.txt`) and validated with `node --import tsx scripts/ci/check-ws21-rollback-drill.ts artifacts/governance/ws21-rollback-drill-single-user.md`.
 
 ---
 

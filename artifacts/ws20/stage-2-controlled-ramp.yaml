@@ -1,0 +1,21 @@
+rollout_id: single-user-rollout-2026-02-28
+stage: 2
+stage_name: controlled_ramp
+status: PASS
+controlled_ramp:
+  checkpoints:
+    - percent: 10
+      soak_hours: 24
+      status: pass
+      signed_by: preda
+      evidence_ref: artifacts/governance/rollout-evidence-log.md#ramp-10
+    - percent: 25
+      soak_hours: 48
+      status: pass
+      signed_by: preda
+      evidence_ref: artifacts/governance/rollout-evidence-log.md#ramp-25
+    - percent: 50
+      soak_hours: 72
+      status: pass
+      signed_by: preda
+      evidence_ref: artifacts/governance/rollout-evidence-log.md#ramp-50

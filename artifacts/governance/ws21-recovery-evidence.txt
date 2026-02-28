@@ -1,0 +1,2 @@
+Recovery Evidence: services healthy after rollback dry-run validation.
+PASS
