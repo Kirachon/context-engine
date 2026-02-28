@@ -5,6 +5,24 @@ import os from 'os';
 import path from 'path';
 
 describe('review_diff tool', () => {
+  it('throws the existing error message when diff is missing or invalid', async () => {
+    await expect(handleReviewDiff({ diff: undefined as unknown as string }, {} as any)).rejects.toThrow(
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
+    );
+
+    await expect(handleReviewDiff({ diff: '' }, {} as any)).rejects.toThrow(
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
+    );
+
+    await expect(handleReviewDiff({ diff: '   \n\t  ' }, {} as any)).rejects.toThrow(
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
+    );
+
+    await expect(handleReviewDiff({ diff: 123 as unknown as string }, {} as any)).rejects.toThrow(
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
+    );
+  });
+
   it('returns structured JSON result with deterministic findings', async () => {
     const diff = `diff --git a/src/mcp/tools/x.ts b/src/mcp/tools/x.ts
 index 1234567..abcdefg 100644

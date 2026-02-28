@@ -5,6 +5,24 @@ import os from 'os';
 import path from 'path';
 
 describe('check_invariants tool', () => {
+  it('throws the existing error message when diff is missing or invalid', async () => {
+    await expect(
+      handleCheckInvariants({ diff: undefined as unknown as string }, { getWorkspacePath: () => process.cwd() } as any)
+    ).rejects.toThrow('Missing or invalid "diff" argument. Provide a unified diff string.');
+
+    await expect(
+      handleCheckInvariants({ diff: '' }, { getWorkspacePath: () => process.cwd() } as any)
+    ).rejects.toThrow('Missing or invalid "diff" argument. Provide a unified diff string.');
+
+    await expect(
+      handleCheckInvariants({ diff: '   \n\t  ' }, { getWorkspacePath: () => process.cwd() } as any)
+    ).rejects.toThrow('Missing or invalid "diff" argument. Provide a unified diff string.');
+
+    await expect(
+      handleCheckInvariants({ diff: 123 as unknown as string }, { getWorkspacePath: () => process.cwd() } as any)
+    ).rejects.toThrow('Missing or invalid "diff" argument. Provide a unified diff string.');
+  });
+
   it('returns findings when invariants are violated', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-inv-'));
     const invPath = path.join(tmpDir, '.review-invariants.yml');

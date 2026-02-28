@@ -21,6 +21,12 @@ import {
   ReviewOptions,
   ReviewCategory,
 } from '../types/codeReview.js';
+import {
+  parseJsonString,
+  validateMaxLength,
+  validateNonEmptyString,
+  validateOneOf,
+} from '../tooling/validation.js';
 
 // ============================================================================
 // Tool Argument Types
@@ -68,24 +74,21 @@ export async function handleReviewChanges(
     console.error('[review_changes] Starting code review...');
 
     // Validate required arguments
-    if (!args.diff || typeof args.diff !== 'string') {
-      throw new Error('Missing or invalid "diff" argument. Provide a unified diff string.');
-    }
-    const normalizedDiff = args.diff.trim();
-    if (!normalizedDiff) {
-      throw new Error('Missing or invalid "diff" argument. Provide a unified diff string.');
-    }
-    if (normalizedDiff.length > MAX_DIFF_LENGTH) {
-      throw new Error(`Invalid "diff": maximum ${MAX_DIFF_LENGTH} characters`);
-    }
+    const normalizedDiff = validateNonEmptyString(
+      typeof args.diff === 'string' ? args.diff.trim() : args.diff,
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
+    );
+    validateMaxLength(normalizedDiff, MAX_DIFF_LENGTH, `Invalid "diff": maximum ${MAX_DIFF_LENGTH} characters`);
 
     if (args.custom_instructions !== undefined) {
       if (typeof args.custom_instructions !== 'string') {
         throw new Error('Invalid "custom_instructions": must be a string');
       }
-      if (args.custom_instructions.length > MAX_CUSTOM_INSTRUCTIONS_LENGTH) {
-        throw new Error(`Invalid "custom_instructions": maximum ${MAX_CUSTOM_INSTRUCTIONS_LENGTH} characters`);
-      }
+      validateMaxLength(
+        args.custom_instructions,
+        MAX_CUSTOM_INSTRUCTIONS_LENGTH,
+        `Invalid "custom_instructions": maximum ${MAX_CUSTOM_INSTRUCTIONS_LENGTH} characters`
+      );
     }
 
     // Parse file contexts if provided
@@ -94,14 +97,15 @@ export async function handleReviewChanges(
       if (typeof args.file_contexts !== 'string') {
         throw new Error('Invalid "file_contexts": must be a JSON string');
       }
-      if (args.file_contexts.length > MAX_FILE_CONTEXTS_LENGTH) {
-        throw new Error(`Invalid "file_contexts": maximum ${MAX_FILE_CONTEXTS_LENGTH} characters`);
-      }
-      try {
-        fileContexts = JSON.parse(args.file_contexts);
-      } catch {
-        throw new Error('Invalid "file_contexts" JSON format');
-      }
+      validateMaxLength(
+        args.file_contexts,
+        MAX_FILE_CONTEXTS_LENGTH,
+        `Invalid "file_contexts": maximum ${MAX_FILE_CONTEXTS_LENGTH} characters`
+      );
+      fileContexts = parseJsonString<Record<string, string>>(
+        args.file_contexts,
+        'Invalid "file_contexts" JSON format'
+      );
       if (fileContexts === null || typeof fileContexts !== 'object' || Array.isArray(fileContexts)) {
         throw new Error('Invalid "file_contexts" JSON format: expected an object map of file path to content');
       }
@@ -122,9 +126,7 @@ export async function handleReviewChanges(
         'correctness', 'security', 'performance', 'maintainability', 'style', 'documentation'
       ];
       for (const cat of categories) {
-        if (!validCategories.includes(cat)) {
-          throw new Error(`Invalid category: "${cat}". Valid: ${validCategories.join(', ')}`);
-        }
+        validateOneOf(cat, validCategories, `Invalid category: "${cat}". Valid: ${validCategories.join(', ')}`);
       }
     }
 

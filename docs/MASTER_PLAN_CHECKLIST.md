@@ -77,6 +77,8 @@ Progress notes:
 - 2026-02-28: Shared validation module created at `src/mcp/tooling/validation.ts`.
 - 2026-02-28: First migration slice complete for `semantic_search`, `get_file`, and `enhance_prompt`.
 - 2026-02-28: Validator edge-case tests added at `tests/tooling/validation.test.ts`.
+- 2026-02-28: Second migration slice complete for `check_invariants`, `review_diff`, and `review_changes`.
+- 2026-02-28: Added focused validation tests for review tool diff/file-context/category paths.
 
 ### WS14 - Shared Tool Runtime Wrapper
 Owner: _TBD_ (blocker until assigned in B0)
@@ -258,3 +260,4 @@ Checklist:
 ## Changelog
 - [ ] 2026-02-28: Added governance rules, owner lock, batch prerequisites, quantitative SLO/soak thresholds, and rollback triggers.
 - [x] 2026-02-28: Implemented WS13 first migration slice (shared validators + 3 tools + validator tests).
+- [x] 2026-02-28: Implemented WS13 second migration slice (review tool validation migration + new validation tests).
