@@ -29,34 +29,36 @@ import {
 } from '../../reactive/index.js';
 import { createAIAgentStepExecutor } from '../../reactive/executors/AIAgentStepExecutor.js';
 import { createBatchReviewExecutor } from '../../reactive/executors/BatchReviewExecutor.js';
+import { createClientBoundFactory } from '../tooling/serviceFactory.js';
 
-// ============================================================================
-// Service Instance Reuse (Lazy Singleton Pattern)
-// ============================================================================
+type ReactiveServiceBundle = {
+    reactiveService: ReactiveReviewService;
+    planningService: PlanningService;
+    executionService: ExecutionTrackingService;
+};
 
-let cachedReactiveService: ReactiveReviewService | null = null;
-let cachedPlanningService: PlanningService | null = null;
-let cachedExecutionService: ExecutionTrackingService | null = null;
-let cachedServiceClientRef: WeakRef<ContextServiceClient> | null = null;
+const reactiveServiceFactory = createClientBoundFactory<ReactiveServiceBundle, ContextServiceClient>(
+    (serviceClient): ReactiveServiceBundle => {
+        const planningService = new PlanningService(serviceClient);
+        const executionService = new ExecutionTrackingService();
+        const reactiveService = new ReactiveReviewService(
+            serviceClient,
+            planningService,
+            executionService
+        );
+        return {
+            reactiveService,
+            planningService,
+            executionService,
+        };
+    }
+);
+
 let cachedSecretScrubber: SecretScrubber | null = null;
 let cachedValidationPipeline: ValidationPipeline | null = null;
 
 function getReactiveReviewService(serviceClient: ContextServiceClient): ReactiveReviewService {
-    const cachedClient = cachedServiceClientRef?.deref();
-    if (cachedReactiveService && cachedClient === serviceClient) {
-        return cachedReactiveService;
-    }
-
-    cachedPlanningService = new PlanningService(serviceClient);
-    cachedExecutionService = new ExecutionTrackingService();
-    cachedReactiveService = new ReactiveReviewService(
-        serviceClient,
-        cachedPlanningService,
-        cachedExecutionService
-    );
-    cachedServiceClientRef = new WeakRef(serviceClient);
-
-    return cachedReactiveService;
+    return reactiveServiceFactory.get(serviceClient).reactiveService;
 }
 
 function getSecretScrubber(): SecretScrubber {
@@ -74,12 +76,13 @@ function getValidationPipeline(): ValidationPipeline {
 }
 
 function getPlanningService(serviceClient: ContextServiceClient): PlanningService {
-    // Ensure the reactive service is initialized first (which creates the planning service)
-    getReactiveReviewService(serviceClient);
-    if (!cachedPlanningService) {
-        cachedPlanningService = new PlanningService(serviceClient);
-    }
-    return cachedPlanningService;
+    return reactiveServiceFactory.get(serviceClient).planningService;
+}
+
+export function resetReactiveReviewCachesForTests(): void {
+    reactiveServiceFactory.reset();
+    cachedSecretScrubber = null;
+    cachedValidationPipeline = null;
 }
 
 // ============================================================================

@@ -11,7 +11,7 @@ import { parseUnifiedDiff } from '../../reviewer/diff/parse.js';
 import { runDeterministicPreflight } from '../../reviewer/checks/preflight.js';
 import { loadInvariantsConfig } from '../../reviewer/checks/invariants/load.js';
 import { runInvariants } from '../../reviewer/checks/invariants/runner.js';
-import { normalizeRequiredDiffInput } from '../tooling/diffInput.js';
+import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
 
 export interface CheckInvariantsArgs {
   diff: string;
@@ -27,6 +27,7 @@ export async function handleCheckInvariants(
     args.diff,
     'Missing or invalid "diff" argument. Provide a unified diff string.'
   );
+  assertNonEmptyDiffScope(diff, args.changed_files);
 
   const workspacePath = serviceClient.getWorkspacePath();
   const invariantsPath = args.invariants_path ?? '.review-invariants.yml';

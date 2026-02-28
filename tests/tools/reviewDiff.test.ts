@@ -50,15 +50,22 @@ index 1234567..abcdefg 100644
     expect(typeof result.stats.timings_ms.preflight).toBe('number');
   });
 
-  it('keeps existing behavior for malformed non-empty diff input', async () => {
+  it('blocks malformed non-empty diff input with no reviewable scope', async () => {
+    await expect(
+      handleReviewDiff(
+        { diff: 'plain text, not a diff' },
+        { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+      )
+    ).rejects.toThrow('No reviewable changes found in diff scope. Provide a unified diff with at least one changed file.');
+  });
+
+  it('allows malformed diff text when changed_files explicitly provides scope', async () => {
     const resultStr = await handleReviewDiff(
-      { diff: 'plain text, not a diff' },
+      { diff: 'plain text, not a diff', changed_files: ['src/a.ts'] },
       { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
     );
     const result = JSON.parse(resultStr);
-    expect(result.stats.files_changed).toBe(0);
-    expect(result.stats.lines_added).toBe(0);
-    expect(result.stats.lines_removed).toBe(0);
+    expect(result.stats.files_changed).toBe(1);
   });
 
   it('accepts partial git-style file sections without hunks', async () => {

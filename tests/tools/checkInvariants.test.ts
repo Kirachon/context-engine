@@ -64,13 +64,26 @@ index 1234567..abcdefg 100644
     expect(result.findings.some((f: any) => f.id === 'SEC123')).toBe(true);
   });
 
-  it('keeps existing behavior for malformed non-empty diff input', async () => {
+  it('blocks malformed non-empty diff input with no reviewable scope', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-inv-malformed-'));
     const invPath = path.join(tmpDir, '.review-invariants.yml');
     fs.writeFileSync(invPath, 'security: []\n', 'utf-8');
 
+    await expect(
+      handleCheckInvariants(
+        { diff: 'plain text, not a diff', invariants_path: invPath },
+        { getWorkspacePath: () => tmpDir } as any
+      )
+    ).rejects.toThrow('No reviewable changes found in diff scope. Provide a unified diff with at least one changed file.');
+  });
+
+  it('allows malformed diff text when changed_files explicitly provides scope', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-inv-malformed-scope-'));
+    const invPath = path.join(tmpDir, '.review-invariants.yml');
+    fs.writeFileSync(invPath, 'security: []\n', 'utf-8');
+
     const resultStr = await handleCheckInvariants(
-      { diff: 'plain text, not a diff', invariants_path: invPath },
+      { diff: 'plain text, not a diff', changed_files: ['src/a.ts'], invariants_path: invPath },
       { getWorkspacePath: () => tmpDir } as any
     );
     const result = JSON.parse(resultStr);

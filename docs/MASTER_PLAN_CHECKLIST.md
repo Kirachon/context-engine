@@ -109,7 +109,7 @@ Files:
 
 Checklist:
 - [x] Normalize unified diff parsing and validation in one shared module.
-- [ ] Enforce no-op/empty-scope protection consistently across review tools.
+- [x] Enforce no-op/empty-scope protection consistently across review tools.
 - [x] Keep existing tool outputs stable while improving determinism.
 - [x] Add tests for malformed/empty/partial diff scenarios.
 
@@ -117,7 +117,7 @@ Progress notes:
 - 2026-02-28: Added shared diff input helper module at `src/mcp/tooling/diffInput.ts` with optional/required normalization plus unified-diff shape checks.
 - 2026-02-28: Migrated `review_auto`, `review_diff`, `check_invariants`, and `review_changes` to shared diff helpers while preserving existing external error semantics.
 - 2026-02-28: Added WS15 malformed/empty/partial diff coverage in `tests/tooling/diffInput.test.ts`, `tests/tools/reviewAuto.test.ts`, `tests/tools/reviewDiff.test.ts`, `tests/tools/checkInvariants.test.ts`, and `tests/tools/reviewChanges.validation.test.ts`.
-- 2026-02-28: Remaining WS15 item is consistent no-op/empty-scope protection policy across all review entry points.
+- 2026-02-28: Added shared no-op scope guard (`assertNonEmptyDiffScope`) and applied it across `review_diff`, `check_invariants`, and `review_changes`, with compatibility tests for explicit `changed_files` scope overrides.
 
 ### WS16 - Shared Service Factory Pattern
 Owner: _TBD_ (blocker until assigned in B0)
@@ -126,10 +126,15 @@ Files:
 - planning/reactive tool modules
 
 Checklist:
-- [ ] Consolidate lazy singleton/cache lifecycle for MCP services.
-- [ ] Remove duplicated weak-ref/service bootstrap patterns.
-- [ ] Verify no stale-session regressions in reactive flows.
-- [ ] Add targeted tests for service reuse and re-init paths.
+- [x] Consolidate lazy singleton/cache lifecycle for MCP services.
+- [x] Remove duplicated weak-ref/service bootstrap patterns.
+- [x] Verify no stale-session regressions in reactive flows.
+- [x] Add targeted tests for service reuse and re-init paths.
+
+Progress notes:
+- 2026-02-28: Added shared client-bound service factory at `src/mcp/tooling/serviceFactory.ts` for WeakRef-based lazy service reuse and explicit reset support, reducing duplicate lifecycle code and improving test isolation.
+- 2026-02-28: Migrated duplicated service bootstrap logic in `src/mcp/tools/plan.ts`, `src/mcp/tools/reactiveReview.ts`, and `src/internal/handlers/codeReview.ts` to the shared factory.
+- 2026-02-28: Added targeted reuse/re-init tests in `tests/tooling/serviceFactory.test.ts` and `tests/internal/handlers/codeReview.test.ts`; validated no reactive flow regressions with `tests/tools/reactiveReview.test.ts`.
 
 ---
 

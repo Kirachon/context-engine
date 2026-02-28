@@ -6,6 +6,10 @@
  */
 
 import { validateNonEmptyString } from './validation.js';
+import { parseUnifiedDiff } from '../../reviewer/diff/parse.js';
+
+export const NO_REVIEWABLE_DIFF_SCOPE_MESSAGE =
+  'No reviewable changes found in diff scope. Provide a unified diff with at least one changed file.';
 
 /**
  * Normalize an optional diff argument by trimming whitespace.
@@ -54,4 +58,23 @@ export function parseRequiredDiffInput(
     throw new Error(invalidUnifiedDiffMessage);
   }
   return diff;
+}
+
+/**
+ * Guard against no-op review scopes where the diff parser yields no changed files
+ * and the caller did not provide an explicit changed_files override.
+ */
+export function assertNonEmptyDiffScope(
+  diff: string,
+  changedFiles: string[] | undefined,
+  noScopeMessage: string = NO_REVIEWABLE_DIFF_SCOPE_MESSAGE
+): void {
+  const parsed = parseUnifiedDiff(diff);
+  const hasParsedChangedFiles = parsed.files.length > 0;
+  const hasProvidedChangedFiles = Array.isArray(changedFiles)
+    && changedFiles.some((filePath) => typeof filePath === 'string' && filePath.trim().length > 0);
+
+  if (!hasParsedChangedFiles && !hasProvidedChangedFiles) {
+    throw new Error(noScopeMessage);
+  }
 }

@@ -7,7 +7,7 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import { reviewDiff, type ReviewDiffInput } from '../../reviewer/reviewDiff.js';
-import { normalizeRequiredDiffInput } from '../tooling/diffInput.js';
+import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
 
 export interface ReviewDiffArgs {
   diff: string;
@@ -47,6 +47,7 @@ export async function handleReviewDiff(
     args.diff,
     'Missing or invalid "diff" argument. Provide a unified diff string.'
   );
+  assertNonEmptyDiffScope(diff, args.changed_files);
 
   const input: ReviewDiffInput = {
     diff,

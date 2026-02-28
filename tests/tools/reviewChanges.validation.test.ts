@@ -57,13 +57,13 @@ describe('review_changes validation paths', () => {
     ).rejects.toThrow(/expected an object map of file path to content/i);
   });
 
-  it('keeps existing behavior for malformed non-empty diff input', async () => {
-    const resultStr = await handleReviewChanges(
-      { diff: 'plain text, not a diff' },
-      mockServiceClientWithValidResponse
-    );
-    const result = JSON.parse(resultStr);
-    expect(Array.isArray(result.findings)).toBe(true);
+  it('blocks malformed non-empty diff input with no reviewable scope', async () => {
+    await expect(
+      handleReviewChanges(
+        { diff: 'plain text, not a diff' },
+        mockServiceClientWithValidResponse
+      )
+    ).rejects.toThrow(/no reviewable changes found in diff scope/i);
   });
 
   it('accepts partial git-style file sections without hunks', async () => {

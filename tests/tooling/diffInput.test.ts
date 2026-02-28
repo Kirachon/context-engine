@@ -1,5 +1,6 @@
 import { describe, it, expect } from '@jest/globals';
 import {
+  assertNonEmptyDiffScope,
   looksLikeUnifiedDiff,
   normalizeOptionalDiffInput,
   normalizeRequiredDiffInput,
@@ -44,5 +45,19 @@ index 1234567..abcdefg 100644
   it('validates required diff shape only when unified-diff guard is requested', () => {
     expect(parseRequiredDiffInput('plain text', 'missing')).toBe('plain text');
     expect(() => parseRequiredDiffInput('plain text', 'missing', 'not unified')).toThrow('not unified');
+  });
+
+  it('guards against no-op diff scopes unless changed_files is provided', () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-a
++b
+`;
+    expect(() => assertNonEmptyDiffScope(diff, undefined, 'no scope')).not.toThrow();
+    expect(() => assertNonEmptyDiffScope('plain text, not a diff', undefined, 'no scope')).toThrow('no scope');
+    expect(() => assertNonEmptyDiffScope('plain text, not a diff', ['src/a.ts'], 'no scope')).not.toThrow();
   });
 });

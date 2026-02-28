@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { ContextServiceClient } from '../serviceClient.js';
 import { PlanningService } from '../services/planningService.js';
+import { createClientBoundFactory } from '../tooling/serviceFactory.js';
 import {
   EnhancedPlanOutput,
   PlanGenerationOptions,
@@ -31,35 +32,12 @@ import {
   GeneratedCodeChange,
 } from '../types/planning.js';
 
-// ============================================================================
-// Service Instance Reuse (Lazy Singleton Pattern)
-// ============================================================================
+const planningServiceFactory = createClientBoundFactory(
+  (serviceClient: ContextServiceClient) => new PlanningService(serviceClient)
+);
 
-/**
- * Cached PlanningService instance for reuse across requests.
- * The service is stateless beyond its serviceClient dependency,
- * so reusing it reduces memory allocation and initialization overhead.
- */
-let cachedPlanningService: PlanningService | null = null;
-let cachedServiceClientRef: WeakRef<ContextServiceClient> | null = null;
-
-/**
- * Get or create a PlanningService instance.
- * Uses lazy initialization and caches the instance for reuse.
- * If the serviceClient changes, a new instance is created.
- */
 function getPlanningService(serviceClient: ContextServiceClient): PlanningService {
-  // Check if we have a cached service and if the serviceClient is still the same
-  const cachedClient = cachedServiceClientRef?.deref();
-  if (cachedPlanningService && cachedClient === serviceClient) {
-    return cachedPlanningService;
-  }
-
-  // Create a new instance
-  cachedPlanningService = new PlanningService(serviceClient);
-  cachedServiceClientRef = new WeakRef(serviceClient);
-
-  return cachedPlanningService;
+  return planningServiceFactory.get(serviceClient);
 }
 
 // ============================================================================
