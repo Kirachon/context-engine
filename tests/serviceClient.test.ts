@@ -386,5 +386,40 @@ cached content
       expect(status.status).toBe('idle');
       expect(status.fileCount).toBe(1);
     });
+
+    it('should hydrate index status fileCount from persisted index state on restore', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-restore-'));
+
+      // Ensure restore path is used.
+      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      mockDirectContext.importFromFile.mockResolvedValueOnce(mockContextInstance);
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 1,
+            updated_at: new Date().toISOString(),
+            files: {
+              'src/a.ts': { hash: 'abc', indexed_at: new Date().toISOString() },
+              'src/b.ts': { hash: 'def', indexed_at: new Date().toISOString() },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      mockContextInstance.search.mockResolvedValue('');
+      const restoredClient = new ContextServiceClient(tempDir);
+      await restoredClient.semanticSearch('hydrate status', 1);
+
+      const status = restoredClient.getIndexStatus();
+      expect(status.fileCount).toBe(2);
+      expect(status.status).toBe('idle');
+      expect(status.lastIndexed).toBeTruthy();
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
   });
 });

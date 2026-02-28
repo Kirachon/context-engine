@@ -135,6 +135,16 @@ describe('Reactive Review Tools', () => {
             ).rejects.toThrow('changed_files[1] must be a non-empty path');
         });
 
+        it('should reject changed_files JSON array entries that are not string paths', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: '[{"path":"src/a.ts"}]',
+                }, mockServiceClient)
+            ).rejects.toThrow('changed_files[0] must be a string path');
+        });
+
         it('should reject commit_hash that exceeds max length', async () => {
             await expect(
                 handleReactiveReviewPR({
@@ -166,6 +176,17 @@ describe('Reactive Review Tools', () => {
             ).rejects.toThrow('additions must be non-negative');
         });
 
+        it('should reject non-integer additions', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: 'src/a.ts',
+                    additions: 1.5,
+                }, mockServiceClient)
+            ).rejects.toThrow('additions must be an integer');
+        });
+
         it('should reject deletions above sane max', async () => {
             await expect(
                 handleReactiveReviewPR({
@@ -186,6 +207,17 @@ describe('Reactive Review Tools', () => {
                     max_workers: 65,
                 }, mockServiceClient)
             ).rejects.toThrow('max_workers exceeds maximum value (64)');
+        });
+
+        it('should reject changed_files path entries that exceed max path length', async () => {
+            const longPath = `src/${'a'.repeat(1025)}.ts`;
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: JSON.stringify([longPath]),
+                }, mockServiceClient)
+            ).rejects.toThrow('changed_files[0] exceeds maximum length (1024)');
         });
     });
 

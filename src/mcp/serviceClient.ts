@@ -895,10 +895,42 @@ export class ContextServiceClient {
   }
 
   /**
+   * Resolve the next lastIndexed value while guarding against stale timestamp clobbering.
+   * - `undefined`: keep current value
+   * - `null`: explicitly clear current value
+   * - `string`: keep the most recent valid timestamp between current and incoming
+   */
+  private resolveLastIndexed(nextValue: string | null | undefined): string | null {
+    if (nextValue === undefined) {
+      return this.indexStatus.lastIndexed;
+    }
+    if (nextValue === null) {
+      return null;
+    }
+
+    const current = this.indexStatus.lastIndexed;
+    if (!current) {
+      return nextValue;
+    }
+
+    const currentMs = Date.parse(current);
+    const nextMs = Date.parse(nextValue);
+
+    if (Number.isNaN(currentMs)) {
+      return nextValue;
+    }
+    if (Number.isNaN(nextMs)) {
+      return current;
+    }
+
+    return nextMs >= currentMs ? nextValue : current;
+  }
+
+  /**
    * Update index status with staleness recompute
    */
   private updateIndexStatus(partial: Partial<IndexStatus>): void {
-    const nextLastIndexed = partial.lastIndexed ?? this.indexStatus.lastIndexed;
+    const nextLastIndexed = this.resolveLastIndexed(partial.lastIndexed);
     const nextIsStale =
       partial.isStale !== undefined
         ? partial.isStale
@@ -1242,11 +1274,13 @@ export class ContextServiceClient {
         try {
           const stats = fs.statSync(stateFilePath);
           const restoredAt = stats.mtime.toISOString();
-          // Only set lastIndexed from the state file on first restore.
-          // If we just completed an explicit indexing run, keep its lastIndexed value.
-          const nextStatus: Partial<IndexStatus> = { status: 'idle' };
-          if (!this.indexStatus.lastIndexed) {
-            nextStatus.lastIndexed = restoredAt;
+          const nextStatus: Partial<IndexStatus> = {};
+          if (this.indexStatus.status !== 'indexing') {
+            nextStatus.status = 'idle';
+            const resolvedLastIndexed = this.resolveLastIndexed(restoredAt);
+            if (resolvedLastIndexed !== this.indexStatus.lastIndexed) {
+              nextStatus.lastIndexed = resolvedLastIndexed;
+            }
           }
 
           // Best-effort: if we can infer an indexed file count from the index state store,
@@ -1263,7 +1297,9 @@ export class ContextServiceClient {
             }
           }
 
-          this.updateIndexStatus(nextStatus);
+          if (Object.keys(nextStatus).length > 0) {
+            this.updateIndexStatus(nextStatus);
+          }
         } catch {
           // ignore stat errors, keep defaults
         }
@@ -1412,7 +1448,14 @@ export class ContextServiceClient {
         }
       }
     } catch (error) {
-      console.error(`Error discovering files in ${dirPath}:`, error);
+      const fsError = error as NodeJS.ErrnoException;
+      if (fsError?.code === 'ENOENT') {
+        if (debugIndex) {
+          console.error(`[discoverFiles] Directory disappeared during scan (skipping): ${dirPath}`);
+        }
+      } else {
+        console.error(`Error discovering files in ${dirPath}:`, error);
+      }
     }
 
     return files;

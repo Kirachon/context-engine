@@ -105,5 +105,66 @@ index 1234567..abcdefg 100644
     const parsed = JSON.parse(resultStr);
     expect(normalizeReviewAuto(parsed)).toMatchSnapshot();
   });
-});
 
+  it('rejects review_diff selection when diff is not unified-diff shaped', async () => {
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => '',
+      searchAndAsk: async () => '',
+    } as any;
+
+    await expect(
+      handleReviewAuto(
+        {
+          tool: 'review_diff',
+          diff: 'plain text, not a diff',
+        },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/does not look like a unified diff/i);
+  });
+
+  it('rejects git args when auto-select resolves to review_diff', async () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => '',
+      searchAndAsk: async () => '',
+    } as any;
+
+    await expect(
+      handleReviewAuto(
+        {
+          diff,
+          target: 'staged',
+        },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/git args .* not applicable/i);
+  });
+
+  it('rejects diff argument when review_git_diff is forced', async () => {
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      searchAndAsk: async () => '{}',
+    } as any;
+
+    await expect(
+      handleReviewAuto(
+        {
+          tool: 'review_git_diff',
+          diff: 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n',
+        },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/diff argument is not applicable/i);
+  });
+});

@@ -172,6 +172,36 @@ function asFiniteNumber(value: unknown, label: string): number {
   return value;
 }
 
+function computeRegressionPct(regressionAbs: number, baselineMetric: number, candidateMetric: number): number {
+  const absBaseline = Math.abs(baselineMetric);
+  const scale = Math.max(1, absBaseline, Math.abs(candidateMetric));
+  const effectivelyZeroBaseline = absBaseline <= Number.EPSILON * scale;
+  if (effectivelyZeroBaseline) {
+    if (regressionAbs === 0) {
+      return 0;
+    }
+    return regressionAbs > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  }
+
+  const ratio = regressionAbs / baselineMetric;
+  if (!Number.isFinite(ratio)) {
+    if (ratio === 0) {
+      return 0;
+    }
+    return ratio > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  }
+
+  if (Math.abs(ratio) > Number.MAX_VALUE / 100) {
+    return ratio > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  }
+
+  const pct = ratio * 100;
+  if (!Number.isFinite(pct)) {
+    return pct > 0 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  }
+  return pct;
+}
+
 function readRequiredProvenanceField(
   provenance: ProvenanceMetadata | undefined,
   field: keyof ProvenanceMetadata,
@@ -238,7 +268,7 @@ function main(): void {
     const candidateMetric = asFiniteNumber(getByPath(candidate, metricPath), `candidate:${metricPath}`);
 
     const regressionAbs = args.higherIsBetter ? baselineMetric - candidateMetric : candidateMetric - baselineMetric;
-    const regressionPct = baselineMetric === 0 ? (regressionAbs === 0 ? 0 : Number.POSITIVE_INFINITY) : (regressionAbs / baselineMetric) * 100;
+    const regressionPct = computeRegressionPct(regressionAbs, baselineMetric, candidateMetric);
 
     const breachedPct = args.maxRegressionPct != null && regressionPct > args.maxRegressionPct;
     const breachedAbs = args.maxRegressionAbs != null && regressionAbs > args.maxRegressionAbs;

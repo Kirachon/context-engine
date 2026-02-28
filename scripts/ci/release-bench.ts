@@ -297,8 +297,8 @@ function main(): void {
 
   const benchMode = args.mode;
   const benchArgs = resolveBenchArgs(args.mode, args.workspace);
-  const candidateRuns: BenchOutput[] = [];
   const candidateMetrics: number[] = [];
+  let firstCandidateRunPath: string | undefined;
 
   for (let i = 0; i < 3; i++) {
     try {
@@ -311,7 +311,9 @@ function main(): void {
       }
       const candidateRunPath = `${args.candidateRunPrefix}-${i + 1}.json`;
       writeJson(candidateRunPath, out);
-      candidateRuns.push(out);
+      if (!firstCandidateRunPath) {
+        firstCandidateRunPath = candidateRunPath;
+      }
       candidateMetrics.push(metric);
     } catch (error) {
       // eslint-disable-next-line no-console
@@ -319,9 +321,9 @@ function main(): void {
     }
   }
 
-  if (candidateRuns.length < 3) {
+  if (candidateMetrics.length < 3) {
     // eslint-disable-next-line no-console
-    console.error(`Insufficient candidate data: expected 3 successful runs, got ${candidateRuns.length}.`);
+    console.error(`Insufficient candidate data: expected 3 successful runs, got ${candidateMetrics.length}.`);
     process.exit(1);
   }
 
@@ -332,7 +334,13 @@ function main(): void {
     process.exit(1);
   }
 
-  const first = candidateRuns[0]!;
+  if (!firstCandidateRunPath) {
+    // eslint-disable-next-line no-console
+    console.error('Unable to locate first successful candidate run artifact.');
+    process.exit(1);
+  }
+
+  const first = readJson(firstCandidateRunPath);
   const payload = { ...(first.payload ?? {}) };
   const timing = { ...((payload.timing as Record<string, unknown> | undefined) ?? {}) };
   timing.p95_ms = medianP95;
