@@ -32,6 +32,12 @@ describe('codebase_retrieval Tool', () => {
     ).rejects.toThrow(/invalid query/i);
   });
 
+  it('rejects whitespace-only query', async () => {
+    await expect(
+      handleCodebaseRetrieval({ query: '   ' } as any, mockServiceClient as any)
+    ).rejects.toThrow(/invalid query/i);
+  });
+
   it('returns JSON string with expected structure', async () => {
     const mockResults: SearchResult[] = [
       { path: 'src/a.ts', content: 'code a', lines: '1-5', relevanceScore: 0.9 },
@@ -57,6 +63,14 @@ describe('codebase_retrieval Tool', () => {
     expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith('test', 5);
   });
 
+  it('trims query before delegating to semanticSearch', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+    await handleCodebaseRetrieval({ query: '  test  ' }, mockServiceClient as any);
+
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith('test', 10);
+  });
+
   it('adds reason text for each result', async () => {
     const mockResults: SearchResult[] = [
       { path: 'src/b.ts', content: 'code b', relevanceScore: 0.5 },
@@ -67,6 +81,42 @@ describe('codebase_retrieval Tool', () => {
     const parsed = JSON.parse(result);
 
     expect(parsed.results[0].reason).toMatch(/Semantic match/);
+  });
+
+  it('adds freshness warning metadata when index is stale', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+    mockServiceClient.getIndexStatus.mockReturnValue({
+      workspace: '/tmp/workspace',
+      lastIndexed: '2024-01-01T00:00:00.000Z',
+      status: 'idle',
+      fileCount: 10,
+      isStale: true,
+    });
+
+    const result = await handleCodebaseRetrieval({ query: 'stale' }, mockServiceClient as any);
+    const parsed = JSON.parse(result);
+
+    expect(parsed.metadata.freshnessWarning).toMatch(/index is stale/i);
+    expect(parsed.metadata.indexStatus.isStale).toBe(true);
+  });
+
+  it('adds freshness warning metadata when index is unhealthy', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+    mockServiceClient.getIndexStatus.mockReturnValue({
+      workspace: '/tmp/workspace',
+      lastIndexed: null,
+      status: 'error',
+      fileCount: 0,
+      isStale: true,
+      lastError: 'index worker failed',
+    });
+
+    const result = await handleCodebaseRetrieval({ query: 'unhealthy' }, mockServiceClient as any);
+    const parsed = JSON.parse(result);
+
+    expect(parsed.metadata.freshnessWarning).toMatch(/index status is error/i);
+    expect(parsed.metadata.freshnessWarning).toMatch(/workspace appears unindexed/i);
+    expect(parsed.metadata.indexStatus.status).toBe('error');
   });
 
   it('exposes correct tool schema', () => {

@@ -31,6 +31,60 @@ describe('index_status Tool', () => {
     expect(result).toContain('**Workspace**');
     expect(result).toContain('**Status**');
     expect(result).toContain('42');
+    expect(result).toContain('**Freshness**');
+  });
+
+  it('should surface stale index guidance', async () => {
+    const staleStatus: IndexStatus = {
+      workspace: '/tmp/workspace',
+      status: 'idle',
+      lastIndexed: '2025-01-10T00:00:00.000Z',
+      fileCount: 42,
+      isStale: true,
+    };
+    mockServiceClient.getIndexStatus.mockReturnValue(staleStatus);
+
+    const result = await handleIndexStatus({}, mockServiceClient as any);
+
+    expect(result).toContain('stale');
+    expect(result).toContain('## Freshness Guidance');
+    expect(result).toContain('index_workspace');
+  });
+
+  it('should surface unindexed guidance when never indexed', async () => {
+    const unindexedStatus: IndexStatus = {
+      workspace: '/tmp/workspace',
+      status: 'idle',
+      lastIndexed: null,
+      fileCount: 0,
+      isStale: true,
+    };
+    mockServiceClient.getIndexStatus.mockReturnValue(unindexedStatus);
+
+    const result = await handleIndexStatus({}, mockServiceClient as any);
+
+    expect(result).toContain('unindexed');
+    expect(result).toContain('Index has not been built yet');
+    expect(result).toContain('index_workspace');
+  });
+
+  it('should surface error guidance for unhealthy index status', async () => {
+    const errorStatus: IndexStatus = {
+      workspace: '/tmp/workspace',
+      status: 'error',
+      lastIndexed: '2025-01-11T00:00:00.000Z',
+      fileCount: 42,
+      isStale: true,
+      lastError: 'Index worker exited with code 1',
+    };
+    mockServiceClient.getIndexStatus.mockReturnValue(errorStatus);
+
+    const result = await handleIndexStatus({}, mockServiceClient as any);
+
+    expect(result).toContain('⚠️ error');
+    expect(result).toContain('Index is unhealthy due to an indexing error.');
+    expect(result).toContain('reindex_workspace');
+    expect(result).toContain('Index worker exited with code 1');
   });
 
   it('should expose tool schema', () => {

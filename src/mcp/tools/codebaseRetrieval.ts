@@ -8,6 +8,7 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
+import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 
 export interface CodebaseRetrievalArgs {
   query: string;
@@ -29,6 +30,13 @@ export interface CodebaseRetrievalOutput {
     lastIndexed: string | null;
     queryTimeMs: number;
     totalResults: number;
+    indexStatus?: {
+      status: 'idle' | 'indexing' | 'error';
+      fileCount: number;
+      isStale: boolean;
+      lastError?: string;
+    };
+    freshnessWarning?: string;
   };
 }
 
@@ -38,30 +46,35 @@ export async function handleCodebaseRetrieval(
 ): Promise<string> {
   const startTime = Date.now();
   const { query, top_k = 10 } = args;
+  const normalizedQuery = typeof query === 'string' ? query.trim() : query;
 
   // Validate inputs
-  if (!query || typeof query !== 'string') {
+  if (!normalizedQuery || typeof normalizedQuery !== 'string') {
     throw new Error('Invalid query parameter: must be a non-empty string');
   }
 
-  if (query.length > 1000) {
+  if (normalizedQuery.length > 1000) {
     throw new Error('Query too long: maximum 1000 characters');
   }
 
-  if (top_k !== undefined && (typeof top_k !== 'number' || top_k < 1 || top_k > 50)) {
+  if (
+    top_k !== undefined &&
+    (typeof top_k !== 'number' || !Number.isFinite(top_k) || top_k < 1 || top_k > 50)
+  ) {
     throw new Error('Invalid top_k parameter: must be a number between 1 and 50');
   }
 
-  const retrieval = await internalRetrieveCode(query, serviceClient, { topK: top_k });
+  const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, { topK: top_k });
   const searchResults = retrieval.results;
   const status = internalIndexStatus(serviceClient);
+  const freshnessWarning = getIndexFreshnessWarning(status);
 
   const results: CodebaseRetrievalResult[] = searchResults.map((r) => ({
     file: r.path,
     content: r.content,
     score: r.relevanceScore || 0,
     lines: r.lines,
-    reason: `Semantic match for: "${query}"`,
+    reason: `Semantic match for: "${normalizedQuery}"`,
   }));
 
   const output: CodebaseRetrievalOutput = {
@@ -71,6 +84,13 @@ export async function handleCodebaseRetrieval(
       lastIndexed: status.lastIndexed,
       queryTimeMs: Date.now() - startTime,
       totalResults: results.length,
+      indexStatus: {
+        status: status.status,
+        fileCount: status.fileCount,
+        isStale: status.isStale,
+        lastError: status.lastError,
+      },
+      freshnessWarning: freshnessWarning ?? undefined,
     },
   };
 

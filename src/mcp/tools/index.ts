@@ -5,13 +5,72 @@
  * This is essential for first-time setup or when files change significantly.
  */
 
-import { ContextServiceClient } from '../serviceClient.js';
+import { ContextServiceClient, IndexStatus } from '../serviceClient.js';
 
 export interface IndexWorkspaceArgs {
   /** Force re-indexing even if index exists (default: false) */
   force?: boolean;
   /** Run indexing in background worker (default: false) */
   background?: boolean;
+}
+
+export interface IndexFreshnessInfo {
+  code: 'healthy' | 'indexing' | 'unindexed' | 'stale' | 'error';
+  severity: 'ok' | 'warning' | 'error';
+  summary: string;
+  guidance: string[];
+}
+
+/**
+ * Normalize index health into user-facing freshness guidance.
+ * This is additive and does not change existing response contracts.
+ */
+export function evaluateIndexFreshness(status: IndexStatus): IndexFreshnessInfo {
+  if (status.status === 'error') {
+    return {
+      code: 'error',
+      severity: 'error',
+      summary: 'Index is unhealthy due to an indexing error.',
+      guidance: [
+        'Run `reindex_workspace` to rebuild from scratch.',
+        'Review `lastError` and server logs for the root cause before retrying.',
+      ],
+    };
+  }
+
+  if (status.status === 'indexing') {
+    return {
+      code: 'indexing',
+      severity: 'warning',
+      summary: 'Indexing is currently in progress; results may be incomplete.',
+      guidance: ['Wait for indexing to complete, then re-check with `index_status`.'],
+    };
+  }
+
+  if (!status.lastIndexed || status.fileCount === 0) {
+    return {
+      code: 'unindexed',
+      severity: 'warning',
+      summary: 'Index has not been built yet for this workspace.',
+      guidance: ['Run `index_workspace` to build the initial index.'],
+    };
+  }
+
+  if (status.isStale) {
+    return {
+      code: 'stale',
+      severity: 'warning',
+      summary: 'Index appears stale and may not reflect recent file changes.',
+      guidance: ['Run `index_workspace` to refresh or `reindex_workspace` for a full rebuild.'],
+    };
+  }
+
+  return {
+    code: 'healthy',
+    severity: 'ok',
+    summary: 'Index is healthy and up to date.',
+    guidance: [],
+  };
 }
 
 /**

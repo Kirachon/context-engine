@@ -5,6 +5,7 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
+import { evaluateIndexFreshness } from './index.js';
 
 export interface ReindexWorkspaceArgs {
   // Optional future flags can be added here
@@ -22,6 +23,8 @@ export async function handleReindexWorkspace(
 
   await serviceClient.clearIndex();
   const result = await serviceClient.indexWorkspace();
+  const status = serviceClient.getIndexStatus();
+  const freshness = evaluateIndexFreshness(status);
 
   const elapsed = Date.now() - startTime;
 
@@ -33,6 +36,13 @@ export async function handleReindexWorkspace(
       indexed: result.indexed,
       skipped: result.skipped,
       errors: result.errors,
+      index_status: status.status,
+      is_stale: status.isStale,
+      last_indexed: status.lastIndexed,
+      freshness: freshness.code,
+      freshness_message: freshness.summary,
+      freshness_guidance: freshness.guidance,
+      last_error: status.lastError ?? null,
     },
     null,
     2
@@ -44,10 +54,19 @@ export async function handleClearIndex(
   serviceClient: ContextServiceClient
 ): Promise<string> {
   await serviceClient.clearIndex();
+  const status = serviceClient.getIndexStatus();
+  const freshness = evaluateIndexFreshness(status);
   return JSON.stringify(
     {
       success: true,
       message: 'Index cleared. Re-run index_workspace to rebuild.',
+      index_status: status.status,
+      is_stale: status.isStale,
+      last_indexed: status.lastIndexed,
+      freshness: freshness.code,
+      freshness_message: freshness.summary,
+      freshness_guidance: freshness.guidance,
+      last_error: status.lastError ?? null,
     },
     null,
     2

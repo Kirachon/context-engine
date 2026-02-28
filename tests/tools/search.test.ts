@@ -19,12 +19,24 @@ describe('semantic_search Tool', () => {
       getContextForPrompt: jest.fn(),
       indexWorkspace: jest.fn(),
       clearCache: jest.fn(),
+      getIndexStatus: jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: false,
+      })),
     };
   });
 
   describe('Input Validation', () => {
     it('should reject empty query', async () => {
       await expect(handleSemanticSearch({ query: '' }, mockServiceClient as any))
+        .rejects.toThrow(/invalid query/i);
+    });
+
+    it('should reject whitespace-only query', async () => {
+      await expect(handleSemanticSearch({ query: '   ' }, mockServiceClient as any))
         .rejects.toThrow(/invalid query/i);
     });
 
@@ -72,6 +84,18 @@ describe('semantic_search Tool', () => {
         top_k: 10,
       }, mockServiceClient as any)).resolves.toBeDefined();
     });
+
+    it('should trim query before delegating to semanticSearch', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch({ query: '  test query  ' }, mockServiceClient as any);
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'test query',
+        10,
+        expect.objectContaining({ bypassCache: false })
+      );
+    });
   });
 
   describe('Output Formatting', () => {
@@ -82,6 +106,56 @@ describe('semantic_search Tool', () => {
 
       expect(result).toContain('No results found');
       expect(result).toContain('# 🔍 Search Results');
+    });
+
+    it('should include freshness warning in no-results output when index is stale', async () => {
+      mockServiceClient.getIndexStatus = jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        status: 'idle',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        fileCount: 10,
+        isStale: true,
+        lastError: undefined,
+      }));
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      const result = await handleSemanticSearch({ query: 'nonexistent' }, mockServiceClient as any);
+
+      expect(result).toContain('No results found');
+      expect(result).toContain('Index freshness warning');
+    });
+
+    it('should include freshness warning when index is stale', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+      mockServiceClient.getIndexStatus.mockReturnValue({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: true,
+      });
+
+      const result = await handleSemanticSearch({ query: 'stale' }, mockServiceClient as any);
+
+      expect(result).toContain('Index freshness warning');
+      expect(result).toContain('index is stale');
+    });
+
+    it('should include freshness warning when index is unhealthy', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+      mockServiceClient.getIndexStatus.mockReturnValue({
+        workspace: '/tmp/workspace',
+        lastIndexed: null,
+        status: 'error',
+        fileCount: 0,
+        isStale: true,
+        lastError: 'failed to load index',
+      });
+
+      const result = await handleSemanticSearch({ query: 'unhealthy' }, mockServiceClient as any);
+
+      expect(result).toContain('index status is error');
+      expect(result).toContain('workspace appears unindexed');
     });
 
     it('should include search results header', async () => {

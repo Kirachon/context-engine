@@ -19,6 +19,8 @@
 
 import { ContextServiceClient, ContextOptions } from '../serviceClient.js';
 import { internalContextBundle } from '../../internal/handlers/context.js';
+import { internalIndexStatus } from '../../internal/handlers/utilities.js';
+import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 
 export interface GetContextArgs {
   query: string;
@@ -100,11 +102,20 @@ export async function handleGetContext(
     throw new Error(`Query too long: maximum ${MAX_QUERY_LENGTH} characters`);
   }
 
-  if (max_files !== undefined && (typeof max_files !== 'number' || max_files < 1 || max_files > 20)) {
+  if (
+    max_files !== undefined &&
+    (typeof max_files !== 'number' || !Number.isFinite(max_files) || max_files < 1 || max_files > 20)
+  ) {
     throw new Error('Invalid max_files parameter: must be a number between 1 and 20');
   }
 
-  if (token_budget !== undefined && (typeof token_budget !== 'number' || token_budget < 500 || token_budget > 100000)) {
+  if (
+    token_budget !== undefined &&
+    (typeof token_budget !== 'number' ||
+      !Number.isFinite(token_budget) ||
+      token_budget < 500 ||
+      token_budget > 100000)
+  ) {
     throw new Error('Invalid token_budget parameter: must be a number between 500 and 100000');
   }
 
@@ -134,6 +145,11 @@ export async function handleGetContext(
   };
 
   const contextBundle = await internalContextBundle(normalizedQuery, serviceClient, options);
+  const status = internalIndexStatus(serviceClient);
+  const freshnessWarning = getIndexFreshnessWarning(status, {
+    prefix: '⚠️ ',
+    subject: 'Context',
+  });
 
   // Format enhanced context bundle for agent consumption
   let output = '';
@@ -143,6 +159,9 @@ export async function handleGetContext(
   // =========================================================================
   output += `# 📚 Codebase Context\n\n`;
   output += `**Query:** "${normalizedQuery}"\n\n`;
+  if (freshnessWarning) {
+    output += `${freshnessWarning}\n\n`;
+  }
   output += `> ${contextBundle.summary}\n\n`;
 
   // Metadata section

@@ -185,10 +185,16 @@ Scope:
 - `codebase_retrieval`, `semantic_search`, `get_file`, `get_context_for_prompt`, `enhance_prompt`, `tool_manifest`
 
 Checklist:
-- [ ] Standardize input guards and size limits across lifecycle/search tools.
-- [ ] Add index freshness sanity guards for perf claims.
+- [x] Standardize input guards and size limits across lifecycle/search tools.
+- [x] Add index freshness sanity guards for perf claims.
 - [ ] Verify parity script robustness against formatting/refactor drift.
-- [ ] Add focused regression tests for unhealthy index and stale status paths.
+- [x] Add focused regression tests for unhealthy index and stale status paths.
+
+Progress notes:
+- 2026-02-28: Added additive freshness classification/metadata in `index_workspace`, `reindex_workspace`, and `clear_index` outputs, and expanded `index_status` with explicit freshness guidance for stale/unindexed/error states.
+- 2026-02-28: Added index health signaling in `codebase_retrieval`, `semantic_search`, and `get_context_for_prompt` so stale/unhealthy index states are visible alongside retrieval/performance output.
+- 2026-02-28: Standardized lifecycle/search input normalization and guard behavior (trimmed query handling, finite numeric range enforcement) with backward-compatible output contracts.
+- 2026-02-28: Added targeted stale/unhealthy regression tests in `tests/tools/lifecycle.test.ts`, `tests/tools/status.test.ts`, `tests/tools/codebaseRetrieval.test.ts`, `tests/tools/search.test.ts`, and `tests/tools/context.test.ts`.
 
 ### Batch D - Memory + Reactive Utility Family
 Prerequisites:

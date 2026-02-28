@@ -19,12 +19,24 @@ describe('get_context_for_prompt Tool', () => {
       getContextForPrompt: jest.fn(),
       indexWorkspace: jest.fn(),
       clearCache: jest.fn(),
+      getIndexStatus: jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: false,
+      })),
     };
   });
 
   describe('Input Validation', () => {
     it('should reject empty query', async () => {
       await expect(handleGetContext({ query: '' }, mockServiceClient as any))
+        .rejects.toThrow(/invalid query/i);
+    });
+
+    it('should reject whitespace-only query', async () => {
+      await expect(handleGetContext({ query: '   ' }, mockServiceClient as any))
         .rejects.toThrow(/invalid query/i);
     });
 
@@ -105,6 +117,41 @@ describe('get_context_for_prompt Tool', () => {
 
       expect(result).toContain('# 📚 Codebase Context');
       expect(result).toContain('**Query:**');
+    });
+
+    it('should include freshness warning when index is stale', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+      mockServiceClient.getIndexStatus.mockReturnValue({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: true,
+      });
+
+      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+
+      expect(result).toContain('Index freshness warning');
+      expect(result).toContain('index is stale');
+    });
+
+    it('should include freshness warning when index is unhealthy', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+      mockServiceClient.getIndexStatus.mockReturnValue({
+        workspace: '/tmp/workspace',
+        lastIndexed: null,
+        status: 'error',
+        fileCount: 0,
+        isStale: true,
+        lastError: 'index unavailable',
+      });
+
+      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+
+      expect(result).toContain('index status is error');
+      expect(result).toContain('workspace appears unindexed');
     });
 
     it('should include file overview table', async () => {
