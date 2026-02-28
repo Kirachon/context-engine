@@ -108,10 +108,16 @@ Files:
 - `src/mcp/tools/checkInvariants.ts`
 
 Checklist:
-- [ ] Normalize unified diff parsing and validation in one shared module.
+- [x] Normalize unified diff parsing and validation in one shared module.
 - [ ] Enforce no-op/empty-scope protection consistently across review tools.
-- [ ] Keep existing tool outputs stable while improving determinism.
-- [ ] Add tests for malformed/empty/partial diff scenarios.
+- [x] Keep existing tool outputs stable while improving determinism.
+- [x] Add tests for malformed/empty/partial diff scenarios.
+
+Progress notes:
+- 2026-02-28: Added shared diff input helper module at `src/mcp/tooling/diffInput.ts` with optional/required normalization plus unified-diff shape checks.
+- 2026-02-28: Migrated `review_auto`, `review_diff`, `check_invariants`, and `review_changes` to shared diff helpers while preserving existing external error semantics.
+- 2026-02-28: Added WS15 malformed/empty/partial diff coverage in `tests/tooling/diffInput.test.ts`, `tests/tools/reviewAuto.test.ts`, `tests/tools/reviewDiff.test.ts`, `tests/tools/checkInvariants.test.ts`, and `tests/tools/reviewChanges.validation.test.ts`.
+- 2026-02-28: Remaining WS15 item is consistent no-op/empty-scope protection policy across all review entry points.
 
 ### WS16 - Shared Service Factory Pattern
 Owner: _TBD_ (blocker until assigned in B0)
@@ -268,3 +274,4 @@ Checklist:
 - [x] 2026-02-28: Implemented WS13 first migration slice (shared validators + 3 tools + validator tests).
 - [x] 2026-02-28: Implemented WS13 second migration slice (review tool validation migration + new validation tests).
 - [x] 2026-02-28: Completed WS14 shared runtime wrapper with server integration (`src/mcp/server.ts`) and regression tests (`tests/tooling/runtime.test.ts`).
+- [x] 2026-02-28: WS15 major migration completed: shared `diffInput` module adopted by review entry tools with malformed/empty/partial diff regression coverage; no-op/empty-scope policy item remains open.

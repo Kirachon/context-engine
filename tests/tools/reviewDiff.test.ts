@@ -50,6 +50,33 @@ index 1234567..abcdefg 100644
     expect(typeof result.stats.timings_ms.preflight).toBe('number');
   });
 
+  it('keeps existing behavior for malformed non-empty diff input', async () => {
+    const resultStr = await handleReviewDiff(
+      { diff: 'plain text, not a diff' },
+      { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+    );
+    const result = JSON.parse(resultStr);
+    expect(result.stats.files_changed).toBe(0);
+    expect(result.stats.lines_added).toBe(0);
+    expect(result.stats.lines_removed).toBe(0);
+  });
+
+  it('accepts partial git-style file sections without hunks', async () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+`;
+    const resultStr = await handleReviewDiff(
+      { diff },
+      { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+    );
+    const result = JSON.parse(resultStr);
+    expect(result.stats.files_changed).toBe(1);
+    expect(result.stats.lines_added).toBe(0);
+    expect(result.stats.lines_removed).toBe(0);
+  });
+
   it('runs invariants when invariants_path is provided', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-reviewdiff-'));
     const invPath = path.join(tmpDir, '.review-invariants.yml');

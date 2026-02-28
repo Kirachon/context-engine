@@ -3,6 +3,27 @@ import { handleReviewChanges } from '../../src/mcp/tools/codeReview.js';
 
 describe('review_changes validation paths', () => {
   const mockServiceClient = { searchAndAsk: async () => '{}' } as any;
+  const mockServiceClientWithValidResponse = {
+    searchAndAsk: async () =>
+      JSON.stringify({
+        findings: [
+          {
+            id: 'finding_1',
+            title: 'Test finding',
+            body: 'Mocked output.',
+            confidence_score: 0.95,
+            priority: 1,
+            category: 'correctness',
+            code_location: { file_path: 'src/a.ts', line_range: { start: 1, end: 1 } },
+            suggestion: { description: 'Add a guard', can_auto_fix: false },
+            is_on_changed_line: true,
+          },
+        ],
+        overall_correctness: 'needs attention',
+        overall_explanation: 'Mocked output.',
+        overall_confidence_score: 0.8,
+      }),
+  } as any;
 
   it('rejects diff that becomes empty after trimming', async () => {
     await expect(handleReviewChanges({ diff: '   ' }, mockServiceClient)).rejects.toThrow(
@@ -34,5 +55,29 @@ describe('review_changes validation paths', () => {
     await expect(
       handleReviewChanges({ diff: 'diff --git a/a.ts b/a.ts', file_contexts: '[]' }, mockServiceClient)
     ).rejects.toThrow(/expected an object map of file path to content/i);
+  });
+
+  it('keeps existing behavior for malformed non-empty diff input', async () => {
+    const resultStr = await handleReviewChanges(
+      { diff: 'plain text, not a diff' },
+      mockServiceClientWithValidResponse
+    );
+    const result = JSON.parse(resultStr);
+    expect(Array.isArray(result.findings)).toBe(true);
+  });
+
+  it('accepts partial git-style file sections without hunks', async () => {
+    const resultStr = await handleReviewChanges(
+      {
+        diff: `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+`,
+      },
+      mockServiceClientWithValidResponse
+    );
+    const result = JSON.parse(resultStr);
+    expect(Array.isArray(result.findings)).toBe(true);
   });
 });

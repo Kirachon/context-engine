@@ -24,9 +24,9 @@ import {
 import {
   parseJsonString,
   validateMaxLength,
-  validateNonEmptyString,
   validateOneOf,
 } from '../tooling/validation.js';
+import { normalizeRequiredDiffInput } from '../tooling/diffInput.js';
 
 // ============================================================================
 // Tool Argument Types
@@ -74,8 +74,8 @@ export async function handleReviewChanges(
     console.error('[review_changes] Starting code review...');
 
     // Validate required arguments
-    const normalizedDiff = validateNonEmptyString(
-      typeof args.diff === 'string' ? args.diff.trim() : args.diff,
+    const normalizedDiff = normalizeRequiredDiffInput(
+      args.diff,
       'Missing or invalid "diff" argument. Provide a unified diff string.'
     );
     validateMaxLength(normalizedDiff, MAX_DIFF_LENGTH, `Invalid "diff": maximum ${MAX_DIFF_LENGTH} characters`);

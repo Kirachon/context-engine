@@ -14,6 +14,23 @@ function writeFile(filePath: string, contents: string): void {
   fs.writeFileSync(filePath, contents, 'utf-8');
 }
 
+function createRepoWithStagedChange(): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-auto-'));
+
+  sh('git', ['init'], tmp);
+  sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+  sh('git', ['config', 'user.name', 'CI'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+  sh('git', ['commit', '-m', 'base'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', 'export const b = 2;', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+
+  return tmp;
+}
+
 function normalizeReviewAuto(result: any): any {
   const normalized = JSON.parse(JSON.stringify(result));
 
@@ -58,18 +75,7 @@ index 1234567..abcdefg 100644
   });
 
   it('selects review_git_diff when no diff is provided', async () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-auto-'));
-
-    sh('git', ['init'], tmp);
-    sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
-    sh('git', ['config', 'user.name', 'CI'], tmp);
-
-    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
-    sh('git', ['add', '.'], tmp);
-    sh('git', ['commit', '-m', 'base'], tmp);
-
-    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', 'export const b = 2;', ''].join('\n'));
-    sh('git', ['add', '.'], tmp);
+    const tmp = createRepoWithStagedChange();
 
     const mockServiceClient = {
       getWorkspacePath: () => tmp,
@@ -104,6 +110,58 @@ index 1234567..abcdefg 100644
 
     const parsed = JSON.parse(resultStr);
     expect(normalizeReviewAuto(parsed)).toMatchSnapshot();
+  });
+
+  it('treats whitespace-only diff as absent and auto-selects review_git_diff', async () => {
+    const tmp = createRepoWithStagedChange();
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () =>
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'looks good',
+          overall_explanation: 'Mocked output.',
+          overall_confidence_score: 0.8,
+        }),
+    } as any;
+
+    const resultStr = await handleReviewAuto(
+      {
+        diff: '  \n\t  ',
+        target: 'staged',
+      },
+      mockServiceClient
+    );
+
+    const parsed = JSON.parse(resultStr);
+    expect(parsed.selected_tool).toBe('review_git_diff');
+  });
+
+  it('accepts patch-style partial diffs when review_diff is forced', async () => {
+    const diff = `--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => '',
+      searchAndAsk: async () => '',
+    } as any;
+
+    const resultStr = await handleReviewAuto(
+      {
+        tool: 'review_diff',
+        diff,
+      },
+      mockServiceClient
+    );
+
+    const parsed = JSON.parse(resultStr);
+    expect(parsed.selected_tool).toBe('review_diff');
+    expect(parsed.output).toHaveProperty('stats');
   });
 
   it('rejects review_diff selection when diff is not unified-diff shaped', async () => {
@@ -166,5 +224,23 @@ index 1234567..abcdefg 100644
         mockServiceClient
       )
     ).rejects.toThrow(/diff argument is not applicable/i);
+  });
+
+  it('treats whitespace-only diff as missing when review_diff is forced', async () => {
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => '',
+      searchAndAsk: async () => '',
+    } as any;
+
+    await expect(
+      handleReviewAuto(
+        {
+          tool: 'review_diff',
+          diff: '  \n\t  ',
+        },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/no valid diff provided/i);
   });
 });

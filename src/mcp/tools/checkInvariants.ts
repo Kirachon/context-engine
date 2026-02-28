@@ -11,7 +11,7 @@ import { parseUnifiedDiff } from '../../reviewer/diff/parse.js';
 import { runDeterministicPreflight } from '../../reviewer/checks/preflight.js';
 import { loadInvariantsConfig } from '../../reviewer/checks/invariants/load.js';
 import { runInvariants } from '../../reviewer/checks/invariants/runner.js';
-import { validateNonEmptyString } from '../tooling/validation.js';
+import { normalizeRequiredDiffInput } from '../tooling/diffInput.js';
 
 export interface CheckInvariantsArgs {
   diff: string;
@@ -23,8 +23,8 @@ export async function handleCheckInvariants(
   args: CheckInvariantsArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const diff = validateNonEmptyString(
-    typeof args.diff === 'string' ? args.diff.trim() : args.diff,
+  const diff = normalizeRequiredDiffInput(
+    args.diff,
     'Missing or invalid "diff" argument. Provide a unified diff string.'
   );
 

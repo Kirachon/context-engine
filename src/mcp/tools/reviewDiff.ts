@@ -7,7 +7,7 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import { reviewDiff, type ReviewDiffInput } from '../../reviewer/reviewDiff.js';
-import { validateNonEmptyString } from '../tooling/validation.js';
+import { normalizeRequiredDiffInput } from '../tooling/diffInput.js';
 
 export interface ReviewDiffArgs {
   diff: string;
@@ -43,8 +43,8 @@ export async function handleReviewDiff(
   args: ReviewDiffArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const diff = validateNonEmptyString(
-    typeof args.diff === 'string' ? args.diff.trim() : args.diff,
+  const diff = normalizeRequiredDiffInput(
+    args.diff,
     'Missing or invalid "diff" argument. Provide a unified diff string.'
   );
 
