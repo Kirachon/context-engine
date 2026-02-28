@@ -1,0 +1,477 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`plan lifecycle contract snapshots captures create/refine/visualize/execute external output contracts 1`] = `
+{
+  "create_plan": "# Implementation Plan
+
+**ID:** plan_contract
+**Version:** 1
+**Status:** ready
+**Confidence:** 85%
+**Generated in:** 12ms
+
+## Goal
+Contract lifecycle plan
+
+## Scope
+### Included
+- contract coverage
+
+## Steps (2 total)
+
+### 1. Add tests 🟠
+Add lifecycle contract tests
+- **Modify:** tests/tools/planLifecycle.contract.test.ts
+- **Effort:** 1h
+
+### 2. Run checks 🟡
+Run focused tests and tsc
+- **Depends on:** Step(s) 1
+- **Effort:** 30m
+
+## Critical Path
+Steps 1 → 2
+
+## Risks
+- 🟢 **Snapshot drift**
+  - Mitigation: Normalize dynamic fields
+
+---
+
+<details>
+<summary>Full Plan JSON</summary>
+
+\`\`\`json
+{
+  "id": "plan_contract",
+  "version": 1,
+  "created_at": "2025-01-01T00:00:00.000Z",
+  "updated_at": "2025-01-01T00:00:00.000Z",
+  "goal": "Contract lifecycle plan",
+  "scope": {
+    "included": [
+      "contract coverage"
+    ],
+    "excluded": [],
+    "assumptions": [],
+    "constraints": []
+  },
+  "mvp_features": [
+    {
+      "name": "Coverage",
+      "description": "Expand test contracts",
+      "steps": [
+        1,
+        2
+      ]
+    }
+  ],
+  "nice_to_have_features": [],
+  "architecture": {
+    "notes": "Simple deterministic fixture",
+    "patterns_used": [
+      "Adapter"
+    ],
+    "diagrams": []
+  },
+  "risks": [
+    {
+      "issue": "Snapshot drift",
+      "mitigation": "Normalize dynamic fields",
+      "likelihood": "low",
+      "impact": "Low"
+    }
+  ],
+  "milestones": [],
+  "steps": [
+    {
+      "step_number": 1,
+      "id": "step_1",
+      "title": "Add tests",
+      "description": "Add lifecycle contract tests",
+      "files_to_modify": [
+        {
+          "path": "tests/tools/planLifecycle.contract.test.ts",
+          "change_type": "modify",
+          "estimated_loc": 40,
+          "complexity": "simple",
+          "reason": "Contract coverage"
+        }
+      ],
+      "files_to_create": [],
+      "files_to_delete": [],
+      "depends_on": [],
+      "blocks": [
+        2
+      ],
+      "can_parallel_with": [],
+      "priority": "high",
+      "estimated_effort": "1h",
+      "acceptance_criteria": [
+        "Snapshot captures stable contract output"
+      ]
+    },
+    {
+      "step_number": 2,
+      "id": "step_2",
+      "title": "Run checks",
+      "description": "Run focused tests and tsc",
+      "files_to_modify": [],
+      "files_to_create": [],
+      "files_to_delete": [],
+      "depends_on": [
+        1
+      ],
+      "blocks": [],
+      "can_parallel_with": [],
+      "priority": "medium",
+      "estimated_effort": "30m",
+      "acceptance_criteria": [
+        "All checks pass"
+      ]
+    }
+  ],
+  "dependency_graph": {
+    "nodes": [
+      {
+        "id": "step_1",
+        "step_number": 1
+      },
+      {
+        "id": "step_2",
+        "step_number": 2
+      }
+    ],
+    "edges": [
+      {
+        "from": "step_1",
+        "to": "step_2",
+        "type": "blocks"
+      }
+    ],
+    "critical_path": [
+      1,
+      2
+    ],
+    "parallel_groups": [],
+    "execution_order": [
+      1,
+      2
+    ]
+  },
+  "testing_strategy": {
+    "unit": "Jest contract tests",
+    "integration": "N/A",
+    "coverage_target": "80%"
+  },
+  "acceptance_criteria": [
+    {
+      "description": "Contracts remain stable",
+      "verification": "Snapshot assertions"
+    }
+  ],
+  "confidence_score": 0.85,
+  "questions_for_clarification": [],
+  "context_files": [
+    "tests/tools/planLifecycle.contract.test.ts"
+  ],
+  "codebase_insights": [
+    "Lifecycle outputs include markdown + JSON sections"
+  ]
+}
+\`\`\`
+</details>
+",
+  "execute_plan": "# Plan Execution Result
+
+**Plan ID:** plan_contract
+**Success:** ✅ Yes
+**Duration:** 0ms
+**Progress:** 2/2 steps (100%)
+
+## Step Results
+
+### Step 1
+- **Status:** ✅ Success
+- **Duration:** 10ms
+- **Reasoning:** Executed step 1
+
+#### Generated Changes (Preview Only)
+
+**MODIFY:** \`src/step-1.ts\`
+> Deterministic generated change
+
+\`\`\`
+export const step1 = true;
+
+\`\`\`
+
+
+### Step 2
+- **Status:** ✅ Success
+- **Duration:** 20ms
+- **Reasoning:** Executed step 2
+
+#### Generated Changes (Preview Only)
+
+**MODIFY:** \`src/step-2.ts\`
+> Deterministic generated change
+
+\`\`\`
+export const step2 = true;
+
+\`\`\`
+
+
+
+---
+
+<details>
+<summary>Full JSON Response</summary>
+
+\`\`\`json
+{
+  "success": true,
+  "plan_id": "plan_contract",
+  "step_results": [
+    {
+      "step_number": 1,
+      "success": true,
+      "reasoning": "Executed step 1",
+      "generated_code": [
+        {
+          "path": "src/step-1.ts",
+          "change_type": "modify",
+          "content": "export const step1 = true;\\n",
+          "explanation": "Deterministic generated change"
+        }
+      ],
+      "duration_ms": 0
+    },
+    {
+      "step_number": 2,
+      "success": true,
+      "reasoning": "Executed step 2",
+      "generated_code": [
+        {
+          "path": "src/step-2.ts",
+          "change_type": "modify",
+          "content": "export const step2 = true;\\n",
+          "explanation": "Deterministic generated change"
+        }
+      ],
+      "duration_ms": 0
+    }
+  ],
+  "next_ready_steps": [],
+  "progress": {
+    "plan_id": "plan_contract",
+    "total_steps": 2,
+    "completed_steps": 2,
+    "failed_steps": 0,
+    "skipped_steps": 0,
+    "in_progress_steps": 0,
+    "blocked_steps": 0,
+    "ready_steps": 0,
+    "pending_steps": 0,
+    "percentage": 100
+  },
+  "duration_ms": 0
+}
+\`\`\`
+</details>
+",
+  "refine_plan": "# Implementation Plan
+
+**ID:** plan_contract
+**Version:** 2
+**Status:** ready
+**Confidence:** 85%
+**Generated in:** 17ms
+
+## Goal
+Contract lifecycle plan
+
+## Scope
+### Included
+- contract coverage
+
+## Steps (2 total)
+
+### 1. Add tests 🟠
+Add lifecycle contract tests
+- **Modify:** tests/tools/planLifecycle.contract.test.ts
+- **Effort:** 1h
+
+### 2. Run checks 🟡
+Run focused tests and tsc
+- **Depends on:** Step(s) 1
+- **Effort:** 30m
+
+## Critical Path
+Steps 1 → 2
+
+## Risks
+- 🟢 **Snapshot drift**
+  - Mitigation: Normalize dynamic fields
+
+---
+
+<details>
+<summary>Full Plan JSON</summary>
+
+\`\`\`json
+{
+  "id": "plan_contract",
+  "version": 2,
+  "created_at": "2025-01-01T00:00:00.000Z",
+  "updated_at": "2025-01-02T00:00:00.000Z",
+  "goal": "Contract lifecycle plan",
+  "scope": {
+    "included": [
+      "contract coverage"
+    ],
+    "excluded": [],
+    "assumptions": [],
+    "constraints": []
+  },
+  "mvp_features": [
+    {
+      "name": "Coverage",
+      "description": "Expand test contracts",
+      "steps": [
+        1,
+        2
+      ]
+    }
+  ],
+  "nice_to_have_features": [],
+  "architecture": {
+    "notes": "Simple deterministic fixture",
+    "patterns_used": [
+      "Adapter"
+    ],
+    "diagrams": []
+  },
+  "risks": [
+    {
+      "issue": "Snapshot drift",
+      "mitigation": "Normalize dynamic fields",
+      "likelihood": "low",
+      "impact": "Low"
+    }
+  ],
+  "milestones": [],
+  "steps": [
+    {
+      "step_number": 1,
+      "id": "step_1",
+      "title": "Add tests",
+      "description": "Add lifecycle contract tests",
+      "files_to_modify": [
+        {
+          "path": "tests/tools/planLifecycle.contract.test.ts",
+          "change_type": "modify",
+          "estimated_loc": 40,
+          "complexity": "simple",
+          "reason": "Contract coverage"
+        }
+      ],
+      "files_to_create": [],
+      "files_to_delete": [],
+      "depends_on": [],
+      "blocks": [
+        2
+      ],
+      "can_parallel_with": [],
+      "priority": "high",
+      "estimated_effort": "1h",
+      "acceptance_criteria": [
+        "Snapshot captures stable contract output"
+      ]
+    },
+    {
+      "step_number": 2,
+      "id": "step_2",
+      "title": "Run checks",
+      "description": "Run focused tests and tsc",
+      "files_to_modify": [],
+      "files_to_create": [],
+      "files_to_delete": [],
+      "depends_on": [
+        1
+      ],
+      "blocks": [],
+      "can_parallel_with": [],
+      "priority": "medium",
+      "estimated_effort": "30m",
+      "acceptance_criteria": [
+        "All checks pass"
+      ]
+    }
+  ],
+  "dependency_graph": {
+    "nodes": [
+      {
+        "id": "step_1",
+        "step_number": 1
+      },
+      {
+        "id": "step_2",
+        "step_number": 2
+      }
+    ],
+    "edges": [
+      {
+        "from": "step_1",
+        "to": "step_2",
+        "type": "blocks"
+      }
+    ],
+    "critical_path": [
+      1,
+      2
+    ],
+    "parallel_groups": [],
+    "execution_order": [
+      1,
+      2
+    ]
+  },
+  "testing_strategy": {
+    "unit": "Jest contract tests",
+    "integration": "N/A",
+    "coverage_target": "80%"
+  },
+  "acceptance_criteria": [
+    {
+      "description": "Contracts remain stable",
+      "verification": "Snapshot assertions"
+    }
+  ],
+  "confidence_score": 0.85,
+  "questions_for_clarification": [],
+  "context_files": [
+    "tests/tools/planLifecycle.contract.test.ts"
+  ],
+  "codebase_insights": [
+    "Lifecycle outputs include markdown + JSON sections"
+  ]
+}
+\`\`\`
+</details>
+",
+  "visualize_plan": {
+    "diagram_type": "dependencies",
+    "mermaid": "graph TD
+    step_1["1. Add tests"]
+    step_2["2. Run checks"]
+    step_1 --> step_2
+
+    classDef critical fill:#ff6b6b,stroke:#c0392b
+",
+    "plan_id": "plan_contract",
+    "plan_version": 1,
+  },
+}
+`;

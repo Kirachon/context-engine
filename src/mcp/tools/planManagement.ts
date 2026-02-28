@@ -49,16 +49,6 @@ function getHistoryService(): PlanHistoryService {
   return historyService;
 }
 
-function validateRequiredStringLike(value: unknown, errorMessage: string): string {
-  if (typeof value === 'string') {
-    return validateNonEmptyString(value, errorMessage);
-  }
-  if (!value) {
-    throw new Error(errorMessage);
-  }
-  return value as string;
-}
-
 // ============================================================================
 // Tool Definitions
 // ============================================================================
@@ -319,7 +309,7 @@ export async function handleListPlans(args: Record<string, unknown>): Promise<st
 }
 
 export async function handleDeletePlan(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
 
   const service = getPersistenceService();
   const result = await service.deletePlan(planId);
@@ -334,7 +324,7 @@ export async function handleDeletePlan(args: Record<string, unknown>): Promise<s
 }
 
 export async function handleRequestApproval(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
 
   const persistService = getPersistenceService();
   const plan = await persistService.loadPlan(planId);
@@ -358,8 +348,8 @@ export async function handleRequestApproval(args: Record<string, unknown>): Prom
 }
 
 export async function handleRespondApproval(args: Record<string, unknown>): Promise<string> {
-  const requestId = validateRequiredStringLike(args.request_id, 'request_id is required');
-  const action = validateRequiredStringLike(
+  const requestId = validateNonEmptyString(args.request_id, 'request_id is required');
+  const action = validateNonEmptyString(
     args.action,
     'action is required'
   ) as 'approve' | 'reject' | 'request_modification';
@@ -382,7 +372,7 @@ export async function handleRespondApproval(args: Record<string, unknown>): Prom
 }
 
 export async function handleStartStep(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
   const stepNumber = validateRequiredNumber(args.step_number, 'step_number is required');
 
   const execService = getExecutionService();
@@ -404,7 +394,7 @@ export async function handleStartStep(args: Record<string, unknown>): Promise<st
 }
 
 export async function handleCompleteStep(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
   const stepNumber = validateRequiredNumber(args.step_number, 'step_number is required');
 
   const persistService = getPersistenceService();
@@ -432,9 +422,9 @@ export async function handleCompleteStep(args: Record<string, unknown>): Promise
 }
 
 export async function handleFailStep(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
   const stepNumber = validateRequiredNumber(args.step_number, 'step_number is required');
-  const error = validateRequiredStringLike(args.error, 'error is required');
+  const error = validateNonEmptyString(args.error, 'error is required');
 
   const persistService = getPersistenceService();
   const plan = await persistService.loadPlan(planId);
@@ -457,7 +447,7 @@ export async function handleFailStep(args: Record<string, unknown>): Promise<str
 }
 
 export async function handleViewProgress(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
 
   const execService = getExecutionService();
   const progress = execService.getProgress(planId);
@@ -476,7 +466,7 @@ export async function handleViewProgress(args: Record<string, unknown>): Promise
 }
 
 export async function handleViewHistory(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
 
   const histService = getHistoryService();
   const history = histService.getHistory(planId, {
@@ -492,7 +482,7 @@ export async function handleViewHistory(args: Record<string, unknown>): Promise<
 }
 
 export async function handleComparePlanVersions(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
   const fromVersion = validateRequiredNumber(args.from_version, 'from_version is required');
   const toVersion = validateRequiredNumber(args.to_version, 'to_version is required');
 
@@ -507,7 +497,7 @@ export async function handleComparePlanVersions(args: Record<string, unknown>): 
 }
 
 export async function handleRollbackPlan(args: Record<string, unknown>): Promise<string> {
-  const planId = validateRequiredStringLike(args.plan_id, 'plan_id is required');
+  const planId = validateNonEmptyString(args.plan_id, 'plan_id is required');
   const targetVersion = validateRequiredNumber(args.target_version, 'target_version is required');
 
   const histService = getHistoryService();

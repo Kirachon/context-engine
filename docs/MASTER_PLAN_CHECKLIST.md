@@ -83,6 +83,7 @@ Progress notes:
 - 2026-02-28: Fourth migration slice applied shared validation helpers in `create_plan` / `refine_plan` / `visualize_plan` and `planManagement` handlers (save/delete/request/respond/fail paths), with focused regression coverage in `tests/tools/plan.test.ts` and `tests/tools/planManagement.test.ts`.
 - 2026-02-28: Fifth migration slice introduced shared `validateRequiredNumber` helper and adopted it in `planManagement` step/version handlers (`start/complete/fail/compare/rollback`) with expanded regression checks in `tests/tools/planManagement.test.ts`.
 - 2026-02-28: Sixth migration slice introduced shared `validateTrimmedNonEmptyString` and adopted it in `semantic_search`, `codebase_retrieval`, `get_context_for_prompt`, and `create_plan` task validation; added helper coverage in `tests/tooling/validation.test.ts` and revalidated affected tool suites.
+- 2026-02-28: Batch A slice 1 finished remaining planning-family shared-validation migration by removing custom string-like validation in `src/mcp/tools/planManagement.ts`, routing required field checks through shared helpers, and deduplicating `single_step` validation in `src/mcp/tools/plan.ts`; evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts` and `npx tsc --noEmit` (both pass).
 
 ### WS14 - Shared Tool Runtime Wrapper
 Owner: _TBD_ (blocker until assigned in B0)
@@ -157,7 +158,10 @@ Checklist:
 - [ ] Align all input validation style and bounds.
 - [ ] Align error messages and retry guidance consistency.
 - [ ] Ensure telemetry parity fields exist across handlers.
-- [ ] Expand contract tests/snapshots for full plan lifecycle.
+- [x] Expand contract tests/snapshots for full plan lifecycle.
+
+Progress notes:
+- 2026-02-28: Added additive contract snapshot suites for full planning lifecycle and management handlers in `tests/tools/planLifecycle.contract.test.ts` and `tests/tools/planManagement.contract.test.ts`.
 
 ### Batch B - Review Pipeline Family
 Prerequisites:
@@ -315,3 +319,4 @@ Checklist:
 - [x] 2026-02-28: Completed WS14 shared runtime wrapper with server integration (`src/mcp/server.ts`) and regression tests (`tests/tooling/runtime.test.ts`).
 - [x] 2026-02-28: WS15 major migration completed: shared `diffInput` module adopted by review entry tools with malformed/empty/partial diff regression coverage; no-op/empty-scope policy item remains open.
 - [x] 2026-02-28: Completed WS18 policy + parity gate by adding `docs/VERSIONING_CONTRACT_POLICY.md`, `scripts/ci/check-version-literals.ts`, `tests/ci/checkVersionLiterals.test.ts`, and CI workflow enforcement in `.github/workflows/review_diff.yml` with passing evidence commands.
+- [x] 2026-02-28: Batch A slice 1 completed planning-family shared-validation migration follow-up in `src/mcp/tools/planManagement.ts` and `src/mcp/tools/plan.ts` with focused regression coverage in `tests/tools/planManagement.test.ts` and `tests/tools/plan.test.ts`; validation evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts`, `npx tsc --noEmit`.

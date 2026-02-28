@@ -282,6 +282,16 @@ describe('Planning MCP Tools', () => {
           handleExecutePlan({ plan: validPlan, mode: 'single_step' }, mockServiceClient)
         ).rejects.toThrow(/step_number is required/i);
       });
+
+      it('should reject non-number step_number in single_step mode', async () => {
+        const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
+        await expect(
+          handleExecutePlan(
+            { plan: validPlan, mode: 'single_step', step_number: '1' as unknown as number },
+            mockServiceClient
+          )
+        ).rejects.toThrow('step_number is required when mode is "single_step"');
+      });
     });
 
     describe('Tool Schema', () => {

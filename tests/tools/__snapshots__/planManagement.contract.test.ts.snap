@@ -1,0 +1,420 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`plan management contract snapshots captures end-to-end management handler output contracts 1`] = `
+{
+  "compare_plan_versions": {
+    "diff": {
+      "field_changes": [
+        {
+          "new_value": "Plan v2",
+          "old_value": "Plan v1",
+          "path": "goal",
+          "type": "modified",
+        },
+      ],
+      "files_added": [],
+      "files_removed": [],
+      "from_version": 1,
+      "risks_added": [],
+      "risks_removed": [],
+      "scope_changes": {
+        "excluded_added": [],
+        "excluded_removed": [],
+        "included_added": [],
+        "included_removed": [],
+      },
+      "steps_added": [],
+      "steps_modified": [
+        2,
+      ],
+      "steps_removed": [],
+      "summary": "1 step(s) modified",
+      "to_version": 2,
+    },
+    "success": true,
+  },
+  "complete_step": {
+    "progress": {
+      "blocked_steps": 0,
+      "completed_steps": 1,
+      "failed_steps": 0,
+      "in_progress_steps": 0,
+      "pending_steps": 0,
+      "percentage": 50,
+      "plan_id": "plan_contract",
+      "ready_steps": 1,
+      "skipped_steps": 0,
+      "total_steps": 2,
+    },
+    "step": {
+      "completed_at": "<fixed-time>",
+      "duration_ms": 0,
+      "files_modified": [
+        "tests/tools/planManagement.contract.test.ts",
+      ],
+      "notes": "completed in contract test",
+      "retry_count": 0,
+      "started_at": "<fixed-time>",
+      "status": "completed",
+      "step_id": "step_1",
+      "step_number": 1,
+    },
+    "success": true,
+  },
+  "delete_plan": {
+    "file_path": "<workspace>\\.augment-plans\\plan_contract.plan.json",
+    "plan_id": "plan_contract",
+    "success": true,
+  },
+  "fail_step": {
+    "progress": {
+      "blocked_steps": 0,
+      "completed_steps": 1,
+      "failed_steps": 0,
+      "in_progress_steps": 0,
+      "pending_steps": 0,
+      "percentage": 100,
+      "plan_id": "plan_contract",
+      "ready_steps": 0,
+      "skipped_steps": 1,
+      "total_steps": 2,
+    },
+    "step": {
+      "completed_at": "<fixed-time>",
+      "error": "intentional failure",
+      "retry_count": 0,
+      "status": "skipped",
+      "step_id": "step_2",
+      "step_number": 2,
+    },
+    "success": true,
+  },
+  "list_plans": {
+    "count": 1,
+    "plans": [
+      {
+        "created_at": "<fixed-time>",
+        "file_path": "<workspace>\\.augment-plans\\plan_contract.plan.json",
+        "goal": "Plan v2",
+        "id": "plan_contract",
+        "name": "Plan V2",
+        "status": "ready",
+        "step_count": 2,
+        "updated_at": "<fixed-time>",
+        "version": 2,
+      },
+    ],
+    "success": true,
+  },
+  "load_plan": {
+    "plan": {
+      "acceptance_criteria": [],
+      "architecture": {
+        "diagrams": [],
+        "notes": "Contract fixture",
+        "patterns_used": [],
+      },
+      "codebase_insights": [],
+      "confidence_score": 0.8,
+      "context_files": [],
+      "created_at": "<fixed-time>",
+      "dependency_graph": {
+        "critical_path": [
+          1,
+          2,
+        ],
+        "edges": [
+          {
+            "from": "step_1",
+            "to": "step_2",
+            "type": "blocks",
+          },
+        ],
+        "execution_order": [
+          1,
+          2,
+        ],
+        "nodes": [
+          {
+            "id": "step_1",
+            "step_number": 1,
+          },
+          {
+            "id": "step_2",
+            "step_number": 2,
+          },
+        ],
+        "parallel_groups": [],
+      },
+      "goal": "Plan v2",
+      "id": "plan_contract",
+      "milestones": [],
+      "mvp_features": [],
+      "nice_to_have_features": [],
+      "questions_for_clarification": [],
+      "risks": [],
+      "scope": {
+        "assumptions": [],
+        "constraints": [],
+        "excluded": [],
+        "included": [
+          "Batch A",
+        ],
+      },
+      "steps": [
+        {
+          "acceptance_criteria": [],
+          "blocks": [
+            2,
+          ],
+          "can_parallel_with": [],
+          "depends_on": [],
+          "description": "Start contract flow",
+          "estimated_effort": "1h",
+          "files_to_create": [],
+          "files_to_delete": [],
+          "files_to_modify": [],
+          "id": "step_1",
+          "priority": "high",
+          "step_number": 1,
+          "title": "Step 1",
+        },
+        {
+          "acceptance_criteria": [],
+          "blocks": [],
+          "can_parallel_with": [],
+          "depends_on": [
+            1,
+          ],
+          "description": "Continue contract flow",
+          "estimated_effort": "30m",
+          "files_to_create": [],
+          "files_to_delete": [],
+          "files_to_modify": [],
+          "id": "step_2",
+          "priority": "medium",
+          "step_number": 2,
+          "title": "Step 2 Updated",
+        },
+      ],
+      "testing_strategy": {
+        "coverage_target": "80%",
+        "integration": "N/A",
+        "unit": "Jest",
+      },
+      "updated_at": "<fixed-time>",
+      "version": 2,
+    },
+    "success": true,
+  },
+  "request_approval": {
+    "request": {
+      "affected_files": [],
+      "created_at": "<fixed-time>",
+      "details": "## Step 1: Step 1
+
+Start contract flow
+
+**Priority:** high
+**Estimated Effort:** 1h",
+      "id": "<approval-id>",
+      "plan_id": "plan_contract",
+      "risks": [],
+      "status": "pending",
+      "step_number": 1,
+      "summary": "Approve step 1: Step 1",
+      "type": "step",
+    },
+    "success": true,
+  },
+  "respond_approval": {
+    "next_steps": [
+      "Step 1 approved",
+      "Proceed with implementation",
+      "Mark step complete when done",
+    ],
+    "request": {
+      "affected_files": [],
+      "created_at": "<fixed-time>",
+      "details": "## Step 1: Step 1
+
+Start contract flow
+
+**Priority:** high
+**Estimated Effort:** 1h",
+      "id": "<approval-id>",
+      "plan_id": "plan_contract",
+      "resolved_at": "<fixed-time>",
+      "response": "approved for contract test",
+      "risks": [],
+      "status": "approved",
+      "step_number": 1,
+      "summary": "Approve step 1: Step 1",
+      "type": "step",
+    },
+    "success": true,
+  },
+  "rollback_plan": {
+    "new_version": 3,
+    "plan": {
+      "acceptance_criteria": [],
+      "architecture": {
+        "diagrams": [],
+        "notes": "Contract fixture",
+        "patterns_used": [],
+      },
+      "codebase_insights": [],
+      "confidence_score": 0.8,
+      "context_files": [],
+      "created_at": "<fixed-time>",
+      "dependency_graph": {
+        "critical_path": [
+          1,
+          2,
+        ],
+        "edges": [
+          {
+            "from": "step_1",
+            "to": "step_2",
+            "type": "blocks",
+          },
+        ],
+        "execution_order": [
+          1,
+          2,
+        ],
+        "nodes": [
+          {
+            "id": "step_1",
+            "step_number": 1,
+          },
+          {
+            "id": "step_2",
+            "step_number": 2,
+          },
+        ],
+        "parallel_groups": [],
+      },
+      "goal": "Plan v1",
+      "id": "plan_contract",
+      "milestones": [],
+      "mvp_features": [],
+      "nice_to_have_features": [],
+      "questions_for_clarification": [],
+      "risks": [],
+      "scope": {
+        "assumptions": [],
+        "constraints": [],
+        "excluded": [],
+        "included": [
+          "Batch A",
+        ],
+      },
+      "steps": [
+        {
+          "acceptance_criteria": [],
+          "blocks": [
+            2,
+          ],
+          "can_parallel_with": [],
+          "depends_on": [],
+          "description": "Start contract flow",
+          "estimated_effort": "1h",
+          "files_to_create": [],
+          "files_to_delete": [],
+          "files_to_modify": [],
+          "id": "step_1",
+          "priority": "high",
+          "step_number": 1,
+          "title": "Step 1",
+        },
+        {
+          "acceptance_criteria": [],
+          "blocks": [],
+          "can_parallel_with": [],
+          "depends_on": [
+            1,
+          ],
+          "description": "Continue contract flow",
+          "estimated_effort": "30m",
+          "files_to_create": [],
+          "files_to_delete": [],
+          "files_to_modify": [],
+          "id": "step_2",
+          "priority": "medium",
+          "step_number": 2,
+          "title": "Step 2",
+        },
+      ],
+      "testing_strategy": {
+        "coverage_target": "80%",
+        "integration": "N/A",
+        "unit": "Jest",
+      },
+      "updated_at": "<fixed-time>",
+      "version": 3,
+    },
+    "success": true,
+  },
+  "save_plan_v1": {
+    "file_path": "<workspace>\\.augment-plans\\plan_contract.plan.json",
+    "plan_id": "plan_contract",
+    "success": true,
+  },
+  "save_plan_v2": {
+    "file_path": "<workspace>\\.augment-plans\\plan_contract.plan.json",
+    "plan_id": "plan_contract",
+    "success": true,
+  },
+  "start_step": {
+    "step": {
+      "retry_count": 0,
+      "started_at": "<fixed-time>",
+      "status": "in_progress",
+      "step_id": "step_1",
+      "step_number": 1,
+    },
+    "success": true,
+  },
+  "view_history": {
+    "history": {
+      "created_at": "<fixed-time>",
+      "current_version": 2,
+      "last_modified_at": "<fixed-time>",
+      "plan_id": "plan_contract",
+      "versions": [
+        {
+          "change_summary": "Plan saved",
+          "change_type": "created",
+          "created_at": "<fixed-time>",
+          "version": 1,
+        },
+        {
+          "change_summary": "Plan saved",
+          "change_type": "created",
+          "created_at": "<fixed-time>",
+          "version": 2,
+        },
+      ],
+    },
+    "success": true,
+  },
+  "view_progress": {
+    "current_steps": [],
+    "progress": {
+      "blocked_steps": 0,
+      "completed_steps": 1,
+      "failed_steps": 0,
+      "in_progress_steps": 0,
+      "pending_steps": 0,
+      "percentage": 100,
+      "plan_id": "plan_contract",
+      "ready_steps": 0,
+      "skipped_steps": 1,
+      "total_steps": 2,
+    },
+    "ready_steps": [],
+    "success": true,
+  },
+}
+`;

@@ -508,10 +508,7 @@ export async function handleExecutePlan(
   }
 
   // Validate mode-specific requirements
-  if (mode === 'single_step' && step_number === undefined) {
-    throw new Error('step_number is required when mode is "single_step"');
-  }
-  if (mode === 'single_step' && step_number !== undefined) {
+  if (mode === 'single_step') {
     validateRequiredNumber(step_number, 'step_number is required when mode is "single_step"');
   }
 

@@ -23,6 +23,12 @@ describe('planManagement tool handlers validation', () => {
     await expect(handleDeletePlan({})).rejects.toThrow('plan_id is required');
   });
 
+  it('handleDeletePlan rejects non-string plan_id with existing error message', async () => {
+    await expect(handleDeletePlan({ plan_id: 123 as unknown as string })).rejects.toThrow(
+      'plan_id is required'
+    );
+  });
+
   it('handleRequestApproval rejects missing plan_id with existing error message', async () => {
     await expect(handleRequestApproval({})).rejects.toThrow('plan_id is required');
   });
@@ -37,6 +43,12 @@ describe('planManagement tool handlers validation', () => {
     await expect(handleRespondApproval({ request_id: 'req_123' })).rejects.toThrow(
       'action is required'
     );
+  });
+
+  it('handleRespondApproval rejects non-string action with existing error message', async () => {
+    await expect(
+      handleRespondApproval({ request_id: 'req_123', action: true as unknown as string })
+    ).rejects.toThrow('action is required');
   });
 
   it('handleFailStep preserves validation order for step_number before error', async () => {
