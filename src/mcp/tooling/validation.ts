@@ -49,6 +49,13 @@ export function validateBoolean(value: unknown, errorMessage: string): void {
   }
 }
 
+export function validateRequiredNumber(value: unknown, errorMessage: string): number {
+  if (typeof value !== 'number') {
+    throw new Error(errorMessage);
+  }
+  return value;
+}
+
 export function validateOneOf<T extends string>(
   value: unknown,
   allowed: readonly T[],

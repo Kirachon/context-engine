@@ -7,6 +7,7 @@ import {
   validateMaxLength,
   validateNonEmptyString,
   validateNumberInRange,
+  validateRequiredNumber,
   validateOneOf,
 } from '../../src/mcp/tooling/validation.js';
 
@@ -38,6 +39,11 @@ describe('mcp tooling validation helpers', () => {
 
   it('validateBoolean throws for non-boolean values', () => {
     expect(() => validateBoolean('true', 'bad')).toThrow('bad');
+  });
+
+  it('validateRequiredNumber accepts numbers and rejects non-number values', () => {
+    expect(validateRequiredNumber(3, 'bad')).toBe(3);
+    expect(() => validateRequiredNumber('3', 'bad')).toThrow('bad');
   });
 
   it('validateOneOf accepts allowed value', () => {

@@ -81,6 +81,7 @@ Progress notes:
 - 2026-02-28: Added focused validation tests for review tool diff/file-context/category paths.
 - 2026-02-28: Third migration slice applied shared finite-range validation to `codebase_retrieval`, `semantic_search`, and `get_context_for_prompt`; added memory validation coverage in `tests/tools/memory.test.ts`.
 - 2026-02-28: Fourth migration slice applied shared validation helpers in `create_plan` / `refine_plan` / `visualize_plan` and `planManagement` handlers (save/delete/request/respond/fail paths), with focused regression coverage in `tests/tools/plan.test.ts` and `tests/tools/planManagement.test.ts`.
+- 2026-02-28: Fifth migration slice introduced shared `validateRequiredNumber` helper and adopted it in `planManagement` step/version handlers (`start/complete/fail/compare/rollback`) with expanded regression checks in `tests/tools/planManagement.test.ts`.
 
 ### WS14 - Shared Tool Runtime Wrapper
 Owner: _TBD_ (blocker until assigned in B0)
