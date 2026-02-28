@@ -93,7 +93,7 @@ describe('review_git_diff tool', () => {
     expect(normalizeReviewGitDiff(parsed)).toMatchSnapshot();
   });
 
-  it('returns an empty review when there is nothing staged', async () => {
+  it('blocks review when there is nothing staged', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-git-diff-empty-'));
 
     sh('git', ['init'], tmp);
@@ -105,10 +105,8 @@ describe('review_git_diff tool', () => {
     sh('git', ['commit', '-m', 'base'], tmp);
 
     const mockServiceClient = { getWorkspacePath: () => tmp, searchAndAsk: async () => '' } as any;
-    const resultStr = await handleReviewGitDiff({ target: 'staged' }, mockServiceClient);
-
-    const parsed = JSON.parse(resultStr);
-    expect(normalizeReviewGitDiff(parsed)).toMatchSnapshot();
+    await expect(handleReviewGitDiff({ target: 'staged' }, mockServiceClient)).rejects.toThrow(
+      /No changes found for review_git_diff target "staged".*review is blocked/i
+    );
   });
 });
-

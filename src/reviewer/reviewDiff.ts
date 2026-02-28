@@ -15,7 +15,7 @@ import { scrubSecrets } from '../reactive/guardrails/index.js';
 import { toSarif } from './output/sarif.js';
 import { formatGitHubComment } from './output/github.js';
 import { runStaticAnalyzers } from './checks/adapters/index.js';
-import type { StaticAnalyzerId } from './checks/adapters/types.js';
+import type { StaticAnalyzerId, StaticAnalyzerResult } from './checks/adapters/types.js';
 import { evaluateFailurePolicy, postProcessFindings } from './post/normalize.js';
 import { dedupeFindingsById } from './post/findings.js';
 
@@ -57,6 +57,17 @@ export interface ReviewDiffInput {
     llm?: EnterpriseLLMClient;
   };
 }
+
+interface ReviewDiffStaticAnalysisMetadata {
+  analyzers_requested: StaticAnalyzerId[];
+  analyzers_executed: StaticAnalyzerId[];
+  warnings: string[];
+  results: StaticAnalyzerResult[];
+}
+
+type ReviewDiffResultWithStaticMetadata = EnterpriseReviewResult & {
+  static_analysis?: ReviewDiffStaticAnalysisMetadata;
+};
 
 export async function reviewDiff(input: ReviewDiffInput): Promise<EnterpriseReviewResult> {
   const startTime = Date.now();
@@ -104,22 +115,37 @@ export async function reviewDiff(input: ReviewDiffInput): Promise<EnterpriseRevi
   const staticFindings: EnterpriseFinding[] = [];
   let staticAnalyzersExecuted = 0;
   let staticAnalysisMs = 0;
+  let staticAnalysisMetadata: ReviewDiffStaticAnalysisMetadata | undefined;
   if (input.options?.enable_static_analysis) {
+    const analyzers = (input.options.static_analyzers ?? ['tsc']).filter(Boolean) as StaticAnalyzerId[];
+    staticAnalysisMetadata = {
+      analyzers_requested: analyzers,
+      analyzers_executed: [],
+      warnings: [],
+      results: [],
+    };
+
     if (!input.workspace_path) {
-      warnings.push('enable_static_analysis was true but workspace_path was not provided; skipping static analysis');
+      const warning = 'enable_static_analysis was true but workspace_path was not provided; skipping static analysis';
+      warnings.push(warning);
+      staticAnalysisMetadata.warnings.push(warning);
     } else {
       const staticStart = Date.now();
-      const analyzers = (input.options.static_analyzers ?? ['tsc']).filter(Boolean);
       const changedFiles = preflight.changed_files.length > 0 ? preflight.changed_files : input.changed_files ?? [];
       const run = await runStaticAnalyzers({
         input: { workspace_path: input.workspace_path, changed_files: changedFiles, diff: input.diff },
-        analyzers: analyzers as StaticAnalyzerId[],
+        analyzers,
         timeoutMs: input.options.static_analysis_timeout_ms ?? 60_000,
         maxFindingsPerAnalyzer: input.options.static_analysis_max_findings_per_analyzer ?? 20,
         semgrepArgs: input.options.semgrep_args,
       });
       staticAnalysisMs = Date.now() - staticStart;
       staticAnalyzersExecuted = run.results.filter(r => !r.skipped_reason).length;
+      staticAnalysisMetadata.analyzers_executed = run.results
+        .filter(r => !r.skipped_reason)
+        .map(r => r.analyzer);
+      staticAnalysisMetadata.results = run.results;
+      staticAnalysisMetadata.warnings.push(...run.warnings);
       staticFindings.push(...run.findings);
       warnings.push(...run.warnings);
     }
@@ -236,7 +262,7 @@ export async function reviewDiff(input: ReviewDiffInput): Promise<EnterpriseRevi
     findingsCount: limitedFindings.length,
   });
 
-  const result: EnterpriseReviewResult = {
+  const result: ReviewDiffResultWithStaticMetadata = {
     run_id: crypto.randomUUID(),
     risk_score: preflight.risk_score,
     classification,
@@ -273,6 +299,10 @@ export async function reviewDiff(input: ReviewDiffInput): Promise<EnterpriseRevi
       llm_model: llmModel,
     },
   };
+
+  if (staticAnalysisMetadata) {
+    result.static_analysis = staticAnalysisMetadata;
+  }
 
   if (input.options?.include_sarif) {
     result.sarif = toSarif(result);

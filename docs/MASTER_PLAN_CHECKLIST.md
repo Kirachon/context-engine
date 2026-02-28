@@ -165,10 +165,15 @@ Scope:
 - `review_changes`, `review_git_diff`, `review_diff`, `review_auto`, `check_invariants`, `run_static_analysis`
 
 Checklist:
-- [ ] Shared diff validation integrated across all review entry points.
-- [ ] Analyzer metadata consistency between standalone and review-driven static analysis.
-- [ ] No-op review scope blocked with clear operator feedback.
-- [ ] Failure-injection tests for invalid diff and empty scopes.
+- [x] Shared diff validation integrated across all review entry points.
+- [x] Analyzer metadata consistency between standalone and review-driven static analysis.
+- [x] No-op review scope blocked with clear operator feedback.
+- [x] Failure-injection tests for invalid diff and empty scopes.
+
+Progress notes:
+- 2026-02-28: Added `review_diff` static-analysis metadata parity block (`static_analysis`) including requested/executed analyzers, per-analyzer results, and scoped warnings.
+- 2026-02-28: Switched `review_git_diff` empty-scope behavior from silent empty-success payload to explicit blocking error with operator guidance; `review_auto` inherits this when routing to git review.
+- 2026-02-28: Expanded failure-injection coverage for malformed diff inputs and empty-scope review paths across `review_diff`, `check_invariants`, `review_changes`, `review_git_diff`, and `review_auto`.
 
 ### Batch C - Index/Search Lifecycle Family
 Prerequisites:

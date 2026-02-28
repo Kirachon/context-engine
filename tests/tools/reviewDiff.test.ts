@@ -50,6 +50,32 @@ index 1234567..abcdefg 100644
     expect(typeof result.stats.timings_ms.preflight).toBe('number');
   });
 
+  it('exposes static analyzer metadata when static analysis is enabled', async () => {
+    const diff = `diff --git a/src/mcp/tools/x.ts b/src/mcp/tools/x.ts
+index 1234567..abcdefg 100644
+--- a/src/mcp/tools/x.ts
++++ b/src/mcp/tools/x.ts
+@@ -1,2 +1,2 @@
+-export const x = 1;
++export const x = 2;
+`;
+
+    const resultStr = await handleReviewDiff(
+      { diff, options: { enable_static_analysis: true, static_analyzers: ['semgrep'] } },
+      { getWorkspacePath: () => process.cwd() } as any
+    );
+    const result = JSON.parse(resultStr);
+
+    expect(result).toHaveProperty('static_analysis');
+    expect(result.static_analysis).toHaveProperty('analyzers_requested', ['semgrep']);
+    expect(Array.isArray(result.static_analysis.analyzers_executed)).toBe(true);
+    expect(Array.isArray(result.static_analysis.results)).toBe(true);
+    expect(Array.isArray(result.static_analysis.warnings)).toBe(true);
+    expect(result.static_analysis.results.length).toBeGreaterThanOrEqual(1);
+    expect(result.static_analysis.results[0]).toHaveProperty('analyzer', 'semgrep');
+    expect(typeof result.static_analysis.results[0].duration_ms).toBe('number');
+  });
+
   it('blocks malformed non-empty diff input with no reviewable scope', async () => {
     await expect(
       handleReviewDiff(

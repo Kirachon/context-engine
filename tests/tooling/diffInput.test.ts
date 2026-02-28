@@ -57,6 +57,13 @@ index 1234567..abcdefg 100644
 +b
 `;
     expect(() => assertNonEmptyDiffScope(diff, undefined, 'no scope')).not.toThrow();
+    const patchStyle = `--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-a
++b
+`;
+    expect(() => assertNonEmptyDiffScope(patchStyle, undefined, 'no scope')).not.toThrow();
     expect(() => assertNonEmptyDiffScope('plain text, not a diff', undefined, 'no scope')).toThrow('no scope');
     expect(() => assertNonEmptyDiffScope('plain text, not a diff', ['src/a.ts'], 'no scope')).not.toThrow();
   });

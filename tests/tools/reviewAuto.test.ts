@@ -31,6 +31,20 @@ function createRepoWithStagedChange(): string {
   return tmp;
 }
 
+function createRepoWithNoStagedChange(): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-auto-empty-'));
+
+  sh('git', ['init'], tmp);
+  sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+  sh('git', ['config', 'user.name', 'CI'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+  sh('git', ['commit', '-m', 'base'], tmp);
+
+  return tmp;
+}
+
 function normalizeReviewAuto(result: any): any {
   const normalized = JSON.parse(JSON.stringify(result));
 
@@ -110,6 +124,23 @@ index 1234567..abcdefg 100644
 
     const parsed = JSON.parse(resultStr);
     expect(normalizeReviewAuto(parsed)).toMatchSnapshot();
+  });
+
+  it('blocks when auto-select routes to review_git_diff with empty staged scope', async () => {
+    const tmp = createRepoWithNoStagedChange();
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () => '',
+    } as any;
+
+    await expect(
+      handleReviewAuto(
+        {
+          target: 'staged',
+        },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/No changes found for review_git_diff target "staged".*review is blocked/i);
   });
 
   it('treats whitespace-only diff as absent and auto-selects review_git_diff', async () => {

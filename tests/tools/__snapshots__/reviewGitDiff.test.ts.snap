@@ -1,40 +1,5 @@
 // Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
 
-exports[`review_git_diff tool returns an empty review when there is nothing staged 1`] = `
-{
-  "git_info": {
-    "command": "git diff --unified=3 --staged",
-    "files_changed": [],
-    "stats": {
-      "additions": 0,
-      "deletions": 0,
-      "files_count": 0,
-    },
-    "target": "staged",
-  },
-  "review": {
-    "changes_summary": {
-      "files_changed": 0,
-      "lines_added": 0,
-      "lines_removed": 0,
-    },
-    "findings": [],
-    "metadata": {
-      "categories_reviewed": [],
-      "confidence_threshold": 0.7,
-      "findings_filtered": 0,
-      "model_used": "none",
-      "review_duration_ms": 0,
-      "reviewed_at": "<fixed>",
-      "tool_version": "1.5.0",
-    },
-    "overall_confidence_score": 1,
-    "overall_correctness": "patch is correct",
-    "overall_explanation": "No changes to review.",
-  },
-}
-`;
-
 exports[`review_git_diff tool returns git_info + review (snapshot) for staged changes with mocked LLM response 1`] = `
 {
   "git_info": {

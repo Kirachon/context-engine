@@ -161,39 +161,13 @@ export async function handleReviewGitDiff(
     diffResult = await getGitDiff(workspacePath, diffOptions);
   }
 
-  // Check if there's anything to review
+  // Block no-op scopes so operators do not mistake empty input for a completed review.
   if (!diffResult.diff.trim()) {
-    const emptyReview: ReviewResult = {
-      findings: [],
-      overall_correctness: 'patch is correct',
-      overall_explanation: 'No changes to review.',
-      overall_confidence_score: 1.0,
-      changes_summary: {
-        files_changed: 0,
-        lines_added: 0,
-        lines_removed: 0,
-      },
-      metadata: {
-        reviewed_at: new Date().toISOString(),
-        review_duration_ms: 0,
-        model_used: 'none',
-        tool_version: '1.5.0',
-        findings_filtered: 0,
-        confidence_threshold: 0.7,
-        categories_reviewed: [],
-      },
-    };
-    const output: ReviewGitDiffOutput = {
-      git_info: {
-        target,
-        base,
-        command: diffResult.command,
-        files_changed: [],
-        stats: { additions: 0, deletions: 0, files_count: 0 },
-      },
-      review: emptyReview,
-    };
-    return JSON.stringify(output, null, 2);
+    throw new Error(
+      `No changes found for review_git_diff target "${target}". ` +
+        'Review scope is empty, so review is blocked. ' +
+        'Stage or modify files, or choose a different target (e.g., unstaged, head, branch, or commit).'
+    );
   }
 
   console.error(`[review_git_diff] Found ${diffResult.files_changed.length} files changed`);

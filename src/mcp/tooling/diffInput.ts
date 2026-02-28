@@ -73,8 +73,9 @@ export function assertNonEmptyDiffScope(
   const hasParsedChangedFiles = parsed.files.length > 0;
   const hasProvidedChangedFiles = Array.isArray(changedFiles)
     && changedFiles.some((filePath) => typeof filePath === 'string' && filePath.trim().length > 0);
+  const hasUnifiedDiffShape = looksLikeUnifiedDiff(diff);
 
-  if (!hasParsedChangedFiles && !hasProvidedChangedFiles) {
+  if (!hasParsedChangedFiles && !hasProvidedChangedFiles && !hasUnifiedDiffShape) {
     throw new Error(noScopeMessage);
   }
 }
