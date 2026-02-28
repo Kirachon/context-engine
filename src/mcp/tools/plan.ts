@@ -20,7 +20,7 @@ import * as path from 'path';
 import { ContextServiceClient } from '../serviceClient.js';
 import { PlanningService } from '../services/planningService.js';
 import { createClientBoundFactory } from '../tooling/serviceFactory.js';
-import { parseJsonString, validateNonEmptyString } from '../tooling/validation.js';
+import { parseJsonString, validateNonEmptyString, validateRequiredNumber, validateTrimmedNonEmptyString } from '../tooling/validation.js';
 import {
   EnhancedPlanOutput,
   PlanGenerationOptions,
@@ -126,10 +126,7 @@ export async function handleCreatePlan(
     save_overwrite,
   } = args;
 
-  const validatedTask = validateNonEmptyString(task, 'Task is required and must be a non-empty string');
-  if (validatedTask.trim().length === 0) {
-    throw new Error('Task is required and must be a non-empty string');
-  }
+  const validatedTask = validateTrimmedNonEmptyString(task, 'Task is required and must be a non-empty string');
 
   const planningService = getPlanningService(serviceClient);
 
@@ -513,6 +510,9 @@ export async function handleExecutePlan(
   // Validate mode-specific requirements
   if (mode === 'single_step' && step_number === undefined) {
     throw new Error('step_number is required when mode is "single_step"');
+  }
+  if (mode === 'single_step' && step_number !== undefined) {
+    validateRequiredNumber(step_number, 'step_number is required when mode is "single_step"');
   }
 
   const planningService = getPlanningService(serviceClient);

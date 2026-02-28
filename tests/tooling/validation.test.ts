@@ -8,6 +8,7 @@ import {
   validateNonEmptyString,
   validateNumberInRange,
   validateRequiredNumber,
+  validateTrimmedNonEmptyString,
   validateOneOf,
 } from '../../src/mcp/tooling/validation.js';
 
@@ -18,6 +19,11 @@ describe('mcp tooling validation helpers', () => {
 
   it('validateNonEmptyString throws for empty input', () => {
     expect(() => validateNonEmptyString('', 'bad')).toThrow('bad');
+  });
+
+  it('validateTrimmedNonEmptyString returns trimmed value and rejects whitespace-only', () => {
+    expect(validateTrimmedNonEmptyString('  value  ', 'bad')).toBe('value');
+    expect(() => validateTrimmedNonEmptyString('   ', 'bad')).toThrow('bad');
   });
 
   it('validateMaxLength throws when over max', () => {

@@ -22,7 +22,7 @@ import {
   validateBoolean,
   validateFiniteNumberInRange,
   validateMaxLength,
-  validateNonEmptyString,
+  validateTrimmedNonEmptyString,
   validateOneOf,
 } from '../tooling/validation.js';
 
@@ -55,11 +55,7 @@ export async function handleSemanticSearch(
   const { query, top_k = 10, mode = 'fast', bypass_cache = false, timeout_ms } = args;
 
   // Validate inputs
-  const rawQuery = validateNonEmptyString(query, 'Invalid query parameter: must be a non-empty string');
-  const validQuery = rawQuery.trim();
-  if (!validQuery) {
-    throw new Error('Invalid query parameter: must be a non-empty string');
-  }
+  const validQuery = validateTrimmedNonEmptyString(query, 'Invalid query parameter: must be a non-empty string');
   validateMaxLength(validQuery, 500, 'Query too long: maximum 500 characters');
   validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
   validateOneOf(mode, ['fast', 'deep'] as const, 'Invalid mode parameter: must be "fast" or "deep"');

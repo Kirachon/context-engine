@@ -25,7 +25,7 @@ import {
   validateBoolean,
   validateFiniteNumberInRange,
   validateMaxLength,
-  validateNonEmptyString,
+  validateTrimmedNonEmptyString,
 } from '../tooling/validation.js';
 
 export interface GetContextArgs {
@@ -97,16 +97,12 @@ export async function handleGetContext(
     min_relevance = 0.3,
     bypass_cache = false,
   } = args;
-  const normalizedQuery = validateNonEmptyString(
+  const normalizedQuery = validateTrimmedNonEmptyString(
     query,
     'Invalid query parameter: must be a non-empty string'
-  ).trim();
+  );
 
   // Validate inputs
-  if (!normalizedQuery) {
-    throw new Error('Invalid query parameter: must be a non-empty string');
-  }
-
   validateMaxLength(normalizedQuery, MAX_QUERY_LENGTH, `Query too long: maximum ${MAX_QUERY_LENGTH} characters`);
   validateFiniteNumberInRange(max_files, 1, 20, 'Invalid max_files parameter: must be a number between 1 and 20');
   validateFiniteNumberInRange(

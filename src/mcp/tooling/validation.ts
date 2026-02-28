@@ -12,6 +12,14 @@ export function validateNonEmptyString(value: unknown, errorMessage: string): st
   return value;
 }
 
+export function validateTrimmedNonEmptyString(value: unknown, errorMessage: string): string {
+  const validated = validateNonEmptyString(value, errorMessage).trim();
+  if (!validated) {
+    throw new Error(errorMessage);
+  }
+  return validated;
+}
+
 export function validateMaxLength(value: string, maxLength: number, errorMessage: string): void {
   if (value.length > maxLength) {
     throw new Error(errorMessage);

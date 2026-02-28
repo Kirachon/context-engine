@@ -9,7 +9,7 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
-import { validateFiniteNumberInRange, validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
+import { validateFiniteNumberInRange, validateMaxLength, validateTrimmedNonEmptyString } from '../tooling/validation.js';
 
 export interface CodebaseRetrievalArgs {
   query: string;
@@ -47,13 +47,12 @@ export async function handleCodebaseRetrieval(
 ): Promise<string> {
   const startTime = Date.now();
   const { query, top_k = 10 } = args;
-  const normalizedQuery = validateNonEmptyString(query, 'Invalid query parameter: must be a non-empty string').trim();
+  const normalizedQuery = validateTrimmedNonEmptyString(
+    query,
+    'Invalid query parameter: must be a non-empty string'
+  );
 
   // Validate inputs
-  if (!normalizedQuery) {
-    throw new Error('Invalid query parameter: must be a non-empty string');
-  }
-
   validateMaxLength(normalizedQuery, 1000, 'Query too long: maximum 1000 characters');
   validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
 
