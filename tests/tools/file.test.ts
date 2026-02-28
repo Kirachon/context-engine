@@ -46,6 +46,13 @@ describe('get_file Tool', () => {
         .rejects.toThrow(/invalid start_line/i);
     });
 
+    it('should reject non-numeric start_line', async () => {
+      mockServiceClient.getFile.mockResolvedValue('line 1\nline 2\nline 3');
+
+      await expect(handleGetFile({ path: 'test.ts', start_line: '2' as any }, mockServiceClient as any))
+        .rejects.toThrow(/invalid start_line/i);
+    });
+
     it('should reject invalid end_line', async () => {
       mockServiceClient.getFile.mockResolvedValue('line 1\nline 2\nline 3');
 
@@ -135,4 +142,3 @@ describe('get_file Tool', () => {
     });
   });
 });
-

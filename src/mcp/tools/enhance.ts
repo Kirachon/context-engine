@@ -23,6 +23,7 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalPromptEnhancer } from '../../internal/handlers/enhancement.js';
+import { validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
 
 export interface EnhancePromptArgs {
   /** The raw user prompt to enhance */
@@ -49,18 +50,20 @@ export async function handleEnhancePrompt(
   const { prompt } = args;
   const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : prompt;
 
-  // Validate inputs
-  if (!normalizedPrompt || typeof normalizedPrompt !== 'string') {
-    throw new Error('Invalid prompt parameter: must be a non-empty string');
-  }
-
-  if (normalizedPrompt.length > MAX_PROMPT_LENGTH) {
-    throw new Error(`Prompt too long: maximum ${MAX_PROMPT_LENGTH} characters`);
-  }
+  // Validate inputs (preserve existing external error messages)
+  const validatedPrompt = validateNonEmptyString(
+    normalizedPrompt,
+    'Invalid prompt parameter: must be a non-empty string'
+  );
+  validateMaxLength(
+    validatedPrompt,
+    MAX_PROMPT_LENGTH,
+    `Prompt too long: maximum ${MAX_PROMPT_LENGTH} characters`
+  );
 
   // Always use AI-powered enhancement
   console.error('[enhance_prompt] Using AI-powered enhancement mode');
-  return internalPromptEnhancer(normalizedPrompt, serviceClient);
+  return internalPromptEnhancer(validatedPrompt, serviceClient);
 }
 
 /**

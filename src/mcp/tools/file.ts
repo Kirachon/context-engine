@@ -16,6 +16,12 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import * as nodePath from 'path';
+import {
+  validateLineRange,
+  validateMaxLength,
+  validateNonEmptyString,
+  validateNumberInRange,
+} from '../tooling/validation.js';
 
 export interface GetFileArgs {
   path: string;
@@ -81,33 +87,19 @@ export async function handleGetFile(
   const { path, start_line, end_line } = args;
 
   // Validate inputs
-  if (!path || typeof path !== 'string') {
-    throw new Error('Invalid path parameter: must be a non-empty string');
-  }
+  const validPath = validateNonEmptyString(path, 'Invalid path parameter: must be a non-empty string');
+  validateMaxLength(validPath, 500, 'Path too long: maximum 500 characters');
+  validateNumberInRange(start_line, 1, Number.POSITIVE_INFINITY, 'Invalid start_line: must be a positive number');
+  validateNumberInRange(end_line, 1, Number.POSITIVE_INFINITY, 'Invalid end_line: must be a positive number');
+  validateLineRange(start_line, end_line, 'Invalid range: start_line must be less than or equal to end_line');
 
-  if (path.length > 500) {
-    throw new Error('Path too long: maximum 500 characters');
-  }
-
-  if (start_line !== undefined && (typeof start_line !== 'number' || start_line < 1)) {
-    throw new Error('Invalid start_line: must be a positive number');
-  }
-
-  if (end_line !== undefined && (typeof end_line !== 'number' || end_line < 1)) {
-    throw new Error('Invalid end_line: must be a positive number');
-  }
-
-  if (start_line !== undefined && end_line !== undefined && start_line > end_line) {
-    throw new Error('Invalid range: start_line must be less than or equal to end_line');
-  }
-
-  const fullContent = await serviceClient.getFile(path);
+  const fullContent = await serviceClient.getFile(validPath);
   const allLines = fullContent.split('\n');
   const totalLines = allLines.length;
   const size = Buffer.byteLength(fullContent, 'utf-8');
-  const ext = nodePath.extname(path);
+  const ext = nodePath.extname(validPath);
   const language = getLanguageForExtension(ext);
-  const filename = nodePath.basename(path);
+  const filename = nodePath.basename(validPath);
 
   // Handle line range if specified
   let content: string;
@@ -133,7 +125,7 @@ export async function handleGetFile(
   let output = `# 📄 File: \`${filename}\`\n\n`;
   output += `| Property | Value |\n`;
   output += `|----------|-------|\n`;
-  output += `| **Path** | \`${path}\` |\n`;
+  output += `| **Path** | \`${validPath}\` |\n`;
   output += `| **Lines** | ${lineInfo} |\n`;
   output += `| **Size** | ${formatFileSize(size)} |\n`;
   output += `| **Type** | ${ext || 'unknown'} |\n`;
@@ -187,4 +179,3 @@ For searching across multiple files, use semantic_search or get_context_for_prom
     required: ['path'],
   },
 };
-

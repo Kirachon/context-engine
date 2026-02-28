@@ -49,6 +49,21 @@ describe('semantic_search Tool', () => {
         .rejects.toThrow(/invalid top_k/i);
     });
 
+    it('should reject invalid mode values', async () => {
+      await expect(handleSemanticSearch({ query: 'test', mode: 'turbo' as any }, mockServiceClient as any))
+        .rejects.toThrow(/invalid mode/i);
+    });
+
+    it('should reject non-boolean bypass_cache', async () => {
+      await expect(handleSemanticSearch({ query: 'test', bypass_cache: 'true' as any }, mockServiceClient as any))
+        .rejects.toThrow(/invalid bypass_cache/i);
+    });
+
+    it('should reject out-of-range timeout_ms', async () => {
+      await expect(handleSemanticSearch({ query: 'test', timeout_ms: -1 }, mockServiceClient as any))
+        .rejects.toThrow(/invalid timeout_ms/i);
+    });
+
     it('should accept valid parameters', async () => {
       mockServiceClient.semanticSearch.mockResolvedValue([]);
 

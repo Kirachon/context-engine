@@ -23,23 +23,28 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
   describe('Input Validation', () => {
     it('should reject empty prompt', async () => {
       await expect(handleEnhancePrompt({ prompt: '' }, mockServiceClient as any))
-        .rejects.toThrow(/invalid prompt/i);
+        .rejects.toThrow('Invalid prompt parameter: must be a non-empty string');
     });
 
     it('should reject null prompt', async () => {
       await expect(handleEnhancePrompt({ prompt: null as any }, mockServiceClient as any))
-        .rejects.toThrow(/invalid prompt/i);
+        .rejects.toThrow('Invalid prompt parameter: must be a non-empty string');
     });
 
     it('should reject undefined prompt', async () => {
       await expect(handleEnhancePrompt({ prompt: undefined as any }, mockServiceClient as any))
-        .rejects.toThrow(/invalid prompt/i);
+        .rejects.toThrow('Invalid prompt parameter: must be a non-empty string');
+    });
+
+    it('should reject whitespace-only prompt after trimming', async () => {
+      await expect(handleEnhancePrompt({ prompt: '   \n\t  ' }, mockServiceClient as any))
+        .rejects.toThrow('Invalid prompt parameter: must be a non-empty string');
     });
 
     it('should reject prompt over 10000 characters', async () => {
       const longPrompt = 'a'.repeat(10001);
       await expect(handleEnhancePrompt({ prompt: longPrompt }, mockServiceClient as any))
-        .rejects.toThrow(/prompt too long/i);
+        .rejects.toThrow('Prompt too long: maximum 10000 characters');
     });
 
     it('should accept valid prompt', async () => {
@@ -53,6 +58,24 @@ Here is an enhanced version of the original instruction that is more specific an
       await expect(handleEnhancePrompt({
         prompt: 'How do I implement authentication?',
       }, mockServiceClient as any)).resolves.toBeDefined();
+    });
+
+    it('should trim prompt before forwarding to AI enhancement', async () => {
+      const aiResponse = `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Trimmed prompt validation passed.</enhanced-prompt>
+
+### END RESPONSE ###`;
+      mockServiceClient.searchAndAsk.mockResolvedValue(aiResponse);
+
+      await handleEnhancePrompt({
+        prompt: '   fix the login bug   ',
+      }, mockServiceClient as any);
+
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
+        'fix the login bug',
+        expect.any(String)
+      );
     });
   });
 

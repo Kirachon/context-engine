@@ -16,6 +16,13 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
+import {
+  validateBoolean,
+  validateMaxLength,
+  validateNonEmptyString,
+  validateNumberInRange,
+  validateOneOf,
+} from '../tooling/validation.js';
 
 export interface SemanticSearchArgs {
   query: string;
@@ -46,29 +53,17 @@ export async function handleSemanticSearch(
   const { query, top_k = 10, mode = 'fast', bypass_cache = false, timeout_ms } = args;
 
   // Validate inputs
-  if (!query || typeof query !== 'string') {
-    throw new Error('Invalid query parameter: must be a non-empty string');
-  }
-
-  if (query.length > 500) {
-    throw new Error('Query too long: maximum 500 characters');
-  }
-
-  if (top_k !== undefined && (typeof top_k !== 'number' || top_k < 1 || top_k > 50)) {
-    throw new Error('Invalid top_k parameter: must be a number between 1 and 50');
-  }
-
-  if (mode !== 'fast' && mode !== 'deep') {
-    throw new Error('Invalid mode parameter: must be "fast" or "deep"');
-  }
-
-  if (bypass_cache !== undefined && typeof bypass_cache !== 'boolean') {
-    throw new Error('Invalid bypass_cache parameter: must be a boolean');
-  }
-
-  if (timeout_ms !== undefined && (typeof timeout_ms !== 'number' || timeout_ms < 0 || timeout_ms > 120000)) {
-    throw new Error('Invalid timeout_ms parameter: must be a number between 0 and 120000');
-  }
+  const validQuery = validateNonEmptyString(query, 'Invalid query parameter: must be a non-empty string');
+  validateMaxLength(validQuery, 500, 'Query too long: maximum 500 characters');
+  validateNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
+  validateOneOf(mode, ['fast', 'deep'] as const, 'Invalid mode parameter: must be "fast" or "deep"');
+  validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
+  validateNumberInRange(
+    timeout_ms,
+    0,
+    120000,
+    'Invalid timeout_ms parameter: must be a number between 0 and 120000'
+  );
 
   const effectiveTimeoutMs = timeout_ms ?? (bypass_cache ? 10000 : 0);
 
@@ -93,13 +88,13 @@ export async function handleSemanticSearch(
           enableExpansion: false,
         };
 
-  const retrieval = await internalRetrieveCode(query, serviceClient, retrievalOptions);
+  const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);
   const results = retrieval.results;
 
   // Format results for agent consumption
   if (results.length === 0) {
     let output = `# 🔍 Search Results\n\n`;
-    output += `**Query:** "${query}"\n\n`;
+    output += `**Query:** "${validQuery}"\n\n`;
     output += `_No results found. Try:\n`;
     output += `- Using different keywords\n`;
     output += `- Being more general or more specific\n`;
@@ -108,7 +103,7 @@ export async function handleSemanticSearch(
   }
 
   let output = `# 🔍 Search Results\n\n`;
-  output += `**Query:** "${query}"\n`;
+  output += `**Query:** "${validQuery}"\n`;
   output += `**Found:** ${results.length} matching snippets\n\n`;
 
   // Group results by file for better organization
