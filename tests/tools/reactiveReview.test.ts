@@ -11,7 +11,7 @@
  * - validate_content
  */
 
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import {
     handleReactiveReviewPR,
     handleGetReviewStatus,
@@ -29,10 +29,15 @@ import {
     validateContentTool,
     reactiveReviewTools,
 } from '../../src/mcp/tools/reactiveReview.js';
+import { ReactiveReviewService } from '../../src/reactive/index.js';
 
 describe('Reactive Review Tools', () => {
     beforeEach(() => {
         jest.clearAllMocks();
+    });
+
+    afterEach(() => {
+        jest.restoreAllMocks();
     });
 
     // ============================================================================
@@ -61,6 +66,12 @@ describe('Reactive Review Tools', () => {
                 'base_ref',
                 'changed_files',
             ]);
+        });
+
+        it('reactive_review_pr schema should include max_workers and not expose parallel', () => {
+            const properties = reactiveReviewPRTool.inputSchema.properties as Record<string, unknown>;
+            expect(properties.max_workers).toBeDefined();
+            expect(properties.parallel).toBeUndefined();
         });
 
         it('get_review_status should require session_id', () => {
@@ -253,6 +264,85 @@ describe('Reactive Review Tools', () => {
             await expect(
                 handleGetReviewTelemetry({ session_id: longSessionId }, mockServiceClient)
             ).rejects.toThrow('session_id exceeds maximum length (128)');
+        });
+    });
+
+    describe('handleResumeReview execution behavior', () => {
+        const mockServiceClient = {} as any;
+
+        it('should resume paused sessions and return executing status', async () => {
+            const getStatusSpy = jest.spyOn(ReactiveReviewService.prototype, 'getReviewStatus').mockReturnValue({
+                session: {
+                    session_id: 'session-1',
+                    plan_id: 'plan-1',
+                    status: 'paused',
+                    pr_metadata: {
+                        commit_hash: 'abc123',
+                        base_ref: 'main',
+                        changed_files: ['src/a.ts'],
+                    },
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                },
+                progress: {
+                    completed_steps: 1,
+                    total_steps: 3,
+                    percentage: 33,
+                },
+                telemetry: {
+                    start_time: new Date().toISOString(),
+                    elapsed_ms: 1000,
+                    tokens_used: 10,
+                    cache_hit_rate: 0,
+                },
+                findings_count: 0,
+            } as any);
+            const resumeSpy = jest.spyOn(ReactiveReviewService.prototype, 'resumeReview').mockResolvedValue([]);
+
+            const result = await handleResumeReview({ session_id: 'session-1' }, mockServiceClient);
+            const parsed = JSON.parse(result);
+
+            expect(getStatusSpy).toHaveBeenCalledWith('session-1');
+            expect(resumeSpy).toHaveBeenCalledTimes(1);
+            expect(parsed.success).toBe(true);
+            expect(parsed.status).toBe('executing');
+            expect(parsed.session_status).toBe('executing');
+            expect(parsed.message).toContain('resumed');
+            expect(parsed.progress).toEqual({
+                completed_steps: 1,
+                total_steps: 3,
+                percentage: 33,
+            });
+        });
+
+        it('should reject resume when session is not paused', async () => {
+            jest.spyOn(ReactiveReviewService.prototype, 'getReviewStatus').mockReturnValue({
+                session: {
+                    session_id: 'session-2',
+                    plan_id: 'plan-2',
+                    status: 'executing',
+                    pr_metadata: {
+                        commit_hash: 'abc123',
+                        base_ref: 'main',
+                        changed_files: ['src/a.ts'],
+                    },
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                },
+                progress: {
+                    completed_steps: 0,
+                    total_steps: 3,
+                    percentage: 0,
+                },
+            } as any);
+            const resumeSpy = jest.spyOn(ReactiveReviewService.prototype, 'resumeReview').mockResolvedValue([]);
+
+            const result = await handleResumeReview({ session_id: 'session-2' }, mockServiceClient);
+            const parsed = JSON.parse(result);
+
+            expect(parsed.success).toBe(false);
+            expect(parsed.error).toContain('Session is not paused');
+            expect(resumeSpy).not.toHaveBeenCalled();
         });
     });
 

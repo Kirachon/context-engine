@@ -58,4 +58,18 @@ describe('runSemgrepAnalyzer', () => {
     expect(result.findings).toHaveLength(5);
     expect(result.warnings.some(w => w.includes('chunked into 3 batches'))).toBe(true);
   });
+
+  it('skips when changed_files is empty', async () => {
+    const input = {
+      workspace_path: process.cwd(),
+      changed_files: [],
+    };
+
+    const result = await runSemgrepAnalyzer(input, { timeoutMs: 1000, maxFindings: 10 });
+
+    expect(runCommand).not.toHaveBeenCalled();
+    expect(result.findings).toHaveLength(0);
+    expect(result.skipped_reason).toBe('semgrep_no_changed_files');
+    expect(result.warnings).toContain('semgrep selected with empty changed_files; skipping to avoid scanning the full workspace');
+  });
 });

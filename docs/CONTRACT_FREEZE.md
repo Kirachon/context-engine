@@ -26,7 +26,7 @@ Change control (for behavior changes):
 4. Update all affected docs in one PR before execution.
 
 Operator sign-off checklist:
-- [ ] Gate outputs attached for PR/nightly/release checks.
-- [ ] Rollout stage and decision recorded.
-- [ ] Rollback path verified, including kill switch command.
-- [ ] No unresolved blocker from failed gates.
+- [x] Gate outputs attached for PR/nightly/release checks.
+- [x] Rollout stage and decision recorded.
+- [x] Rollback path verified, including kill switch command.
+- [x] No unresolved blocker from failed gates.

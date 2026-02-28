@@ -8,6 +8,9 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { runStaticAnalyzers } from '../../reviewer/checks/adapters/index.js';
 import type { StaticAnalyzerId } from '../../reviewer/checks/adapters/types.js';
+import { envInt } from '../../config/env.js';
+
+const DEFAULT_SEMGREP_MAX_FILES = 100;
 
 export interface RunStaticAnalysisArgs {
   changed_files?: string[];
@@ -26,16 +29,28 @@ export async function handleRunStaticAnalysis(
   const workspacePath = serviceClient.getWorkspacePath();
   const analyzers = (args.options?.analyzers ?? ['tsc']).filter(Boolean) as StaticAnalyzerId[];
   const changedFiles = args.changed_files ?? [];
+  const analyzerTimeoutInput = args.options?.timeout_ms ?? 60_000;
+  const analyzerTimeoutMs = Number.isFinite(analyzerTimeoutInput)
+    ? Math.max(1, Math.trunc(analyzerTimeoutInput))
+    : 60_000;
+  const semgrepMaxFiles = envInt('CE_SEMGREP_MAX_FILES', DEFAULT_SEMGREP_MAX_FILES, { min: 0 });
 
   const warnings: string[] = [];
   if (analyzers.includes('semgrep') && changedFiles.length === 0) {
-    warnings.push('semgrep selected but changed_files is empty; semgrep will likely do nothing');
+    warnings.push('semgrep selected but changed_files is empty; semgrep will be skipped');
+  }
+  if (analyzers.includes('semgrep') && semgrepMaxFiles > 0 && changedFiles.length > semgrepMaxFiles) {
+    const batchCount = Math.ceil(changedFiles.length / semgrepMaxFiles);
+    warnings.push(
+      `semgrep changed_files contains ${changedFiles.length} entries; execution will be chunked into ${batchCount} batches (max ${semgrepMaxFiles} files each)`
+    );
   }
 
   const run = await runStaticAnalyzers({
     input: { workspace_path: workspacePath, changed_files: changedFiles },
     analyzers,
-    timeoutMs: args.options?.timeout_ms ?? 60_000,
+    timeoutMs: analyzerTimeoutMs,
+    totalTimeoutMs: analyzerTimeoutMs * Math.max(1, analyzers.length),
     maxFindingsPerAnalyzer: args.options?.max_findings_per_analyzer ?? 20,
     semgrepArgs: args.options?.semgrep_args,
   });
@@ -81,4 +96,3 @@ export const runStaticAnalysisTool = {
     required: [],
   },
 };
-

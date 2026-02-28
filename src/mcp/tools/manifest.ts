@@ -10,8 +10,10 @@ export interface ToolManifestArgs {
   // No arguments
 }
 
+export const MCP_SERVER_VERSION = '1.9.0';
+
 const manifest = {
-  version: '1.9.0',
+  version: MCP_SERVER_VERSION,
   capabilities: [
     'semantic_search',
     'file_retrieval',

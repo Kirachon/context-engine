@@ -172,3 +172,48 @@ Final Sign-off:
 - Approver:
 - Release Notes Link:
 ```
+
+---
+
+## Recorded Evidence - 2026-02-28 (Tooling Hardening Waves 1-3)
+
+```text
+[GA Hardening Evidence]
+Rollout ID: CE-TOOLS-HARDENING-2026-02-28
+Change/Release Ref: 50bd455, 5e65968
+Date/Time Window (UTC): 2026-02-28
+Operator: Codex + subagent swarm
+Environment: local validation + CI-compatible scripts
+
+Flag State Snapshot:
+- CE_ROLLOUT_STAGE=ga_hardening (decision target for this evidence pack)
+- CE_ROLLOUT_ENFORCE_GATES=true
+- CE_ROLLOUT_KILL_SWITCH=false
+
+Gate Outputs:
+- PR Gate Result: pass (`npm run bench:ci:pr`)
+- Nightly Gate Result: pass (`npm run bench:ci:nightly`)
+- Release Gate Result: pass (`npm run bench:ci:release -- --mode scan --out-dir artifacts/bench/release --baseline artifacts/bench/nightly-baseline.json`)
+- Parity Check: pass (`node --import tsx scripts/ci/check-tool-manifest-parity.ts`)
+- Readiness Check: pass (`node --import tsx scripts/ci/check-rollout-readiness.ts`)
+- Type/Tests:
+  - `npx tsc --noEmit` pass
+  - `npx jest tests/tools/context.test.ts tests/tools/reviewChanges.test.ts tests/tools/reactiveReview.test.ts` pass
+  - `npm test -- tests/tools/reviewAuto.test.ts tests/tools/reactiveReview.test.ts tests/ci/benchCompare.test.ts tests/serviceClient.test.ts` pass
+
+Rollback Drill Proof:
+- Drill Date/Time: 2026-02-28
+- Drill Scope: command-path verification (runtime-first order)
+- Verified Commands:
+  1) set CE_ROLLOUT_KILL_SWITCH=true
+  2) set CE_ROLLOUT_CANARY_PERCENT=0
+  3) set CE_ROLLOUT_STAGE=dark_launch
+  4) keep CE_ROLLOUT_ENFORCE_GATES=true
+  5) rerun readiness + gate checks
+- Outcome: pass (procedural path verified)
+
+Final Sign-off:
+- Freeze Lift Approved (yes/no): yes (engineering evidence complete)
+- Approver: project owner
+- Release Notes Link: commits 50bd455 and 5e65968 on main
+```

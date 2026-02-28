@@ -101,8 +101,6 @@ export interface ReactiveReviewPRArgs {
     additions?: number;
     /** Number of deletions in the PR */
     deletions?: number;
-    /** Enable parallel execution (default: uses config) */
-    parallel?: boolean;
     /** Maximum parallel workers */
     max_workers?: number;
 }
@@ -312,24 +310,7 @@ export async function handleReactiveReviewPR(
         console.error(`[reactive_review_pr] Session created in ${planCreationTime}ms: ${session.session_id}`);
         console.error(`[reactive_review_pr] Plan has ${session.total_steps} steps, starting execution...`);
 
-        // Select executor based on configuration
-        const config = getConfig();
-        const stepExecutor = config.enable_batching
-            ? createBatchReviewExecutor(service, session.session_id, {
-                max_batch_size: config.batch_size,
-            })
-            : config.use_ai_agent_executor
-                ? createAIAgentStepExecutor(service, session.session_id)
-                : createDefaultStepExecutor(service, planningService, session.session_id);
-
-        // Log executor mode
-        if (config.enable_batching) {
-            console.error(`[reactive_review_pr] Using Batch Review Executor (fastest mode, batch_size=${config.batch_size})`);
-        } else if (config.use_ai_agent_executor) {
-            console.error('[reactive_review_pr] Using AI Agent Step Executor (fast mode)');
-        } else {
-            console.error('[reactive_review_pr] Using Default Step Executor (API mode)');
-        }
+        const stepExecutor = createReactiveStepExecutor(service, planningService, session.session_id);
 
         // Start execution asynchronously (don't await - let it run in background)
         // This prevents the MCP call from timing out while steps execute
@@ -351,6 +332,34 @@ export async function handleReactiveReviewPR(
         console.error(`[reactive_review_pr] Failed: ${errorMessage}`);
         throw new Error(`Reactive review failed: ${errorMessage}`);
     }
+}
+
+/**
+ * Create the configured reactive step executor for a session.
+ */
+function createReactiveStepExecutor(
+    service: ReactiveReviewService,
+    planningService: PlanningService,
+    sessionId: string
+): (planId: string, stepNumber: number) => Promise<{ success: boolean; error?: string; files_modified?: string[] }> {
+    const config = getConfig();
+    const stepExecutor = config.enable_batching
+        ? createBatchReviewExecutor(service, sessionId, {
+            max_batch_size: config.batch_size,
+        })
+        : config.use_ai_agent_executor
+            ? createAIAgentStepExecutor(service, sessionId)
+            : createDefaultStepExecutor(service, planningService, sessionId);
+
+    if (config.enable_batching) {
+        console.error(`[reactive_review_pr] Using Batch Review Executor (fastest mode, batch_size=${config.batch_size})`);
+    } else if (config.use_ai_agent_executor) {
+        console.error('[reactive_review_pr] Using AI Agent Step Executor (fast mode)');
+    } else {
+        console.error('[reactive_review_pr] Using Default Step Executor (API mode)');
+    }
+
+    return stepExecutor;
 }
 
 /**
@@ -497,9 +506,8 @@ export async function handlePauseReview(
 }
 
 /**
- * Handle the resume_review tool call
- * Note: This currently just marks the session as ready to resume.
- * Full execution continuation requires a step executor callback.
+ * Handle the resume_review tool call.
+ * This resumes execution asynchronously in the background.
  */
 export async function handleResumeReview(
     args: PauseResumeArgs,
@@ -533,12 +541,15 @@ export async function handleResumeReview(
             }, null, 2);
         }
 
-        // Note: Full resume requires a step executor. For MCP, we just return status.
-        // The actual resume should be done programmatically with a callback.
+        const planningService = getPlanningService(serviceClient);
+        const stepExecutor = createReactiveStepExecutor(service, planningService, sessionId);
+        executeResumeInBackground(service, sessionId, stepExecutor);
+
         return JSON.stringify({
             success: true,
-            message: `Session ${sessionId} is ready to resume. Call execute with a step executor to continue.`,
-            session_status: status.session.status,
+            status: 'executing',
+            message: `Review session ${sessionId} resumed. Execution running in background. Use get_review_status to monitor progress.`,
+            session_status: 'executing',
             progress: status.progress,
         }, null, 2);
 
@@ -549,6 +560,27 @@ export async function handleResumeReview(
             error: errorMessage,
         }, null, 2);
     }
+}
+
+/**
+ * Resume a paused review in the background without blocking the MCP response.
+ */
+function executeResumeInBackground(
+    service: ReactiveReviewService,
+    sessionId: string,
+    stepExecutor: (planId: string, stepNumber: number) => Promise<{ success: boolean; error?: string; files_modified?: string[] }>
+): void {
+    // Don't await - let it run in background
+    service.resumeReview(sessionId, stepExecutor)
+        .then((results) => {
+            const succeeded = results.filter(r => r.success).length;
+            const failed = results.filter(r => !r.success).length;
+            console.error(`[resume_review] Background execution completed: ${succeeded} succeeded, ${failed} failed`);
+        })
+        .catch((error) => {
+            const errorMessage = error instanceof Error ? error.message : String(error);
+            console.error(`[resume_review] Background execution failed: ${errorMessage}`);
+        });
 }
 
 /**
@@ -748,6 +780,10 @@ This tool initiates an AI-powered code review with advanced features:
             deletions: {
                 type: 'number',
                 description: 'Number of line deletions in the PR',
+            },
+            max_workers: {
+                type: 'number',
+                description: 'Maximum number of parallel workers for this review session',
             },
         },
         required: ['commit_hash', 'base_ref', 'changed_files'],

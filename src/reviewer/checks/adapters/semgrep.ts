@@ -19,10 +19,21 @@ export async function runSemgrepAnalyzer(
   input: StaticAnalyzerInput,
   opts: { timeoutMs: number; maxFindings: number; args?: string[] }
 ): Promise<StaticAnalyzerResult> {
+  const startTime = Date.now();
   const command = process.platform === 'win32' ? 'semgrep.exe' : 'semgrep';
   const baseArgs = ['--json', ...(opts.args ?? ['--config', 'auto']), '--quiet'];
   const maxFiles = envInt('CE_SEMGREP_MAX_FILES', DEFAULT_SEMGREP_MAX_FILES, { min: 0 });
   const files = input.changed_files ?? [];
+  if (files.length === 0) {
+    return {
+      analyzer: 'semgrep',
+      duration_ms: Date.now() - startTime,
+      findings: [],
+      warnings: ['semgrep selected with empty changed_files; skipping to avoid scanning the full workspace'],
+      skipped_reason: 'semgrep_no_changed_files',
+    };
+  }
+
   const chunks: string[][] = [];
 
   if (maxFiles > 0 && files.length > maxFiles) {
@@ -42,7 +53,6 @@ export async function runSemgrepAnalyzer(
   let totalResults: any[] = [];
   let skippedInvalidJson = 0;
   let combinedExitCode = 0;
-  const startTime = Date.now();
   let findingIndex = 0;
   let anyParsed = false;
 

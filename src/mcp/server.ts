@@ -35,7 +35,7 @@ import {
   handleReindexWorkspace,
   handleClearIndex,
 } from './tools/lifecycle.js';
-import { toolManifestTool, handleToolManifest } from './tools/manifest.js';
+import { MCP_SERVER_VERSION, toolManifestTool, handleToolManifest } from './tools/manifest.js';
 import { codebaseRetrievalTool, handleCodebaseRetrieval } from './tools/codebaseRetrieval.js';
 import {
   createPlanTool,
@@ -110,6 +110,7 @@ export class ContextEngineMCPServer {
   private pendingReindexTimer: NodeJS.Timeout | null = null;
   private reindexInFlight: Promise<void> | null = null;
   private lastReindexAt: number | null = null;
+  private runtimeToolCount = 0;
 
   constructor(
     workspacePath: string,
@@ -130,7 +131,7 @@ export class ContextEngineMCPServer {
     this.server = new Server(
       {
         name: serverName,
-        version: '1.0.0',
+        version: MCP_SERVER_VERSION,
       },
       {
         capabilities: {
@@ -367,6 +368,7 @@ export class ContextEngineMCPServer {
     const toolHandlers = new Map<string, ToolHandler>(
       toolRegistryEntries.map((entry) => [entry.tool.name, entry.handler])
     );
+    this.runtimeToolCount = tools.length;
 
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
@@ -442,13 +444,13 @@ export class ContextEngineMCPServer {
     await this.server.connect(transport);
 
     console.error('='.repeat(60));
-    console.error('Context Engine MCP Server v1.6.0');
+    console.error(`Context Engine MCP Server v${MCP_SERVER_VERSION}`);
     console.error('='.repeat(60));
     console.error(`Workspace: ${this.workspacePath}`);
     console.error('Transport: stdio');
     console.error(`Watcher: ${this.enableWatcher ? 'enabled' : 'disabled'}`);
     console.error('');
-    console.error('Available tools (39 total):');
+    console.error(`Available tools (${this.runtimeToolCount} total):`);
     console.error('  Core Context:');
     console.error('    - index_workspace, codebase_retrieval, semantic_search');
     console.error('    - get_file, get_context_for_prompt, enhance_prompt');

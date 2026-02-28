@@ -106,3 +106,46 @@ Checklist:
 - [x] `npx jest tests/tools/context.test.ts tests/tools/reviewChanges.test.ts tests/tools/reactiveReview.test.ts`
 - [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
 - [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
+
+## Wave 3 - Multi-Agent Hardening (Completed)
+Goal: address next-tier correctness and resilience risks discovered in automated review.
+
+### WS7 - Benchmark/Release Robustness
+Owner: Agent G
+Files:
+- `scripts/ci/bench-compare.ts`
+- `scripts/ci/release-bench.ts`
+
+Checklist:
+- [x] Harden regression percentage math for tiny-baseline edge cases.
+- [x] Keep CI anti-self-baseline integrity enforcement.
+- [x] Reduce release benchmark candidate memory footprint.
+
+### WS8 - Indexing Resilience in Service Layer
+Owner: Agent H
+Files:
+- `src/mcp/serviceClient.ts`
+
+Checklist:
+- [x] Distinguish expected `ENOENT` vs unexpected directory read errors.
+- [x] Prevent stale `lastIndexed` overwrite with monotonic merge behavior.
+- [x] Avoid restore-path status clobber while indexing is active.
+
+### WS9 - Targeted Regression Coverage
+Owner: Agent I
+Files:
+- `tests/ci/benchCompare.test.ts`
+- `tests/serviceClient.test.ts`
+- `tests/tools/reviewAuto.test.ts`
+- `tests/tools/reactiveReview.test.ts`
+
+Checklist:
+- [x] Added focused tests for benchmark provenance and math guards.
+- [x] Added coverage for serviceClient restore/index status behavior.
+- [x] Added guard-path tests for review auto/reactive validation.
+
+### Wave 3 Validation Gates (Coordinator)
+- [x] `npx tsc --noEmit`
+- [x] `npm test -- tests/tools/reviewAuto.test.ts tests/tools/reactiveReview.test.ts tests/ci/benchCompare.test.ts tests/serviceClient.test.ts`
+- [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
+- [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
