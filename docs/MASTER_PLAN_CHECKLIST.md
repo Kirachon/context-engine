@@ -269,10 +269,10 @@ Checklist:
 
 ## C) Global Validation Gates (Must Pass Before “All Done”)
 - [ ] Owner assignment lock passed (B0 complete)
-- [ ] `npx tsc --noEmit`
+- [x] `npx tsc --noEmit`
 - [ ] Full targeted test matrix for all migrated families
-- [ ] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
-- [ ] `node --import tsx scripts/ci/check-rollout-readiness.ts`
+- [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
+- [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
 - [ ] `node --import tsx scripts/ci/validate-master-plan.ts` (checklist/evidence validator)
 - [ ] Compatibility replay suite pass
 - [ ] Benchmark/regression gate suite pass
