@@ -34,6 +34,9 @@ jobs:
       - name: Check stale-cache correctness guard coverage
         run: npm run ci:check:stale-cache-guards
 
+      - name: Check WS21 rollback drill evidence completeness
+        run: npm run ci:check:ws21-rollback-drill
+
       - name: Run review_diff
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -45,6 +48,20 @@ jobs:
 
       - name: Run WS19 SLO threshold gate (review family)
         run: node --import tsx scripts/ci/ws19-slo-gate.ts --family review --artifact artifacts/review_diff_result.json
+
+      - name: Run WS20 rollout stage gate (optional artifact)
+        run: |
+          if [ -f artifacts/ws20-stage-evidence.yaml ]; then
+            node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20-stage-evidence.yaml
+          elif [ -f artifacts/ws20-stage-evidence.yml ]; then
+            node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20-stage-evidence.yml
+          elif [ -f artifacts/ws20-stage-evidence.json ]; then
+            node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20-stage-evidence.json
+          elif [ -f artifacts/ws20-stage-evidence.md ]; then
+            node --import tsx scripts/ci/ws20-stage-gate.ts --artifact artifacts/ws20-stage-evidence.md
+          else
+            echo "WS20 stage gate: SKIP (no artifact at artifacts/ws20-stage-evidence.{yaml,yml,json,md})"
+          fi
 
       - name: Upload review artifacts
         if: always()

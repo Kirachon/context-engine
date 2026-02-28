@@ -1,0 +1,46 @@
+# WS20 rollout stage evidence template
+# Copy this file, fill the fields for the stage you are validating, and keep only relevant sections.
+
+schema_version: 1
+rollout_id: "CE-ROLLOUT-YYYYMMDD-01"
+stage: 2
+stage_name: controlled_ramp
+environment: production
+window:
+  start_utc: "2026-02-28T00:00:00Z"
+  end_utc: "2026-03-03T00:00:00Z"
+
+pre_rollout:
+  baseline_snapshot_id: "bench-nightly-2026-02-27"
+  checklist_complete: true
+
+canary:
+  percent: 5
+  soak_hours: 24
+  exit_criteria_met: true
+  signed_by: "release.owner"
+  evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#canary-2026-03-01"
+
+controlled_ramp:
+  checkpoints:
+    - percent: 10
+      soak_hours: 24
+      status: pass
+      signed_by: "release.owner"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ramp-10-2026-03-02"
+    - percent: 25
+      soak_hours: 48
+      status: pass
+      signed_by: "release.owner"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ramp-25-2026-03-03"
+    - percent: 50
+      soak_hours: 72
+      status: pass
+      signed_by: "release.owner"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ramp-50-2026-03-06"
+
+ga_hardening:
+  soak_hours: 24
+  stability_confirmed: true
+  closeout_evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ga-2026-03-07"
+  signed_by: "release.owner"

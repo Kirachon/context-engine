@@ -288,17 +288,37 @@ Progress notes:
 
 ### WS20 - Rollout Stage Gates (Numeric)
 Checklist:
+- [x] Deterministic WS20 evidence gate script added (`scripts/ci/ws20-stage-gate.ts`) for numeric stages 0-3.
+- [x] Structured operator artifacts added (`docs/templates/ws20-stage-evidence.template.yaml`, `docs/examples/ws20-stage-evidence.sample.yaml`).
+- [x] Focused WS20 gate regression tests added (`tests/ci/ws20StageGate.test.ts`).
+- [x] Non-destructive CI hook added in `.github/workflows/review_diff.yml` (runs only when `artifacts/ws20-stage-evidence.*` exists).
 - [ ] Pre-rollout checklist with baseline snapshot.
 - [ ] Canary gate (1-5%) with 24h soak and strict exit criteria.
 - [ ] Controlled ramp gate (10->25->50%) with signed checkpoints and soak windows.
   - 10%: 24h, 25%: 48h, 50%: 72h.
 - [ ] GA hardening gate (24h stability + closeout evidence).
 
+Progress notes:
+- 2026-02-28: Added deterministic WS20 stage gate validator `scripts/ci/ws20-stage-gate.ts` with structured artifact parsing (JSON/YAML/Markdown) and explicit numeric gate checks for pre-rollout, canary, controlled ramp, and GA hardening.
+- 2026-02-28: Added operator template/sample artifacts at `docs/templates/ws20-stage-evidence.template.yaml` and `docs/examples/ws20-stage-evidence.sample.yaml`.
+- 2026-02-28: Added focused regression coverage in `tests/ci/ws20StageGate.test.ts` and wired optional CI enforcement in `.github/workflows/review_diff.yml`.
+- 2026-02-28: Validation evidence (WS20 stage gates):
+  - `npm test -- tests/ci/ws20StageGate.test.ts`
+  - `node --import tsx scripts/ci/ws20-stage-gate.ts --artifact docs/examples/ws20-stage-evidence.sample.yaml`
+  - `npx tsc --noEmit`
+  - `node --import tsx scripts/ci/validate-master-plan.ts`
+
 ### WS21 - Rollback Drill + Evidence Completeness
 Checklist:
 - [ ] Execute and record rollback drill for remaining roadmap batches.
 - [ ] Capture command path, owner, timestamps, recovery evidence.
 - [ ] Confirm no unresolved blockers before freeze lift.
+- [x] Add deterministic WS21 evidence completeness checker for required rollback drill fields.
+- [x] Add operator-facing WS21 rollback drill template + sample evidence and validate both via CI script.
+
+Progress notes:
+- 2026-02-28: Added deterministic evidence checker `scripts/ci/check-ws21-rollback-drill.ts` to enforce required fields (`Command Path`, `Owner`, `Started At (UTC)`, `Ended At (UTC)`, `Recovery Evidence`, `Blocker Status`) plus unresolved-blocker rejection.
+- 2026-02-28: Added operator artifacts `docs/WS21_ROLLBACK_DRILL_TEMPLATE.md` and `docs/WS21_ROLLBACK_DRILL_SAMPLE.md`; wired CI script `npm run ci:check:ws21-rollback-drill`.
 
 ---
 
@@ -332,6 +352,7 @@ Checklist:
 
 ## Changelog
 - [ ] 2026-02-28: Added governance rules, owner lock, batch prerequisites, quantitative SLO/soak thresholds, and rollback triggers.
+- [x] 2026-02-28: Implemented WS20 deterministic stage evidence gates by adding `scripts/ci/ws20-stage-gate.ts`, operator artifacts (`docs/templates/ws20-stage-evidence.template.yaml`, `docs/examples/ws20-stage-evidence.sample.yaml`), focused tests (`tests/ci/ws20StageGate.test.ts`), and optional CI wiring in `.github/workflows/review_diff.yml`.
 - [x] 2026-02-28: Implemented WS19 deterministic threshold gates by adding `scripts/ci/ws19-slo-gate.ts`, documenting per-family artifact mapping and fail/skip handling in `docs/WS19_SLO_GATE.md`, wiring enforcement in performance/review CI workflows, and adding `tests/ci/ws19SloGate.test.ts`.
 - [x] 2026-02-28: Implemented WS13 first migration slice (shared validators + 3 tools + validator tests).
 - [x] 2026-02-28: Implemented WS13 second migration slice (review tool validation migration + new validation tests).

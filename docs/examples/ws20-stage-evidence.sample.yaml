@@ -1,0 +1,25 @@
+schema_version: 1
+rollout_id: "CE-WS20-SAMPLE-2026-02-28"
+stage: 2
+stage_name: controlled_ramp
+environment: staging
+window:
+  start_utc: "2026-02-25T00:00:00Z"
+  end_utc: "2026-02-28T00:00:00Z"
+controlled_ramp:
+  checkpoints:
+    - percent: 10
+      soak_hours: 24
+      status: pass
+      signed_by: "ops.owner"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#sample-ramp-10"
+    - percent: 25
+      soak_hours: 48
+      status: pass
+      signed_by: "ops.owner"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#sample-ramp-25"
+    - percent: 50
+      soak_hours: 72
+      status: pass
+      signed_by: "ops.owner"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#sample-ramp-50"
