@@ -177,7 +177,12 @@ Steps 1 → 2
   ],
   "codebase_insights": [
     "Lifecycle outputs include markdown + JSON sections"
-  ]
+  ],
+  "_meta": {
+    "tool": "create_plan",
+    "duration_ms": 0,
+    "status": "ready"
+  }
 }
 \`\`\`
 </details>
@@ -276,7 +281,12 @@ export const step2 = true;
     "pending_steps": 0,
     "percentage": 100
   },
-  "duration_ms": 0
+  "duration_ms": 0,
+  "_meta": {
+    "tool": "execute_plan",
+    "duration_ms": 0,
+    "status": "completed"
+  }
 }
 \`\`\`
 </details>
@@ -456,12 +466,21 @@ Steps 1 → 2
   ],
   "codebase_insights": [
     "Lifecycle outputs include markdown + JSON sections"
-  ]
+  ],
+  "_meta": {
+    "tool": "refine_plan",
+    "duration_ms": 0,
+    "status": "ready"
+  }
 }
 \`\`\`
 </details>
 ",
   "visualize_plan": {
+    "_meta": {
+      "duration_ms": 0,
+      "tool": "visualize_plan",
+    },
     "diagram_type": "dependencies",
     "mermaid": "graph TD
     step_1["1. Add tests"]

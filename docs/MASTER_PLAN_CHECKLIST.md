@@ -167,13 +167,15 @@ Scope:
 
 Checklist:
 - [x] Align all input validation style and bounds.
-- [ ] Align error messages and retry guidance consistency.
-- [ ] Ensure telemetry parity fields exist across handlers.
+- [x] Align error messages and retry guidance consistency.
+- [x] Ensure telemetry parity fields exist across handlers.
 - [x] Expand contract tests/snapshots for full plan lifecycle.
 
 Progress notes:
 - 2026-02-28: Added additive contract snapshot suites for full planning lifecycle and management handlers in `tests/tools/planLifecycle.contract.test.ts` and `tests/tools/planManagement.contract.test.ts`.
 - 2026-02-28: Completed planning-family input validation alignment by adopting shared validation helpers for `execute_plan` (`mode`, `plan_id`, `max_steps`, boolean flags) and `planManagement` (`load_plan` non-empty ID/name checks, `list_plans` finite positive `limit`, `respond_approval` action enum guard); evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts tests/tools/planLifecycle.contract.test.ts tests/tools/planManagement.contract.test.ts` and `npx tsc --noEmit`.
+- 2026-02-28: Standardized operation-level failure responses in plan-management handlers with additive `retry_guidance` while preserving existing error strings (`load_plan`, `start_step`, `complete_step`, `fail_step`, `view_progress`, `view_history`, `compare_plan_versions`); evidence: `npm test -- tests/tools/planManagement.test.ts tests/tools/planManagement.contract.test.ts`.
+- 2026-02-28: Added additive planning telemetry parity metadata (`_meta.tool`, `_meta.duration_ms`, `_meta.status`) across `create_plan`, `refine_plan`, `visualize_plan`, and `execute_plan` outputs, including lifecycle contract assertions; evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planLifecycle.contract.test.ts`.
 
 ### Batch B - Review Pipeline Family
 Prerequisites:

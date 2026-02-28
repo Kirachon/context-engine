@@ -49,6 +49,20 @@ function getPlanningService(serviceClient: ContextServiceClient): PlanningServic
   return planningServiceFactory.get(serviceClient);
 }
 
+type ToolMeta = {
+  tool: string;
+  duration_ms: number;
+  status?: string;
+};
+
+function buildToolMeta(tool: string, duration_ms: number, status?: string): ToolMeta {
+  return {
+    tool,
+    duration_ms,
+    ...(status ? { status } : {}),
+  };
+}
+
 // ============================================================================
 // Tool Argument Types
 // ============================================================================
@@ -122,6 +136,7 @@ export async function handleCreatePlan(
   args: CreatePlanArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
+  const startTime = Date.now();
   const {
     task,
     max_context_files,
@@ -161,7 +176,11 @@ export async function handleCreatePlan(
         : null;
       if (!workspacePath) {
         persistence = { saved: false, error: 'Plan persistence unavailable (workspace path missing)' };
-        return formatPlanResult(result, persistence);
+        const resultWithMeta = {
+          ...result,
+          _meta: buildToolMeta('create_plan', Date.now() - startTime, result.status),
+        };
+        return formatPlanResult(resultWithMeta, persistence);
       }
       const { PlanPersistenceService } = await import('../services/planPersistenceService.js');
       const service = new PlanPersistenceService(workspacePath);
@@ -185,7 +204,11 @@ export async function handleCreatePlan(
   }
 
   // Format the result for output
-  return formatPlanResult(result, persistence);
+  const resultWithMeta = {
+    ...result,
+    _meta: buildToolMeta('create_plan', Date.now() - startTime, result.status),
+  };
+  return formatPlanResult(resultWithMeta, persistence);
 }
 
 /**
@@ -195,6 +218,7 @@ export async function handleRefinePlan(
   args: RefinePlanArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
+  const startTime = Date.now();
   const { current_plan, feedback, clarifications, focus_steps } = args;
 
   const currentPlan = validateNonEmptyString(
@@ -227,7 +251,11 @@ export async function handleRefinePlan(
     throw new Error(`Failed to refine plan: ${result.error}`);
   }
 
-  return formatPlanResult(result);
+  const resultWithMeta = {
+    ...result,
+    _meta: buildToolMeta('refine_plan', Date.now() - startTime, result.status),
+  };
+  return formatPlanResult(resultWithMeta);
 }
 
 /**
@@ -237,6 +265,7 @@ export async function handleVisualizePlan(
   args: VisualizePlanArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
+  const startTime = Date.now();
   const { plan: planJson, diagram_type = 'dependencies' } = args;
 
   const planInput = validateNonEmptyString(planJson, 'plan is required and must be a valid JSON string');
@@ -267,6 +296,7 @@ export async function handleVisualizePlan(
     mermaid,
     plan_id: plan.id,
     plan_version: plan.version,
+    _meta: buildToolMeta('visualize_plan', Date.now() - startTime),
   }, null, 2);
 }
 
@@ -559,14 +589,16 @@ export async function handleExecutePlan(
   }
 
   if (stepsToExecute.length === 0) {
+    const duration = Date.now() - startTime;
     return JSON.stringify({
       success: true,
       plan_id: plan.id,
       step_results: [],
       next_ready_steps: getReadySteps(plan),
       progress: calculateProgress(plan, []),
-      duration_ms: Date.now() - startTime,
+      duration_ms: duration,
       message: 'No steps to execute',
+      _meta: buildToolMeta('execute_plan', duration, 'completed'),
     }, null, 2);
   }
 
@@ -645,7 +677,11 @@ export async function handleExecutePlan(
   }
 
   // Format output
-  return formatExecutionResult(response, apply_changes);
+  const responseWithMeta = {
+    ...response,
+    _meta: buildToolMeta('execute_plan', response.duration_ms, response.success ? 'completed' : 'failed'),
+  };
+  return formatExecutionResult(responseWithMeta, apply_changes);
 }
 
 /**
@@ -793,15 +829,20 @@ function formatExecutionResult(result: ExecutePlanResult, applyChanges: boolean)
  * Format a plan result for output
  */
 function formatPlanResult(
-  result: PlanResult,
+  result: PlanResult & { _meta?: ToolMeta },
   persistence?: { saved: boolean; plan_id?: string; file_path?: string; error?: string }
 ): string {
+  const fullPlanJson = result.plan
+    ? (result._meta ? { ...result.plan, _meta: result._meta } : result.plan)
+    : undefined;
+
   if (!result.plan) {
     return JSON.stringify({
       success: result.success,
       status: result.status,
       error: result.error,
       duration_ms: result.duration_ms,
+      ...(result._meta ? { _meta: result._meta } : {}),
     }, null, 2);
   }
 
@@ -923,7 +964,7 @@ function formatPlanResult(
   output += `---\n\n`;
   output += `<details>\n<summary>Full Plan JSON</summary>\n\n`;
   output += '```json\n';
-  output += JSON.stringify(plan, null, 2);
+  output += JSON.stringify(fullPlanJson, null, 2);
   output += '\n```\n</details>\n';
 
   return output;

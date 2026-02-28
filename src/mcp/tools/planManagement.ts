@@ -56,6 +56,14 @@ function getHistoryService(): PlanHistoryService {
   return historyService;
 }
 
+function operationFailureResponse(error: string, retryGuidance: string): string {
+  return JSON.stringify({
+    success: false,
+    error,
+    retry_guidance: retryGuidance,
+  });
+}
+
 // ============================================================================
 // Tool Definitions
 // ============================================================================
@@ -303,7 +311,10 @@ export async function handleLoadPlan(args: Record<string, unknown>): Promise<str
   }
 
   if (!plan) {
-    return JSON.stringify({ success: false, error: 'Plan not found' });
+    return operationFailureResponse(
+      'Plan not found',
+      'Verify plan_id or name exists, then retry.'
+    );
   }
 
   return JSON.stringify({ success: true, plan }, null, 2);
@@ -408,7 +419,10 @@ export async function handleStartStep(args: Record<string, unknown>): Promise<st
 
   const result = execService.startStep(planId, stepNumber);
   if (!result) {
-    return JSON.stringify({ success: false, error: 'Could not start step' });
+    return operationFailureResponse(
+      'Could not start step',
+      'Verify plan_id and step_number are valid and ready, then retry.'
+    );
   }
 
   return JSON.stringify({ success: true, step: result }, null, 2);
@@ -429,7 +443,10 @@ export async function handleCompleteStep(args: Record<string, unknown>): Promise
   });
 
   if (!result) {
-    return JSON.stringify({ success: false, error: 'Could not complete step' });
+    return operationFailureResponse(
+      'Could not complete step',
+      'Initialize execution state and verify step_number, then retry.'
+    );
   }
 
   const progress = execService.getProgress(planId);
@@ -460,7 +477,10 @@ export async function handleFailStep(args: Record<string, unknown>): Promise<str
   });
 
   if (!result) {
-    return JSON.stringify({ success: false, error: 'Could not mark step as failed' });
+    return operationFailureResponse(
+      'Could not mark step as failed',
+      'Initialize execution state and verify step_number, then retry.'
+    );
   }
 
   const progress = execService.getProgress(planId);
@@ -474,7 +494,10 @@ export async function handleViewProgress(args: Record<string, unknown>): Promise
   const progress = execService.getProgress(planId);
 
   if (!progress) {
-    return JSON.stringify({ success: false, error: 'No execution state found for plan' });
+    return operationFailureResponse(
+      'No execution state found for plan',
+      'Initialize execution state for this plan, then retry.'
+    );
   }
 
   const state = execService.getExecutionState(planId);
@@ -496,7 +519,10 @@ export async function handleViewHistory(args: Record<string, unknown>): Promise<
   });
 
   if (!history) {
-    return JSON.stringify({ success: false, error: 'No history found for plan' });
+    return operationFailureResponse(
+      'No history found for plan',
+      'Verify plan_id exists and has recorded history, then retry.'
+    );
   }
 
   return JSON.stringify({ success: true, history }, null, 2);
@@ -511,7 +537,10 @@ export async function handleComparePlanVersions(args: Record<string, unknown>): 
   const diff = histService.generateDiff(planId, fromVersion, toVersion);
 
   if (!diff) {
-    return JSON.stringify({ success: false, error: 'Could not generate diff' });
+    return operationFailureResponse(
+      'Could not generate diff',
+      'Verify plan_id and requested versions exist in history, then retry.'
+    );
   }
 
   return JSON.stringify({ success: true, diff }, null, 2);

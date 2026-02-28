@@ -172,6 +172,8 @@ describe('Planning MCP Tools', () => {
       expect(parsed.mermaid).toContain('graph TD');
       expect(parsed.mermaid).toContain('step_1');
       expect(parsed.mermaid).toContain('step_2');
+      expect(parsed._meta?.tool).toBe('visualize_plan');
+      expect(typeof parsed._meta?.duration_ms).toBe('number');
     });
 
     it('should reject missing plan', async () => {
@@ -196,6 +198,8 @@ describe('Planning MCP Tools', () => {
       const parsed = JSON.parse(result);
       expect(parsed.diagram_type).toBe('gantt');
       expect(parsed.mermaid).toContain('gantt');
+      expect(parsed._meta?.tool).toBe('visualize_plan');
+      expect(typeof parsed._meta?.duration_ms).toBe('number');
     });
 
     describe('Tool Schema', () => {
@@ -274,6 +278,9 @@ describe('Planning MCP Tools', () => {
         const parsed = JSON.parse(result);
         expect(parsed.success).toBe(true);
         expect(parsed.plan_id).toBe(plan.id);
+        expect(parsed._meta?.tool).toBe('execute_plan');
+        expect(parsed._meta?.status).toBe('completed');
+        expect(typeof parsed._meta?.duration_ms).toBe('number');
       });
 
       it('should reject single_step mode without step_number', async () => {

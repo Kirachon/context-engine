@@ -193,4 +193,77 @@ describe('plan management contract snapshots', () => {
       )
     ).toMatchSnapshot();
   });
+
+  it('returns stable retry_guidance for operation-level failure responses', async () => {
+    const plan = createContractPlan(1);
+    const planNoExecution = { ...createContractPlan(1), id: 'plan_no_execution' };
+    await handleSavePlan({ plan: JSON.stringify(plan), name: 'Failure Contract Plan' });
+    await handleSavePlan({ plan: JSON.stringify(planNoExecution), name: 'No Execution Plan' });
+
+    const loadPlanNotFound = parse(await handleLoadPlan({ plan_id: 'missing_plan' }));
+    expect(loadPlanNotFound).toEqual({
+      success: false,
+      error: 'Plan not found',
+      retry_guidance: 'Verify plan_id or name exists, then retry.',
+    });
+
+    const startStepFailure = parse(await handleStartStep({ plan_id: plan.id, step_number: 999 }));
+    expect(startStepFailure).toEqual({
+      success: false,
+      error: 'Could not start step',
+      retry_guidance: 'Verify plan_id and step_number are valid and ready, then retry.',
+    });
+
+    const completeStepFailure = parse(
+      await handleCompleteStep({
+        plan_id: planNoExecution.id,
+        step_number: 1,
+      })
+    );
+    expect(completeStepFailure).toEqual({
+      success: false,
+      error: 'Could not complete step',
+      retry_guidance: 'Initialize execution state and verify step_number, then retry.',
+    });
+
+    const failStepFailure = parse(
+      await handleFailStep({
+        plan_id: planNoExecution.id,
+        step_number: 1,
+        error: 'forced failure',
+      })
+    );
+    expect(failStepFailure).toEqual({
+      success: false,
+      error: 'Could not mark step as failed',
+      retry_guidance: 'Initialize execution state and verify step_number, then retry.',
+    });
+
+    const viewProgressNoState = parse(await handleViewProgress({ plan_id: 'no_execution_plan' }));
+    expect(viewProgressNoState).toEqual({
+      success: false,
+      error: 'No execution state found for plan',
+      retry_guidance: 'Initialize execution state for this plan, then retry.',
+    });
+
+    const viewHistoryNoHistory = parse(await handleViewHistory({ plan_id: 'no_history_plan' }));
+    expect(viewHistoryNoHistory).toEqual({
+      success: false,
+      error: 'No history found for plan',
+      retry_guidance: 'Verify plan_id exists and has recorded history, then retry.',
+    });
+
+    const compareVersionsDiffFail = parse(
+      await handleComparePlanVersions({
+        plan_id: plan.id,
+        from_version: 1,
+        to_version: 2,
+      })
+    );
+    expect(compareVersionsDiffFail).toEqual({
+      success: false,
+      error: 'Could not generate diff',
+      retry_guidance: 'Verify plan_id and requested versions exist in history, then retry.',
+    });
+  });
 });

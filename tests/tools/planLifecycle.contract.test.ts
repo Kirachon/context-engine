@@ -77,6 +77,22 @@ function normalizeLifecycleText(output: string): string {
     .replace(/"duration_ms":\s*\d+/g, '"duration_ms": 0');
 }
 
+function extractJsonDetails(output: string): Record<string, unknown> {
+  const match = output.match(/```json\n([\s\S]*?)\n```/);
+  if (!match) {
+    throw new Error('Expected markdown output to include a JSON details block');
+  }
+  return JSON.parse(match[1]);
+}
+
+type TelemetryMetaCarrier = {
+  _meta?: {
+    tool?: string;
+    status?: string;
+    duration_ms?: number;
+  };
+};
+
 describe('plan lifecycle contract snapshots', () => {
   const mockServiceClient = {
     getWorkspacePath: () => process.cwd(),
@@ -137,11 +153,27 @@ describe('plan lifecycle contract snapshots', () => {
       { plan: JSON.stringify(basePlan), mode: 'full_plan', max_steps: 2, stop_on_failure: true },
       mockServiceClient
     );
+    const createDetails = extractJsonDetails(createOutput) as TelemetryMetaCarrier;
+    const refineDetails = extractJsonDetails(refineOutput) as TelemetryMetaCarrier;
+    const executeDetails = extractJsonDetails(executeOutput) as TelemetryMetaCarrier;
+    const visualizeDetails = JSON.parse(visualizeOutput);
+
+    expect(createDetails._meta?.tool).toBe('create_plan');
+    expect(createDetails._meta?.status).toBe('ready');
+    expect(typeof createDetails._meta?.duration_ms).toBe('number');
+    expect(refineDetails._meta?.tool).toBe('refine_plan');
+    expect(refineDetails._meta?.status).toBe('ready');
+    expect(typeof refineDetails._meta?.duration_ms).toBe('number');
+    expect(executeDetails._meta?.tool).toBe('execute_plan');
+    expect(executeDetails._meta?.status).toBe('completed');
+    expect(typeof executeDetails._meta?.duration_ms).toBe('number');
+    expect(visualizeDetails._meta?.tool).toBe('visualize_plan');
+    expect(typeof visualizeDetails._meta?.duration_ms).toBe('number');
 
     expect({
       create_plan: normalizeLifecycleText(createOutput),
       refine_plan: normalizeLifecycleText(refineOutput),
-      visualize_plan: JSON.parse(visualizeOutput),
+      visualize_plan: visualizeDetails,
       execute_plan: normalizeLifecycleText(executeOutput),
     }).toMatchSnapshot();
   });
