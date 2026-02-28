@@ -8,3 +8,5 @@
 | **File Count** | 42 |
 | **Is Stale** | No |
 | **Last Error** | None |
+| **Freshness** | ✅ healthy |
+| **Freshness Summary** | Index is healthy and up to date. |

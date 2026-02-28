@@ -229,9 +229,12 @@ Progress notes:
 ### WS17 - Old-Client Replay Compatibility Suite
 Checklist:
 - [ ] Create/expand old-client fixture set for all tool families.
-- [ ] Run replay suite against updated server.
-- [ ] Confirm no unintended response-shape drift.
-- [ ] Document any intentional deltas with migration notes.
+- [x] Run replay suite against updated server.
+- [x] Confirm no unintended response-shape drift.
+- [x] Document any intentional deltas with migration notes.
+
+Progress notes:
+- 2026-02-28: Executed snapshot replay harness and updated compatibility baselines for additive/index-health/tool-manifest deltas; reran replay to pass. Migration notes captured in `docs/COMPATIBILITY_REPLAY_NOTES_2026-02-28.md`.
 
 ### WS18 - Versioning and Contract Policy
 Checklist:
@@ -275,7 +278,7 @@ Checklist:
 - [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
 - [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
 - [x] `node --import tsx scripts/ci/validate-master-plan.ts` (checklist/evidence validator)
-- [ ] Compatibility replay suite pass
+- [x] Compatibility replay suite pass
 - [ ] Benchmark/regression gate suite pass
 
 ## E) Rollback Triggers

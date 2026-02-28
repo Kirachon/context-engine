@@ -26,6 +26,11 @@
     "workspace": "D:/mock-workspace",
     "lastIndexed": "2025-01-01T00:00:00.000Z",
     "queryTimeMs": 0,
-    "totalResults": 3
+    "totalResults": 3,
+    "indexStatus": {
+      "status": "idle",
+      "fileCount": 42,
+      "isStale": false
+    }
   }
 }

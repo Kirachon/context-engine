@@ -1,5 +1,5 @@
 {
-  "version": "1.4.1",
+  "version": "1.9.0",
   "capabilities": [
     "semantic_search",
     "file_retrieval",
@@ -12,7 +12,10 @@
     "plan_persistence",
     "approval_workflow",
     "execution_tracking",
-    "version_history"
+    "version_history",
+    "code_review",
+    "enterprise_review",
+    "static_analysis"
   ],
   "tools": [
     "index_workspace",
@@ -25,9 +28,12 @@
     "reindex_workspace",
     "clear_index",
     "tool_manifest",
+    "add_memory",
+    "list_memories",
     "create_plan",
     "refine_plan",
     "visualize_plan",
+    "execute_plan",
     "save_plan",
     "load_plan",
     "list_plans",
@@ -40,7 +46,20 @@
     "view_progress",
     "view_history",
     "compare_plan_versions",
-    "rollback_plan"
+    "rollback_plan",
+    "review_changes",
+    "review_git_diff",
+    "review_diff",
+    "review_auto",
+    "check_invariants",
+    "run_static_analysis",
+    "reactive_review_pr",
+    "get_review_status",
+    "pause_review",
+    "resume_review",
+    "get_review_telemetry",
+    "scrub_secrets",
+    "validate_content"
   ],
   "features": {
     "planning": {
@@ -96,6 +115,62 @@
         "Safe array handling in all planning services",
         "Fallback values for missing properties",
         "Enhanced error messages with context"
+      ]
+    },
+    "internal_handlers": {
+      "description": "Layer 2.5 - Internal shared handlers for code consolidation",
+      "version": "1.5.0",
+      "improvements": [
+        "Shared retrieval, context, and enhancement handlers",
+        "Advanced retrieval features (dedupe, expand, rerank)",
+        "Snapshot testing infrastructure for regression checks",
+        "Reduced code duplication (~100 lines in enhance.ts)",
+        "Tool inventory generator and documentation"
+      ]
+    },
+    "code_review": {
+      "description": "AI-powered code review with structured output and confidence scoring",
+      "version": "1.7.0",
+      "tools": [
+        "review_changes",
+        "review_git_diff"
+      ],
+      "features": [
+        "Structured output schema (Codex-style findings)",
+        "Confidence scoring per finding and overall",
+        "Priority levels (P0-P3) with semantic meaning",
+        "Changed lines filter to reduce noise",
+        "Category-based analysis (correctness, security, performance, etc.)",
+        "Actionable fix suggestions",
+        "Git integration (automatic diff retrieval)",
+        "Support for staged, unstaged, branch, and commit diffs"
+      ]
+    },
+    "enterprise_review": {
+      "description": "Deterministic diff-first preflight review with risk scoring",
+      "version": "1.9.0",
+      "tools": [
+        "review_diff"
+      ],
+      "features": [
+        "Risk scoring (1-5) based on deterministic preflight",
+        "Change classification (feature/bugfix/refactor/infra/docs)",
+        "Hotspot detection for sensitive areas",
+        "Structured JSON output suitable for CI/IDE integrations",
+        "Optional local static analyzers (tsc/semgrep) for additional signal"
+      ]
+    },
+    "static_analysis": {
+      "description": "Optional local static analyzers for CI/IDE feedback",
+      "version": "1.9.0",
+      "tools": [
+        "run_static_analysis",
+        "check_invariants"
+      ],
+      "features": [
+        "TypeScript typecheck via tsc (noEmit)",
+        "Optional semgrep integration when available on PATH",
+        "Deterministic output (no LLM) suitable for CI"
       ]
     }
   }
