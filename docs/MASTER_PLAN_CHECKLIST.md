@@ -274,7 +274,7 @@ Checklist:
 - [ ] Full targeted test matrix for all migrated families
 - [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
 - [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
-- [ ] `node --import tsx scripts/ci/validate-master-plan.ts` (checklist/evidence validator)
+- [x] `node --import tsx scripts/ci/validate-master-plan.ts` (checklist/evidence validator)
 - [ ] Compatibility replay suite pass
 - [ ] Benchmark/regression gate suite pass
 
