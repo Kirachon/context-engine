@@ -219,6 +219,10 @@ const CACHE_TTL_MS = envMs('CE_SEARCH_CACHE_TTL_MS', 60_000, { min: 0 });
 const DEFAULT_API_TIMEOUT_MS = 120000;
 const MIN_API_TIMEOUT_MS = 10_000;
 const MAX_API_TIMEOUT_MS = 30 * 60 * 1000;
+const DEFAULT_RATE_LIMIT_MAX_RETRIES = 2;
+const DEFAULT_RATE_LIMIT_BACKOFF_MS = 1000;
+const MIN_RATE_LIMIT_BACKOFF_MS = 100;
+const MAX_RATE_LIMIT_BACKOFF_MS = 60_000;
 const DEFAULT_SEARCH_QUEUE_MAX = 50;
 
 /** State file name for persisting index state */
@@ -383,6 +387,16 @@ class SearchQueue {
     this.queue = [];
     return count;
   }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isRateLimitedError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  const normalized = message.toLowerCase();
+  return normalized.includes('429') || normalized.includes('too many requests') || normalized.includes('rate limit');
 }
 
 /** Default directories to always exclude - organized by category */
@@ -2830,6 +2844,14 @@ export class ContextServiceClient {
       min: MIN_API_TIMEOUT_MS,
       max: MAX_API_TIMEOUT_MS,
     });
+    const maxRateLimitRetries = envInt('CE_AI_RATE_LIMIT_MAX_RETRIES', DEFAULT_RATE_LIMIT_MAX_RETRIES, {
+      min: 0,
+      max: 10,
+    });
+    const baseRateLimitBackoffMs = envMs('CE_AI_RATE_LIMIT_BACKOFF_MS', DEFAULT_RATE_LIMIT_BACKOFF_MS, {
+      min: MIN_RATE_LIMIT_BACKOFF_MS,
+      max: MAX_RATE_LIMIT_BACKOFF_MS,
+    });
     const timeoutCandidate = options?.timeoutMs ?? defaultTimeoutMs;
     const requestedTimeoutMs = Number.isFinite(timeoutCandidate) ? timeoutCandidate : defaultTimeoutMs;
     const timeoutMs = Math.max(MIN_API_TIMEOUT_MS, Math.min(MAX_API_TIMEOUT_MS, requestedTimeoutMs));
@@ -2840,12 +2862,38 @@ export class ContextServiceClient {
           console.error(`[searchAndAsk] Searching for: ${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`);
           console.error(`[searchAndAsk] Prompt: ${prompt?.substring(0, 100) || '(using search query)'}`);
 
-          // Use the SDK's searchAndAsk method
-          const innerResponse = await context.searchAndAsk(searchQuery, prompt);
-
-          console.error(`[searchAndAsk] Response length: ${innerResponse?.length || 0}`);
-
-          return innerResponse;
+          // Use the SDK's searchAndAsk method with bounded retries for transient rate limits.
+          let attempt = 0;
+          while (true) {
+            try {
+              const innerResponse = await context.searchAndAsk(searchQuery, prompt);
+              console.error(`[searchAndAsk] Response length: ${innerResponse?.length || 0}`);
+              return innerResponse;
+            } catch (error) {
+              if (isRateLimitedError(error) && attempt < maxRateLimitRetries) {
+                const exponentialBackoffMs = Math.min(
+                  MAX_RATE_LIMIT_BACKOFF_MS,
+                  baseRateLimitBackoffMs * Math.pow(2, attempt)
+                );
+                const jitterMs = Math.floor(Math.random() * 250);
+                const waitMs = exponentialBackoffMs + jitterMs;
+                const nextAttempt = attempt + 1;
+                console.error(
+                  `[searchAndAsk] Rate limited (attempt ${nextAttempt}/${maxRateLimitRetries}); retrying in ${waitMs}ms`
+                );
+                incCounter(
+                  'context_engine_search_and_ask_retries_total',
+                  { reason: 'rate_limit' },
+                  1,
+                  'Total searchAndAsk retries triggered by rate limiting.'
+                );
+                attempt = nextAttempt;
+                await sleep(waitMs);
+                continue;
+              }
+              throw error;
+            }
+          }
         } catch (error) {
           console.error('[searchAndAsk] Failed:', error);
           throw error;

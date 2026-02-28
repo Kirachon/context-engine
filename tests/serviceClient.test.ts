@@ -67,6 +67,8 @@ describe('ContextServiceClient', () => {
     delete process.env.AUGMENT_API_TOKEN;
     delete process.env.AUGMENT_API_URL;
     delete process.env.CONTEXT_ENGINE_OFFLINE_ONLY;
+    delete process.env.CE_AI_RATE_LIMIT_MAX_RETRIES;
+    delete process.env.CE_AI_RATE_LIMIT_BACKOFF_MS;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -225,6 +227,32 @@ content
       await expect(offlineClient.semanticSearch('offline test', 1)).rejects.toThrow(/offline mode/i);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('searchAndAsk rate-limit retries', () => {
+    it('should retry on 429 and eventually succeed', async () => {
+      process.env.CE_AI_RATE_LIMIT_MAX_RETRIES = '1';
+      process.env.CE_AI_RATE_LIMIT_BACKOFF_MS = '100';
+
+      mockContextInstance.searchAndAsk
+        .mockRejectedValueOnce(new Error('429 Too Many Requests'))
+        .mockResolvedValueOnce('retry succeeded');
+
+      const result = await client.searchAndAsk('retry query', 'retry prompt');
+
+      expect(result).toBe('retry succeeded');
+      expect(mockContextInstance.searchAndAsk).toHaveBeenCalledTimes(2);
+    });
+
+    it('should not retry non-rate-limit errors', async () => {
+      process.env.CE_AI_RATE_LIMIT_MAX_RETRIES = '3';
+      process.env.CE_AI_RATE_LIMIT_BACKOFF_MS = '100';
+
+      mockContextInstance.searchAndAsk.mockRejectedValueOnce(new Error('Network timeout'));
+
+      await expect(client.searchAndAsk('fail query', 'fail prompt')).rejects.toThrow('Network timeout');
+      expect(mockContextInstance.searchAndAsk).toHaveBeenCalledTimes(1);
     });
   });
 
