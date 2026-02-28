@@ -126,6 +126,19 @@ function parse(output: string): Record<string, unknown> {
   return JSON.parse(output) as Record<string, unknown>;
 }
 
+function expectOperationFailureEnvelope(
+  actual: Record<string, unknown>,
+  expectedError: string,
+  expectedRetryGuidance: string
+): void {
+  expect(actual).toEqual({
+    success: false,
+    error: expectedError,
+    retry_guidance: expectedRetryGuidance,
+  });
+  expect(Object.keys(actual).sort()).toEqual(['error', 'retry_guidance', 'success']);
+}
+
 describe('plan management contract snapshots', () => {
   let tmpDir: string;
 
@@ -201,18 +214,18 @@ describe('plan management contract snapshots', () => {
     await handleSavePlan({ plan: JSON.stringify(planNoExecution), name: 'No Execution Plan' });
 
     const loadPlanNotFound = parse(await handleLoadPlan({ plan_id: 'missing_plan' }));
-    expect(loadPlanNotFound).toEqual({
-      success: false,
-      error: 'Plan not found',
-      retry_guidance: 'Verify plan_id or name exists, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      loadPlanNotFound,
+      'Plan not found',
+      'Verify plan_id or name exists, then retry.'
+    );
 
     const startStepFailure = parse(await handleStartStep({ plan_id: plan.id, step_number: 999 }));
-    expect(startStepFailure).toEqual({
-      success: false,
-      error: 'Could not start step',
-      retry_guidance: 'Verify plan_id and step_number are valid and ready, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      startStepFailure,
+      'Could not start step',
+      'Verify plan_id and step_number are valid and ready, then retry.'
+    );
 
     const completeStepFailure = parse(
       await handleCompleteStep({
@@ -220,11 +233,11 @@ describe('plan management contract snapshots', () => {
         step_number: 1,
       })
     );
-    expect(completeStepFailure).toEqual({
-      success: false,
-      error: 'Could not complete step',
-      retry_guidance: 'Initialize execution state and verify step_number, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      completeStepFailure,
+      'Could not complete step',
+      'Initialize execution state and verify step_number, then retry.'
+    );
 
     const failStepFailure = parse(
       await handleFailStep({
@@ -233,25 +246,25 @@ describe('plan management contract snapshots', () => {
         error: 'forced failure',
       })
     );
-    expect(failStepFailure).toEqual({
-      success: false,
-      error: 'Could not mark step as failed',
-      retry_guidance: 'Initialize execution state and verify step_number, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      failStepFailure,
+      'Could not mark step as failed',
+      'Initialize execution state and verify step_number, then retry.'
+    );
 
     const viewProgressNoState = parse(await handleViewProgress({ plan_id: 'no_execution_plan' }));
-    expect(viewProgressNoState).toEqual({
-      success: false,
-      error: 'No execution state found for plan',
-      retry_guidance: 'Initialize execution state for this plan, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      viewProgressNoState,
+      'No execution state found for plan',
+      'Initialize execution state for this plan, then retry.'
+    );
 
     const viewHistoryNoHistory = parse(await handleViewHistory({ plan_id: 'no_history_plan' }));
-    expect(viewHistoryNoHistory).toEqual({
-      success: false,
-      error: 'No history found for plan',
-      retry_guidance: 'Verify plan_id exists and has recorded history, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      viewHistoryNoHistory,
+      'No history found for plan',
+      'Verify plan_id exists and has recorded history, then retry.'
+    );
 
     const compareVersionsDiffFail = parse(
       await handleComparePlanVersions({
@@ -260,10 +273,10 @@ describe('plan management contract snapshots', () => {
         to_version: 2,
       })
     );
-    expect(compareVersionsDiffFail).toEqual({
-      success: false,
-      error: 'Could not generate diff',
-      retry_guidance: 'Verify plan_id and requested versions exist in history, then retry.',
-    });
+    expectOperationFailureEnvelope(
+      compareVersionsDiffFail,
+      'Could not generate diff',
+      'Verify plan_id and requested versions exist in history, then retry.'
+    );
   });
 });

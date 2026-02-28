@@ -26,6 +26,54 @@ export function validateMaxLength(value: string, maxLength: number, errorMessage
   }
 }
 
+export function validateOptionalString(
+  value: unknown,
+  typeErrorMessage: string
+): string | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(typeErrorMessage);
+  }
+  return value;
+}
+
+export function validateTrimmedRequiredStringWithMaxLength(
+  value: unknown,
+  maxLength: number,
+  missingMessage: string,
+  maxLengthMessage: string
+): string {
+  const trimmed = validateTrimmedNonEmptyString(value, missingMessage);
+  validateMaxLength(trimmed, maxLength, maxLengthMessage);
+  return trimmed;
+}
+
+export function validateOptionalNonNegativeIntegerWithMax(
+  value: unknown,
+  integerErrorMessage: string,
+  nonNegativeErrorMessage: string,
+  maxValue: number,
+  maxValueErrorMessage: string
+): number | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+
+  if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
+    throw new Error(integerErrorMessage);
+  }
+  if (value < 0) {
+    throw new Error(nonNegativeErrorMessage);
+  }
+  if (value > maxValue) {
+    throw new Error(maxValueErrorMessage);
+  }
+
+  return value;
+}
+
 export function validateNumberInRange(
   value: unknown,
   min: number,

@@ -40,6 +40,24 @@ jobs:
       - name: Check WS owner assignment lock (WS13-WS21)
         run: npm run ci:check:ws-owner-assignment-lock
 
+      - name: Check rollout governance artifact templates
+        run: npm run ci:check:governance-artifacts
+
+      - name: Check rollout governance runtime artifacts (optional)
+        run: |
+          if [ -f artifacts/governance/pre-rollout-baseline-checklist.md ] && \
+             [ -f artifacts/governance/freeze-checklist.md ] && \
+             [ -f artifacts/governance/final-release-summary.md ] && \
+             [ -f artifacts/governance/rollout-evidence-log.md ]; then
+            node --import tsx scripts/ci/check-governance-artifacts.ts \
+              --pre-rollout artifacts/governance/pre-rollout-baseline-checklist.md \
+              --freeze artifacts/governance/freeze-checklist.md \
+              --final-release artifacts/governance/final-release-summary.md \
+              --rollout-evidence artifacts/governance/rollout-evidence-log.md
+          else
+            echo "Governance artifacts check: SKIP (missing one or more files in artifacts/governance/)"
+          fi
+
       - name: Check WS21 rollback drill evidence completeness
         run: npm run ci:check:ws21-rollback-drill
 

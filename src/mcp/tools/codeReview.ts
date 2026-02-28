@@ -24,6 +24,7 @@ import {
 import {
   parseJsonString,
   validateMaxLength,
+  validateOptionalString,
   validateOneOf,
 } from '../tooling/validation.js';
 import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
@@ -81,12 +82,13 @@ export async function handleReviewChanges(
     assertNonEmptyDiffScope(normalizedDiff, undefined);
     validateMaxLength(normalizedDiff, MAX_DIFF_LENGTH, `Invalid "diff": maximum ${MAX_DIFF_LENGTH} characters`);
 
-    if (args.custom_instructions !== undefined) {
-      if (typeof args.custom_instructions !== 'string') {
-        throw new Error('Invalid "custom_instructions": must be a string');
-      }
+    const customInstructions = validateOptionalString(
+      args.custom_instructions,
+      'Invalid "custom_instructions": must be a string'
+    );
+    if (customInstructions !== undefined) {
       validateMaxLength(
-        args.custom_instructions,
+        customInstructions,
         MAX_CUSTOM_INSTRUCTIONS_LENGTH,
         `Invalid "custom_instructions": maximum ${MAX_CUSTOM_INSTRUCTIONS_LENGTH} characters`
       );
@@ -94,17 +96,18 @@ export async function handleReviewChanges(
 
     // Parse file contexts if provided
     let fileContexts: Record<string, string> | undefined;
-    if (args.file_contexts !== undefined) {
-      if (typeof args.file_contexts !== 'string') {
-        throw new Error('Invalid "file_contexts": must be a JSON string');
-      }
+    const fileContextsInput = validateOptionalString(
+      args.file_contexts,
+      'Invalid "file_contexts": must be a JSON string'
+    );
+    if (fileContextsInput !== undefined) {
       validateMaxLength(
-        args.file_contexts,
+        fileContextsInput,
         MAX_FILE_CONTEXTS_LENGTH,
         `Invalid "file_contexts": maximum ${MAX_FILE_CONTEXTS_LENGTH} characters`
       );
       fileContexts = parseJsonString<Record<string, string>>(
-        args.file_contexts,
+        fileContextsInput,
         'Invalid "file_contexts" JSON format'
       );
       if (fileContexts === null || typeof fileContexts !== 'object' || Array.isArray(fileContexts)) {

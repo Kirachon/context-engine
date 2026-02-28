@@ -30,7 +30,10 @@ import {
 import { createAIAgentStepExecutor } from '../../reactive/executors/AIAgentStepExecutor.js';
 import { createBatchReviewExecutor } from '../../reactive/executors/BatchReviewExecutor.js';
 import { createClientBoundFactory } from '../tooling/serviceFactory.js';
-import { validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
+import {
+    validateOptionalNonNegativeIntegerWithMax,
+    validateTrimmedRequiredStringWithMaxLength,
+} from '../tooling/validation.js';
 
 type ReactiveServiceBundle = {
     reactiveService: ReactiveReviewService;
@@ -159,14 +162,12 @@ function validateRequiredString(
     maxLength: number,
     missingMessage = `${fieldName} is required`
 ): string {
-    const trimmed = validateNonEmptyString(value, missingMessage).trim();
-    if (!trimmed) {
-        throw new Error(missingMessage);
-    }
-
-    validateMaxLength(trimmed, maxLength, `${fieldName} exceeds maximum length (${maxLength})`);
-
-    return trimmed;
+    return validateTrimmedRequiredStringWithMaxLength(
+        value,
+        maxLength,
+        missingMessage,
+        `${fieldName} exceeds maximum length (${maxLength})`
+    );
 }
 
 function validateOptionalNonNegativeInteger(
@@ -174,23 +175,13 @@ function validateOptionalNonNegativeInteger(
     fieldName: string,
     maxValue: number
 ): number | undefined {
-    if (value === undefined || value === null) {
-        return undefined;
-    }
-
-    if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
-        throw new Error(`${fieldName} must be an integer`);
-    }
-
-    if (value < 0) {
-        throw new Error(`${fieldName} must be non-negative`);
-    }
-
-    if (value > maxValue) {
-        throw new Error(`${fieldName} exceeds maximum value (${maxValue})`);
-    }
-
-    return value;
+    return validateOptionalNonNegativeIntegerWithMax(
+        value,
+        `${fieldName} must be an integer`,
+        `${fieldName} must be non-negative`,
+        maxValue,
+        `${fieldName} exceeds maximum value (${maxValue})`
+    );
 }
 
 function parseChangedFilesInput(changedFilesInput: unknown): string[] {

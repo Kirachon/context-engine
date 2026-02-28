@@ -74,8 +74,8 @@ Files:
 
 Checklist:
 - [x] Introduce reusable validators (`requiredString`, bounded numbers, enum checks, JSON string parsing).
-- [ ] Replace duplicated per-tool validation blocks in remaining tools.
-- [ ] Preserve current external error shape/semantics (no silent contract breaks).
+- [x] Replace duplicated per-tool validation blocks in remaining tools.
+- [x] Preserve current external error shape/semantics (no silent contract breaks).
 - [x] Add unit tests for validator edge cases.
 
 Progress notes:
@@ -89,6 +89,8 @@ Progress notes:
 - 2026-02-28: Fifth migration slice introduced shared `validateRequiredNumber` helper and adopted it in `planManagement` step/version handlers (`start/complete/fail/compare/rollback`) with expanded regression checks in `tests/tools/planManagement.test.ts`.
 - 2026-02-28: Sixth migration slice introduced shared `validateTrimmedNonEmptyString` and adopted it in `semantic_search`, `codebase_retrieval`, `get_context_for_prompt`, and `create_plan` task validation; added helper coverage in `tests/tooling/validation.test.ts` and revalidated affected tool suites.
 - 2026-02-28: Batch A slice 1 finished remaining planning-family shared-validation migration by removing custom string-like validation in `src/mcp/tools/planManagement.ts`, routing required field checks through shared helpers, and deduplicating `single_step` validation in `src/mcp/tools/plan.ts`; evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts` and `npx tsc --noEmit` (both pass).
+- 2026-02-28: Final WS13 dedup slice migrated remaining inline optional-string and bounded-integer validation paths in `src/mcp/tools/codeReview.ts` and `src/mcp/tools/reactiveReview.ts` to shared helpers (`validateOptionalString`, `validateTrimmedRequiredStringWithMaxLength`, `validateOptionalNonNegativeIntegerWithMax`) with helper coverage in `tests/tooling/validation.test.ts`; evidence: `npm test -- tests/tooling/validation.test.ts tests/tools/reviewChanges.validation.test.ts tests/tools/reactiveReview.test.ts`.
+- 2026-02-28: Added contract-level error-shape safeguards for planning and plan-management failure envelopes (`tests/tools/planLifecycle.contract.test.ts`, `tests/tools/planManagement.contract.test.ts`) to prevent silent external error semantic drift while retaining existing message text.
 
 ### WS14 - Shared Tool Runtime Wrapper
 Owner: runtime-wrapper-owner
@@ -322,7 +324,7 @@ Checklist:
 - [x] Structured operator artifacts added (`docs/templates/ws20-stage-evidence.template.yaml`, `docs/examples/ws20-stage-evidence.sample.yaml`).
 - [x] Focused WS20 gate regression tests added (`tests/ci/ws20StageGate.test.ts`).
 - [x] Non-destructive CI hook added in `.github/workflows/review_diff.yml` (runs only when `artifacts/ws20-stage-evidence.*` exists).
-- [ ] Pre-rollout checklist with baseline snapshot.
+- [x] Pre-rollout checklist template with baseline snapshot fields added (`docs/templates/pre-rollout-baseline-checklist.template.md`).
 - [ ] Canary gate (1-5%) with 24h soak and strict exit criteria.
 - [ ] Controlled ramp gate (10->25->50%) with signed checkpoints and soak windows.
   - 10%: 24h, 25%: 48h, 50%: 72h.
@@ -337,6 +339,7 @@ Progress notes:
   - `node --import tsx scripts/ci/ws20-stage-gate.ts --artifact docs/examples/ws20-stage-evidence.sample.yaml`
   - `npx tsc --noEmit`
   - `node --import tsx scripts/ci/validate-master-plan.ts`
+- 2026-02-28: Added pre-rollout baseline operator checklist template (`docs/templates/pre-rollout-baseline-checklist.template.md`) for stage 0 readiness evidence.
 
 ### WS21 - Rollback Drill + Evidence Completeness
 Owner: rollback-drill-owner
@@ -349,10 +352,14 @@ Checklist:
 - [ ] Confirm no unresolved blockers before freeze lift.
 - [x] Add deterministic WS21 evidence completeness checker for required rollback drill fields.
 - [x] Add operator-facing WS21 rollback drill template + sample evidence and validate both via CI script.
+- [x] Add deterministic governance artifact checker for pre-rollout/freeze/final-summary/rollout-log completeness fields.
+- [x] Add operator templates for freeze checklist and final release summary, plus rollout evidence update path/template.
 
 Progress notes:
 - 2026-02-28: Added deterministic evidence checker `scripts/ci/check-ws21-rollback-drill.ts` to enforce required fields (`Command Path`, `Owner`, `Started At (UTC)`, `Ended At (UTC)`, `Recovery Evidence`, `Blocker Status`) plus unresolved-blocker rejection.
 - 2026-02-28: Added operator artifacts `docs/WS21_ROLLBACK_DRILL_TEMPLATE.md` and `docs/WS21_ROLLBACK_DRILL_SAMPLE.md`; wired CI script `npm run ci:check:ws21-rollback-drill`.
+- 2026-02-28: Added governance artifact templates (`docs/templates/freeze-checklist.template.md`, `docs/templates/final-release-summary.template.md`, `docs/templates/rollout-evidence-entry.template.md`) and rollout evidence update path section in `docs/ROLLOUT_EVIDENCE_LOG.md`.
+- 2026-02-28: Added deterministic checker `scripts/ci/check-governance-artifacts.ts` with focused tests in `tests/ci/checkGovernanceArtifacts.test.ts`, package script `npm run ci:check:governance-artifacts`, and non-destructive workflow wiring in `.github/workflows/review_diff.yml` (optional runtime-artifact validation step).
 
 ---
 
@@ -385,7 +392,7 @@ Progress notes:
 ---
 
 ## Changelog
-- [ ] 2026-02-28: Added governance rules, owner lock, batch prerequisites, quantitative SLO/soak thresholds, and rollback triggers.
+- [x] 2026-02-28: Added governance rules, owner lock, batch prerequisites, quantitative SLO/soak thresholds, and rollback triggers.
 - [x] 2026-02-28: Implemented WS20 deterministic stage evidence gates by adding `scripts/ci/ws20-stage-gate.ts`, operator artifacts (`docs/templates/ws20-stage-evidence.template.yaml`, `docs/examples/ws20-stage-evidence.sample.yaml`), focused tests (`tests/ci/ws20StageGate.test.ts`), and optional CI wiring in `.github/workflows/review_diff.yml`.
 - [x] 2026-02-28: Implemented WS19 deterministic threshold gates by adding `scripts/ci/ws19-slo-gate.ts`, documenting per-family artifact mapping and fail/skip handling in `docs/WS19_SLO_GATE.md`, wiring enforcement in performance/review CI workflows, and adding `tests/ci/ws19SloGate.test.ts`.
 - [x] 2026-02-28: Implemented WS13 first migration slice (shared validators + 3 tools + validator tests).

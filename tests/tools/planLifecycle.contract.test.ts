@@ -157,6 +157,9 @@ describe('plan lifecycle contract snapshots', () => {
     const refineDetails = extractJsonDetails(refineOutput) as TelemetryMetaCarrier;
     const executeDetails = extractJsonDetails(executeOutput) as TelemetryMetaCarrier;
     const visualizeDetails = JSON.parse(visualizeOutput);
+    if (visualizeDetails?._meta && typeof visualizeDetails._meta.duration_ms === 'number') {
+      visualizeDetails._meta.duration_ms = 0;
+    }
 
     expect(createDetails._meta?.tool).toBe('create_plan');
     expect(createDetails._meta?.status).toBe('ready');
@@ -176,5 +179,46 @@ describe('plan lifecycle contract snapshots', () => {
       visualize_plan: visualizeDetails,
       execute_plan: normalizeLifecycleText(executeOutput),
     }).toMatchSnapshot();
+  });
+
+  it('preserves execute_plan failure envelope and error text semantics', async () => {
+    const basePlan = createContractPlan(1);
+
+    jest
+      .spyOn(PlanningService.prototype, 'executeStep')
+      .mockResolvedValue({
+        step_number: 1,
+        success: false,
+        error: 'intentional contract failure',
+        duration_ms: 9,
+      });
+
+    const executeOutput = await handleExecutePlan(
+      { plan: JSON.stringify(basePlan), mode: 'single_step', step_number: 1, stop_on_failure: true },
+      mockServiceClient
+    );
+
+    expect(normalizeLifecycleText(executeOutput)).toContain(
+      '## Error\nStep 1 failed: intentional contract failure'
+    );
+
+    const executeDetails = extractJsonDetails(executeOutput) as TelemetryMetaCarrier & {
+      success: boolean;
+      error?: string;
+      step_results: Array<Record<string, unknown>>;
+      next_ready_steps: number[];
+      progress: Record<string, unknown>;
+    };
+    expect(executeDetails.success).toBe(false);
+    expect(executeDetails.error).toBe('Step 1 failed: intentional contract failure');
+    expect(executeDetails.step_results).toHaveLength(1);
+    expect(executeDetails._meta?.tool).toBe('execute_plan');
+    expect(executeDetails._meta?.status).toBe('failed');
+    expect(typeof executeDetails._meta?.duration_ms).toBe('number');
+    expect(Array.isArray(executeDetails.next_ready_steps)).toBe(true);
+    expect(executeDetails.progress).toMatchObject({
+      plan_id: basePlan.id,
+      total_steps: 2,
+    });
   });
 });

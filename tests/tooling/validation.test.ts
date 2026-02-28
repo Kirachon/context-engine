@@ -6,8 +6,11 @@ import {
   validateLineRange,
   validateMaxLength,
   validateNonEmptyString,
+  validateOptionalNonNegativeIntegerWithMax,
+  validateOptionalString,
   validateNumberInRange,
   validateRequiredNumber,
+  validateTrimmedRequiredStringWithMaxLength,
   validateTrimmedNonEmptyString,
   validateOneOf,
 } from '../../src/mcp/tooling/validation.js';
@@ -28,6 +31,31 @@ describe('mcp tooling validation helpers', () => {
 
   it('validateMaxLength throws when over max', () => {
     expect(() => validateMaxLength('abc', 2, 'too long')).toThrow('too long');
+  });
+
+  it('validateOptionalString returns undefined for undefined and throws for non-string', () => {
+    expect(validateOptionalString(undefined, 'bad')).toBeUndefined();
+    expect(() => validateOptionalString(5, 'bad')).toThrow('bad');
+  });
+
+  it('validateTrimmedRequiredStringWithMaxLength trims and enforces max length', () => {
+    expect(
+      validateTrimmedRequiredStringWithMaxLength('  value  ', 10, 'missing', 'too long')
+    ).toBe('value');
+    expect(() =>
+      validateTrimmedRequiredStringWithMaxLength('   ', 10, 'missing', 'too long')
+    ).toThrow('missing');
+    expect(() =>
+      validateTrimmedRequiredStringWithMaxLength('abcdef', 3, 'missing', 'too long')
+    ).toThrow('too long');
+  });
+
+  it('validateOptionalNonNegativeIntegerWithMax enforces integer/non-negative/max bounds', () => {
+    expect(validateOptionalNonNegativeIntegerWithMax(undefined, 'int', 'nonneg', 10, 'max')).toBeUndefined();
+    expect(validateOptionalNonNegativeIntegerWithMax(3, 'int', 'nonneg', 10, 'max')).toBe(3);
+    expect(() => validateOptionalNonNegativeIntegerWithMax(1.5, 'int', 'nonneg', 10, 'max')).toThrow('int');
+    expect(() => validateOptionalNonNegativeIntegerWithMax(-1, 'int', 'nonneg', 10, 'max')).toThrow('nonneg');
+    expect(() => validateOptionalNonNegativeIntegerWithMax(11, 'int', 'nonneg', 10, 'max')).toThrow('max');
   });
 
   it('validateNumberInRange accepts undefined', () => {

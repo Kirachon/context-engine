@@ -7,6 +7,20 @@ How to use:
 - Keep outputs concrete (command, timestamp, status, artifact path).
 - Link incident notes and rollback drill proof before approving the next stage.
 
+## Governance Artifact Update Path
+
+Use these templates when adding or updating rollout governance artifacts:
+- Pre-rollout baseline checklist: `docs/templates/pre-rollout-baseline-checklist.template.md`
+- Freeze checklist: `docs/templates/freeze-checklist.template.md`
+- Final release summary: `docs/templates/final-release-summary.template.md`
+- Rollout evidence entry block: `docs/templates/rollout-evidence-entry.template.md`
+
+Recommended update sequence:
+1. Fill pre-rollout baseline checklist before stage 0->1 advancement.
+2. Append rollout evidence entries for each stage transition window.
+3. Complete freeze checklist before freeze lift decision.
+4. Record final release summary after rollout completion and sign-off.
+
 ---
 
 ## Shared Header (copy for each stage entry)

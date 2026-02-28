@@ -28,6 +28,7 @@
     "ci:matrix:migrated-families": "node --import tsx scripts/ci/run-migrated-family-matrix.ts",
     "ci:check:stale-cache-guards": "node --import tsx scripts/ci/check-stale-cache-guards.ts",
     "ci:check:ws-owner-assignment-lock": "node --import tsx scripts/ci/check-ws-owner-assignment-lock.ts",
+    "ci:check:governance-artifacts": "node --import tsx scripts/ci/check-governance-artifacts.ts",
     "ci:check:ws21-rollback-drill": "node --import tsx scripts/ci/check-ws21-rollback-drill.ts docs/WS21_ROLLBACK_DRILL_TEMPLATE.md docs/WS21_ROLLBACK_DRILL_SAMPLE.md"
   },
   "keywords": [
