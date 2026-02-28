@@ -54,6 +54,26 @@ describe('get_context_for_prompt Tool', () => {
         .rejects.toThrow(/invalid token_budget/i);
     });
 
+    it('should reject non-boolean include_related', async () => {
+      await expect(handleGetContext({ query: 'test', include_related: 'yes' as any }, mockServiceClient as any))
+        .rejects.toThrow(/invalid include_related/i);
+    });
+
+    it('should reject min_relevance below 0', async () => {
+      await expect(handleGetContext({ query: 'test', min_relevance: -0.01 }, mockServiceClient as any))
+        .rejects.toThrow(/invalid min_relevance/i);
+    });
+
+    it('should reject min_relevance above 1', async () => {
+      await expect(handleGetContext({ query: 'test', min_relevance: 1.01 }, mockServiceClient as any))
+        .rejects.toThrow(/invalid min_relevance/i);
+    });
+
+    it('should reject non-numeric min_relevance', async () => {
+      await expect(handleGetContext({ query: 'test', min_relevance: '0.3' as any }, mockServiceClient as any))
+        .rejects.toThrow(/invalid min_relevance/i);
+    });
+
     it('should accept valid parameters', async () => {
       const mockBundle: ContextBundle = createMockContextBundle();
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
@@ -65,6 +85,14 @@ describe('get_context_for_prompt Tool', () => {
         include_related: true,
         min_relevance: 0.3,
       }, mockServiceClient as any)).resolves.toBeDefined();
+    });
+
+    it('should normalize whitespace-only around query', async () => {
+      const mockBundle: ContextBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: '   test query   ' }, mockServiceClient as any);
+      expect(result).toContain('**Query:** "test query"');
     });
   });
 
@@ -189,4 +217,3 @@ function createMockContextBundle(): ContextBundle {
     },
   };
 }
-

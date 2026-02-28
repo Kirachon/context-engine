@@ -1,4 +1,5 @@
 import { ContextServiceClient, SearchResult } from '../../mcp/serviceClient.js';
+import { featureEnabled } from '../../config/features.js';
 import { expandQuery } from './expandQuery.js';
 import { dedupeResults } from './dedupe.js';
 import { rerankResults } from './rerank.js';
@@ -13,6 +14,10 @@ type NormalizedRetrievalOptions =
   };
 
 export function isRetrievalPipelineEnabled(): boolean {
+  if (featureEnabled('rollout_kill_switch')) {
+    return false;
+  }
+
   const raw = process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE;
   if (!raw) {
     return true;

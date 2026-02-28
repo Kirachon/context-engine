@@ -213,7 +213,7 @@ const DEFAULT_TOKEN_BUDGET = 8000;
 const CHARS_PER_TOKEN = 4;
 
 /** Cache TTL in milliseconds (1 minute) */
-const CACHE_TTL_MS = 60000;
+const CACHE_TTL_MS = envMs('CE_SEARCH_CACHE_TTL_MS', 60_000, { min: 0 });
 
 /** Default timeout for AI API calls in milliseconds (2 minutes) */
 const DEFAULT_API_TIMEOUT_MS = 120000;
@@ -234,7 +234,10 @@ const SEARCH_CACHE_FILE_NAME = '.augment-search-cache.json';
 const CONTEXT_CACHE_FILE_NAME = '.augment-context-cache.json';
 
 /** Persistent cache TTL (7 days). */
-const PERSISTENT_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const PERSISTENT_CACHE_TTL_MS = envMs('CE_PERSISTENT_CACHE_TTL_MS', 7 * 24 * 60 * 60 * 1000, { min: 0 });
+
+const PERSISTENT_SEARCH_CACHE_MAX_ENTRIES = envInt('CE_PERSIST_SEARCH_CACHE_MAX_ENTRIES', 500, { min: 0, max: 10000 });
+const PERSISTENT_CONTEXT_CACHE_MAX_ENTRIES = envInt('CE_PERSIST_CONTEXT_CACHE_MAX_ENTRIES', 100, { min: 0, max: 5000 });
 
 /** Context ignore file names (in order of preference) */
 const CONTEXT_IGNORE_FILES = ['.contextignore', '.augment-ignore'];
@@ -1239,10 +1242,28 @@ export class ContextServiceClient {
         try {
           const stats = fs.statSync(stateFilePath);
           const restoredAt = stats.mtime.toISOString();
-          this.updateIndexStatus({
-            status: 'idle',
-            lastIndexed: restoredAt,
-          });
+          // Only set lastIndexed from the state file on first restore.
+          // If we just completed an explicit indexing run, keep its lastIndexed value.
+          const nextStatus: Partial<IndexStatus> = { status: 'idle' };
+          if (!this.indexStatus.lastIndexed) {
+            nextStatus.lastIndexed = restoredAt;
+          }
+
+          // Best-effort: if we can infer an indexed file count from the index state store,
+          // populate fileCount for better UX in index_status.
+          if (!this.indexStatus.fileCount) {
+            try {
+              const store = new JsonIndexStateStore(this.workspacePath);
+              const known = Object.keys(store.load().files).length;
+              if (known > 0) {
+                nextStatus.fileCount = known;
+              }
+            } catch {
+              // ignore
+            }
+          }
+
+          this.updateIndexStatus(nextStatus);
         } catch {
           // ignore stat errors, keep defaults
         }
@@ -1356,7 +1377,7 @@ export class ContextServiceClient {
     const files: string[] = [];
 
     try {
-      const entries = fs.readdirSync(dirPath, { withFileTypes: true });
+      const entries = await fs.promises.readdir(dirPath, { withFileTypes: true });
 
       for (const entry of entries) {
         const fullPath = path.join(dirPath, entry.name);
@@ -1387,18 +1408,6 @@ export class ContextServiceClient {
           const subFiles = await this.discoverFiles(fullPath, relativeTo);
           files.push(...subFiles);
         } else if (entry.isFile() && this.shouldIndexFile(entry.name)) {
-          // Early file size check during discovery for performance
-          try {
-            const stats = fs.statSync(fullPath);
-            if (stats.size > MAX_FILE_SIZE) {
-              if (debugIndex) {
-                console.error(`Skipping large file during discovery: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB > ${MAX_FILE_SIZE / 1024 / 1024}MB limit)`);
-              }
-              continue;
-            }
-          } catch {
-            // If stat fails, we'll catch it later during reading
-          }
           files.push(relativePath);
         }
       }
@@ -1435,6 +1444,30 @@ export class ContextServiceClient {
       const content = fs.readFileSync(fullPath, 'utf-8');
 
       // Check for binary content
+      if (this.isBinaryContent(content)) {
+        console.error(`Skipping binary file: ${relativePath}`);
+        return null;
+      }
+
+      return content;
+    } catch (error) {
+      console.error(`Error reading file ${relativePath}:`, error);
+      return null;
+    }
+  }
+
+  private async readFileContentsAsync(relativePath: string): Promise<string | null> {
+    try {
+      const fullPath = path.join(this.workspacePath, relativePath);
+      const stats = await fs.promises.stat(fullPath);
+
+      if (stats.size > MAX_FILE_SIZE) {
+        console.error(`Skipping large file: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+        return null;
+      }
+
+      const content = await fs.promises.readFile(fullPath, 'utf-8');
+
       if (this.isBinaryContent(content)) {
         console.error(`Skipping binary file: ${relativePath}`);
         return null;
@@ -1625,8 +1658,7 @@ export class ContextServiceClient {
     if (!this.isPersistentCacheEnabled()) return;
     this.loadPersistentCacheIfNeeded();
     // Cap persistent cache size to avoid unbounded growth.
-    const MAX_ENTRIES = 500;
-    if (this.persistentSearchCache.size >= MAX_ENTRIES) {
+    if (this.persistentSearchCache.size >= PERSISTENT_SEARCH_CACHE_MAX_ENTRIES) {
       const oldestKey = this.persistentSearchCache.keys().next().value;
       if (oldestKey) {
         this.persistentSearchCache.delete(oldestKey);
@@ -1728,8 +1760,7 @@ export class ContextServiceClient {
     if (!this.isPersistentContextCacheEnabled()) return;
     this.loadPersistentContextCacheIfNeeded();
 
-    const MAX_ENTRIES = 100;
-    if (this.persistentContextCache.size >= MAX_ENTRIES) {
+    if (this.persistentContextCache.size >= PERSISTENT_CONTEXT_CACHE_MAX_ENTRIES) {
       const oldestKey = this.persistentContextCache.keys().next().value;
       if (oldestKey) {
         this.persistentContextCache.delete(oldestKey);
@@ -1904,19 +1935,24 @@ export class ContextServiceClient {
         if (!result) {
           // fall through to in-process path
         } else {
+          // If the worker does not provide totalIndexable (older worker builds), avoid
+          // clobbering a previously-known fileCount with a small per-run indexed count.
+          const nextFileCount =
+            result.totalIndexable ??
+            (this.indexStatus.fileCount > 0 ? this.indexStatus.fileCount : result.indexed);
 
           if (result.indexed > 0) {
             this.updateIndexStatus({
               status: result.errors.length ? 'error' : 'idle',
               lastIndexed: new Date().toISOString(),
-              fileCount: result.totalIndexable ?? result.indexed,
+              fileCount: nextFileCount,
               lastError: result.errors.length ? result.errors[result.errors.length - 1] : undefined,
             });
           } else {
             this.updateIndexStatus({
               status: result.errors.length ? 'error' : 'idle',
               lastIndexed: new Date().toISOString(),
-              fileCount: result.totalIndexable ?? 0,
+              fileCount: nextFileCount,
               lastError: result.errors[0],
             });
           }
@@ -1990,22 +2026,30 @@ export class ContextServiceClient {
 
       // Read file contents for this batch only (streaming approach)
       const batch: Array<{ path: string; contents: string }> = [];
-      for (const relativePath of batchPaths) {
-        const contents = this.readFileContents(relativePath);
-        if (contents !== null) {
-          if (skipUnchanged && indexState) {
-            const hash = this.hashContent(contents);
-            contentHashes.set(relativePath, hash);
-            const previous = indexState.files[relativePath]?.hash;
-            if (previous && previous === hash) {
-              unchangedSkippedCount++;
-              continue;
-            }
-          }
-          batch.push({ path: relativePath, contents });
-        } else {
+      const contentsByPath = await Promise.all(
+        batchPaths.map(async (relativePath) => ({
+          relativePath,
+          contents: await this.readFileContentsAsync(relativePath),
+        }))
+      );
+
+      for (const { relativePath, contents } of contentsByPath) {
+        if (contents === null) {
           skippedCount++;
+          continue;
         }
+
+        if (skipUnchanged && indexState) {
+          const hash = this.hashContent(contents);
+          contentHashes.set(relativePath, hash);
+          const previous = indexState.files[relativePath]?.hash;
+          if (previous && previous === hash) {
+            unchangedSkippedCount++;
+            continue;
+          }
+        }
+
+        batch.push({ path: relativePath, contents });
       }
 
       if (batch.length === 0) {
@@ -2202,10 +2246,14 @@ export class ContextServiceClient {
             if (settled) return;
             settled = true;
 
+            const nextFileCount =
+              message.totalIndexable ??
+              (this.indexStatus.fileCount > 0 ? this.indexStatus.fileCount : message.count);
+
             this.updateIndexStatus({
               status: message.errors?.length ? 'error' : 'idle',
               lastIndexed: new Date().toISOString(),
-              fileCount: message.totalIndexable ?? message.count,
+              fileCount: nextFileCount,
               lastError: message.errors?.[message.errors.length - 1],
             });
 
@@ -2337,7 +2385,6 @@ export class ContextServiceClient {
       const context = await this.ensureInitialized({ skipAutoIndex: true });
       this.loadIgnorePatterns();
 
-      const files: Array<{ path: string; contents: string }> = [];
       const errors: string[] = [];
       let skipped = 0;
       let unchangedSkippedCount = 0;
@@ -2350,6 +2397,7 @@ export class ContextServiceClient {
       const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
       const indexedAtIso = new Date().toISOString();
 
+      const normalizedPaths: string[] = [];
       for (const rawPath of uniquePaths) {
         // Normalize and ensure path stays within workspace
         const relativePath = path.isAbsolute(rawPath)
@@ -2371,8 +2419,29 @@ export class ContextServiceClient {
           continue;
         }
 
-        const contents = this.readFileContents(relativePath);
-        if (contents !== null) {
+        normalizedPaths.push(relativePath);
+      }
+
+      let successCount = 0;
+      const BATCH_SIZE = Number.parseInt(process.env.CE_INDEX_BATCH_SIZE ?? '10', 10) || 10;
+      for (let i = 0; i < normalizedPaths.length; i += BATCH_SIZE) {
+        const batchPaths = normalizedPaths.slice(i, i + BATCH_SIZE);
+        const isLastBatch = i + BATCH_SIZE >= normalizedPaths.length;
+
+        const contentsByPath = await Promise.all(
+          batchPaths.map(async (relativePath) => ({
+            relativePath,
+            contents: await this.readFileContentsAsync(relativePath),
+          }))
+        );
+
+        const batch: Array<{ path: string; contents: string }> = [];
+        for (const { relativePath, contents } of contentsByPath) {
+          if (contents === null) {
+            skipped++;
+            continue;
+          }
+
           if (skipUnchanged && indexState) {
             const hash = this.hashContent(contents);
             contentHashes.set(relativePath, hash);
@@ -2382,30 +2451,14 @@ export class ContextServiceClient {
               continue;
             }
           }
-          files.push({ path: relativePath, contents });
-        } else {
-          skipped++;
+
+          batch.push({ path: relativePath, contents });
         }
-      }
 
-      if (files.length === 0) {
-        this.updateIndexStatus({
-          status: 'error',
-          lastError: 'No indexable file changes provided',
-        });
-        return {
-          indexed: 0,
-          skipped: skipped + unchangedSkippedCount,
-          errors: ['No indexable file changes provided'],
-          duration: Date.now() - startTime,
-        };
-      }
+        if (batch.length === 0) {
+          continue;
+        }
 
-      let successCount = 0;
-      const BATCH_SIZE = Number.parseInt(process.env.CE_INDEX_BATCH_SIZE ?? '10', 10) || 10;
-      for (let i = 0; i < files.length; i += BATCH_SIZE) {
-        const batch = files.slice(i, i + BATCH_SIZE);
-        const isLastBatch = i + BATCH_SIZE >= files.length;
         try {
           await context.addToIndex(batch, { waitForIndexing: isLastBatch });
           successCount += batch.length;
@@ -2431,6 +2484,37 @@ export class ContextServiceClient {
             }
           }
         }
+      }
+
+      if (successCount === 0 && unchangedSkippedCount > 0 && errors.length === 0) {
+        // Successful no-op (all requested files unchanged or otherwise skipped by optimization).
+        this.updateIndexStatus({
+          status: 'idle',
+          lastIndexed: new Date().toISOString(),
+        });
+        this.clearCache();
+        return {
+          indexed: 0,
+          skipped: skipped + unchangedSkippedCount,
+          errors: [],
+          duration: Date.now() - startTime,
+          unchangedSkipped: unchangedSkippedCount,
+        };
+      }
+
+      if (successCount === 0 && errors.length === 0) {
+        this.updateIndexStatus({
+          status: 'error',
+          lastError: 'No indexable file changes provided',
+        });
+        this.clearCache();
+        return {
+          indexed: 0,
+          skipped: skipped + unchangedSkippedCount,
+          errors: ['No indexable file changes provided'],
+          duration: Date.now() - startTime,
+          unchangedSkipped: unchangedSkippedCount,
+        };
       }
 
       if (store && successfulPaths.size > 0) {

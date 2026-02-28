@@ -138,6 +138,119 @@ export interface ValidateContentArgs {
 }
 
 // ============================================================================
+// Input Validation Constants & Helpers
+// ============================================================================
+
+const MAX_COMMIT_HASH_LENGTH = 200;
+const MAX_BASE_REF_LENGTH = 256;
+const MAX_SESSION_ID_LENGTH = 128;
+const MAX_CONTENT_LENGTH = 1_000_000;
+const MAX_CHANGED_FILES_INPUT_LENGTH = 100_000;
+const MAX_CHANGED_FILES_COUNT = 5000;
+const MAX_FILE_PATH_LENGTH = 1024;
+const MAX_LINES_CHANGED = 10_000_000;
+const MAX_REACTIVE_WORKERS = 64;
+
+function validateRequiredString(
+    value: unknown,
+    fieldName: string,
+    maxLength: number,
+    missingMessage = `${fieldName} is required`
+): string {
+    if (typeof value !== 'string') {
+        throw new Error(missingMessage);
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed) {
+        throw new Error(missingMessage);
+    }
+
+    if (trimmed.length > maxLength) {
+        throw new Error(`${fieldName} exceeds maximum length (${maxLength})`);
+    }
+
+    return trimmed;
+}
+
+function validateOptionalNonNegativeInteger(
+    value: unknown,
+    fieldName: string,
+    maxValue: number
+): number | undefined {
+    if (value === undefined || value === null) {
+        return undefined;
+    }
+
+    if (typeof value !== 'number' || !Number.isFinite(value) || !Number.isInteger(value)) {
+        throw new Error(`${fieldName} must be an integer`);
+    }
+
+    if (value < 0) {
+        throw new Error(`${fieldName} must be non-negative`);
+    }
+
+    if (value > maxValue) {
+        throw new Error(`${fieldName} exceeds maximum value (${maxValue})`);
+    }
+
+    return value;
+}
+
+function parseChangedFilesInput(changedFilesInput: unknown): string[] {
+    const raw = validateRequiredString(
+        changedFilesInput,
+        'changed_files',
+        MAX_CHANGED_FILES_INPUT_LENGTH
+    );
+
+    let parsedEntries: unknown[];
+    const trimmed = raw.trim();
+
+    if (trimmed.startsWith('[')) {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(trimmed);
+        } catch {
+            throw new Error('changed_files must be valid CSV or JSON array string');
+        }
+
+        if (!Array.isArray(parsed)) {
+            throw new Error('changed_files JSON input must be an array of file paths');
+        }
+
+        parsedEntries = parsed;
+    } else {
+        parsedEntries = raw.split(',');
+    }
+
+    if (parsedEntries.length === 0) {
+        throw new Error('changed_files must include at least one file path');
+    }
+
+    if (parsedEntries.length > MAX_CHANGED_FILES_COUNT) {
+        throw new Error(`changed_files exceeds maximum entries (${MAX_CHANGED_FILES_COUNT})`);
+    }
+
+    return parsedEntries.map((entry, index) => {
+        if (typeof entry !== 'string') {
+            throw new Error(`changed_files[${index}] must be a string path`);
+        }
+
+        const path = entry.trim();
+        if (!path) {
+            throw new Error(`changed_files[${index}] must be a non-empty path`);
+        }
+
+        if (path.length > MAX_FILE_PATH_LENGTH) {
+            throw new Error(`changed_files[${index}] exceeds maximum length (${MAX_FILE_PATH_LENGTH})`);
+        }
+
+        return path;
+    });
+}
+
+// ============================================================================
 // Tool Handlers
 // ============================================================================
 
@@ -155,6 +268,13 @@ export async function handleReactiveReviewPR(
     const startTime = Date.now();
 
     try {
+        const commitHash = validateRequiredString(args.commit_hash, 'commit_hash', MAX_COMMIT_HASH_LENGTH);
+        const baseRef = validateRequiredString(args.base_ref, 'base_ref', MAX_BASE_REF_LENGTH);
+        const changedFiles = parseChangedFilesInput(args.changed_files);
+        const additions = validateOptionalNonNegativeInteger(args.additions, 'additions', MAX_LINES_CHANGED);
+        const deletions = validateOptionalNonNegativeInteger(args.deletions, 'deletions', MAX_LINES_CHANGED);
+        const maxWorkers = validateOptionalNonNegativeInteger(args.max_workers, 'max_workers', MAX_REACTIVE_WORKERS);
+
         // Check if reactive features are enabled
         if (!isPhaseEnabled(2)) {
             return JSON.stringify({
@@ -165,28 +285,20 @@ export async function handleReactiveReviewPR(
 
         console.error('[reactive_review_pr] Starting reactive PR review...');
 
-        // Parse changed files
-        let changedFiles: string[];
-        if (args.changed_files.startsWith('[')) {
-            changedFiles = JSON.parse(args.changed_files);
-        } else {
-            changedFiles = args.changed_files.split(',').map(f => f.trim());
-        }
-
         // Build PR metadata
         const prMetadata: PRMetadata = {
-            commit_hash: args.commit_hash,
-            base_ref: args.base_ref,
+            commit_hash: commitHash,
+            base_ref: baseRef,
             changed_files: changedFiles,
             title: args.title,
             author: args.author,
-            lines_added: args.additions,
-            lines_removed: args.deletions,
+            lines_added: additions,
+            lines_removed: deletions,
         };
 
         // Build start options
         const options: StartReviewOptions = {
-            max_workers: args.max_workers,
+            max_workers: maxWorkers,
         };
 
         // Get services
@@ -319,16 +431,22 @@ export async function handleGetReviewStatus(
         if (!args.session_id) {
             throw new Error('Missing session_id argument');
         }
+        const sessionId = validateRequiredString(
+            args.session_id,
+            'session_id',
+            MAX_SESSION_ID_LENGTH,
+            'Missing session_id argument'
+        );
 
         const service = getReactiveReviewService(serviceClient);
 
         // Use async version to allow plan recovery from disk
-        const status = await service.getReviewStatusAsync(args.session_id);
+        const status = await service.getReviewStatusAsync(sessionId);
 
         if (!status) {
             return JSON.stringify({
                 success: false,
-                error: `Session not found: ${args.session_id}`,
+                error: `Session not found: ${sessionId}`,
             }, null, 2);
         }
 
@@ -354,13 +472,19 @@ export async function handlePauseReview(
         if (!args.session_id) {
             throw new Error('Missing session_id argument');
         }
+        const sessionId = validateRequiredString(
+            args.session_id,
+            'session_id',
+            MAX_SESSION_ID_LENGTH,
+            'Missing session_id argument'
+        );
 
         const service = getReactiveReviewService(serviceClient);
-        await service.pauseReview(args.session_id);
+        await service.pauseReview(sessionId);
 
         return JSON.stringify({
             success: true,
-            message: `Review session ${args.session_id} paused`,
+            message: `Review session ${sessionId} paused`,
         }, null, 2);
 
     } catch (error) {
@@ -385,14 +509,20 @@ export async function handleResumeReview(
         if (!args.session_id) {
             throw new Error('Missing session_id argument');
         }
+        const sessionId = validateRequiredString(
+            args.session_id,
+            'session_id',
+            MAX_SESSION_ID_LENGTH,
+            'Missing session_id argument'
+        );
 
         const service = getReactiveReviewService(serviceClient);
-        const status = service.getReviewStatus(args.session_id);
+        const status = service.getReviewStatus(sessionId);
 
         if (!status) {
             return JSON.stringify({
                 success: false,
-                error: `Session not found: ${args.session_id}`,
+                error: `Session not found: ${sessionId}`,
             }, null, 2);
         }
 
@@ -407,7 +537,7 @@ export async function handleResumeReview(
         // The actual resume should be done programmatically with a callback.
         return JSON.stringify({
             success: true,
-            message: `Session ${args.session_id} is ready to resume. Call execute with a step executor to continue.`,
+            message: `Session ${sessionId} is ready to resume. Call execute with a step executor to continue.`,
             session_status: status.session.status,
             progress: status.progress,
         }, null, 2);
@@ -433,16 +563,22 @@ export async function handleGetReviewTelemetry(
         if (!args.session_id) {
             throw new Error('Missing session_id argument');
         }
+        const sessionId = validateRequiredString(
+            args.session_id,
+            'session_id',
+            MAX_SESSION_ID_LENGTH,
+            'Missing session_id argument'
+        );
 
         const service = getReactiveReviewService(serviceClient);
 
         // Use async version to allow plan recovery from disk
-        const status = await service.getReviewStatusAsync(args.session_id);
+        const status = await service.getReviewStatusAsync(sessionId);
 
         if (!status) {
             return JSON.stringify({
                 success: false,
-                error: `Session not found: ${args.session_id}`,
+                error: `Session not found: ${sessionId}`,
             }, null, 2);
         }
 
@@ -452,7 +588,7 @@ export async function handleGetReviewTelemetry(
 
         return JSON.stringify({
             success: true,
-            session_id: args.session_id,
+            session_id: sessionId,
             telemetry: status.telemetry,
             cache_stats: {
                 hit_rate: cacheStats.hitRate,
@@ -478,9 +614,15 @@ export async function handleScrubSecrets(
         if (!args.content) {
             throw new Error('Missing content argument');
         }
+        const content = validateRequiredString(
+            args.content,
+            'content',
+            MAX_CONTENT_LENGTH,
+            'Missing content argument'
+        );
 
         const scrubber = getSecretScrubber();
-        const result = scrubber.scrub(args.content);
+        const result = scrubber.scrub(content);
 
         return JSON.stringify({
             success: true,
@@ -512,10 +654,16 @@ export async function handleValidateContent(
         if (!args.content) {
             throw new Error('Missing content argument');
         }
+        const content = validateRequiredString(
+            args.content,
+            'content',
+            MAX_CONTENT_LENGTH,
+            'Missing content argument'
+        );
 
         const pipeline = getValidationPipeline();
         const result = pipeline.validate({
-            content: args.content,
+            content,
             contentType: args.content_type || 'raw_text',
             filePath: args.file_path,
         });

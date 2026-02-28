@@ -13,6 +13,11 @@
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import {
+    handleReactiveReviewPR,
+    handleGetReviewStatus,
+    handlePauseReview,
+    handleResumeReview,
+    handleGetReviewTelemetry,
     handleScrubSecrets,
     handleValidateContent,
     reactiveReviewPRTool,
@@ -84,6 +89,142 @@ describe('Reactive Review Tools', () => {
     });
 
     // ============================================================================
+    // reactive_review_pr Input Validation Tests
+    // ============================================================================
+
+    describe('handleReactiveReviewPR input validation', () => {
+        const mockServiceClient = {} as any;
+
+        it('should reject invalid changed_files JSON array string', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: '["src/a.ts",',
+                }, mockServiceClient)
+            ).rejects.toThrow('changed_files must be valid CSV or JSON array string');
+        });
+
+        it('should reject changed_files CSV with empty entries', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: 'src/a.ts, ,src/b.ts',
+                }, mockServiceClient)
+            ).rejects.toThrow('changed_files[1] must be a non-empty path');
+        });
+
+        it('should reject changed_files JSON array with non-string entries', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: '["src/a.ts", 42]',
+                }, mockServiceClient)
+            ).rejects.toThrow('changed_files[1] must be a string path');
+        });
+
+        it('should reject changed_files JSON array with empty path values', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: '["src/a.ts", "   "]',
+                }, mockServiceClient)
+            ).rejects.toThrow('changed_files[1] must be a non-empty path');
+        });
+
+        it('should reject commit_hash that exceeds max length', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'a'.repeat(201),
+                    base_ref: 'main',
+                    changed_files: 'src/a.ts,src/b.ts',
+                }, mockServiceClient)
+            ).rejects.toThrow('commit_hash exceeds maximum length (200)');
+        });
+
+        it('should reject base_ref that exceeds max length', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'b'.repeat(257),
+                    changed_files: '["src/a.ts","src/b.ts"]',
+                }, mockServiceClient)
+            ).rejects.toThrow('base_ref exceeds maximum length (256)');
+        });
+
+        it('should reject negative additions', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: 'src/a.ts',
+                    additions: -1,
+                }, mockServiceClient)
+            ).rejects.toThrow('additions must be non-negative');
+        });
+
+        it('should reject deletions above sane max', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: 'src/a.ts',
+                    deletions: 10_000_001,
+                }, mockServiceClient)
+            ).rejects.toThrow('deletions exceeds maximum value (10000000)');
+        });
+
+        it('should reject max_workers above sane max', async () => {
+            await expect(
+                handleReactiveReviewPR({
+                    commit_hash: 'abc123',
+                    base_ref: 'main',
+                    changed_files: 'src/a.ts',
+                    max_workers: 65,
+                }, mockServiceClient)
+            ).rejects.toThrow('max_workers exceeds maximum value (64)');
+        });
+    });
+
+    // ============================================================================
+    // Session ID Validation Tests
+    // ============================================================================
+
+    describe('session_id validation', () => {
+        const mockServiceClient = {} as any;
+        const longSessionId = 's'.repeat(129);
+
+        it('get_review_status should reject oversized session_id', async () => {
+            await expect(
+                handleGetReviewStatus({ session_id: longSessionId }, mockServiceClient)
+            ).rejects.toThrow('session_id exceeds maximum length (128)');
+        });
+
+        it('pause_review should reject oversized session_id', async () => {
+            const result = await handlePauseReview({ session_id: longSessionId }, mockServiceClient);
+            const parsed = JSON.parse(result);
+            expect(parsed.success).toBe(false);
+            expect(parsed.error).toContain('session_id exceeds maximum length (128)');
+        });
+
+        it('resume_review should reject oversized session_id', async () => {
+            const result = await handleResumeReview({ session_id: longSessionId }, mockServiceClient);
+            const parsed = JSON.parse(result);
+            expect(parsed.success).toBe(false);
+            expect(parsed.error).toContain('session_id exceeds maximum length (128)');
+        });
+
+        it('get_review_telemetry should reject oversized session_id', async () => {
+            await expect(
+                handleGetReviewTelemetry({ session_id: longSessionId }, mockServiceClient)
+            ).rejects.toThrow('session_id exceeds maximum length (128)');
+        });
+    });
+
+    // ============================================================================
     // scrub_secrets Tool Tests
     // ============================================================================
 
@@ -151,6 +292,12 @@ describe('Reactive Review Tools', () => {
             await expect(
                 handleScrubSecrets({ content: '' })
             ).rejects.toThrow('Missing content argument');
+        });
+
+        it('should reject oversized content', async () => {
+            await expect(
+                handleScrubSecrets({ content: 'x'.repeat(1_000_001) })
+            ).rejects.toThrow('content exceeds maximum length (1000000)');
         });
 
         it('should include processing time', async () => {
@@ -230,6 +377,12 @@ describe('Reactive Review Tools', () => {
             await expect(
                 handleValidateContent({ content: '', content_type: 'raw_text' })
             ).rejects.toThrow('Missing content argument');
+        });
+
+        it('should reject oversized content', async () => {
+            await expect(
+                handleValidateContent({ content: 'x'.repeat(1_000_001), content_type: 'raw_text' })
+            ).rejects.toThrow('content exceeds maximum length (1000000)');
         });
 
         it('should include tiers run', async () => {

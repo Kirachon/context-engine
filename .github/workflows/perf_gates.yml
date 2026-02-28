@@ -1,0 +1,79 @@
+name: Performance Gates
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: "30 2 * * *"
+  workflow_dispatch:
+    inputs:
+      baseline_path:
+        description: "Baseline benchmark JSON path"
+        required: false
+        default: "bench-baseline.json"
+
+permissions:
+  contents: read
+
+jobs:
+  pr_gate:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
+      AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run benchmark suite and compare (PR mode)
+        run: npm run bench:ci:pr
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-gate-pr-artifacts
+          path: artifacts/bench/
+          if-no-files-found: warn
+
+  nightly_gate:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    env:
+      AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
+      AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Run benchmark suite and compare (Nightly mode)
+        run: npm run bench:ci:nightly
+
+      - name: Upload benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-gate-nightly-artifacts
+          path: artifacts/bench/
+          if-no-files-found: warn

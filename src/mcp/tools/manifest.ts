@@ -42,10 +42,14 @@ const manifest = {
     'reindex_workspace',
     'clear_index',
     'tool_manifest',
+    // Memory Tools (v1.4.1)
+    'add_memory',
+    'list_memories',
     // Planning Tools (v1.4.0)
     'create_plan',
     'refine_plan',
     'visualize_plan',
+    'execute_plan',
     // Plan Persistence Tools (v1.4.0)
     'save_plan',
     'load_plan',
@@ -68,9 +72,18 @@ const manifest = {
     'review_git_diff',
     // Enterprise Review (v1.8.0)
     'review_diff',
+    'review_auto',
     // Ecosystem utilities (optional)
     'check_invariants',
     'run_static_analysis',
+    // Reactive Review tools (v1.6.0)
+    'reactive_review_pr',
+    'get_review_status',
+    'pause_review',
+    'resume_review',
+    'get_review_telemetry',
+    'scrub_secrets',
+    'validate_content',
   ],
   features: {
     planning: {

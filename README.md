@@ -6,6 +6,8 @@ A **local-first**, **agent-agnostic** Model Context Protocol (MCP) server implem
 >
 > 🚀 **Quick Start**: [QUICKSTART.md](QUICKSTART.md) → [GETTING_STARTED.md](GETTING_STARTED.md) → [API_REFERENCE.md](API_REFERENCE.md)
 >
+> 🪟 **Windows Deployment**: [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)
+>
 > 🏗️ **Architecture**: [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md) for deep technical dive
 
 ## Architecture

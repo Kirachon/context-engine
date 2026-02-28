@@ -19,7 +19,12 @@
     "verify": "node verify-setup.js",
     "index": "tsx src/index.ts --workspace . --index",
     "inspector": "npx @modelcontextprotocol/inspector tsx src/index.ts --workspace .",
-    "bench": "tsx scripts/bench.ts"
+    "bench": "tsx scripts/bench.ts",
+    "bench:compare": "node --import tsx scripts/ci/bench-compare.ts",
+    "bench:pr": "npm run bench:compare -- --baseline bench-baseline.json --candidate bench-candidate.json --metric payload.timing.p95_ms --max-regression-pct 10 --max-regression-abs 25",
+    "bench:ci:pr": "node --import tsx scripts/ci/run-bench-suite.ts --mode pr",
+    "bench:ci:nightly": "node --import tsx scripts/ci/run-bench-suite.ts --mode nightly",
+    "bench:ci:release": "node --import tsx scripts/ci/release-bench.ts"
   },
   "keywords": [
     "mcp",

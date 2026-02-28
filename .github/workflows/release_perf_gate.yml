@@ -1,0 +1,104 @@
+name: Release Performance Gate
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Benchmark mode to execute for release gate"
+        type: choice
+        options:
+          - scan
+          - search
+          - retrieve
+        default: search
+      baseline_path:
+        description: "Baseline benchmark JSON path"
+        required: false
+        default: "nightly-baseline.json"
+      candidate_path:
+        description: "Optional candidate output file/dir/prefix relative to artifact dir unless absolute"
+        required: false
+        default: ""
+      metric:
+        description: "Dot-path metric used by compare gate"
+        required: false
+        default: "payload.timing.p95_ms"
+      max_regression_pct:
+        description: "Allowed percent regression (release is strict)"
+        required: false
+        default: "5"
+      max_regression_abs:
+        description: "Allowed absolute regression in metric units"
+        required: false
+        default: "15"
+
+permissions:
+  contents: read
+
+jobs:
+  release_gate:
+    runs-on: ubuntu-latest
+    env:
+      AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
+      AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
+      BENCH_MODE: ${{ inputs.mode }}
+      BASELINE_PATH: ${{ inputs.baseline_path }}
+      CANDIDATE_PATH_INPUT: ${{ inputs.candidate_path }}
+      METRIC: ${{ inputs.metric }}
+      MAX_REGRESSION_PCT: ${{ inputs.max_regression_pct }}
+      MAX_REGRESSION_ABS: ${{ inputs.max_regression_abs }}
+      BENCH_ARTIFACT_DIR: artifacts/bench/release
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Validate release gate prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "${BENCH_ARTIFACT_DIR}"
+
+          BASELINE_CHECK="${BASELINE_PATH}"
+          if [ ! -f "${BASELINE_CHECK}" ]; then
+            BASELINE_CHECK="${BENCH_ARTIFACT_DIR}/${BASELINE_PATH}"
+          fi
+
+          if [ ! -f "${BASELINE_CHECK}" ]; then
+            echo "::error::Baseline benchmark file not found."
+            echo "::error::Checked '${BASELINE_PATH}' and '${BENCH_ARTIFACT_DIR}/${BASELINE_PATH}'."
+            echo "::error::Provide an existing baseline via workflow input 'baseline_path'."
+            exit 1
+          fi
+
+      - name: Run release benchmark gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          CANDIDATE_ARG=()
+          if [ -n "${CANDIDATE_PATH_INPUT}" ]; then
+            CANDIDATE_ARG=(--candidate "${CANDIDATE_PATH_INPUT}")
+          fi
+
+          npm run bench:ci:release -- \
+            --mode "${BENCH_MODE}" \
+            --out-dir "${BENCH_ARTIFACT_DIR}" \
+            --baseline "${BASELINE_PATH}" \
+            "${CANDIDATE_ARG[@]}"
+
+      - name: Upload release benchmark artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-perf-gate-artifacts
+          path: ${{ env.BENCH_ARTIFACT_DIR }}/
+          if-no-files-found: warn

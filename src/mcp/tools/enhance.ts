@@ -29,6 +29,8 @@ export interface EnhancePromptArgs {
   prompt: string;
 }
 
+const MAX_PROMPT_LENGTH = 10000;
+
 // ============================================================================
 // AI-Powered Enhancement (using searchAndAsk)
 // ============================================================================
@@ -45,19 +47,20 @@ export async function handleEnhancePrompt(
   serviceClient: ContextServiceClient
 ): Promise<string> {
   const { prompt } = args;
+  const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : prompt;
 
   // Validate inputs
-  if (!prompt || typeof prompt !== 'string') {
+  if (!normalizedPrompt || typeof normalizedPrompt !== 'string') {
     throw new Error('Invalid prompt parameter: must be a non-empty string');
   }
 
-  if (prompt.length > 10000) {
-    throw new Error('Prompt too long: maximum 10000 characters');
+  if (normalizedPrompt.length > MAX_PROMPT_LENGTH) {
+    throw new Error(`Prompt too long: maximum ${MAX_PROMPT_LENGTH} characters`);
   }
 
   // Always use AI-powered enhancement
   console.error('[enhance_prompt] Using AI-powered enhancement mode');
-  return internalPromptEnhancer(prompt, serviceClient);
+  return internalPromptEnhancer(normalizedPrompt, serviceClient);
 }
 
 /**

@@ -18,12 +18,18 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
    - Architecture diagram
    - Usage examples
 
+3. **[docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)** - Full Windows deployment manual
+   - Step-by-step beginner guide
+   - Windows-specific commands
+   - Troubleshooting and maintenance
+
 ## 📚 Core Documentation
 
 ### For Users
 
 - **[QUICKSTART.md](QUICKSTART.md)** - Fast setup guide
 - **[README.md](README.md)** - Complete user guide
+- **[docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)** - Full Windows deployment manual
 - **[EXAMPLES.md](EXAMPLES.md)** - Real-world usage examples
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
 - **[TESTING.md](TESTING.md)** - How to test the server
@@ -41,6 +47,9 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 
 #### Install and Run
 → [QUICKSTART.md](QUICKSTART.md) - Steps 1-4
+
+#### Deploy on Windows (Beginner-Friendly)
+→ [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md) - Full walkthrough
 
 #### Configure Codex CLI
 → [QUICKSTART.md](QUICKSTART.md) - Step 5
@@ -74,6 +83,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 |------|---------|----------|
 | [README.md](README.md) | Project overview and usage | Everyone |
 | [QUICKSTART.md](QUICKSTART.md) | 5-minute setup guide | New users |
+| [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md) | Full Windows deployment manual | Windows users |
 | [EXAMPLES.md](EXAMPLES.md) | Real-world usage examples | Users |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Detailed architecture | Developers |
 | [TESTING.md](TESTING.md) | Testing strategies | Users & Developers |
@@ -217,4 +227,3 @@ Before asking for help, verify:
 **Need help?** → [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 
 **Want to understand?** → [ARCHITECTURE.md](ARCHITECTURE.md)
-

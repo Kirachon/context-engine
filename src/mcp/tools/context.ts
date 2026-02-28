@@ -29,6 +29,8 @@ export interface GetContextArgs {
   bypass_cache?: boolean;
 }
 
+const MAX_QUERY_LENGTH = 1000;
+
 /**
  * Get the syntax highlighting language for a file extension
  */
@@ -87,14 +89,15 @@ export async function handleGetContext(
     min_relevance = 0.3,
     bypass_cache = false,
   } = args;
+  const normalizedQuery = typeof query === 'string' ? query.trim() : query;
 
   // Validate inputs
-  if (!query || typeof query !== 'string') {
+  if (!normalizedQuery || typeof normalizedQuery !== 'string') {
     throw new Error('Invalid query parameter: must be a non-empty string');
   }
 
-  if (query.length > 1000) {
-    throw new Error('Query too long: maximum 1000 characters');
+  if (normalizedQuery.length > MAX_QUERY_LENGTH) {
+    throw new Error(`Query too long: maximum ${MAX_QUERY_LENGTH} characters`);
   }
 
   if (max_files !== undefined && (typeof max_files !== 'number' || max_files < 1 || max_files > 20)) {
@@ -109,6 +112,17 @@ export async function handleGetContext(
     throw new Error('Invalid bypass_cache parameter: must be a boolean');
   }
 
+  if (include_related !== undefined && typeof include_related !== 'boolean') {
+    throw new Error('Invalid include_related parameter: must be a boolean');
+  }
+
+  if (
+    min_relevance !== undefined &&
+    (typeof min_relevance !== 'number' || !Number.isFinite(min_relevance) || min_relevance < 0 || min_relevance > 1)
+  ) {
+    throw new Error('Invalid min_relevance parameter: must be a number between 0 and 1');
+  }
+
   // Build options
   const options: ContextOptions = {
     maxFiles: max_files,
@@ -119,7 +133,7 @@ export async function handleGetContext(
     bypassCache: bypass_cache,
   };
 
-  const contextBundle = await internalContextBundle(query, serviceClient, options);
+  const contextBundle = await internalContextBundle(normalizedQuery, serviceClient, options);
 
   // Format enhanced context bundle for agent consumption
   let output = '';
@@ -128,7 +142,7 @@ export async function handleGetContext(
   // Header with summary and metadata
   // =========================================================================
   output += `# 📚 Codebase Context\n\n`;
-  output += `**Query:** "${query}"\n\n`;
+  output += `**Query:** "${normalizedQuery}"\n\n`;
   output += `> ${contextBundle.summary}\n\n`;
 
   // Metadata section

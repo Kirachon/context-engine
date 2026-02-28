@@ -47,6 +47,10 @@ export interface ReviewChangesArgs {
   exclude_patterns?: string;
 }
 
+const MAX_DIFF_LENGTH = 1_000_000;
+const MAX_CUSTOM_INSTRUCTIONS_LENGTH = 10_000;
+const MAX_FILE_CONTEXTS_LENGTH = 2_000_000;
+
 // ============================================================================
 // Tool Handler
 // ============================================================================
@@ -67,14 +71,45 @@ export async function handleReviewChanges(
     if (!args.diff || typeof args.diff !== 'string') {
       throw new Error('Missing or invalid "diff" argument. Provide a unified diff string.');
     }
+    const normalizedDiff = args.diff.trim();
+    if (!normalizedDiff) {
+      throw new Error('Missing or invalid "diff" argument. Provide a unified diff string.');
+    }
+    if (normalizedDiff.length > MAX_DIFF_LENGTH) {
+      throw new Error(`Invalid "diff": maximum ${MAX_DIFF_LENGTH} characters`);
+    }
+
+    if (args.custom_instructions !== undefined) {
+      if (typeof args.custom_instructions !== 'string') {
+        throw new Error('Invalid "custom_instructions": must be a string');
+      }
+      if (args.custom_instructions.length > MAX_CUSTOM_INSTRUCTIONS_LENGTH) {
+        throw new Error(`Invalid "custom_instructions": maximum ${MAX_CUSTOM_INSTRUCTIONS_LENGTH} characters`);
+      }
+    }
 
     // Parse file contexts if provided
     let fileContexts: Record<string, string> | undefined;
-    if (args.file_contexts) {
+    if (args.file_contexts !== undefined) {
+      if (typeof args.file_contexts !== 'string') {
+        throw new Error('Invalid "file_contexts": must be a JSON string');
+      }
+      if (args.file_contexts.length > MAX_FILE_CONTEXTS_LENGTH) {
+        throw new Error(`Invalid "file_contexts": maximum ${MAX_FILE_CONTEXTS_LENGTH} characters`);
+      }
       try {
         fileContexts = JSON.parse(args.file_contexts);
       } catch {
         throw new Error('Invalid "file_contexts" JSON format');
+      }
+      if (fileContexts === null || typeof fileContexts !== 'object' || Array.isArray(fileContexts)) {
+        throw new Error('Invalid "file_contexts" JSON format: expected an object map of file path to content');
+      }
+      const invalidFileContextEntry = Object.entries(fileContexts).find(
+        ([filePath, content]) => typeof filePath !== 'string' || !filePath || typeof content !== 'string'
+      );
+      if (invalidFileContextEntry) {
+        throw new Error('Invalid "file_contexts" JSON format: all values must be strings');
       }
     }
 
@@ -105,13 +140,13 @@ export async function handleReviewChanges(
       max_findings: args.max_findings,
       categories,
       changed_lines_only: args.changed_lines_only,
-      custom_instructions: args.custom_instructions,
+      custom_instructions: args.custom_instructions?.trim(),
       exclude_patterns: excludePatterns,
     };
 
     // Build review input
     const input: ReviewChangesInput = {
-      diff: args.diff,
+      diff: normalizedDiff,
       file_contexts: fileContexts,
       base_ref: args.base_ref,
       options,

@@ -1,6 +1,8 @@
 import { envBool } from './env.js';
 
 export interface FeatureFlags {
+  /** Global rollout kill switch for retrieval pipeline optimizations. */
+  rollout_kill_switch: boolean;
   /** Persist per-file index state store (JSON sidecar). */
   index_state_store: boolean;
   /** Skip indexing unchanged files (requires index_state_store). */
@@ -15,6 +17,7 @@ export interface FeatureFlags {
 
 export function getFeatureFlagsFromEnv(): FeatureFlags {
  return {
+   rollout_kill_switch: envBool('CE_ROLLOUT_KILL_SWITCH', false),
    index_state_store: envBool('CE_INDEX_STATE_STORE', false),
    skip_unchanged_indexing: envBool('CE_SKIP_UNCHANGED_INDEXING', false),
    hash_normalize_eol: envBool('CE_HASH_NORMALIZE_EOL', false),

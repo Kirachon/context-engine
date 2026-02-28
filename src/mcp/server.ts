@@ -76,6 +76,7 @@ import { reviewDiffTool, handleReviewDiff } from './tools/reviewDiff.js';
 import { reviewAutoTool, handleReviewAuto } from './tools/reviewAuto.js';
 import { checkInvariantsTool, handleCheckInvariants } from './tools/checkInvariants.js';
 import { runStaticAnalysisTool, handleRunStaticAnalysis } from './tools/staticAnalysis.js';
+import { incCounter, observeDurationMs } from '../metrics/metrics.js';
 import {
   reactiveReviewTools,
   handleReactiveReviewPR,
@@ -87,6 +88,12 @@ import {
   handleValidateContent,
 } from './tools/reactiveReview.js';
 import { FileWatcher } from '../watcher/index.js';
+
+type ToolHandler = (args: unknown) => Promise<string>;
+type ToolRegistryEntry = {
+  tool: { name: string };
+  handler: ToolHandler;
+};
 
 export class ContextEngineMCPServer {
   private server: Server;
@@ -298,40 +305,73 @@ export class ContextEngineMCPServer {
   }
 
   private setupHandlers(): void {
+    const findToolByName = (tools: Array<{ name: string }>, name: string): { name: string } => {
+      const tool = tools.find((t) => t.name === name);
+      if (!tool) {
+        throw new Error(`Tool definition not found: ${name}`);
+      }
+      return tool;
+    };
+
+    const toolRegistryEntries: ToolRegistryEntry[] = [
+      { tool: indexWorkspaceTool, handler: (args) => handleIndexWorkspace(args as any, this.serviceClient) },
+      { tool: codebaseRetrievalTool, handler: (args) => handleCodebaseRetrieval(args as any, this.serviceClient) },
+      { tool: semanticSearchTool, handler: (args) => handleSemanticSearch(args as any, this.serviceClient) },
+      { tool: getFileTool, handler: (args) => handleGetFile(args as any, this.serviceClient) },
+      { tool: getContextTool, handler: (args) => handleGetContext(args as any, this.serviceClient) },
+      { tool: enhancePromptTool, handler: (args) => handleEnhancePrompt(args as any, this.serviceClient) },
+      { tool: indexStatusTool, handler: (args) => handleIndexStatus(args as any, this.serviceClient) },
+      { tool: reindexWorkspaceTool, handler: (args) => handleReindexWorkspace(args as any, this.serviceClient) },
+      { tool: clearIndexTool, handler: (args) => handleClearIndex(args as any, this.serviceClient) },
+      { tool: toolManifestTool, handler: (args) => handleToolManifest(args as any, this.serviceClient) },
+      // Memory tools (v1.4.1)
+      { tool: addMemoryTool, handler: (args) => handleAddMemory(args as any, this.serviceClient) },
+      { tool: listMemoriesTool, handler: (args) => handleListMemories(args as any, this.serviceClient) },
+      // Planning tools (Phase 1)
+      { tool: createPlanTool, handler: (args) => handleCreatePlan(args as any, this.serviceClient) },
+      { tool: refinePlanTool, handler: (args) => handleRefinePlan(args as any, this.serviceClient) },
+      { tool: visualizePlanTool, handler: (args) => handleVisualizePlan(args as any, this.serviceClient) },
+      { tool: executePlanTool, handler: (args) => handleExecutePlan(args as any, this.serviceClient) },
+      // Plan management tools (Phase 2)
+      { tool: findToolByName(planManagementTools, 'save_plan'), handler: (args) => handleSavePlan(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'load_plan'), handler: (args) => handleLoadPlan(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'list_plans'), handler: (args) => handleListPlans(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'delete_plan'), handler: (args) => handleDeletePlan(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'request_approval'), handler: (args) => handleRequestApproval(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'respond_approval'), handler: (args) => handleRespondApproval(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'start_step'), handler: (args) => handleStartStep(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'complete_step'), handler: (args) => handleCompleteStep(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'fail_step'), handler: (args) => handleFailStep(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'view_progress'), handler: (args) => handleViewProgress(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'view_history'), handler: (args) => handleViewHistory(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'compare_plan_versions'), handler: (args) => handleComparePlanVersions(args as Record<string, unknown>) },
+      { tool: findToolByName(planManagementTools, 'rollback_plan'), handler: (args) => handleRollbackPlan(args as Record<string, unknown>) },
+      // Code Review tools (v1.5.0)
+      { tool: reviewChangesTool, handler: (args) => handleReviewChanges(args as any, this.serviceClient) },
+      { tool: reviewGitDiffTool, handler: (args) => handleReviewGitDiff(args as any, this.serviceClient) },
+      { tool: reviewDiffTool, handler: (args) => handleReviewDiff(args as any, this.serviceClient) },
+      { tool: reviewAutoTool, handler: (args) => handleReviewAuto(args as any, this.serviceClient) },
+      { tool: checkInvariantsTool, handler: (args) => handleCheckInvariants(args as any, this.serviceClient) },
+      { tool: runStaticAnalysisTool, handler: (args) => handleRunStaticAnalysis(args as any, this.serviceClient) },
+      // Reactive Review tools (Phase 4)
+      { tool: findToolByName(reactiveReviewTools, 'reactive_review_pr'), handler: (args) => handleReactiveReviewPR(args as any, this.serviceClient) },
+      { tool: findToolByName(reactiveReviewTools, 'get_review_status'), handler: (args) => handleGetReviewStatus(args as any, this.serviceClient) },
+      { tool: findToolByName(reactiveReviewTools, 'pause_review'), handler: (args) => handlePauseReview(args as any, this.serviceClient) },
+      { tool: findToolByName(reactiveReviewTools, 'resume_review'), handler: (args) => handleResumeReview(args as any, this.serviceClient) },
+      { tool: findToolByName(reactiveReviewTools, 'get_review_telemetry'), handler: (args) => handleGetReviewTelemetry(args as any, this.serviceClient) },
+      { tool: findToolByName(reactiveReviewTools, 'scrub_secrets'), handler: (args) => handleScrubSecrets(args as any) },
+      { tool: findToolByName(reactiveReviewTools, 'validate_content'), handler: (args) => handleValidateContent(args as any) },
+    ];
+
+    const tools = toolRegistryEntries.map((entry) => entry.tool);
+    const toolHandlers = new Map<string, ToolHandler>(
+      toolRegistryEntries.map((entry) => [entry.tool.name, entry.handler])
+    );
+
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => {
       return {
-        tools: [
-          indexWorkspaceTool,
-          codebaseRetrievalTool,
-          semanticSearchTool,
-          getFileTool,
-          getContextTool,
-          enhancePromptTool,
-          indexStatusTool,
-          reindexWorkspaceTool,
-          clearIndexTool,
-          toolManifestTool,
-          // Memory tools (v1.4.1)
-          addMemoryTool,
-          listMemoriesTool,
-          // Planning tools (Phase 1)
-          createPlanTool,
-          refinePlanTool,
-          visualizePlanTool,
-          executePlanTool,
-          // Plan management tools (Phase 2)
-          ...planManagementTools,
-          // Code Review tools (v1.5.0)
-          reviewChangesTool,
-          reviewGitDiffTool,
-          reviewDiffTool,
-          reviewAutoTool,
-          checkInvariantsTool,
-          runStaticAnalysisTool,
-          // Reactive Review tools (Phase 4)
-          ...reactiveReviewTools,
-        ],
+        tools,
       };
     });
 
@@ -339,190 +379,17 @@ export class ContextEngineMCPServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       const startTime = Date.now();
+      let metricsResult: 'success' | 'error' = 'success';
 
       // Log request (to stderr so it doesn't interfere with stdio transport)
       console.error(`[${new Date().toISOString()}] Tool: ${name}`);
 
       try {
-        let result: string;
-
-        switch (name) {
-          case 'index_workspace':
-            result = await handleIndexWorkspace(args as any, this.serviceClient);
-            break;
-
-          case 'reindex_workspace':
-            result = await handleReindexWorkspace(args as any, this.serviceClient);
-            break;
-
-          case 'clear_index':
-            result = await handleClearIndex(args as any, this.serviceClient);
-            break;
-
-          case 'index_status':
-            result = await handleIndexStatus(args as any, this.serviceClient);
-            break;
-
-          case 'tool_manifest':
-            result = await handleToolManifest(args as any, this.serviceClient);
-            break;
-
-          case 'codebase_retrieval':
-            result = await handleCodebaseRetrieval(args as any, this.serviceClient);
-            break;
-
-          case 'semantic_search':
-            result = await handleSemanticSearch(args as any, this.serviceClient);
-            break;
-
-          case 'get_file':
-            result = await handleGetFile(args as any, this.serviceClient);
-            break;
-
-          case 'get_context_for_prompt':
-            result = await handleGetContext(args as any, this.serviceClient);
-            break;
-
-          case 'enhance_prompt':
-            result = await handleEnhancePrompt(args as any, this.serviceClient);
-            break;
-
-          // Memory tools (v1.4.1)
-          case 'add_memory':
-            result = await handleAddMemory(args as any, this.serviceClient);
-            break;
-
-          case 'list_memories':
-            result = await handleListMemories(args as any, this.serviceClient);
-            break;
-
-          // Planning tools (Phase 1)
-          case 'create_plan':
-            result = await handleCreatePlan(args as any, this.serviceClient);
-            break;
-
-          case 'refine_plan':
-            result = await handleRefinePlan(args as any, this.serviceClient);
-            break;
-
-          case 'visualize_plan':
-            result = await handleVisualizePlan(args as any, this.serviceClient);
-            break;
-
-          case 'execute_plan':
-            result = await handleExecutePlan(args as any, this.serviceClient);
-            break;
-
-          // Plan management tools (Phase 2)
-          case 'save_plan':
-            result = await handleSavePlan(args as Record<string, unknown>);
-            break;
-
-          case 'load_plan':
-            result = await handleLoadPlan(args as Record<string, unknown>);
-            break;
-
-          case 'list_plans':
-            result = await handleListPlans(args as Record<string, unknown>);
-            break;
-
-          case 'delete_plan':
-            result = await handleDeletePlan(args as Record<string, unknown>);
-            break;
-
-          case 'request_approval':
-            result = await handleRequestApproval(args as Record<string, unknown>);
-            break;
-
-          case 'respond_approval':
-            result = await handleRespondApproval(args as Record<string, unknown>);
-            break;
-
-          case 'start_step':
-            result = await handleStartStep(args as Record<string, unknown>);
-            break;
-
-          case 'complete_step':
-            result = await handleCompleteStep(args as Record<string, unknown>);
-            break;
-
-          case 'fail_step':
-            result = await handleFailStep(args as Record<string, unknown>);
-            break;
-
-          case 'view_progress':
-            result = await handleViewProgress(args as Record<string, unknown>);
-            break;
-
-          case 'view_history':
-            result = await handleViewHistory(args as Record<string, unknown>);
-            break;
-
-          case 'compare_plan_versions':
-            result = await handleComparePlanVersions(args as Record<string, unknown>);
-            break;
-
-          case 'rollback_plan':
-            result = await handleRollbackPlan(args as Record<string, unknown>);
-            break;
-
-          // Code Review tools (v1.5.0)
-          case 'review_changes':
-            result = await handleReviewChanges(args as any, this.serviceClient);
-            break;
-
-          case 'review_git_diff':
-            result = await handleReviewGitDiff(args as any, this.serviceClient);
-            break;
-
-          case 'review_diff':
-            result = await handleReviewDiff(args as any, this.serviceClient);
-            break;
-
-          case 'review_auto':
-            result = await handleReviewAuto(args as any, this.serviceClient);
-            break;
-
-          case 'check_invariants':
-            result = await handleCheckInvariants(args as any, this.serviceClient);
-            break;
-
-          case 'run_static_analysis':
-            result = await handleRunStaticAnalysis(args as any, this.serviceClient);
-            break;
-
-          // Reactive Review tools (Phase 4)
-          case 'reactive_review_pr':
-            result = await handleReactiveReviewPR(args as any, this.serviceClient);
-            break;
-
-          case 'get_review_status':
-            result = await handleGetReviewStatus(args as any, this.serviceClient);
-            break;
-
-          case 'pause_review':
-            result = await handlePauseReview(args as any, this.serviceClient);
-            break;
-
-          case 'resume_review':
-            result = await handleResumeReview(args as any, this.serviceClient);
-            break;
-
-          case 'get_review_telemetry':
-            result = await handleGetReviewTelemetry(args as any, this.serviceClient);
-            break;
-
-          case 'scrub_secrets':
-            result = await handleScrubSecrets(args as any);
-            break;
-
-          case 'validate_content':
-            result = await handleValidateContent(args as any);
-            break;
-
-          default:
-            throw new Error(`Unknown tool: ${name}`);
+        const handler = toolHandlers.get(name);
+        if (!handler) {
+          throw new Error(`Unknown tool: ${name}`);
         }
+        const result = await handler(args);
 
         const elapsed = Date.now() - startTime;
         console.error(`[${new Date().toISOString()}] Tool ${name} completed in ${elapsed}ms`);
@@ -536,6 +403,7 @@ export class ContextEngineMCPServer {
           ],
         };
       } catch (error) {
+        metricsResult = 'error';
         const elapsed = Date.now() - startTime;
         const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -550,6 +418,21 @@ export class ContextEngineMCPServer {
           ],
           isError: true,
         };
+      } finally {
+        const elapsed = Date.now() - startTime;
+        const metricLabels = { tool: name, result: metricsResult };
+        incCounter(
+          'context_engine_mcp_tool_calls_total',
+          metricLabels,
+          1,
+          'Total MCP tool calls handled by the server.'
+        );
+        observeDurationMs(
+          'context_engine_mcp_tool_call_duration_seconds',
+          metricLabels,
+          elapsed,
+          { help: 'MCP tool call handling duration in seconds.' }
+        );
       }
     });
   }

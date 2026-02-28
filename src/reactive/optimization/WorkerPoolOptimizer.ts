@@ -9,6 +9,7 @@
  */
 
 import os from 'os';
+import { envBool } from '../../config/env.js';
 
 /**
  * Worker pool configuration
@@ -60,6 +61,7 @@ export class WorkerPoolOptimizer {
     private cpuCores: number;
     private optimalWorkers: number;
     private workerLoads: Map<number, number>;
+    private debug: boolean;
 
     constructor(config: Partial<WorkerPoolConfig> = {}) {
         this.config = {
@@ -72,9 +74,12 @@ export class WorkerPoolOptimizer {
         this.cpuCores = os.cpus().length;
         this.optimalWorkers = this.calculateOptimalWorkers();
         this.workerLoads = new Map();
+        this.debug = envBool('CE_DEBUG_WORKER_POOL', false) || envBool('REACTIVE_DEBUG_WORKER_POOL', false);
 
-        console.error(`[WorkerPoolOptimizer] CPU cores detected: ${this.cpuCores}`);
-        console.error(`[WorkerPoolOptimizer] Optimal workers: ${this.optimalWorkers}`);
+        if (this.debug) {
+            console.error(`[WorkerPoolOptimizer] CPU cores detected: ${this.cpuCores}`);
+            console.error(`[WorkerPoolOptimizer] Optimal workers: ${this.optimalWorkers}`);
+        }
     }
 
     /**
@@ -149,7 +154,11 @@ export class WorkerPoolOptimizer {
         const currentLoad = this.workerLoads.get(selectedWorker) || 0;
         this.workerLoads.set(selectedWorker, currentLoad + estimatedDuration);
 
-        console.error(`[WorkerPoolOptimizer] Assigned task ${taskId} to worker ${selectedWorker} (load: ${currentLoad}ms)`);
+        if (this.debug) {
+            console.error(
+                `[WorkerPoolOptimizer] Assigned task ${taskId} to worker ${selectedWorker} (load: ${currentLoad}ms)`
+            );
+        }
 
         return selectedWorker;
     }
@@ -165,7 +174,9 @@ export class WorkerPoolOptimizer {
         const newLoad = Math.max(0, currentLoad - actualDuration);
         this.workerLoads.set(workerId, newLoad);
 
-        console.error(`[WorkerPoolOptimizer] Task complete on worker ${workerId}, new load: ${newLoad}ms`);
+        if (this.debug) {
+            console.error(`[WorkerPoolOptimizer] Task complete on worker ${workerId}, new load: ${newLoad}ms`);
+        }
     }
 
     /**
@@ -181,7 +192,9 @@ export class WorkerPoolOptimizer {
         }
 
         const subtasks = Math.ceil(taskSize / maxSubtaskSize);
-        console.error(`[WorkerPoolOptimizer] Partitioned task (size ${taskSize}) into ${subtasks} subtasks`);
+        if (this.debug) {
+            console.error(`[WorkerPoolOptimizer] Partitioned task (size ${taskSize}) into ${subtasks} subtasks`);
+        }
 
         return Math.min(subtasks, this.optimalWorkers);
     }
@@ -208,7 +221,9 @@ export class WorkerPoolOptimizer {
      */
     reset(): void {
         this.workerLoads.clear();
-        console.error('[WorkerPoolOptimizer] Worker loads reset');
+        if (this.debug) {
+            console.error('[WorkerPoolOptimizer] Worker loads reset');
+        }
     }
 
     /**

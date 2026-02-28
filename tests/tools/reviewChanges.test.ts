@@ -67,5 +67,41 @@ index 1234567..abcdefg 100644
     const parsed = JSON.parse(resultStr);
     expect(normalizeReviewChanges(parsed)).toMatchSnapshot();
   });
-});
 
+  it('rejects oversized diff input', async () => {
+    const mockServiceClient = { searchAndAsk: async () => '{}' } as any;
+    const oversizedDiff = 'a'.repeat(1_000_001);
+
+    await expect(handleReviewChanges({ diff: oversizedDiff }, mockServiceClient))
+      .rejects.toThrow(/maximum 1000000 characters/i);
+  });
+
+  it('rejects invalid file_contexts json string', async () => {
+    const mockServiceClient = { searchAndAsk: async () => '{}' } as any;
+
+    await expect(
+      handleReviewChanges({ diff: 'diff --git a/a.ts b/a.ts', file_contexts: '{invalid}' }, mockServiceClient)
+    ).rejects.toThrow(/invalid "file_contexts" json format/i);
+  });
+
+  it('rejects file_contexts values that are not strings', async () => {
+    const mockServiceClient = { searchAndAsk: async () => '{}' } as any;
+    const fileContexts = JSON.stringify({ 'src/a.ts': 123 });
+
+    await expect(
+      handleReviewChanges({ diff: 'diff --git a/a.ts b/a.ts', file_contexts: fileContexts }, mockServiceClient)
+    ).rejects.toThrow(/all values must be strings/i);
+  });
+
+  it('rejects oversized custom_instructions input', async () => {
+    const mockServiceClient = { searchAndAsk: async () => '{}' } as any;
+    const customInstructions = 'x'.repeat(10_001);
+
+    await expect(
+      handleReviewChanges(
+        { diff: 'diff --git a/a.ts b/a.ts', custom_instructions: customInstructions },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/custom_instructions.*maximum 10000 characters/i);
+  });
+});
