@@ -211,7 +211,7 @@ Scope:
 - `reactive_review_pr`, `get_review_status`, `pause_review`, `resume_review`, `get_review_telemetry`, `scrub_secrets`, `validate_content`
 
 Checklist:
-- [ ] Complete shared validation/runtime migration.
+- [x] Complete shared validation/runtime migration.
 - [ ] Harden partial-failure/idempotency behavior for sessioned operations.
 - [ ] Ensure background execution failures are observable via status/telemetry.
 - [ ] Add integration tests for pause/resume/fail/recover sequences.
