@@ -187,7 +187,7 @@ Scope:
 Checklist:
 - [x] Standardize input guards and size limits across lifecycle/search tools.
 - [x] Add index freshness sanity guards for perf claims.
-- [ ] Verify parity script robustness against formatting/refactor drift.
+- [x] Verify parity script robustness against formatting/refactor drift.
 - [x] Add focused regression tests for unhealthy index and stale status paths.
 
 Progress notes:
@@ -195,6 +195,7 @@ Progress notes:
 - 2026-02-28: Added index health signaling in `codebase_retrieval`, `semantic_search`, and `get_context_for_prompt` so stale/unhealthy index states are visible alongside retrieval/performance output.
 - 2026-02-28: Standardized lifecycle/search input normalization and guard behavior (trimmed query handling, finite numeric range enforcement) with backward-compatible output contracts.
 - 2026-02-28: Added targeted stale/unhealthy regression tests in `tests/tools/lifecycle.test.ts`, `tests/tools/status.test.ts`, `tests/tools/codebaseRetrieval.test.ts`, `tests/tools/search.test.ts`, and `tests/tools/context.test.ts`.
+- 2026-02-28: Hardened `scripts/ci/check-tool-manifest-parity.ts` against formatting/refactor drift by deriving runtime inventory from both `findToolByName(...)` calls and direct `{ tool: ... }` registrations resolved via exported tool constants; coverage/evidence is the parity gate execution path (`node --import tsx scripts/ci/check-tool-manifest-parity.ts`) recorded in `docs/ROLLOUT_EVIDENCE_LOG.md`.
 
 ### Batch D - Memory + Reactive Utility Family
 Prerequisites:

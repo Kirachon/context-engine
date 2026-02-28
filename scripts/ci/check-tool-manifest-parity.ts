@@ -76,12 +76,124 @@ function extractRuntimeToolNames(serverSource: string): string[] {
   return [...fromFindToolByName, ...fromDirectConsts];
 }
 
+function extractBalancedArrayBlock(source: string, arrayStartIndex: number): string | null {
+  let depth = 0;
+  let inSingleQuote = false;
+  let inDoubleQuote = false;
+  let inTemplate = false;
+  let inLineComment = false;
+  let inBlockComment = false;
+  let escaped = false;
+
+  for (let i = arrayStartIndex; i < source.length; i += 1) {
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (inLineComment) {
+      if (ch === '\n') {
+        inLineComment = false;
+      }
+      continue;
+    }
+
+    if (inBlockComment) {
+      if (ch === '*' && next === '/') {
+        inBlockComment = false;
+        i += 1;
+      }
+      continue;
+    }
+
+    if (!inSingleQuote && !inDoubleQuote && !inTemplate) {
+      if (ch === '/' && next === '/') {
+        inLineComment = true;
+        i += 1;
+        continue;
+      }
+      if (ch === '/' && next === '*') {
+        inBlockComment = true;
+        i += 1;
+        continue;
+      }
+    }
+
+    if (inSingleQuote || inDoubleQuote || inTemplate) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+
+      if (ch === '\\') {
+        escaped = true;
+        continue;
+      }
+
+      if (inSingleQuote && ch === '\'') {
+        inSingleQuote = false;
+      } else if (inDoubleQuote && ch === '"') {
+        inDoubleQuote = false;
+      } else if (inTemplate && ch === '`') {
+        inTemplate = false;
+      }
+      continue;
+    }
+
+    if (ch === '\'') {
+      inSingleQuote = true;
+      continue;
+    }
+    if (ch === '"') {
+      inDoubleQuote = true;
+      continue;
+    }
+    if (ch === '`') {
+      inTemplate = true;
+      continue;
+    }
+
+    if (ch === '[') {
+      depth += 1;
+      continue;
+    }
+
+    if (ch === ']') {
+      depth -= 1;
+      if (depth === 0) {
+        return source.slice(arrayStartIndex + 1, i);
+      }
+      if (depth < 0) {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
 function extractManifestToolNames(manifestSource: string): string[] {
-  const toolsBlockMatch = manifestSource.match(/tools:\s*\[(.*?)\]\s*,\s*features:/s);
-  if (!toolsBlockMatch) {
+  const toolsKeyRegex = /\btools\s*:/g;
+  let toolsBlock: string | null = null;
+  let keyMatch: RegExpExecArray | null;
+
+  while ((keyMatch = toolsKeyRegex.exec(manifestSource)) !== null) {
+    let arrayStart = keyMatch.index + keyMatch[0].length;
+    while (arrayStart < manifestSource.length && /\s/.test(manifestSource[arrayStart])) {
+      arrayStart += 1;
+    }
+    if (manifestSource[arrayStart] !== '[') {
+      continue;
+    }
+    toolsBlock = extractBalancedArrayBlock(manifestSource, arrayStart);
+    if (toolsBlock !== null) {
+      break;
+    }
+  }
+
+  if (toolsBlock === null) {
     throw new Error('Unable to parse tools[] block from manifest.ts');
   }
-  return [...toolsBlockMatch[1].matchAll(/'([^']+)'/g)].map((match) => match[1]);
+
+  return [...toolsBlock.matchAll(/['"]([^'"]+)['"]/g)].map((match) => match[1]);
 }
 
 function formatList(title: string, items: string[]): void {
