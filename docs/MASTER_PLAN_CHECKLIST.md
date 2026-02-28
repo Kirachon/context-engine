@@ -228,19 +228,28 @@ Progress notes:
 
 ### WS17 - Old-Client Replay Compatibility Suite
 Checklist:
-- [ ] Create/expand old-client fixture set for all tool families.
+- [x] Create/expand old-client fixture set for all tool families.
 - [x] Run replay suite against updated server.
 - [x] Confirm no unintended response-shape drift.
 - [x] Document any intentional deltas with migration notes.
 
 Progress notes:
 - 2026-02-28: Executed snapshot replay harness and updated compatibility baselines for additive/index-health/tool-manifest deltas; reran replay to pass. Migration notes captured in `docs/COMPATIBILITY_REPLAY_NOTES_2026-02-28.md`.
+- 2026-02-28: Added `tests/snapshots/phase2/fixtures/old-client-tool-families.json` with coverage for all currently registered tool families/tools; wired fixture validation into `tests/snapshots/snapshot-harness.ts`; verified with `npm test -- tests/snapshots/oldClientFixtures.test.ts` and `node --import tsx tests/snapshots/snapshot-harness.ts`.
 
 ### WS18 - Versioning and Contract Policy
 Checklist:
-- [ ] Document canonical version source and update policy.
-- [ ] Define deprecation path and no-silent-break rule in docs.
-- [ ] Add CI check preventing inconsistent version literals.
+- [x] Document canonical version source and update policy.
+- [x] Define deprecation path and no-silent-break rule in docs.
+- [x] Add CI check preventing inconsistent version literals.
+
+Progress notes:
+- 2026-02-28: Added WS18 policy doc `docs/VERSIONING_CONTRACT_POLICY.md` defining canonical version source (`package.json`), release update policy, deprecation flow, and no-silent-break contract rule.
+- 2026-02-28: Added deterministic CI gate `scripts/ci/check-version-literals.ts` to enforce `package.json` parity for `MCP_SERVER_VERSION` and review-diff `TOOL_VERSION`.
+- 2026-02-28: Wired the gate into GitHub Actions by adding a `Check version literal consistency` step in `.github/workflows/review_diff.yml`.
+- 2026-02-28: Added focused CI script regression coverage in `tests/ci/checkVersionLiterals.test.ts` and passed evidence commands:
+  - `node --import tsx scripts/ci/check-version-literals.ts`
+  - `node --experimental-vm-modules node_modules/jest/bin/jest.js tests/ci/checkVersionLiterals.test.ts`
 
 ---
 
@@ -276,6 +285,7 @@ Checklist:
 - [x] `npx tsc --noEmit`
 - [ ] Full targeted test matrix for all migrated families
 - [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
+- [x] `node --import tsx scripts/ci/check-version-literals.ts`
 - [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
 - [x] `node --import tsx scripts/ci/validate-master-plan.ts` (checklist/evidence validator)
 - [x] Compatibility replay suite pass
@@ -304,3 +314,4 @@ Checklist:
 - [x] 2026-02-28: Implemented WS13 second migration slice (review tool validation migration + new validation tests).
 - [x] 2026-02-28: Completed WS14 shared runtime wrapper with server integration (`src/mcp/server.ts`) and regression tests (`tests/tooling/runtime.test.ts`).
 - [x] 2026-02-28: WS15 major migration completed: shared `diffInput` module adopted by review entry tools with malformed/empty/partial diff regression coverage; no-op/empty-scope policy item remains open.
+- [x] 2026-02-28: Completed WS18 policy + parity gate by adding `docs/VERSIONING_CONTRACT_POLICY.md`, `scripts/ci/check-version-literals.ts`, `tests/ci/checkVersionLiterals.test.ts`, and CI workflow enforcement in `.github/workflows/review_diff.yml` with passing evidence commands.

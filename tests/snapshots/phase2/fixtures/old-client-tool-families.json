@@ -1,0 +1,97 @@
+{
+  "version": 1,
+  "families": [
+    {
+      "family": "core_context",
+      "fixtures": [
+        { "tool": "index_workspace", "args": {} },
+        { "tool": "codebase_retrieval", "args": { "query": "auth flow", "top_k": 3 } },
+        { "tool": "semantic_search", "args": { "query": "auth flow", "top_k": 3 } },
+        { "tool": "get_file", "args": { "path": "README.md" } },
+        { "tool": "get_context_for_prompt", "args": { "query": "auth flow", "max_files": 2, "token_budget": 1200 } },
+        { "tool": "enhance_prompt", "args": { "prompt": "fix login bug" } }
+      ]
+    },
+    {
+      "family": "index_management",
+      "fixtures": [
+        { "tool": "index_status", "args": {} },
+        { "tool": "reindex_workspace", "args": {} },
+        { "tool": "clear_index", "args": {} },
+        { "tool": "tool_manifest", "args": {} }
+      ]
+    },
+    {
+      "family": "memory",
+      "fixtures": [
+        { "tool": "add_memory", "args": { "category": "facts", "content": "Legacy fixture coverage seed" } },
+        { "tool": "list_memories", "args": {} }
+      ]
+    },
+    {
+      "family": "planning",
+      "fixtures": [
+        { "tool": "create_plan", "args": { "task": "Create a minimal compatibility plan" } },
+        { "tool": "refine_plan", "args": { "current_plan": "{\"id\":\"plan_test\",\"steps\":[]}" } },
+        { "tool": "visualize_plan", "args": { "plan": "{\"id\":\"plan_test\"}", "diagram_type": "dependencies" } },
+        { "tool": "execute_plan", "args": {} }
+      ]
+    },
+    {
+      "family": "plan_management",
+      "fixtures": [
+        { "tool": "save_plan", "args": { "plan": "{\"id\":\"plan_test\"}" } },
+        { "tool": "load_plan", "args": { "plan_id": "plan_test" } },
+        { "tool": "list_plans", "args": {} },
+        { "tool": "delete_plan", "args": { "plan_id": "plan_test" } },
+        { "tool": "request_approval", "args": { "plan_id": "plan_test" } },
+        { "tool": "respond_approval", "args": { "request_id": "req_test", "action": "approve" } },
+        { "tool": "start_step", "args": { "plan_id": "plan_test", "step_number": 1 } },
+        { "tool": "complete_step", "args": { "plan_id": "plan_test", "step_number": 1 } },
+        { "tool": "fail_step", "args": { "plan_id": "plan_test", "step_number": 1, "error": "intentional fixture failure" } },
+        { "tool": "view_progress", "args": { "plan_id": "plan_test" } },
+        { "tool": "view_history", "args": { "plan_id": "plan_test" } },
+        { "tool": "compare_plan_versions", "args": { "plan_id": "plan_test", "from_version": 1, "to_version": 2 } },
+        { "tool": "rollback_plan", "args": { "plan_id": "plan_test", "target_version": 1 } }
+      ]
+    },
+    {
+      "family": "code_review",
+      "fixtures": [
+        {
+          "tool": "review_changes",
+          "args": {
+            "diff": "diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n"
+          }
+        },
+        { "tool": "review_git_diff", "args": { "target": "staged" } },
+        {
+          "tool": "review_diff",
+          "args": {
+            "diff": "diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n"
+          }
+        },
+        { "tool": "review_auto", "args": { "target": "staged" } },
+        {
+          "tool": "check_invariants",
+          "args": {
+            "diff": "diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n"
+          }
+        },
+        { "tool": "run_static_analysis", "args": {} }
+      ]
+    },
+    {
+      "family": "reactive_review",
+      "fixtures": [
+        { "tool": "reactive_review_pr", "args": { "commit_hash": "abc1234", "base_ref": "main", "changed_files": "src/a.ts" } },
+        { "tool": "get_review_status", "args": { "session_id": "session_test" } },
+        { "tool": "pause_review", "args": { "session_id": "session_test" } },
+        { "tool": "resume_review", "args": { "session_id": "session_test" } },
+        { "tool": "get_review_telemetry", "args": { "session_id": "session_test" } },
+        { "tool": "scrub_secrets", "args": { "content": "token=12345" } },
+        { "tool": "validate_content", "args": { "content": "const a = 1;" } }
+      ]
+    }
+  ]
+}
