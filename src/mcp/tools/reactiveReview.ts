@@ -30,6 +30,7 @@ import {
 import { createAIAgentStepExecutor } from '../../reactive/executors/AIAgentStepExecutor.js';
 import { createBatchReviewExecutor } from '../../reactive/executors/BatchReviewExecutor.js';
 import { createClientBoundFactory } from '../tooling/serviceFactory.js';
+import { validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
 
 type ReactiveServiceBundle = {
     reactiveService: ReactiveReviewService;
@@ -158,18 +159,12 @@ function validateRequiredString(
     maxLength: number,
     missingMessage = `${fieldName} is required`
 ): string {
-    if (typeof value !== 'string') {
-        throw new Error(missingMessage);
-    }
-
-    const trimmed = value.trim();
+    const trimmed = validateNonEmptyString(value, missingMessage).trim();
     if (!trimmed) {
         throw new Error(missingMessage);
     }
 
-    if (trimmed.length > maxLength) {
-        throw new Error(`${fieldName} exceeds maximum length (${maxLength})`);
-    }
+    validateMaxLength(trimmed, maxLength, `${fieldName} exceeds maximum length (${maxLength})`);
 
     return trimmed;
 }
@@ -440,9 +435,6 @@ export async function handleGetReviewStatus(
     serviceClient: ContextServiceClient
 ): Promise<string> {
     try {
-        if (!args.session_id) {
-            throw new Error('Missing session_id argument');
-        }
         const sessionId = validateRequiredString(
             args.session_id,
             'session_id',
@@ -481,9 +473,6 @@ export async function handlePauseReview(
     serviceClient: ContextServiceClient
 ): Promise<string> {
     try {
-        if (!args.session_id) {
-            throw new Error('Missing session_id argument');
-        }
         const sessionId = validateRequiredString(
             args.session_id,
             'session_id',
@@ -517,9 +506,6 @@ export async function handleResumeReview(
     serviceClient: ContextServiceClient
 ): Promise<string> {
     try {
-        if (!args.session_id) {
-            throw new Error('Missing session_id argument');
-        }
         const sessionId = validateRequiredString(
             args.session_id,
             'session_id',
@@ -595,9 +581,6 @@ export async function handleGetReviewTelemetry(
     serviceClient: ContextServiceClient
 ): Promise<string> {
     try {
-        if (!args.session_id) {
-            throw new Error('Missing session_id argument');
-        }
         const sessionId = validateRequiredString(
             args.session_id,
             'session_id',
@@ -646,9 +629,6 @@ export async function handleScrubSecrets(
     args: ScrubSecretsArgs
 ): Promise<string> {
     try {
-        if (!args.content) {
-            throw new Error('Missing content argument');
-        }
         const content = validateRequiredString(
             args.content,
             'content',
@@ -686,9 +666,6 @@ export async function handleValidateContent(
     args: ValidateContentArgs
 ): Promise<string> {
     try {
-        if (!args.content) {
-            throw new Error('Missing content argument');
-        }
         const content = validateRequiredString(
             args.content,
             'content',

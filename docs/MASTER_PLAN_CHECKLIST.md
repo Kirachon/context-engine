@@ -215,6 +215,9 @@ Checklist:
 - [ ] Ensure background execution failures are observable via status/telemetry.
 - [ ] Add integration tests for pause/resume/fail/recover sequences.
 
+Progress notes:
+- 2026-02-28: Reactive utility validation paths were consolidated in `src/mcp/tools/reactiveReview.ts` by removing duplicated pre-check branches and routing required-string/length enforcement through shared helpers while preserving existing operator-facing error text; validated by `tests/tools/reactiveReview.test.ts`.
+
 ---
 
 ## B3) Compatibility + Contract Assurance
