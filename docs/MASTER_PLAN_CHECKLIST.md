@@ -261,12 +261,30 @@ Progress notes:
 
 ### WS19 - Quantitative SLO Gate Pack
 Checklist:
-- [ ] Define per-family p95/error/timeout/throughput thresholds.
+- [x] Define per-family p95/error/timeout/throughput thresholds.
   - Review tools: p95 <= 500ms, error rate < 1.0%, timeout < 30s.
   - Index/search tools: p95 <= 2s, error rate < 0.5%, timeout < 60s.
   - Planning/lifecycle tools: p95 <= 1s, error rate < 1.0%, timeout < 45s.
-- [ ] Add CI fail gates tied to thresholds.
-- [ ] Add stale-cache correctness guard checks.
+- [x] Add CI fail gates tied to thresholds.
+- [x] Add stale-cache correctness guard checks.
+
+Progress notes:
+- 2026-02-28: Added deterministic CI guard script `scripts/ci/check-stale-cache-guards.ts` that enforces stale/unhealthy index coverage anchors and cache safeguard anchors in concrete test files (`tests/tools/status.test.ts`, `tests/tools/search.test.ts`, `tests/tools/context.test.ts`, `tests/tools/codebaseRetrieval.test.ts`, `tests/serviceClient.test.ts`).
+- 2026-02-28: Added focused regression tests for the guard in `tests/ci/checkStaleCacheGuards.test.ts` (pass/fail fixture cases), wired guard to CI via `.github/workflows/review_diff.yml`, and added `npm run ci:check:stale-cache-guards`.
+- 2026-02-28: Validation evidence:
+  - `npm run ci:check:stale-cache-guards`
+  - `node --experimental-vm-modules node_modules/jest/bin/jest.js tests/ci/checkStaleCacheGuards.test.ts tests/tools/status.test.ts tests/tools/search.test.ts tests/tools/context.test.ts tests/tools/codebaseRetrieval.test.ts tests/serviceClient.test.ts`
+  - `npx tsc --noEmit`
+- 2026-02-28: Added WS19 deterministic threshold gate `scripts/ci/ws19-slo-gate.ts` with explicit per-family p95/error/timeout/throughput policy and deterministic artifact extraction from existing benchmark/review outputs.
+- 2026-02-28: Wired WS19 fail gates into `.github/workflows/perf_gates.yml`, `.github/workflows/release_perf_gate.yml`, and `.github/workflows/review_diff.yml`.
+- 2026-02-28: Added WS19 gate policy/mapping doc at `docs/WS19_SLO_GATE.md` and linked from `docs/BENCHMARKING_GATES.md`.
+- 2026-02-28: Added focused WS19 gate regression tests in `tests/ci/ws19SloGate.test.ts`.
+- 2026-02-28: Validation evidence (WS19 thresholds):
+  - `npm test -- tests/ci/ws19SloGate.test.ts`
+  - `node --import tsx scripts/ci/ws19-slo-gate.ts --family index_search --artifact artifacts/bench/pr-candidate.json`
+  - `node --import tsx scripts/ci/ws19-slo-gate.ts --family index_search --artifact artifacts/bench/nightly-candidate.json`
+  - `node --import tsx scripts/ci/ws19-slo-gate.ts --family index_search --artifact artifacts/bench/release/release-candidate-median.json`
+  - `npx tsc --noEmit`
 
 ### WS20 - Rollout Stage Gates (Numeric)
 Checklist:
@@ -314,6 +332,7 @@ Checklist:
 
 ## Changelog
 - [ ] 2026-02-28: Added governance rules, owner lock, batch prerequisites, quantitative SLO/soak thresholds, and rollback triggers.
+- [x] 2026-02-28: Implemented WS19 deterministic threshold gates by adding `scripts/ci/ws19-slo-gate.ts`, documenting per-family artifact mapping and fail/skip handling in `docs/WS19_SLO_GATE.md`, wiring enforcement in performance/review CI workflows, and adding `tests/ci/ws19SloGate.test.ts`.
 - [x] 2026-02-28: Implemented WS13 first migration slice (shared validators + 3 tools + validator tests).
 - [x] 2026-02-28: Implemented WS13 second migration slice (review tool validation migration + new validation tests).
 - [x] 2026-02-28: Completed WS14 shared runtime wrapper with server integration (`src/mcp/server.ts`) and regression tests (`tests/tooling/runtime.test.ts`).

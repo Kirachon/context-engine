@@ -24,7 +24,8 @@
     "bench:pr": "npm run bench:compare -- --baseline bench-baseline.json --candidate bench-candidate.json --metric payload.timing.p95_ms --max-regression-pct 10 --max-regression-abs 25",
     "bench:ci:pr": "node --import tsx scripts/ci/run-bench-suite.ts --mode pr",
     "bench:ci:nightly": "node --import tsx scripts/ci/run-bench-suite.ts --mode nightly",
-    "bench:ci:release": "node --import tsx scripts/ci/release-bench.ts"
+    "bench:ci:release": "node --import tsx scripts/ci/release-bench.ts",
+    "ci:check:stale-cache-guards": "node --import tsx scripts/ci/check-stale-cache-guards.ts"
   },
   "keywords": [
     "mcp",

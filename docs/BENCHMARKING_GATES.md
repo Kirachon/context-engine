@@ -2,6 +2,8 @@
 
 This document defines operator pass/fail rules for rollout decisions.
 
+For deterministic WS19 quantitative SLO threshold enforcement from existing CI artifacts, see `docs/WS19_SLO_GATE.md`.
+
 Baseline rules:
 - Compare candidate vs approved baseline for the same query set and environment class.
 - Latency deltas use percent change from baseline.

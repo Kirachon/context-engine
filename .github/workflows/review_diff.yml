@@ -31,6 +31,9 @@ jobs:
       - name: Check version literal consistency
         run: node --import tsx scripts/ci/check-version-literals.ts
 
+      - name: Check stale-cache correctness guard coverage
+        run: npm run ci:check:stale-cache-guards
+
       - name: Run review_diff
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
@@ -39,6 +42,9 @@ jobs:
           CE_REVIEW_INCLUDE_MARKDOWN: "true"
           CE_REVIEW_FAIL_ON_SEVERITY: "CRITICAL"
         run: npx --no-install tsx scripts/ci/review-diff.ts
+
+      - name: Run WS19 SLO threshold gate (review family)
+        run: node --import tsx scripts/ci/ws19-slo-gate.ts --family review --artifact artifacts/review_diff_result.json
 
       - name: Upload review artifacts
         if: always()
