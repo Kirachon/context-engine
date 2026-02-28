@@ -55,14 +55,19 @@ Document governance:
 ## B) Remaining Master Roadmap (Implement All)
 
 ### B0) Prerequisite Ownership Lock
-- [ ] Assign an owner for each WS13-WS21 stream.
-- [ ] Record assignment date and approver next to each WS heading.
-- [ ] Do not start batch execution until all owners are assigned.
+- [x] Assign an owner for each WS13-WS21 stream.
+- [x] Record assignment date and approver next to each WS heading.
+- [x] Do not start batch execution until all owners are assigned.
+
+Lock artifact:
+- `docs/WS_OWNER_ASSIGNMENT_LOCK.md`
 
 ## B1) Shared Foundations (Cross-Tool Standardization)
 
 ### WS13 - Shared Validation Library
-Owner: _TBD_ (blocker until assigned in B0)
+Owner: validation-library-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
 Files:
 - `src/mcp/tooling/validation.ts` (new)
 - consumers in `src/mcp/tools/*`
@@ -86,7 +91,9 @@ Progress notes:
 - 2026-02-28: Batch A slice 1 finished remaining planning-family shared-validation migration by removing custom string-like validation in `src/mcp/tools/planManagement.ts`, routing required field checks through shared helpers, and deduplicating `single_step` validation in `src/mcp/tools/plan.ts`; evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts` and `npx tsc --noEmit` (both pass).
 
 ### WS14 - Shared Tool Runtime Wrapper
-Owner: _TBD_ (blocker until assigned in B0)
+Owner: runtime-wrapper-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
 Files:
 - `src/mcp/tooling/runtime.ts` (new)
 - `src/mcp/server.ts` and tool handlers using wrapper
@@ -104,7 +111,9 @@ Progress notes:
 - 2026-02-28: Dedicated wrapper module added at `src/mcp/tooling/runtime.ts` with explicit error/success path regression tests in `tests/tooling/runtime.test.ts`.
 
 ### WS15 - Shared Diff Input Parser
-Owner: _TBD_ (blocker until assigned in B0)
+Owner: diff-input-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
 Files:
 - `src/mcp/tooling/diffInput.ts` (new)
 - `src/mcp/tools/reviewAuto.ts`
@@ -125,7 +134,9 @@ Progress notes:
 - 2026-02-28: Added shared no-op scope guard (`assertNonEmptyDiffScope`) and applied it across `review_diff`, `check_invariants`, and `review_changes`, with compatibility tests for explicit `changed_files` scope overrides.
 
 ### WS16 - Shared Service Factory Pattern
-Owner: _TBD_ (blocker until assigned in B0)
+Owner: service-factory-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
 Files:
 - `src/mcp/tooling/serviceFactory.ts` (new)
 - planning/reactive tool modules
@@ -231,6 +242,10 @@ Progress notes:
 ## B3) Compatibility + Contract Assurance
 
 ### WS17 - Old-Client Replay Compatibility Suite
+Owner: compatibility-suite-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
+
 Checklist:
 - [x] Create/expand old-client fixture set for all tool families.
 - [x] Run replay suite against updated server.
@@ -242,6 +257,10 @@ Progress notes:
 - 2026-02-28: Added `tests/snapshots/phase2/fixtures/old-client-tool-families.json` with coverage for all currently registered tool families/tools; wired fixture validation into `tests/snapshots/snapshot-harness.ts`; verified with `npm test -- tests/snapshots/oldClientFixtures.test.ts` and `node --import tsx tests/snapshots/snapshot-harness.ts`.
 
 ### WS18 - Versioning and Contract Policy
+Owner: versioning-policy-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
+
 Checklist:
 - [x] Document canonical version source and update policy.
 - [x] Define deprecation path and no-silent-break rule in docs.
@@ -260,6 +279,10 @@ Progress notes:
 ## B4) Performance, Safety, and Rollout Governance
 
 ### WS19 - Quantitative SLO Gate Pack
+Owner: slo-gate-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
+
 Checklist:
 - [x] Define per-family p95/error/timeout/throughput thresholds.
   - Review tools: p95 <= 500ms, error rate < 1.0%, timeout < 30s.
@@ -287,6 +310,10 @@ Progress notes:
   - `npx tsc --noEmit`
 
 ### WS20 - Rollout Stage Gates (Numeric)
+Owner: stage-gate-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
+
 Checklist:
 - [x] Deterministic WS20 evidence gate script added (`scripts/ci/ws20-stage-gate.ts`) for numeric stages 0-3.
 - [x] Structured operator artifacts added (`docs/templates/ws20-stage-evidence.template.yaml`, `docs/examples/ws20-stage-evidence.sample.yaml`).
@@ -309,6 +336,10 @@ Progress notes:
   - `node --import tsx scripts/ci/validate-master-plan.ts`
 
 ### WS21 - Rollback Drill + Evidence Completeness
+Owner: rollback-drill-owner
+Assignment Date: 2026-02-28
+Approver: release-governance-approver
+
 Checklist:
 - [ ] Execute and record rollback drill for remaining roadmap batches.
 - [ ] Capture command path, owner, timestamps, recovery evidence.
@@ -323,9 +354,9 @@ Progress notes:
 ---
 
 ## C) Global Validation Gates (Must Pass Before “All Done”)
-- [ ] Owner assignment lock passed (B0 complete)
+- [x] Owner assignment lock passed (B0 complete)
 - [x] `npx tsc --noEmit`
-- [ ] Full targeted test matrix for all migrated families
+- [x] Full targeted test matrix for all migrated families (`npm run ci:matrix:migrated-families`)
 - [x] `node --import tsx scripts/ci/check-tool-manifest-parity.ts`
 - [x] `node --import tsx scripts/ci/check-version-literals.ts`
 - [x] `node --import tsx scripts/ci/check-rollout-readiness.ts`
@@ -360,3 +391,5 @@ Progress notes:
 - [x] 2026-02-28: WS15 major migration completed: shared `diffInput` module adopted by review entry tools with malformed/empty/partial diff regression coverage; no-op/empty-scope policy item remains open.
 - [x] 2026-02-28: Completed WS18 policy + parity gate by adding `docs/VERSIONING_CONTRACT_POLICY.md`, `scripts/ci/check-version-literals.ts`, `tests/ci/checkVersionLiterals.test.ts`, and CI workflow enforcement in `.github/workflows/review_diff.yml` with passing evidence commands.
 - [x] 2026-02-28: Batch A slice 1 completed planning-family shared-validation migration follow-up in `src/mcp/tools/planManagement.ts` and `src/mcp/tools/plan.ts` with focused regression coverage in `tests/tools/planManagement.test.ts` and `tests/tools/plan.test.ts`; validation evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts`, `npx tsc --noEmit`.
+- [x] 2026-02-28: Implemented B0 owner-assignment lock by adding `docs/WS_OWNER_ASSIGNMENT_LOCK.md`, `scripts/ci/check-ws-owner-assignment-lock.ts`, focused tests (`tests/ci/checkWsOwnerAssignmentLock.test.ts`), CI wiring in `.github/workflows/review_diff.yml`, and package script `ci:check:ws-owner-assignment-lock`; WS13-WS21 headings now include owner, assignment date, and approver.
+- [x] 2026-02-28: Implemented deterministic migrated-family targeted matrix gate via `scripts/ci/run-migrated-family-matrix.ts`, wired npm command `ci:matrix:migrated-families` in `package.json`, added CI enforcement step in `.github/workflows/review_diff.yml`, and validated with `npm run ci:matrix:migrated-families`, `npx tsc --noEmit`, and `node --import tsx scripts/ci/validate-master-plan.ts`.

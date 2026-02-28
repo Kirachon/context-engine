@@ -186,14 +186,14 @@ Steps 1 → 2
 
 **Plan ID:** plan_contract
 **Success:** ✅ Yes
-**Duration:** 0ms
+**Duration:** <duration>
 **Progress:** 2/2 steps (100%)
 
 ## Step Results
 
 ### Step 1
 - **Status:** ✅ Success
-- **Duration:** 10ms
+- **Duration:** <duration>
 - **Reasoning:** Executed step 1
 
 #### Generated Changes (Preview Only)
@@ -209,7 +209,7 @@ export const step1 = true;
 
 ### Step 2
 - **Status:** ✅ Success
-- **Duration:** 20ms
+- **Duration:** <duration>
 - **Reasoning:** Executed step 2
 
 #### Generated Changes (Preview Only)

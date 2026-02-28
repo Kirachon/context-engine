@@ -34,6 +34,12 @@ jobs:
       - name: Check stale-cache correctness guard coverage
         run: npm run ci:check:stale-cache-guards
 
+      - name: Run migrated-family targeted matrix gate
+        run: npm run ci:matrix:migrated-families
+
+      - name: Check WS owner assignment lock (WS13-WS21)
+        run: npm run ci:check:ws-owner-assignment-lock
+
       - name: Check WS21 rollback drill evidence completeness
         run: npm run ci:check:ws21-rollback-drill
 

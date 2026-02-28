@@ -72,6 +72,7 @@ function createContractPlan(version = 1): EnhancedPlanOutput {
 function normalizeLifecycleText(output: string): string {
   return output
     .replace(/Generated in:\s*\d+ms/g, 'Generated in: <duration>')
+    .replace(/\*\*Duration:\*\*\s*\d+ms/g, '**Duration:** <duration>')
     .replace(/Duration:\s*\d+ms/g, 'Duration: <duration>')
     .replace(/"duration_ms":\s*\d+/g, '"duration_ms": 0');
 }
