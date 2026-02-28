@@ -212,13 +212,14 @@ Scope:
 
 Checklist:
 - [x] Complete shared validation/runtime migration.
-- [ ] Harden partial-failure/idempotency behavior for sessioned operations.
-- [ ] Ensure background execution failures are observable via status/telemetry.
-- [ ] Add integration tests for pause/resume/fail/recover sequences.
+- [x] Harden partial-failure/idempotency behavior for sessioned operations.
+- [x] Ensure background execution failures are observable via status/telemetry.
+- [x] Add integration tests for pause/resume/fail/recover sequences.
 
 Progress notes:
 - 2026-02-28: Reactive utility validation paths were consolidated in `src/mcp/tools/reactiveReview.ts` by removing duplicated pre-check branches and routing required-string/length enforcement through shared helpers while preserving existing operator-facing error text; validated by `tests/tools/reactiveReview.test.ts`.
 - 2026-02-28: Expanded `tests/tools/reactiveReview.test.ts` with failure-observability coverage (`get_review_status`/`get_review_telemetry` on errored sessions) and pause/resume lifecycle assertions to support Batch D reliability gates.
+- 2026-02-28: Hardened pause/resume idempotency in `src/mcp/tools/reactiveReview.ts` (`already paused`/`already executing` no-op success paths), added telemetry exposure fields (`session_status`, `session_error`) for failed sessions, and expanded pause/resume/fail/recover integration coverage in `tests/tools/reactiveReview.test.ts`.
 
 ---
 

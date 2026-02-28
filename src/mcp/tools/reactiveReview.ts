@@ -481,11 +481,37 @@ export async function handlePauseReview(
         );
 
         const service = getReactiveReviewService(serviceClient);
+        const status = service.getReviewStatus(sessionId);
+        if (!status) {
+            return JSON.stringify({
+                success: false,
+                error: `Session not found: ${sessionId}`,
+            }, null, 2);
+        }
+
+        if (status.session.status === 'paused') {
+            return JSON.stringify({
+                success: true,
+                status: 'paused',
+                message: `Review session ${sessionId} is already paused`,
+                progress: status.progress,
+            }, null, 2);
+        }
+
+        if (status.session.status !== 'executing') {
+            return JSON.stringify({
+                success: false,
+                error: `Session is not executing (current status: ${status.session.status})`,
+            }, null, 2);
+        }
+
         await service.pauseReview(sessionId);
 
         return JSON.stringify({
             success: true,
+            status: 'paused',
             message: `Review session ${sessionId} paused`,
+            progress: status.progress,
         }, null, 2);
 
     } catch (error) {
@@ -520,6 +546,16 @@ export async function handleResumeReview(
             return JSON.stringify({
                 success: false,
                 error: `Session not found: ${sessionId}`,
+            }, null, 2);
+        }
+
+        if (status.session.status === 'executing') {
+            return JSON.stringify({
+                success: true,
+                status: 'executing',
+                message: `Review session ${sessionId} is already executing`,
+                session_status: 'executing',
+                progress: status.progress,
             }, null, 2);
         }
 
@@ -608,6 +644,8 @@ export async function handleGetReviewTelemetry(
             success: true,
             session_id: sessionId,
             telemetry: status.telemetry,
+            session_status: status.session.status,
+            session_error: status.session.error,
             cache_stats: {
                 hit_rate: cacheStats.hitRate,
                 total_entries: cacheStats.size,
