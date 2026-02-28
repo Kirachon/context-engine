@@ -87,10 +87,16 @@ Files:
 - `src/mcp/server.ts` and tool handlers using wrapper
 
 Checklist:
-- [ ] Centralize consistent timing/error wrapping for tool handlers.
-- [ ] Preserve existing MCP success/error envelope behavior.
-- [ ] Ensure telemetry labels remain stable.
-- [ ] Add regression tests for wrapper error-path behavior.
+- [x] Centralize consistent timing/error wrapping for tool handlers.
+- [x] Preserve existing MCP success/error envelope behavior.
+- [x] Ensure telemetry labels remain stable.
+- [x] Add regression tests for wrapper error-path behavior.
+
+Progress notes:
+- 2026-02-28: Server integration is present in `src/mcp/server.ts` via shared runtime execution for `CallToolRequestSchema`.
+- 2026-02-28: MCP response envelope behavior remains aligned (`content[].text` on success; `isError: true` + `Error: ...` on failures).
+- 2026-02-28: Telemetry emission remains consistent using `context_engine_mcp_tool_calls_total` and `context_engine_mcp_tool_call_duration_seconds` with `{ tool, result }` labels.
+- 2026-02-28: Dedicated wrapper module added at `src/mcp/tooling/runtime.ts` with explicit error/success path regression tests in `tests/tooling/runtime.test.ts`.
 
 ### WS15 - Shared Diff Input Parser
 Owner: _TBD_ (blocker until assigned in B0)
@@ -261,3 +267,4 @@ Checklist:
 - [ ] 2026-02-28: Added governance rules, owner lock, batch prerequisites, quantitative SLO/soak thresholds, and rollback triggers.
 - [x] 2026-02-28: Implemented WS13 first migration slice (shared validators + 3 tools + validator tests).
 - [x] 2026-02-28: Implemented WS13 second migration slice (review tool validation migration + new validation tests).
+- [x] 2026-02-28: Completed WS14 shared runtime wrapper with server integration (`src/mcp/server.ts`) and regression tests (`tests/tooling/runtime.test.ts`).

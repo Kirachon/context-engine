@@ -77,6 +77,7 @@ import { reviewAutoTool, handleReviewAuto } from './tools/reviewAuto.js';
 import { checkInvariantsTool, handleCheckInvariants } from './tools/checkInvariants.js';
 import { runStaticAnalysisTool, handleRunStaticAnalysis } from './tools/staticAnalysis.js';
 import { incCounter, observeDurationMs } from '../metrics/metrics.js';
+import { executeToolCall, type ToolHandler as RuntimeToolHandler } from './tooling/runtime.js';
 import {
   reactiveReviewTools,
   handleReactiveReviewPR,
@@ -89,11 +90,13 @@ import {
 } from './tools/reactiveReview.js';
 import { FileWatcher } from '../watcher/index.js';
 
-type ToolHandler = (args: unknown) => Promise<string>;
 type ToolRegistryEntry = {
   tool: { name: string };
   handler: ToolHandler;
 };
+
+// Re-export for compatibility with existing server.ts type import paths.
+export type ToolHandler = RuntimeToolHandler;
 
 export class ContextEngineMCPServer {
   private server: Server;
@@ -380,62 +383,27 @@ export class ContextEngineMCPServer {
     // Handle tool calls
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
-      const startTime = Date.now();
-      let metricsResult: 'success' | 'error' = 'success';
+      const execution = await executeToolCall({
+        name,
+        args,
+        toolHandlers,
+      });
 
-      // Log request (to stderr so it doesn't interfere with stdio transport)
-      console.error(`[${new Date().toISOString()}] Tool: ${name}`);
+      const metricLabels = { tool: name, result: execution.result };
+      incCounter(
+        'context_engine_mcp_tool_calls_total',
+        metricLabels,
+        1,
+        'Total MCP tool calls handled by the server.'
+      );
+      observeDurationMs(
+        'context_engine_mcp_tool_call_duration_seconds',
+        metricLabels,
+        execution.elapsedMs,
+        { help: 'MCP tool call handling duration in seconds.' }
+      );
 
-      try {
-        const handler = toolHandlers.get(name);
-        if (!handler) {
-          throw new Error(`Unknown tool: ${name}`);
-        }
-        const result = await handler(args);
-
-        const elapsed = Date.now() - startTime;
-        console.error(`[${new Date().toISOString()}] Tool ${name} completed in ${elapsed}ms`);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: result,
-            },
-          ],
-        };
-      } catch (error) {
-        metricsResult = 'error';
-        const elapsed = Date.now() - startTime;
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        console.error(`[${new Date().toISOString()}] Tool ${name} failed after ${elapsed}ms: ${errorMessage}`);
-
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Error: ${errorMessage}`,
-            },
-          ],
-          isError: true,
-        };
-      } finally {
-        const elapsed = Date.now() - startTime;
-        const metricLabels = { tool: name, result: metricsResult };
-        incCounter(
-          'context_engine_mcp_tool_calls_total',
-          metricLabels,
-          1,
-          'Total MCP tool calls handled by the server.'
-        );
-        observeDurationMs(
-          'context_engine_mcp_tool_call_duration_seconds',
-          metricLabels,
-          elapsed,
-          { help: 'MCP tool call handling duration in seconds.' }
-        );
-      }
+      return execution.response;
     });
   }
 
