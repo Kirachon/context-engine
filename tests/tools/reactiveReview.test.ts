@@ -346,6 +346,97 @@ describe('Reactive Review Tools', () => {
         });
     });
 
+    describe('reactive session failure visibility', () => {
+        const mockServiceClient = {
+            getCacheStats: () => ({ hitRate: 0.25, size: 10, commitKeyed: true }),
+        } as any;
+
+        it('pause_review should return success for valid paused-session request', async () => {
+            const pauseSpy = jest.spyOn(ReactiveReviewService.prototype, 'pauseReview').mockResolvedValue(undefined as any);
+            const result = await handlePauseReview({ session_id: 'session-ok' }, mockServiceClient);
+            const parsed = JSON.parse(result);
+
+            expect(pauseSpy).toHaveBeenCalledWith('session-ok');
+            expect(parsed.success).toBe(true);
+            expect(parsed.message).toContain('paused');
+        });
+
+        it('get_review_status should expose session error details when execution fails', async () => {
+            jest.spyOn(ReactiveReviewService.prototype, 'getReviewStatusAsync').mockResolvedValue({
+                session: {
+                    session_id: 'session-failed',
+                    plan_id: 'plan-failed',
+                    status: 'error',
+                    error: 'Background execution failed: network timeout',
+                    pr_metadata: {
+                        commit_hash: 'abc123',
+                        base_ref: 'main',
+                        changed_files: ['src/a.ts'],
+                    },
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                },
+                progress: {
+                    completed_steps: 1,
+                    total_steps: 3,
+                    percentage: 33,
+                },
+                telemetry: {
+                    start_time: new Date().toISOString(),
+                    elapsed_ms: 1234,
+                    tokens_used: 111,
+                    cache_hit_rate: 0.2,
+                },
+                findings_count: 2,
+            } as any);
+
+            const result = await handleGetReviewStatus({ session_id: 'session-failed' }, mockServiceClient);
+            const parsed = JSON.parse(result);
+
+            expect(parsed.success).toBe(true);
+            expect(parsed.session.status).toBe('error');
+            expect(parsed.session.error).toContain('Background execution failed');
+        });
+
+        it('get_review_telemetry should remain available for failed sessions', async () => {
+            jest.spyOn(ReactiveReviewService.prototype, 'getReviewStatusAsync').mockResolvedValue({
+                session: {
+                    session_id: 'session-failed',
+                    plan_id: 'plan-failed',
+                    status: 'error',
+                    error: 'Background execution failed',
+                    pr_metadata: {
+                        commit_hash: 'abc123',
+                        base_ref: 'main',
+                        changed_files: ['src/a.ts'],
+                    },
+                    created_at: new Date().toISOString(),
+                    updated_at: new Date().toISOString(),
+                },
+                progress: {
+                    completed_steps: 1,
+                    total_steps: 3,
+                    percentage: 33,
+                },
+                telemetry: {
+                    start_time: new Date().toISOString(),
+                    elapsed_ms: 2222,
+                    tokens_used: 42,
+                    cache_hit_rate: 0.5,
+                },
+                findings_count: 1,
+            } as any);
+
+            const result = await handleGetReviewTelemetry({ session_id: 'session-failed' }, mockServiceClient);
+            const parsed = JSON.parse(result);
+
+            expect(parsed.success).toBe(true);
+            expect(parsed.session_id).toBe('session-failed');
+            expect(parsed.telemetry.elapsed_ms).toBe(2222);
+            expect(parsed.cache_stats.commit_keyed).toBe(true);
+        });
+    });
+
     // ============================================================================
     // scrub_secrets Tool Tests
     // ============================================================================
