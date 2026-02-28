@@ -3,6 +3,8 @@ import {
   handleComparePlanVersions,
   handleDeletePlan,
   handleFailStep,
+  handleListPlans,
+  handleLoadPlan,
   handleRollbackPlan,
   handleRequestApproval,
   handleRespondApproval,
@@ -29,6 +31,34 @@ describe('planManagement tool handlers validation', () => {
     );
   });
 
+  it('handleLoadPlan rejects when neither plan_id nor name is provided', async () => {
+    await expect(handleLoadPlan({})).rejects.toThrow('Either plan_id or name is required');
+  });
+
+  it('handleLoadPlan rejects non-string plan_id', async () => {
+    await expect(handleLoadPlan({ plan_id: 123 as unknown as string })).rejects.toThrow(
+      'plan_id must be a non-empty string'
+    );
+  });
+
+  it('handleLoadPlan rejects whitespace-only name', async () => {
+    await expect(handleLoadPlan({ name: '   ' })).rejects.toThrow(
+      'name must be a non-empty string'
+    );
+  });
+
+  it('handleListPlans rejects non-finite limit', async () => {
+    await expect(handleListPlans({ limit: Number.POSITIVE_INFINITY })).rejects.toThrow(
+      'limit must be a finite positive number'
+    );
+  });
+
+  it('handleListPlans rejects non-positive limit', async () => {
+    await expect(handleListPlans({ limit: 0 })).rejects.toThrow(
+      'limit must be a finite positive number'
+    );
+  });
+
   it('handleRequestApproval rejects missing plan_id with existing error message', async () => {
     await expect(handleRequestApproval({})).rejects.toThrow('plan_id is required');
   });
@@ -49,6 +79,12 @@ describe('planManagement tool handlers validation', () => {
     await expect(
       handleRespondApproval({ request_id: 'req_123', action: true as unknown as string })
     ).rejects.toThrow('action is required');
+  });
+
+  it('handleRespondApproval rejects invalid action enum with clear error', async () => {
+    await expect(handleRespondApproval({ request_id: 'req_123', action: 'accept' })).rejects.toThrow(
+      'action must be one of: approve, reject, request_modification'
+    );
   });
 
   it('handleFailStep preserves validation order for step_number before error', async () => {

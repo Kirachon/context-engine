@@ -166,13 +166,14 @@ Scope:
 - `save/load/list/delete/request/respond/start/complete/fail/view_progress/view_history/compare/rollback`
 
 Checklist:
-- [ ] Align all input validation style and bounds.
+- [x] Align all input validation style and bounds.
 - [ ] Align error messages and retry guidance consistency.
 - [ ] Ensure telemetry parity fields exist across handlers.
 - [x] Expand contract tests/snapshots for full plan lifecycle.
 
 Progress notes:
 - 2026-02-28: Added additive contract snapshot suites for full planning lifecycle and management handlers in `tests/tools/planLifecycle.contract.test.ts` and `tests/tools/planManagement.contract.test.ts`.
+- 2026-02-28: Completed planning-family input validation alignment by adopting shared validation helpers for `execute_plan` (`mode`, `plan_id`, `max_steps`, boolean flags) and `planManagement` (`load_plan` non-empty ID/name checks, `list_plans` finite positive `limit`, `respond_approval` action enum guard); evidence: `npm test -- tests/tools/plan.test.ts tests/tools/planManagement.test.ts tests/tools/planLifecycle.contract.test.ts tests/tools/planManagement.contract.test.ts` and `npx tsc --noEmit`.
 
 ### Batch B - Review Pipeline Family
 Prerequisites:

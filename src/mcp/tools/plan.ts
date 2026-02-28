@@ -20,7 +20,15 @@ import * as path from 'path';
 import { ContextServiceClient } from '../serviceClient.js';
 import { PlanningService } from '../services/planningService.js';
 import { createClientBoundFactory } from '../tooling/serviceFactory.js';
-import { parseJsonString, validateNonEmptyString, validateRequiredNumber, validateTrimmedNonEmptyString } from '../tooling/validation.js';
+import {
+  parseJsonString,
+  validateBoolean,
+  validateFiniteNumberInRange,
+  validateNonEmptyString,
+  validateOneOf,
+  validateRequiredNumber,
+  validateTrimmedNonEmptyString,
+} from '../tooling/validation.js';
 import {
   EnhancedPlanOutput,
   PlanGenerationOptions,
@@ -467,16 +475,34 @@ export async function handleExecutePlan(
   args: ExecutePlanArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const {
-    plan: planJson,
-    plan_id,
-    mode = 'single_step',
-    step_number,
-    apply_changes = false,
-    max_steps = 5,
-    stop_on_failure = true,
-    additional_context,
-  } = args;
+  const planJson = args.plan;
+  const step_number = args.step_number;
+  const additional_context = args.additional_context;
+  const modeInput = args.mode ?? 'single_step';
+  const allowedModes = ['single_step', 'all_ready', 'full_plan'] as const;
+  validateOneOf(modeInput, allowedModes, 'mode must be one of "single_step", "all_ready", or "full_plan"');
+  const mode: ExecutionMode = modeInput;
+
+  if (args.plan_id !== undefined) {
+    validateTrimmedNonEmptyString(args.plan_id, 'plan_id must be a non-empty string');
+  }
+  const plan_id = args.plan_id?.trim();
+
+  if (args.max_steps !== undefined) {
+    validateFiniteNumberInRange(
+      args.max_steps,
+      1,
+      Number.MAX_SAFE_INTEGER,
+      'max_steps must be a finite number greater than or equal to 1'
+    );
+  }
+  const max_steps = args.max_steps ?? 5;
+
+  validateBoolean(args.apply_changes, 'apply_changes must be a boolean');
+  const apply_changes = args.apply_changes ?? false;
+
+  validateBoolean(args.stop_on_failure, 'stop_on_failure must be a boolean');
+  const stop_on_failure = args.stop_on_failure ?? true;
 
   // Resolve plan from JSON or persisted plan ID
   let plan: EnhancedPlanOutput | null = null;

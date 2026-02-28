@@ -11,7 +11,14 @@ import { ApprovalWorkflowService } from '../services/approvalWorkflowService.js'
 import { ExecutionTrackingService } from '../services/executionTrackingService.js';
 import { PlanHistoryService } from '../services/planHistoryService.js';
 import { EnhancedPlanOutput, PlanStatus } from '../types/planning.js';
-import { parseJsonString, validateNonEmptyString, validateRequiredNumber } from '../tooling/validation.js';
+import {
+  parseJsonString,
+  validateFiniteNumberInRange,
+  validateNonEmptyString,
+  validateOneOf,
+  validateRequiredNumber,
+  validateTrimmedNonEmptyString,
+} from '../tooling/validation.js';
 
 // ============================================================================
 // Service Instances (lazily initialized)
@@ -278,14 +285,19 @@ export async function handleSavePlan(args: Record<string, unknown>): Promise<str
 }
 
 export async function handleLoadPlan(args: Record<string, unknown>): Promise<string> {
-  const service = getPersistenceService();
-
   let plan: EnhancedPlanOutput | null = null;
 
-  if (args.plan_id) {
-    plan = await service.loadPlan(args.plan_id as string);
-  } else if (args.name) {
-    plan = await service.loadPlanByName(args.name as string);
+  if (args.plan_id !== undefined) {
+    const planId = validateTrimmedNonEmptyString(
+      args.plan_id,
+      'plan_id must be a non-empty string'
+    );
+    const service = getPersistenceService();
+    plan = await service.loadPlan(planId);
+  } else if (args.name !== undefined) {
+    const name = validateTrimmedNonEmptyString(args.name, 'name must be a non-empty string');
+    const service = getPersistenceService();
+    plan = await service.loadPlanByName(name);
   } else {
     throw new Error('Either plan_id or name is required');
   }
@@ -298,6 +310,13 @@ export async function handleLoadPlan(args: Record<string, unknown>): Promise<str
 }
 
 export async function handleListPlans(args: Record<string, unknown>): Promise<string> {
+  validateFiniteNumberInRange(
+    args.limit,
+    Number.EPSILON,
+    Number.MAX_SAFE_INTEGER,
+    'limit must be a finite positive number'
+  );
+
   const service = getPersistenceService();
   const plans = await service.listPlans({
     status: args.status as PlanStatus | undefined,
@@ -349,10 +368,12 @@ export async function handleRequestApproval(args: Record<string, unknown>): Prom
 
 export async function handleRespondApproval(args: Record<string, unknown>): Promise<string> {
   const requestId = validateNonEmptyString(args.request_id, 'request_id is required');
-  const action = validateNonEmptyString(
-    args.action,
-    'action is required'
-  ) as 'approve' | 'reject' | 'request_modification';
+  const action = validateNonEmptyString(args.action, 'action is required');
+  validateOneOf(
+    action,
+    ['approve', 'reject', 'request_modification'] as const,
+    'action must be one of: approve, reject, request_modification'
+  );
 
   const approvalSvc = getApprovalService();
   const result = approvalSvc.processApprovalResponse({

@@ -292,6 +292,59 @@ describe('Planning MCP Tools', () => {
           )
         ).rejects.toThrow('step_number is required when mode is "single_step"');
       });
+
+      it('should reject invalid mode', async () => {
+        const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
+        await expect(
+          handleExecutePlan(
+            { plan: validPlan, mode: 'bad_mode' as any },
+            mockServiceClient
+          )
+        ).rejects.toThrow('mode must be one of "single_step", "all_ready", or "full_plan"');
+      });
+
+      it('should reject empty plan_id when provided', async () => {
+        await expect(
+          handleExecutePlan({ plan: '', plan_id: '   ' }, mockServiceClient)
+        ).rejects.toThrow('plan_id must be a non-empty string');
+      });
+
+      it('should reject max_steps less than 1', async () => {
+        const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
+        await expect(
+          handleExecutePlan({ plan: validPlan, mode: 'all_ready', max_steps: 0 }, mockServiceClient)
+        ).rejects.toThrow('max_steps must be a finite number greater than or equal to 1');
+      });
+
+      it('should reject non-finite max_steps', async () => {
+        const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
+        await expect(
+          handleExecutePlan(
+            { plan: validPlan, mode: 'all_ready', max_steps: Number.POSITIVE_INFINITY },
+            mockServiceClient
+          )
+        ).rejects.toThrow('max_steps must be a finite number greater than or equal to 1');
+      });
+
+      it('should reject non-boolean apply_changes when provided', async () => {
+        const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
+        await expect(
+          handleExecutePlan(
+            { plan: validPlan, mode: 'all_ready', apply_changes: 'true' as any },
+            mockServiceClient
+          )
+        ).rejects.toThrow('apply_changes must be a boolean');
+      });
+
+      it('should reject non-boolean stop_on_failure when provided', async () => {
+        const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
+        await expect(
+          handleExecutePlan(
+            { plan: validPlan, mode: 'all_ready', stop_on_failure: 'false' as any },
+            mockServiceClient
+          )
+        ).rejects.toThrow('stop_on_failure must be a boolean');
+      });
     });
 
     describe('Tool Schema', () => {
