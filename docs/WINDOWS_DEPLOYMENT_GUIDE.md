@@ -26,14 +26,13 @@ You’ll install prerequisites, build the server, start it on Windows, and conne
 ## 2) Fast Path (If You Want the Shortest Route)
 
 1. Install Node.js 18+
-2. `npm install -g @augmentcode/auggie`
-3. `npm install -g @openai/codex`
-4. `npm install`
-5. `npm run build`
-6. `auggie login`
-7. `.\manage-server.bat start`
-8. `codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" --workspace "C:\path\to\your-project"`
-9. Start Codex CLI → `/mcp` → run a test query
+2. `npm install -g @openai/codex`
+3. `npm install`
+4. `npm run build`
+5. Set `CE_AI_PROVIDER=openai_session` and run `codex login`
+6. `.\manage-server.bat start`
+7. `codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" --workspace "C:\path\to\your-project"`
+8. Start Codex CLI → `/mcp` → run a test query
 
 If any step fails, follow the detailed walkthrough below.
 
@@ -68,13 +67,7 @@ git --version
 ```
 If Git isn’t installed, you can download the repository as a ZIP file instead.
 
-### 4.3 Install Auggie CLI
-```powershell
-npm install -g @augmentcode/auggie
-auggie --version
-```
-
-### 4.4 Install Codex CLI (for MCP integration)
+### 4.3 Install Codex CLI (for MCP integration)
 ```powershell
 npm install -g @openai/codex
 codex --version
@@ -134,22 +127,26 @@ npm run build
 
 ---
 
-## 8) Authenticate (Auggie)
+## 8) Configure Retrieval Provider (OpenAI Session First)
 
-### Option A (Recommended): Login via CLI
+### Option A (Recommended): OpenAI session provider
 ```powershell
-auggie login
+$env:CE_AI_PROVIDER = "openai_session"
+$env:CE_OPENAI_SESSION_CMD = "cmd"
+$env:CE_OPENAI_SESSION_ARGS_JSON = "[`"/d`",`"/s`",`"/c`",`"D:\\npm-global\\codex.cmd`"]"
+codex login
+codex login status
 ```
-
-### Option B: Environment Variables (.env)
+Or use `.env`:
 ```powershell
 copy .env.example .env
 notepad .env
 ```
 Set values:
 ```
-AUGMENT_API_TOKEN=your-token-here
-AUGMENT_API_URL=https://api.augmentcode.com
+CE_AI_PROVIDER=openai_session
+CE_OPENAI_SESSION_CMD=cmd
+CE_OPENAI_SESSION_ARGS_JSON=["/d","/s","/c","D:\\npm-global\\codex.cmd"]
 ```
 
 > Tip: `.env` is easiest for beginners; environment variables are for advanced setups.
@@ -231,8 +228,8 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
    # CE_HASH_NORMALIZE_EOL = "true"
 
    # Auth (replace with real values)
-   AUGMENT_API_TOKEN = "<your-token-here>"
-   AUGMENT_API_URL = "https://d9.api.augmentcode.com/"
+   CE_AI_PROVIDER = "openai_session"
+   CE_OPENAI_SESSION_CMD = "codex"
 
    # Reactive Review Configuration
    REACTIVE_ENABLED = "true"
@@ -270,8 +267,8 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
 | `CE_METRICS` | Enables internal metrics collection | No effect unless you read metrics |
 | `CE_HTTP_METRICS` | Exposes `/metrics` over HTTP | Requires `--http` when starting |
 | `CE_HASH_NORMALIZE_EOL` | Normalizes CRLF/LF when hashing | Helpful on mixed Windows/Linux teams |
-| `AUGMENT_API_TOKEN` | Your Auggie API token | Required if not using `auggie login` |
-| `AUGMENT_API_URL` | Auggie API endpoint | Use the URL your org provides |
+| `CE_AI_PROVIDER` | Active AI provider | Set to `openai_session` |
+| `CE_OPENAI_SESSION_CMD` | Command used for session provider | Default is `codex` |
 | `REACTIVE_ENABLED` | Turns on reactive review features | Required for reactive review tools |
 | `REACTIVE_PARALLEL_EXEC` | Runs reactive steps in parallel | Faster on multi-core CPUs |
 | `REACTIVE_COMMIT_CACHE` | Caches by commit hash | Better cache consistency |
@@ -352,7 +349,7 @@ Then delete the project folder (`C:\path\to\context-engine`).
 
 To remove global tools:
 ```powershell
-npm uninstall -g @augmentcode/auggie @openai/codex
+npm uninstall -g @openai/codex
 ```
 
 ---
@@ -381,9 +378,9 @@ npm run build
 
 ### Authentication errors
 ```powershell
-auggie login
+codex login
+codex login status
 ```
-Or verify `.env` values (no extra spaces, correct token).
 
 ### Server won’t start
 Check logs:

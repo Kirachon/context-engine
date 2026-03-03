@@ -38,7 +38,26 @@ export interface CodebaseRetrievalOutput {
       lastError?: string;
     };
     freshnessWarning?: string;
+    filtersApplied: string[];
+    filteredPathsCount: number;
+    secondPassUsed: boolean;
   };
+}
+
+type FallbackDiagnostics = {
+  filtersApplied?: string[];
+  filteredPathsCount?: number;
+  secondPassUsed?: boolean;
+};
+
+function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDiagnostics | null {
+  const maybeGetter = (serviceClient as ContextServiceClient & {
+    getLastFallbackDiagnostics?: () => FallbackDiagnostics | null | undefined;
+  }).getLastFallbackDiagnostics;
+  if (typeof maybeGetter !== 'function') {
+    return null;
+  }
+  return maybeGetter() ?? null;
 }
 
 export async function handleCodebaseRetrieval(
@@ -58,6 +77,7 @@ export async function handleCodebaseRetrieval(
 
   const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, { topK: top_k });
   const searchResults = retrieval.results;
+  const fallbackDiagnostics = getFallbackDiagnostics(serviceClient);
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status);
 
@@ -83,6 +103,9 @@ export async function handleCodebaseRetrieval(
         lastError: status.lastError,
       },
       freshnessWarning: freshnessWarning ?? undefined,
+      filtersApplied: fallbackDiagnostics?.filtersApplied ?? [],
+      filteredPathsCount: fallbackDiagnostics?.filteredPathsCount ?? 0,
+      secondPassUsed: fallbackDiagnostics?.secondPassUsed ?? false,
     },
   };
 

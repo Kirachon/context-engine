@@ -26,6 +26,7 @@ describe('semantic_search Tool', () => {
         fileCount: 10,
         isStale: false,
       })),
+      getLastFallbackDiagnostics: jest.fn(() => null),
     };
   });
 
@@ -209,6 +210,25 @@ describe('semantic_search Tool', () => {
       expect(result).toContain('Retrieval Audit');
       expect(result).toContain('src/a.ts');
       expect(result).toContain('src/b.ts');
+    });
+
+    it('should include fallback diagnostics line when filters were applied', async () => {
+      const mockResults: SearchResult[] = [
+        { path: 'src/a.ts', content: 'alpha', lines: '1-2', relevanceScore: 0.8, matchType: 'keyword' },
+      ];
+      mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+      mockServiceClient.getLastFallbackDiagnostics.mockReturnValue({
+        filtersApplied: ['exclude:artifacts'],
+        filteredPathsCount: 4,
+        secondPassUsed: true,
+      });
+
+      const result = await handleSemanticSearch({ query: 'audit' }, mockServiceClient as any);
+
+      expect(result).toContain('Fallback Diagnostics');
+      expect(result).toContain('filters_applied=exclude:artifacts');
+      expect(result).toContain('filtered_paths_count=4');
+      expect(result).toContain('second_pass_used=true');
     });
   });
 

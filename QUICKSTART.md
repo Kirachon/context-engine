@@ -5,22 +5,27 @@ Get your Context Engine MCP Server running in 5 minutes!
 ## Step 1: Install Prerequisites
 
 ```bash
-# Install Auggie CLI globally
-npm install -g @augmentcode/auggie
+# Install Codex CLI globally
+npm install -g @openai/codex
 
 # Verify installation
-auggie --version
+codex --version
 ```
 
-## Step 2: Authenticate
+## Step 2: Configure Retrieval Provider (OpenAI Session First)
 
 ```bash
-# Login to Auggie (creates ~/.augment/session.json)
-auggie login
+# Recommended: OpenAI session provider
+export CE_AI_PROVIDER="openai_session"
+export CE_OPENAI_SESSION_CMD="codex"
+codex login
+codex login status
+```
 
-# Or set environment variables
-export AUGMENT_API_TOKEN="your-token"
-export AUGMENT_API_URL="https://api.augmentcode.com"
+Windows fallback if MCP runtime cannot resolve `codex`:
+```powershell
+$env:CE_OPENAI_SESSION_CMD = "cmd"
+$env:CE_OPENAI_SESSION_ARGS_JSON = "[`"/d`",`"/s`",`"/c`",`"D:\\npm-global\\codex.cmd`"]"
 ```
 
 ## Step 3: Build the Server
@@ -437,11 +442,9 @@ codex mcp list
 ### Authentication errors
 
 ```bash
-# Re-authenticate
-auggie login
-
-# Or check environment variables
-echo $AUGMENT_API_TOKEN
+# OpenAI session-first checks
+codex login
+codex login status
 ```
 
 ### No search results
@@ -449,9 +452,6 @@ echo $AUGMENT_API_TOKEN
 ```bash
 # Index your workspace first
 node dist/index.js --workspace /path/to/project --index
-
-# Or use auggie CLI directly
-auggie index /path/to/project
 ```
 
 ## Next Steps
@@ -488,4 +488,3 @@ auggie index /path/to/project
 4. **Check logs** if something doesn't work
 
 Happy coding! 🚀
-

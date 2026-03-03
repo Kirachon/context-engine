@@ -14,7 +14,6 @@
  * - Manage token budgets for LLM context windows
  */
 
-import { DirectContext } from '@augmentcode/auggie-sdk';
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,6 +26,26 @@ import { featureEnabled } from '../config/features.js';
 import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
 import { JsonIndexStateStore, type IndexStateFile } from './indexStateStore.js';
+import { createAIProvider, resolveAIProviderId } from '../ai/providers/factory.js';
+import type { AIProvider, AIProviderId } from '../ai/providers/types.js';
+
+type DirectContextLike = {
+  addToIndex: (...args: unknown[]) => Promise<{
+    newlyUploaded?: Array<{ path: string }>;
+    alreadyUploaded?: Array<{ path: string }>;
+    [key: string]: unknown;
+  }>;
+  search: (query: string, options?: { maxOutputLength?: number }) => Promise<string>;
+  exportToFile: (filePath: string) => Promise<void>;
+  [key: string]: unknown;
+};
+
+type DirectContextModule = {
+  DirectContext: {
+    create: () => Promise<DirectContextLike>;
+    importFromFile: (filePath: string) => Promise<DirectContextLike>;
+  };
+};
 
 // ============================================================================
 // Type Definitions
@@ -150,6 +169,12 @@ export interface ContextOptions {
   bypassCache?: boolean;
 }
 
+export interface SearchDiagnostics {
+  filters_applied: string[];
+  filtered_paths_count: number;
+  second_pass_used: boolean;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -217,13 +242,16 @@ const CACHE_TTL_MS = envMs('CE_SEARCH_CACHE_TTL_MS', 60_000, { min: 0 });
 
 /** Default timeout for AI API calls in milliseconds (2 minutes) */
 const DEFAULT_API_TIMEOUT_MS = 120000;
-const MIN_API_TIMEOUT_MS = 10_000;
+const MIN_API_TIMEOUT_MS = 1_000;
 const MAX_API_TIMEOUT_MS = 30 * 60 * 1000;
 const DEFAULT_RATE_LIMIT_MAX_RETRIES = 2;
 const DEFAULT_RATE_LIMIT_BACKOFF_MS = 1000;
 const MIN_RATE_LIMIT_BACKOFF_MS = 100;
 const MAX_RATE_LIMIT_BACKOFF_MS = 60_000;
 const DEFAULT_SEARCH_QUEUE_MAX = 50;
+const SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD = 2;
+const SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS = 2500;
+const SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS = 2000;
 
 /** State file name for persisting index state */
 const STATE_FILE_NAME = '.augment-context-state.json';
@@ -273,12 +301,26 @@ class SearchQueueFullError extends Error {
   }
 }
 
+class SearchQueuePressureTimeoutError extends Error {
+  readonly code = 'SEARCH_QUEUE_PRESSURE_TIMEOUT';
+
+  constructor(timeoutMs: number, queueDepth: number, minimumBudgetMs: number) {
+    super(
+      `searchAndAsk timeout budget (${timeoutMs}ms) is too small for current queue depth (${queueDepth}). ` +
+      `Estimated minimum budget: ${minimumBudgetMs}ms. Retry with a larger timeout or when queue pressure is lower.`
+    );
+    this.name = 'SearchQueuePressureTimeoutError';
+  }
+}
+
 class SearchQueue {
   private queue: Array<{
     execute: () => Promise<string>;
     resolve: (value: string) => void;
     reject: (error: Error) => void;
     timeoutMs: number;
+    settled: boolean;
+    timer: NodeJS.Timeout;
   }> = [];
   private running = false;
   private maxQueueSize: number;
@@ -318,7 +360,23 @@ class SearchQueue {
       return Promise.reject(new SearchQueueFullError(this.maxQueueSize));
     }
     return new Promise<string>((resolve, reject) => {
-      this.queue.push({ execute: fn, resolve, reject, timeoutMs });
+      const item = {
+        execute: fn,
+        resolve,
+        reject,
+        timeoutMs,
+        settled: false,
+        timer: setTimeout(() => {
+          if (item.settled) return;
+          item.settled = true;
+          item.reject(
+            new Error(
+              `AI API request timed out after ${timeoutMs}ms (including queue wait time).`
+            )
+          );
+        }, timeoutMs),
+      };
+      this.queue.push(item);
       this.processQueue();
     });
   }
@@ -333,6 +391,13 @@ class SearchQueue {
 
     this.running = true;
     const item = this.queue.shift()!;
+    if (item.settled) {
+      this.running = false;
+      if (this.queue.length > 0) {
+        this.processQueue();
+      }
+      return;
+    }
 
     try {
       // Wrap the execution with timeout protection
@@ -341,11 +406,19 @@ class SearchQueue {
         item.timeoutMs,
         'AI API request'
       );
-      item.resolve(result);
+      if (!item.settled) {
+        item.settled = true;
+        clearTimeout(item.timer);
+        item.resolve(result);
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.error(`[SearchQueue] Request failed: ${errorMessage}`);
-      item.reject(error instanceof Error ? error : new Error(String(error)));
+      if (!item.settled) {
+        item.settled = true;
+        clearTimeout(item.timer);
+        item.reject(error instanceof Error ? error : new Error(String(error)));
+      }
     } finally {
       this.running = false;
       // Process next item if available
@@ -382,21 +455,15 @@ class SearchQueue {
   clearPending(): number {
     const count = this.queue.length;
     for (const item of this.queue) {
-      item.reject(new Error('Queue cleared'));
+      if (!item.settled) {
+        item.settled = true;
+        clearTimeout(item.timer);
+        item.reject(new Error('Queue cleared'));
+      }
     }
     this.queue = [];
     return count;
   }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isRateLimitedError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  const normalized = message.toLowerCase();
-  return normalized.includes('429') || normalized.includes('too many requests') || normalized.includes('rate limit');
 }
 
 /** Default directories to always exclude - organized by category */
@@ -799,7 +866,8 @@ interface IndexFingerprintFile {
 
 export class ContextServiceClient {
   private workspacePath: string;
-  private context: DirectContext | null = null;
+  private context: DirectContextLike | null = null;
+  private directContextModulePromise: Promise<DirectContextModule> | null = null;
   private initPromise: Promise<void> | null = null;
   private indexChain: Promise<void> = Promise.resolve();
   private indexStateStore: JsonIndexStateStore | null = null;
@@ -823,6 +891,9 @@ export class ContextServiceClient {
 
   /** Index status metadata */
   private indexStatus: IndexStatus;
+
+  /** Whether lightweight disk hydration has already been attempted for this process. */
+  private indexStatusDiskHydrated = false;
 
   /** Skip auto-index on next initialization (used after clearing state) */
   private skipAutoIndexOnce = false;
@@ -857,9 +928,13 @@ export class ContextServiceClient {
 
   /** Cache miss counter for telemetry */
   private cacheMisses: number = 0;
+  private readonly aiProviderId: AIProviderId;
+  private aiProvider: AIProvider | null = null;
+  private lastSearchDiagnostics: SearchDiagnostics | null = null;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
+    this.aiProviderId = resolveAIProviderId();
     this.indexStatus = {
       workspace: workspacePath,
       status: 'idle',
@@ -867,6 +942,63 @@ export class ContextServiceClient {
       fileCount: 0,
       isStale: true,
     };
+  }
+
+  getActiveAIProviderId(): AIProviderId {
+    return this.aiProviderId;
+  }
+
+  getActiveAIModelLabel(): string {
+    return this.getAIProvider().modelLabel;
+  }
+
+  getLastSearchDiagnostics(): SearchDiagnostics | null {
+    if (!this.lastSearchDiagnostics) {
+      return null;
+    }
+    return {
+      filters_applied: [...this.lastSearchDiagnostics.filters_applied],
+      filtered_paths_count: this.lastSearchDiagnostics.filtered_paths_count,
+      second_pass_used: this.lastSearchDiagnostics.second_pass_used,
+    };
+  }
+
+  private setLastSearchDiagnostics(next: SearchDiagnostics | null): void {
+    this.lastSearchDiagnostics = next;
+  }
+
+  private async loadDirectContextModule(): Promise<DirectContextModule> {
+    if (!this.directContextModulePromise) {
+      this.directContextModulePromise = import('@augmentcode/auggie-sdk') as unknown as Promise<DirectContextModule>;
+    }
+    return this.directContextModulePromise;
+  }
+
+  private getAIProvider(): AIProvider {
+    if (!this.aiProvider) {
+      try {
+        this.aiProvider = createAIProvider({
+          providerId: this.aiProviderId,
+          getAugmentContext: async () => {
+            throw new Error('OpenAI-only provider policy: DirectContext provider path is disabled.');
+          },
+          maxRateLimitRetries: envInt('CE_AI_RATE_LIMIT_MAX_RETRIES', DEFAULT_RATE_LIMIT_MAX_RETRIES, {
+            min: 0,
+            max: 10,
+          }),
+          baseRateLimitBackoffMs: envMs('CE_AI_RATE_LIMIT_BACKOFF_MS', DEFAULT_RATE_LIMIT_BACKOFF_MS, {
+            min: MIN_RATE_LIMIT_BACKOFF_MS,
+            max: MAX_RATE_LIMIT_BACKOFF_MS,
+          }),
+          maxRateLimitBackoffMs: MAX_RATE_LIMIT_BACKOFF_MS,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[ContextServiceClient] Failed to initialize AI provider (${this.aiProviderId}): ${message}`);
+        throw new Error(`AI provider initialization failed (${this.aiProviderId}): ${message}`);
+      }
+    }
+    return this.aiProvider;
   }
 
   private getIndexStateStore(): JsonIndexStateStore | null {
@@ -1134,10 +1266,57 @@ export class ContextServiceClient {
   }
 
   /**
+   * Best-effort, lightweight index status hydration from persisted files.
+   * This intentionally avoids ensureInitialized()/SDK boot so callers like
+   * getIndexStatus() can surface persisted metadata immediately after restart.
+   */
+  private hydrateIndexStatusFromDisk(): void {
+    if (this.indexStatusDiskHydrated) {
+      return;
+    }
+    this.indexStatusDiskHydrated = true;
+
+    const nextStatus: Partial<IndexStatus> = {};
+
+    try {
+      const stateFilePath = this.getStateFilePath();
+      if (fs.existsSync(stateFilePath)) {
+        const stats = fs.statSync(stateFilePath);
+        const restoredAt = stats.mtime.toISOString();
+        if (this.indexStatus.status !== 'indexing') {
+          nextStatus.status = 'idle';
+          const resolvedLastIndexed = this.resolveLastIndexed(restoredAt);
+          if (resolvedLastIndexed !== this.indexStatus.lastIndexed) {
+            nextStatus.lastIndexed = resolvedLastIndexed;
+          }
+        }
+      }
+    } catch {
+      // Best-effort only; keep existing in-memory status on any fs/stat failure.
+    }
+
+    if (!this.indexStatus.fileCount) {
+      try {
+        const store = new JsonIndexStateStore(this.workspacePath);
+        const known = Object.keys(store.load().files).length;
+        if (known > 0) {
+          nextStatus.fileCount = known;
+        }
+      } catch {
+        // Best-effort only; ignore parse/read errors.
+      }
+    }
+
+    if (Object.keys(nextStatus).length > 0) {
+      this.updateIndexStatus(nextStatus);
+    }
+  }
+
+  /**
    * Initialize the DirectContext SDK
    * Tries to restore from saved state if available
    */
-  private async ensureInitialized(options?: { skipAutoIndex?: boolean }): Promise<DirectContext> {
+  private async ensureInitialized(options?: { skipAutoIndex?: boolean }): Promise<DirectContextLike> {
     if (this.context) {
       return this.context;
     }
@@ -1282,41 +1461,11 @@ export class ContextServiceClient {
       // Try to restore from saved state
       if (fs.existsSync(stateFilePath)) {
         console.error(`Restoring context from ${stateFilePath}`);
+        const { DirectContext } = await this.loadDirectContextModule();
         this.context = await DirectContext.importFromFile(stateFilePath);
         this.restoredFromStateFile = true;
         console.error('Context restored successfully');
-        try {
-          const stats = fs.statSync(stateFilePath);
-          const restoredAt = stats.mtime.toISOString();
-          const nextStatus: Partial<IndexStatus> = {};
-          if (this.indexStatus.status !== 'indexing') {
-            nextStatus.status = 'idle';
-            const resolvedLastIndexed = this.resolveLastIndexed(restoredAt);
-            if (resolvedLastIndexed !== this.indexStatus.lastIndexed) {
-              nextStatus.lastIndexed = resolvedLastIndexed;
-            }
-          }
-
-          // Best-effort: if we can infer an indexed file count from the index state store,
-          // populate fileCount for better UX in index_status.
-          if (!this.indexStatus.fileCount) {
-            try {
-              const store = new JsonIndexStateStore(this.workspacePath);
-              const known = Object.keys(store.load().files).length;
-              if (known > 0) {
-                nextStatus.fileCount = known;
-              }
-            } catch {
-              // ignore
-            }
-          }
-
-          if (Object.keys(nextStatus).length > 0) {
-            this.updateIndexStatus(nextStatus);
-          }
-        } catch {
-          // ignore stat errors, keep defaults
-        }
+        this.hydrateIndexStatusFromDisk();
         return;
       }
     } catch (error) {
@@ -1340,6 +1489,7 @@ export class ContextServiceClient {
     // Create new context
     console.error('Creating new DirectContext');
     try {
+      const { DirectContext } = await this.loadDirectContextModule();
       this.context = await DirectContext.create();
       this.restoredFromStateFile = false;
       console.error('DirectContext created successfully');
@@ -1866,8 +2016,9 @@ export class ContextServiceClient {
    * @param topK Number of results
    * @returns Cache key string
    */
-  private getCommitAwareCacheKey(query: string, topK: number): string {
-    const baseKey = `${query}:${topK}`;
+  private getCommitAwareCacheKey(query: string, topK: number, providerId?: AIProviderId): string {
+    const retrievalProvider = providerId ?? this.getActiveAIProviderId();
+    const baseKey = `${retrievalProvider}:${query}:${topK}`;
     if (this.commitCacheEnabled && this.currentCommitHash) {
       return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
     }
@@ -2096,9 +2247,12 @@ export class ContextServiceClient {
           continue;
         }
 
-        if (skipUnchanged && indexState) {
-          const hash = this.hashContent(contents);
+        const hash = store ? this.hashContent(contents) : null;
+        if (hash) {
           contentHashes.set(relativePath, hash);
+        }
+
+        if (skipUnchanged && indexState) {
           const previous = indexState.files[relativePath]?.hash;
           if (previous && previous === hash) {
             unchangedSkippedCount++;
@@ -2127,9 +2281,6 @@ export class ContextServiceClient {
         successCount += batch.length;
         for (const file of batch) {
           successfulPaths.add(file.path);
-          if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
-            contentHashes.set(file.path, this.hashContent(file.contents));
-          }
         }
         if (debugIndex) {
           console.error(`  ✓ Batch ${batchNum} indexed successfully`);
@@ -2147,9 +2298,6 @@ export class ContextServiceClient {
             await context.addToIndex([file], { waitForIndexing: false });
             successCount++;
             successfulPaths.add(file.path);
-            if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
-              contentHashes.set(file.path, this.hashContent(file.contents));
-            }
             if (debugIndex) {
               console.error(`    ✓ ${file.path}`);
             }
@@ -2369,6 +2517,7 @@ export class ContextServiceClient {
    * Get current index status metadata
    */
   getIndexStatus(): IndexStatus {
+    this.hydrateIndexStatusFromDisk();
     // Refresh staleness dynamically based on lastIndexed
     this.updateIndexStatus({});
     return { ...this.indexStatus };
@@ -2499,9 +2648,12 @@ export class ContextServiceClient {
             continue;
           }
 
-          if (skipUnchanged && indexState) {
-            const hash = this.hashContent(contents);
+          const hash = store ? this.hashContent(contents) : null;
+          if (hash) {
             contentHashes.set(relativePath, hash);
+          }
+
+          if (skipUnchanged && indexState) {
             const previous = indexState.files[relativePath]?.hash;
             if (previous && previous === hash) {
               unchangedSkippedCount++;
@@ -2521,9 +2673,6 @@ export class ContextServiceClient {
           successCount += batch.length;
           for (const file of batch) {
             successfulPaths.add(file.path);
-            if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
-              contentHashes.set(file.path, this.hashContent(file.contents));
-            }
           }
         } catch (error) {
           errors.push(error instanceof Error ? error.message : String(error));
@@ -2533,9 +2682,6 @@ export class ContextServiceClient {
               await context.addToIndex([file], { waitForIndexing: false });
               successCount++;
               successfulPaths.add(file.path);
-              if (skipUnchanged && indexState && !contentHashes.has(file.path)) {
-                contentHashes.set(file.path, this.hashContent(file.contents));
-              }
             } catch (fileError) {
               errors.push(`${file.path}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
             }
@@ -2634,6 +2780,7 @@ export class ContextServiceClient {
     this.context = null;
     this.initPromise = null;
     this.restoredFromStateFile = false;
+    this.indexStatusDiskHydrated = false;
     this.skipAutoIndexOnce = true;
 
     // Delete persisted state file if it exists
@@ -2681,7 +2828,7 @@ export class ContextServiceClient {
   }
 
   /**
-   * Perform semantic search using DirectContext SDK
+   * Perform semantic search using the active retrieval provider.
    */
   async semanticSearch(
     query: string,
@@ -2691,9 +2838,11 @@ export class ContextServiceClient {
     const metricsStart = Date.now();
     const debugSearch = process.env.CE_DEBUG_SEARCH === 'true';
     const bypassCache = options?.bypassCache ?? false;
+    const retrievalProvider = this.getActiveAIProviderId();
+    this.setLastSearchDiagnostics(null);
 
     // Use commit-aware cache key when reactive mode is enabled
-    const memoryCacheKey = this.getCommitAwareCacheKey(query, topK);
+    const memoryCacheKey = this.getCommitAwareCacheKey(query, topK, retrievalProvider);
 
     if (!bypassCache) {
       const cached = this.getCachedSearch(memoryCacheKey);
@@ -2718,7 +2867,39 @@ export class ContextServiceClient {
       }
     }
 
-    const context = await this.ensureInitialized();
+    const retrieveFromAIProvider = async (): Promise<SearchResult[]> => {
+      const normalizedQuery = query.trim();
+      const queryTokens = normalizedQuery
+        .split(/[^a-z0-9_./-]+/i)
+        .map((token) => token.trim())
+        .filter(Boolean);
+      const hasStrongIdentifierToken = queryTokens.some((token) => token.length >= 12);
+      const isSingleTokenQuery = queryTokens.length === 1;
+
+      const prompt = this.buildSemanticSearchPrompt(query, topK, options);
+      const rawResponse = await this.searchAndAsk(query, prompt);
+      const parseResult = this.parseAIProviderSearchResults(rawResponse, topK);
+      if (parseResult !== null) {
+        if (parseResult.length > 0) {
+          return parseResult;
+        }
+        // When provider explicitly returns [] (common with LLM-only retrieval),
+        // run local keyword fallback so semantic_search/codebase_retrieval remain usable.
+        return this.keywordFallbackSearch(query, topK);
+      }
+
+      let searchResults = this.parseFormattedResults(rawResponse, topK);
+
+      if (searchResults.length > 0) {
+        return searchResults;
+      }
+
+      if ((rawResponse && rawResponse.trim() !== '') || isSingleTokenQuery || hasStrongIdentifierToken) {
+        return this.keywordFallbackSearch(query, topK);
+      }
+
+      return [];
+    };
 
     const indexFingerprint = this.getIndexFingerprint();
     const persistentCacheKey = (indexFingerprint !== 'no-state' && indexFingerprint !== 'unknown')
@@ -2733,7 +2914,7 @@ export class ContextServiceClient {
           'context_engine_semantic_search_total',
           { cache: 'persistent', bypass: bypassCache ? 'true' : 'false' },
           1,
-          'Total semanticSearch calls (labeled by cache path).'
+          'Total semanticSearch calls labeled by cache path.'
         );
         observeDurationMs(
           'context_engine_semantic_search_duration_seconds',
@@ -2741,36 +2922,13 @@ export class ContextServiceClient {
           Date.now() - metricsStart,
           { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
         );
-        if (debugSearch) {
-          console.error(`[semanticSearch] Persistent cache hit for query: ${query}`);
-        }
-        // Populate in-memory cache for fast subsequent calls.
-        this.setCachedSearch(memoryCacheKey, persistent);
         return persistent;
       }
     }
 
-    this.cacheMisses++;
-
+    let searchResults: SearchResult[] = [];
     try {
-      console.error(`[semanticSearch] Searching for: ${query}`);
-
-      // Use the SDK's search method
-      const formattedResults = await context.search(query, {
-        maxOutputLength: options?.maxOutputLength ?? (topK * 2000), // Approximate output length based on topK
-      });
-
-      if (debugSearch) {
-        console.error(`[semanticSearch] Raw results length: ${formattedResults?.length || 0}`);
-        console.error(`[semanticSearch] Raw results preview: ${formattedResults?.substring(0, 200) || '(empty)'}`);
-      }
-
-      // Parse the formatted results into SearchResult objects
-      const searchResults = this.parseFormattedResults(formattedResults, topK);
-
-      if (debugSearch) {
-        console.error(`[semanticSearch] Parsed ${searchResults.length} results`);
-      }
+      searchResults = await retrieveFromAIProvider();
 
       if (!bypassCache) {
         // Cache results
@@ -2783,7 +2941,7 @@ export class ContextServiceClient {
         'context_engine_semantic_search_total',
         { cache: 'miss', bypass: bypassCache ? 'true' : 'false' },
         1,
-        'Total semanticSearch calls (labeled by cache path).'
+        'Total semanticSearch calls labeled by cache path.'
       );
       observeDurationMs(
         'context_engine_semantic_search_duration_seconds',
@@ -2798,7 +2956,7 @@ export class ContextServiceClient {
         'context_engine_semantic_search_total',
         { cache: 'error', bypass: bypassCache ? 'true' : 'false' },
         1,
-        'Total semanticSearch calls (labeled by cache path).'
+        'Total semanticSearch calls labeled by cache path.'
       );
       observeDurationMs(
         'context_engine_semantic_search_duration_seconds',
@@ -2806,28 +2964,141 @@ export class ContextServiceClient {
         Date.now() - metricsStart,
         { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
       );
-      return [];
+      try {
+        return await this.keywordFallbackSearch(query, topK);
+      } catch {
+        return [];
+      }
     }
   }
 
   /**
-   * Perform AI-powered search and ask using DirectContext SDK
+   * Deterministic local retrieval path for internal callers that should not depend on provider output format.
+   */
+  async localKeywordSearch(query: string, topK: number = 10): Promise<SearchResult[]> {
+    return this.keywordFallbackSearch(query, topK);
+  }
+
+  private parseAIProviderSearchResults(raw: string, topK: number): SearchResult[] | null {
+    const timestamp = new Date().toISOString();
+    if (!raw || typeof raw !== 'string') {
+      return [];
+    }
+
+    const normalized = raw
+      .trim()
+      .replace(/\\`/g, '`');
+    const candidates: string[] = [];
+    const fenceMatches = normalized.matchAll(/```(?:json)?\s*([\s\S]*?)```/g);
+    for (const match of fenceMatches) {
+      const candidate = match[1]?.trim();
+      if (candidate) {
+        candidates.push(candidate);
+      }
+    }
+    if (!candidates.includes(normalized)) {
+      candidates.push(normalized);
+    }
+
+    let sawExplicitEmptyArray = false;
+    for (const candidate of candidates) {
+      if (!candidate || !candidate.startsWith('[') || !candidate.endsWith(']')) {
+        continue;
+      }
+
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(candidate);
+      } catch {
+        continue;
+      }
+
+      if (!Array.isArray(parsed)) {
+        continue;
+      }
+
+      if (parsed.length === 0) {
+        sawExplicitEmptyArray = true;
+        continue;
+      }
+
+      const results: SearchResult[] = [];
+      for (let i = 0; i < parsed.length && results.length < topK; i += 1) {
+        const item = parsed[i] as Record<string, unknown>;
+        if (!item || typeof item !== 'object') continue;
+
+        let rawPath = '';
+        if (typeof item.path === 'string') {
+          rawPath = item.path;
+        } else if (typeof item.file === 'string') {
+          rawPath = item.file;
+        } else if (typeof item.file_path === 'string') {
+          rawPath = item.file_path;
+        }
+
+        const content = typeof item.content === 'string' ? item.content.trim() : '';
+        if (!rawPath || !content) continue;
+
+        const sanitizedPath = this.sanitizeResultPath(rawPath);
+        if (!sanitizedPath) continue;
+
+        const rawScore = typeof item.relevanceScore === 'number'
+          ? item.relevanceScore
+          : typeof item.score === 'number'
+            ? item.score
+            : 0;
+
+        const result: SearchResult = {
+          path: sanitizedPath,
+          content,
+          lines: typeof item.lines === 'string' && item.lines.trim() ? item.lines.trim() : undefined,
+          relevanceScore: Number.isFinite(rawScore)
+            ? Math.max(0, Math.min(1, rawScore))
+            : undefined,
+          matchType: typeof item.matchType === 'string' && (item.matchType === 'keyword' || item.matchType === 'hybrid' || item.matchType === 'semantic')
+            ? item.matchType
+            : 'semantic',
+          retrievedAt: typeof item.retrievedAt === 'string' && item.retrievedAt.trim() ? item.retrievedAt.trim() : timestamp,
+        };
+
+        results.push(result);
+      }
+
+      if (results.length > 0) {
+        return results;
+      }
+    }
+
+    // Explicit empty array from provider means "no matches" and should not trigger fallback.
+    if (sawExplicitEmptyArray) {
+      return [];
+    }
+
+    // Any non-empty or malformed provider payload is treated as unparseable so non-strict mode
+    // can apply legacy fallbacks while strict mode can short-circuit to [].
+    return null;
+  }
+
+  /**
+   * Perform AI-powered search + ask using the active provider.
    *
-   * This method combines semantic search with an LLM call to answer questions
-   * about the codebase. It uses Augment's backend LLM API.
-   *
-   * @param searchQuery - The semantic search query to find relevant code
-   * @param prompt - Optional prompt to ask the LLM about the search results
-   * @returns The LLM's response as a string
-   * @throws Error if the API call fails or authentication is invalid
+   * @param searchQuery - Semantic query to guide provider context.
+   * @param prompt - Optional prompt to send to the provider.
+   * @returns Provider response text.
+   * @throws Error if provider invocation fails or authentication is invalid.
    */
   async searchAndAsk(
     searchQuery: string,
     prompt?: string,
     options?: { timeoutMs?: number }
   ): Promise<string> {
-    const context = await this.ensureInitialized();
     const metricsStart = Date.now();
+    const providerId = this.getActiveAIProviderId();
+    if (this.isOfflineMode()) {
+      throw new Error(
+        'Offline mode enforced (CONTEXT_ENGINE_OFFLINE_ONLY=1) does not allow CE_AI_PROVIDER=openai_session. Disable offline mode to use openai_session.'
+      );
+    }
 
     setGauge(
       'context_engine_search_and_ask_queue_depth',
@@ -2844,56 +3115,36 @@ export class ContextServiceClient {
       min: MIN_API_TIMEOUT_MS,
       max: MAX_API_TIMEOUT_MS,
     });
-    const maxRateLimitRetries = envInt('CE_AI_RATE_LIMIT_MAX_RETRIES', DEFAULT_RATE_LIMIT_MAX_RETRIES, {
-      min: 0,
-      max: 10,
-    });
-    const baseRateLimitBackoffMs = envMs('CE_AI_RATE_LIMIT_BACKOFF_MS', DEFAULT_RATE_LIMIT_BACKOFF_MS, {
-      min: MIN_RATE_LIMIT_BACKOFF_MS,
-      max: MAX_RATE_LIMIT_BACKOFF_MS,
-    });
     const timeoutCandidate = options?.timeoutMs ?? defaultTimeoutMs;
     const requestedTimeoutMs = Number.isFinite(timeoutCandidate) ? timeoutCandidate : defaultTimeoutMs;
     const timeoutMs = Math.max(MIN_API_TIMEOUT_MS, Math.min(MAX_API_TIMEOUT_MS, requestedTimeoutMs));
     try {
+      const admissionTimeoutError = this.getQueueTimeoutAdmissionError(timeoutMs);
+      if (admissionTimeoutError) {
+        throw admissionTimeoutError;
+      }
+
       const response = await this.searchQueue.enqueue(async () => {
         try {
           const queueLength = this.searchQueue.length;
-          console.error(`[searchAndAsk] Searching for: ${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`);
-          console.error(`[searchAndAsk] Prompt: ${prompt?.substring(0, 100) || '(using search query)'}`);
+          console.error(
+            `[searchAndAsk] Provider=${providerId}; query=${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
+          );
 
-          // Use the SDK's searchAndAsk method with bounded retries for transient rate limits.
-          let attempt = 0;
-          while (true) {
-            try {
-              const innerResponse = await context.searchAndAsk(searchQuery, prompt);
-              console.error(`[searchAndAsk] Response length: ${innerResponse?.length || 0}`);
-              return innerResponse;
-            } catch (error) {
-              if (isRateLimitedError(error) && attempt < maxRateLimitRetries) {
-                const exponentialBackoffMs = Math.min(
-                  MAX_RATE_LIMIT_BACKOFF_MS,
-                  baseRateLimitBackoffMs * Math.pow(2, attempt)
-                );
-                const jitterMs = Math.floor(Math.random() * 250);
-                const waitMs = exponentialBackoffMs + jitterMs;
-                const nextAttempt = attempt + 1;
-                console.error(
-                  `[searchAndAsk] Rate limited (attempt ${nextAttempt}/${maxRateLimitRetries}); retrying in ${waitMs}ms`
-                );
-                incCounter(
-                  'context_engine_search_and_ask_retries_total',
-                  { reason: 'rate_limit' },
-                  1,
-                  'Total searchAndAsk retries triggered by rate limiting.'
-                );
-                attempt = nextAttempt;
-                await sleep(waitMs);
-                continue;
-              }
-              throw error;
-            }
+          const provider = this.getAIProvider();
+          const innerResponse = await provider.call({
+            searchQuery,
+            prompt,
+            timeoutMs,
+            workspacePath: this.workspacePath,
+          });
+          if (!innerResponse || typeof innerResponse !== 'object' || typeof innerResponse.text !== 'string') {
+            throw new Error(
+              `AI provider (${provider.id}) returned invalid response: expected object with string text property`
+            );
           }
+          console.error(`[searchAndAsk] Response length: ${innerResponse.text.length}`);
+          return innerResponse.text;
         } catch (error) {
           console.error('[searchAndAsk] Failed:', error);
           throw error;
@@ -2920,6 +3171,19 @@ export class ContextServiceClient {
           Date.now() - metricsStart,
           { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
         );
+      } else if (e instanceof SearchQueuePressureTimeoutError) {
+        incCounter(
+          'context_engine_search_and_ask_rejected_total',
+          { reason: 'queue_timeout_budget' },
+          1,
+          'Total searchAndAsk calls rejected before execution.'
+        );
+        observeDurationMs(
+          'context_engine_search_and_ask_duration_seconds',
+          { result: 'queue_timeout_budget' },
+          Date.now() - metricsStart,
+          { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
+        );
       } else {
         incCounter('context_engine_search_and_ask_errors_total', undefined, 1, 'Total searchAndAsk failures.');
         observeDurationMs(
@@ -2941,8 +3205,267 @@ export class ContextServiceClient {
   }
 
   /**
+   * Conservative queue-admission heuristic for fast-fail timeout budgeting.
+   * This avoids spending very small request budgets in high queue pressure scenarios.
+   */
+  private getQueueTimeoutAdmissionError(timeoutMs: number): SearchQueuePressureTimeoutError | null {
+    const queueDepth = this.searchQueue.depth;
+    if (queueDepth < SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD) {
+      return null;
+    }
+
+    const estimatedQueueDelayMs = Math.max(0, queueDepth - 1) * SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS;
+    const minimumBudgetMs = estimatedQueueDelayMs + SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS;
+    if (timeoutMs >= minimumBudgetMs) {
+      return null;
+    }
+
+    return new SearchQueuePressureTimeoutError(timeoutMs, queueDepth, minimumBudgetMs);
+  }
+
+  /**
+   * Fallback retrieval path when semantic formatting changes and no structured snippets can be parsed.
+   * This performs a bounded keyword scan across indexable files to preserve tool usability.
+   */
+  private async keywordFallbackSearch(query: string, topK: number): Promise<SearchResult[]> {
+    const rawQuery = query.trim();
+    const includeArtifacts = /\binclude:artifacts\b/i.test(rawQuery);
+    const includeDocs = /\binclude:docs\b/i.test(rawQuery);
+    const includeJson = /\binclude:json\b/i.test(rawQuery);
+    const cleanedQuery = rawQuery.replace(/\binclude:(artifacts|docs|json)\b/gi, ' ').trim();
+    const normalizedQuery = cleanedQuery.toLowerCase();
+    if (!normalizedQuery) return [];
+
+    const stopwords = new Set(['and', 'the', 'for', 'with', 'from', 'that', 'this', 'where']);
+    const queryTokens = Array.from(
+      new Set(
+        normalizedQuery
+          .split(/[^a-z0-9_./-]+/i)
+          .map((token) => token.trim())
+          .filter((token) => token.length >= 3 && !stopwords.has(token))
+      )
+    );
+    if (queryTokens.length === 0) return [];
+
+    const symbolTokens = Array.from(
+      new Set(
+        cleanedQuery
+          .split(/[^A-Za-z0-9_./-]+/g)
+          .map((token) => token.trim())
+          .filter((token) => token.length >= 3 && (/[A-Z_]/.test(token) || token.length >= 12))
+          .map((token) => token.toLowerCase())
+      )
+    );
+
+    const identifierLikeToken = cleanedQuery
+      .split(/[^A-Za-z0-9_./-]+/g)
+      .map((token) => token.trim())
+      .filter(Boolean)
+      .some((token) => /[A-Z_]/.test(token) || token.length >= 12);
+    const codeIntent = /\b(function|class|interface|test|factory|provider|handler|module|api|implementation|code|file)\b/i.test(cleanedQuery)
+      || identifierLikeToken;
+    const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
+    const pureCodeIntent = codeIntent && !opsEvidenceIntent;
+
+    const files = await this.discoverFiles(this.workspacePath);
+    if (files.length === 0) return [];
+    const filtersApplied: string[] = [];
+    if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');
+    if (codeIntent && !includeDocs) filtersApplied.push('deprioritize:docs');
+    if (codeIntent && !includeJson) filtersApplied.push('deprioritize:json');
+
+    const runPass = async (allowHardExclusions: boolean): Promise<{
+      rankedResults: Array<SearchResult & { __score: number }>;
+      filteredPathsCount: number;
+    }> => {
+      let filteredPathsCount = 0;
+      const ranked = files
+        .map((filePath) => {
+          const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+          if (allowHardExclusions && pureCodeIntent && !includeArtifacts && normalizedPath.startsWith('artifacts/')) {
+            filteredPathsCount += 1;
+            return null;
+          }
+
+          const lowerPath = filePath.toLowerCase();
+          let score = 0;
+          if (lowerPath.includes(normalizedQuery)) score += 8;
+          for (const token of queryTokens) {
+            if (lowerPath.includes(token)) score += 2;
+          }
+          if (codeIntent) {
+            if (normalizedPath.startsWith('src/') || normalizedPath.startsWith('test/') || normalizedPath.startsWith('tests/')) {
+              score += 8;
+            }
+            if (/\/__tests__\//.test(normalizedPath)) {
+              score += 4;
+            }
+            if (!includeDocs && /^(docs|benchmark|bench|tmp|coverage|dist|build)\//.test(normalizedPath)) {
+              score -= 8;
+            }
+            if (!includeJson && normalizedPath.endsWith('.json')) {
+              score -= 5;
+            } else if (!includeDocs && normalizedPath.endsWith('.md')) {
+              score -= 3;
+            }
+          }
+          return { filePath, score };
+        })
+        .filter((candidate): candidate is { filePath: string; score: number } => candidate !== null)
+        .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath));
+
+      const scanLimit = Math.min(
+        Math.max(topK * 30, 120),
+        ranked.length
+      );
+      const candidates = ranked.slice(0, scanLimit);
+      const retrievedAt = new Date().toISOString();
+      const scoredResults: Array<SearchResult & { __score: number }> = [];
+
+      for (const candidate of candidates) {
+        try {
+          const content = await this.getFile(candidate.filePath);
+          const lowerContent = content.toLowerCase();
+          let matchIndex = lowerContent.indexOf(normalizedQuery);
+          if (matchIndex === -1) {
+            for (const token of queryTokens) {
+              const idx = lowerContent.indexOf(token);
+              if (idx !== -1) {
+                matchIndex = idx;
+                break;
+              }
+            }
+          }
+          if (matchIndex === -1) continue;
+
+          const snippetStart = Math.max(0, matchIndex - 200);
+          const snippetEnd = Math.min(content.length, matchIndex + 400);
+          const snippet = content.substring(snippetStart, snippetEnd).trim();
+          if (!snippet) continue;
+
+          const normalizedPath = candidate.filePath.replace(/\\/g, '/').toLowerCase();
+          let finalScore = candidate.score;
+          const hasFactoryIntent = queryTokens.includes('factory');
+          const hasProviderIntent = queryTokens.includes('provider');
+          const hasTestIntent = queryTokens.includes('test') || queryTokens.includes('tests');
+          if (lowerContent.includes(normalizedQuery)) {
+            finalScore += 16;
+          }
+          for (const token of queryTokens) {
+            if (lowerContent.includes(token)) {
+              finalScore += 2;
+            }
+          }
+          let symbolHitCount = 0;
+          for (const symbol of symbolTokens) {
+            if (lowerContent.includes(symbol)) {
+              finalScore += 28;
+              symbolHitCount += 1;
+            }
+            if (normalizedPath.includes(symbol)) {
+              finalScore += 16;
+            }
+          }
+          if (codeIntent) {
+            if (symbolHitCount > 0) {
+              finalScore += 70 * symbolHitCount;
+            }
+            if (/\/ai\/providers\//.test(normalizedPath)) finalScore += 14;
+            if (/\/factory\.(ts|tsx|js|jsx)$/.test(normalizedPath)) finalScore += hasFactoryIntent ? 70 : 30;
+            if (/\/factory\.test\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
+              finalScore += hasFactoryIntent ? 65 : 25;
+              if (hasTestIntent) finalScore += 30;
+            }
+            if (hasProviderIntent && /\/providers\//.test(normalizedPath)) {
+              finalScore += 18;
+            }
+          }
+
+          const startLine = content.slice(0, snippetStart).split('\n').length;
+          const endLine = startLine + Math.max(0, snippet.split('\n').length - 1);
+
+          scoredResults.push({
+            path: candidate.filePath.replace(/\\/g, '/'),
+            content: snippet,
+            lines: `${startLine}-${Math.max(startLine, endLine)}`,
+            relevanceScore: undefined,
+            matchType: 'keyword',
+            retrievedAt,
+            __score: finalScore,
+          });
+        } catch {
+          // Skip files that cannot be read in fallback mode.
+        }
+      }
+
+      return {
+        rankedResults: scoredResults
+          .sort((a, b) => b.__score - a.__score || a.path.localeCompare(b.path))
+          .slice(0, topK),
+        filteredPathsCount,
+      };
+    };
+
+    const firstPass = await runPass(true);
+    let rankedResults = firstPass.rankedResults;
+    let secondPassUsed = false;
+    let filteredPathsCount = firstPass.filteredPathsCount;
+
+    if (rankedResults.length === 0 && firstPass.filteredPathsCount > 0) {
+      secondPassUsed = true;
+      const secondPass = await runPass(false);
+      rankedResults = secondPass.rankedResults;
+      filteredPathsCount += secondPass.filteredPathsCount;
+    }
+
+    this.setLastSearchDiagnostics({
+      filters_applied: filtersApplied,
+      filtered_paths_count: filteredPathsCount,
+      second_pass_used: secondPassUsed,
+    });
+
+    if (rankedResults.length === 0) {
+      return [];
+    }
+
+    const maxScore = Math.max(...rankedResults.map((item) => item.__score));
+    const minScore = Math.min(...rankedResults.map((item) => item.__score));
+    const scoreRange = Math.max(1, maxScore - minScore);
+
+    return rankedResults.map(({ __score, ...result }) => ({
+      ...result,
+      relevanceScore: Math.max(0, Math.min(1, 0.4 + (0.6 * (__score - minScore)) / scoreRange)),
+    }));
+  }
+
+  private buildSemanticSearchPrompt(query: string, topK: number, options?: { maxOutputLength?: number }): string {
+    const maxOutputLength = options?.maxOutputLength ?? topK * 2000;
+
+    return [
+      'You are a strict JSON-only retriever for the Context Engine.',
+      `Query: ${query}`,
+      `Return up to ${topK} results as a JSON array only. Do not include markdown, prose, or code fences.`,
+      'Use this exact schema for every entry:',
+      '{ "path": "relative/path.ts", "content": "snippet", "lines": "12-20", "relevanceScore": 0.83, "matchType": "semantic", "retrievedAt": "2026-..." }',
+      `Limit content output so total response stays around ${Math.max(500, Math.min(4000, maxOutputLength))} characters.`,
+      'Only include files that are likely relevant to the query.',
+      'Prefer short snippets that include context around the match.',
+      'If no matches are found, return [] exactly.',
+    ].join('\\n');
+  }
+
+  private sanitizeResultPath(rawPath: string): string | null {
+    const normalized = rawPath.trim().replace(/\\\\/g, '/');
+    if (!normalized) return null;
+    if (path.isAbsolute(normalized)) return null;
+    if (normalized.startsWith('..') || normalized.includes('/../') || normalized.includes('..' + path.posix.sep)) return null;
+
+    return normalized;
+  }
+
+  /** 
    * Parse the formatted search results from DirectContext into SearchResult objects
-   *
+   * 
    * The SDK returns results in this format:
    * ```
    * The following code sections were retrieved:

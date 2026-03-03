@@ -9,6 +9,7 @@ import type { Router, Request, Response, NextFunction } from 'express';
 import { Router as createRouter } from 'express';
 import type { ContextServiceClient, ContextOptions } from '../../mcp/serviceClient.js';
 import { handleCreatePlan, type CreatePlanArgs } from '../../mcp/tools/plan.js';
+import { handleEnhancePrompt } from '../../mcp/tools/enhance.js';
 import { handleReviewChanges, type ReviewChangesArgs } from '../../mcp/tools/codeReview.js';
 import { handleReviewGitDiff, type ReviewGitDiffArgs } from '../../mcp/tools/gitReview.js';
 import { handleReviewAuto, type ReviewAutoArgs } from '../../mcp/tools/reviewAuto.js';
@@ -195,16 +196,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('prompt is required and must be a string');
             }
 
-            // Use searchAndAsk for AI-powered prompt enhancement
-            const enhancementPrompt =
-                "Here is an instruction that I'd like to give you, but it needs to be improved. " +
-                "Rewrite and enhance this instruction to make it clearer, more specific, " +
-                "less ambiguous, and correct any mistakes. " +
-                "Reply with ONLY the enhanced version of the prompt, nothing else.\n\n" +
-                "Original instruction:\n" + prompt;
-
             const enhanced = await withTimeout(
-                serviceClient.searchAndAsk(prompt, enhancementPrompt),
+                handleEnhancePrompt({ prompt }, serviceClient),
                 AI_TOOL_TIMEOUT_MS,
                 'Prompt enhancement'
             );

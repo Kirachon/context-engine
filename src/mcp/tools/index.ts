@@ -47,7 +47,7 @@ export function evaluateIndexFreshness(status: IndexStatus): IndexFreshnessInfo 
     };
   }
 
-  if (!status.lastIndexed || status.fileCount === 0) {
+  if (!status.lastIndexed) {
     return {
       code: 'unindexed',
       severity: 'warning',

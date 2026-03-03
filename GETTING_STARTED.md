@@ -28,15 +28,19 @@ npm install
 npm run build
 ```
 
-### 3. Authenticate with Auggie
+### 3. Configure Provider (OpenAI Session First)
 
 ```bash
-auggie login
+export CE_AI_PROVIDER=openai_session
+export CE_OPENAI_SESSION_CMD=codex
+codex login
+codex login status
 ```
 
-Or set environment variable:
-```bash
-export AUGGIE_API_KEY=your-key-here
+Windows fallback if the server reports `command not found`:
+```powershell
+$env:CE_OPENAI_SESSION_CMD = "cmd"
+$env:CE_OPENAI_SESSION_ARGS_JSON = "[`"/d`",`"/s`",`"/c`",`"D:\\npm-global\\codex.cmd`"]"
 ```
 
 ### 4. Test the Server
@@ -55,7 +59,8 @@ node dist/index.js --help
       "command": "node",
       "args": ["D:/GitProjects/context-engine/dist/index.js"],
       "env": {
-        "AUGGIE_API_KEY": "your-key"
+        "CE_AI_PROVIDER": "openai_session",
+        "CE_OPENAI_SESSION_CMD": "codex"
       }
     }
   }
@@ -308,8 +313,9 @@ node dist/index.js review-diff /tmp/staged.diff --enable-static-analysis
 ### Environment Variables
 
 ```bash
-# Required
-AUGGIE_API_KEY=your-key
+# Recommended
+CE_AI_PROVIDER=openai_session
+CE_OPENAI_SESSION_CMD=codex
 
 # Optional
 LOG_LEVEL=info              # debug, info, warn, error
@@ -376,9 +382,9 @@ For PRs with 100+ files:
 
 ## Troubleshooting
 
-### Issue: "Auggie authentication failed"
+### Issue: "Authentication failed"
 
-**Solution**: Run `auggie login` or set `AUGGIE_API_KEY`
+**Solution**: Run `codex login` and `codex login status`.
 
 ### Issue: "TypeScript analyzer failed"
 
@@ -431,4 +437,3 @@ Found an issue? Have a suggestion? Check the documentation or create an issue!
 **Want to contribute?** Read `PROJECT_SUMMARY.md` to understand the implementation status.
 
 **Need help?** See `TROUBLESHOOTING.md` for common issues and solutions.
-

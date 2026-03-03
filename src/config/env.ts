@@ -24,3 +24,17 @@ export function envMs(name: string, defaultValue: number, opts?: { min?: number;
   // Alias for envInt for clarity when the unit is milliseconds.
   return envInt(name, defaultValue, opts);
 }
+
+export function envEnum<const T extends string>(
+  name: string,
+  allowed: readonly T[],
+  defaultValue: T
+): T {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === '') return defaultValue;
+  const normalized = raw.trim() as T;
+  if (allowed.includes(normalized)) return normalized;
+  throw new Error(
+    `Invalid ${name} value "${raw}". Allowed values: ${allowed.join(', ')}`
+  );
+}

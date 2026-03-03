@@ -110,6 +110,30 @@ index 1234567..abcdefg 100644
     expect(result.stats.lines_removed).toBe(0);
   });
 
+  it('does not require provider/model resolution when enable_llm is false', async () => {
+    const originalProvider = process.env.CE_AI_PROVIDER;
+    process.env.CE_AI_PROVIDER = 'invalid-provider-value';
+    try {
+      const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-export const a = 1;
++export const a = 2;
+`;
+      const resultStr = await handleReviewDiff(
+        { diff, options: { enable_llm: false } },
+        { getWorkspacePath: () => process.cwd(), getFile: async () => '' } as any
+      );
+      const result = JSON.parse(resultStr);
+      expect(result).toHaveProperty('stats');
+    } finally {
+      if (originalProvider === undefined) delete process.env.CE_AI_PROVIDER;
+      else process.env.CE_AI_PROVIDER = originalProvider;
+    }
+  });
+
   it('runs invariants when invariants_path is provided', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-reviewdiff-'));
     const invPath = path.join(tmpDir, '.review-invariants.yml');
@@ -164,6 +188,7 @@ index 1234567..abcdefg 100644
       {
         getWorkspacePath: () => process.cwd(),
         getFile: async () => `export const x = 1;\nexport const y = 2;\n`,
+        getActiveAIModelLabel: () => 'test-model',
         searchAndAsk: async () => {
           callCount++;
           return JSON.stringify({

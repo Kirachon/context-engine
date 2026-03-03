@@ -26,11 +26,18 @@ args = [
     "/path/to/your/workspace"
 ]
 
-# Optional: Environment variables for the server
+# Environment variables for the server (OpenAI session first)
 [mcp_servers.context-engine.env]
-# If using environment variable authentication instead of auggie login
-# AUGMENT_API_TOKEN = "your-token-here"
-# AUGMENT_API_URL = "https://api.augmentcode.com"
+CE_AI_PROVIDER = "openai_session"
+CE_OPENAI_SESSION_CMD = "codex"
+CE_OPENAI_SESSION_ARGS_JSON = "[]"
+CE_OPENAI_SESSION_REFRESH_MODE = "per_call"
+CE_OPENAI_SESSION_IDENTITY_TTL_MS = "30000"
+CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
+
+# Windows fallback when MCP server PATH cannot see codex:
+# CE_OPENAI_SESSION_CMD = "cmd"
+# CE_OPENAI_SESSION_ARGS_JSON = "[\"/d\",\"/s\",\"/c\",\"D:\\\\npm-global\\\\codex.cmd\"]"
 
 # Optional: Server timeouts
 # startup_timeout_sec = 30
@@ -90,12 +97,11 @@ args = [
 # ==============================================================================
 #
 # 1. Make sure to build the project first: npm run build
-# 2. Ensure you're authenticated with Auggie: auggie login
-# 3. Index your workspace before first use: 
+# 2. Ensure you're authenticated with Codex session: codex login
+# 3. Index your workspace before first use:
 #    node dist/index.js --workspace /your/project --index
 # 4. Use absolute paths for reliability
 # 5. After modifying config.toml, restart Codex CLI
 #
 # To verify MCP servers are connected, run: codex
 # Then use the /mcp command in the TUI to see connected servers
-

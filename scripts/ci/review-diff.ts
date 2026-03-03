@@ -69,7 +69,7 @@ async function main(): Promise<void> {
         ? {
             llm: {
               call: (searchQuery: string, prompt: string) => serviceClient.searchAndAsk(searchQuery, prompt),
-              model: 'auggie-context-engine',
+              model: serviceClient.getActiveAIModelLabel(),
             },
           }
         : {}),

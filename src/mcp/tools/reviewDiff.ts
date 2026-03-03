@@ -49,18 +49,21 @@ export async function handleReviewDiff(
   );
   assertNonEmptyDiffScope(diff, args.changed_files);
 
+  const runtime: ReviewDiffInput['runtime'] = {
+    readFile: (filePath: string) => serviceClient.getFile(filePath),
+  };
+  if (args.options?.enable_llm) {
+    runtime.llm = {
+      call: (searchQuery: string, prompt: string) => serviceClient.searchAndAsk(searchQuery, prompt),
+    };
+  }
+
   const input: ReviewDiffInput = {
     diff,
     changed_files: args.changed_files,
     workspace_path: serviceClient.getWorkspacePath(),
     options: args.options,
-    runtime: {
-      readFile: (filePath: string) => serviceClient.getFile(filePath),
-      llm: {
-        call: (searchQuery: string, prompt: string) => serviceClient.searchAndAsk(searchQuery, prompt),
-        model: 'auggie-context-engine',
-      },
-    },
+    runtime,
   };
 
   const result = await reviewDiff(input);

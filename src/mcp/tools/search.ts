@@ -37,6 +37,22 @@ export interface SemanticSearchArgs {
   timeout_ms?: number;
 }
 
+type FallbackDiagnostics = {
+  filtersApplied?: string[];
+  filteredPathsCount?: number;
+  secondPassUsed?: boolean;
+};
+
+function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDiagnostics | null {
+  const maybeGetter = (serviceClient as ContextServiceClient & {
+    getLastFallbackDiagnostics?: () => FallbackDiagnostics | null | undefined;
+  }).getLastFallbackDiagnostics;
+  if (typeof maybeGetter !== 'function') {
+    return null;
+  }
+  return maybeGetter() ?? null;
+}
+
 /**
  * Format relevance score as a visual indicator
  */
@@ -92,6 +108,7 @@ export async function handleSemanticSearch(
 
   const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);
   const results = retrieval.results;
+  const fallbackDiagnostics = getFallbackDiagnostics(serviceClient);
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status, { prefix: '⚠️ ' });
 
@@ -114,6 +131,11 @@ export async function handleSemanticSearch(
   output += `**Found:** ${results.length} matching snippets\n\n`;
   if (freshnessWarning) {
     output += `${freshnessWarning}\n\n`;
+  }
+  if ((fallbackDiagnostics?.filtersApplied?.length ?? 0) > 0) {
+    output += `**Fallback Diagnostics:** filters_applied=${fallbackDiagnostics!.filtersApplied!.join(', ')}; `;
+    output += `filtered_paths_count=${fallbackDiagnostics?.filteredPathsCount ?? 0}; `;
+    output += `second_pass_used=${fallbackDiagnostics?.secondPassUsed ? 'true' : 'false'}\n\n`;
   }
 
   // Group results by file for better organization

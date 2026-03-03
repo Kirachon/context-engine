@@ -86,8 +86,10 @@ Options:
   --help, -h               Show this help message
 
 Environment Variables:
-  AUGMENT_API_TOKEN        Auggie API token (or use 'auggie login')
-  AUGMENT_API_URL          Auggie API URL (default: https://api.augmentcode.com)
+  AUGMENT_API_TOKEN        Augment-provider token (not required for openai_session)
+  AUGMENT_API_URL          Augment-provider URL (default: https://api.augmentcode.com; not required for openai_session)
+  CE_AI_PROVIDER           AI provider for ask calls: openai_session
+  CE_OPENAI_SESSION_CMD    Command for session-based provider (default: codex)
 
 Examples:
   # Start stdio server with current directory

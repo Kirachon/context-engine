@@ -398,14 +398,10 @@ These files are human-editable and can be version controlled with Git.
 ## Prerequisites
 
 1. **Node.js 18+**
-2. **Auggie CLI** - Install globally:
+2. **Codex CLI** - Recommended/default provider path in this documentation:
    ```bash
-   npm install -g @augmentcode/auggie
-   ```
-3. **Authentication** - Run `auggie login` or set environment variables:
-   ```bash
-   export AUGMENT_API_TOKEN="your-token"
-   export AUGMENT_API_URL="https://api.augmentcode.com"
+   codex login
+   codex login status
    ```
 
 ## Installation
@@ -598,8 +594,12 @@ The server will automatically use the appropriate tools to provide relevant cont
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `AUGMENT_API_TOKEN` | Auggie API token (or use `auggie login`) | - |
-| `AUGMENT_API_URL` | Auggie API URL | `https://api.augmentcode.com` |
+| `CE_AI_PROVIDER` | Provider for AI ask calls (`openai_session` only) | `openai_session` |
+| `CE_OPENAI_SESSION_CMD` | Command used when `CE_AI_PROVIDER=openai_session` | `codex` |
+| `CE_OPENAI_SESSION_ARGS_JSON` | JSON string array of additional `codex exec` args | `[]` |
+| `CE_OPENAI_SESSION_REFRESH_MODE` | Session readiness check mode (`per_call` or `ttl`) | `per_call` |
+| `CE_OPENAI_SESSION_IDENTITY_TTL_MS` | TTL for session readiness cache when refresh mode is `ttl` | `30000` |
+| `CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS` | Timeout for `codex login status` readiness checks | `10000` |
 | `CONTEXT_ENGINE_OFFLINE_ONLY` | Enforce offline-only policy (v1.1.0) | `false` |
 | `REACTIVE_ENABLED` | Enable reactive review features | `false` |
 | `REACTIVE_USE_AI_AGENT_EXECUTOR`| Use local AI agent for reviews (Phase 1) | `false` |
@@ -608,6 +608,9 @@ The server will automatically use the appropriate tools to provide relevant cont
 | `REACTIVE_OPTIMIZE_WORKERS`| Enable CPU-aware worker optimization (Phase 4) | `false` |
 | `REACTIVE_PARALLEL_EXEC`| Enable concurrent worker execution | `false` |
 | `CE_INDEX_STATE_STORE` | Persist per-file index hashes to `.augment-index-state.json` | `false` |
+
+Windows PATH fallback example:
+`CE_OPENAI_SESSION_CMD=cmd` and `CE_OPENAI_SESSION_ARGS_JSON=["/d","/s","/c","D:\\npm-global\\codex.cmd"]`
 | `CE_SKIP_UNCHANGED_INDEXING` | Skip re-indexing unchanged files (requires `CE_INDEX_STATE_STORE=true`) | `false` |
 | `CE_HASH_NORMALIZE_EOL` | Normalize CRLF/LF when hashing (recommended with state store across Windows/Linux) | `false` |
 | `CE_METRICS` | Enable in-process metrics collection (Prometheus format) | `false` |
@@ -662,7 +665,7 @@ When enabled, the server will fail to start if a remote API URL is configured. T
 
 ### Authentication errors
 
-Run `auggie login` or verify environment variables are set correctly.
+Run `codex login` and `codex login status`.
 
 ### No search results
 
@@ -682,7 +685,7 @@ node dist/index.js --workspace /path/to/project --index
 
 If you see an error about offline-only mode:
 1. Remove the `CONTEXT_ENGINE_OFFLINE_ONLY` environment variable, or
-2. Configure a localhost API URL in `AUGMENT_API_URL`
+2. Verify that `CONTEXT_ENGINE_OFFLINE_ONLY` is not inherited by your shell/service process
 
 ### Tool timeout errors during plan generation (v1.4.0)
 

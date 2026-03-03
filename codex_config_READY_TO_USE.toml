@@ -23,10 +23,15 @@ args = [
     "--watch"                                 # Auto-reindexes when files change
 ]
 
-# Optional: Environment variables (uncomment if not using 'auggie login')
-# [mcp_servers.context-engine.env]
-# AUGMENT_API_TOKEN = "your-token-here"
-# AUGMENT_API_URL = "https://api.augmentcode.com"
+# Environment variables (OpenAI session first)
+[mcp_servers.context-engine.env]
+CE_AI_PROVIDER = "openai_session"
+# Windows-safe launch to avoid PATH/PATHEXT issues in MCP subprocesses.
+CE_OPENAI_SESSION_CMD = "cmd"
+CE_OPENAI_SESSION_ARGS_JSON = "[\"/d\",\"/s\",\"/c\",\"D:\\\\npm-global\\\\codex.cmd\"]"
+CE_OPENAI_SESSION_REFRESH_MODE = "per_call"
+CE_OPENAI_SESSION_IDENTITY_TTL_MS = "30000"
+CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 
 # ============================================================================
 # EXAMPLE: Multiple Projects
@@ -63,4 +68,3 @@ args = [
 #   context-engine: connected
 #
 # ============================================================================
-

@@ -15,7 +15,7 @@ export function getIndexFreshnessWarning(
   if (status.status === 'error') {
     reasons.push(`index status is error${status.lastError ? ` (${status.lastError})` : ''}`);
   }
-  if (!status.lastIndexed || status.fileCount === 0) {
+  if (!status.lastIndexed) {
     reasons.push('workspace appears unindexed');
   }
   if (status.isStale) {
