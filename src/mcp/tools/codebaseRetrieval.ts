@@ -50,14 +50,37 @@ type FallbackDiagnostics = {
   secondPassUsed?: boolean;
 };
 
+type RawFallbackDiagnostics = {
+  filters_applied?: string[];
+  filtered_paths_count?: number;
+  second_pass_used?: boolean;
+  filtersApplied?: string[];
+  filteredPathsCount?: number;
+  secondPassUsed?: boolean;
+};
+
 function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDiagnostics | null {
-  const maybeGetter = (serviceClient as ContextServiceClient & {
-    getLastFallbackDiagnostics?: () => FallbackDiagnostics | null | undefined;
-  }).getLastFallbackDiagnostics;
-  if (typeof maybeGetter !== 'function') {
+  const maybeClient = serviceClient as unknown as {
+    getLastSearchDiagnostics?: () => unknown;
+    getLastFallbackDiagnostics?: () => unknown;
+  };
+  const searchDiagnosticsGetter = maybeClient.getLastSearchDiagnostics;
+  const fallbackDiagnosticsGetter = maybeClient.getLastFallbackDiagnostics;
+  const diagnostics = (
+    typeof searchDiagnosticsGetter === 'function'
+      ? searchDiagnosticsGetter.call(maybeClient)
+      : typeof fallbackDiagnosticsGetter === 'function'
+        ? fallbackDiagnosticsGetter.call(maybeClient)
+        : null
+  ) as RawFallbackDiagnostics | null | undefined;
+  if (!diagnostics) {
     return null;
   }
-  return maybeGetter() ?? null;
+  return {
+    filtersApplied: diagnostics.filters_applied ?? diagnostics.filtersApplied,
+    filteredPathsCount: diagnostics.filtered_paths_count ?? diagnostics.filteredPathsCount,
+    secondPassUsed: diagnostics.second_pass_used ?? diagnostics.secondPassUsed,
+  };
 }
 
 export async function handleCodebaseRetrieval(

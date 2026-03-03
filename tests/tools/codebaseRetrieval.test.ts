@@ -16,7 +16,7 @@ describe('codebase_retrieval Tool', () => {
     jest.clearAllMocks();
     mockServiceClient = {
       semanticSearch: jest.fn(),
-      getLastFallbackDiagnostics: jest.fn(() => null),
+      getLastSearchDiagnostics: jest.fn(() => null),
       getIndexStatus: jest.fn(() => ({
         workspace: '/tmp/workspace',
         lastIndexed: '2024-01-01T00:00:00.000Z',
@@ -89,10 +89,10 @@ describe('codebase_retrieval Tool', () => {
 
   it('includes fallback diagnostics metadata when provided by service client', async () => {
     mockServiceClient.semanticSearch.mockResolvedValue([]);
-    mockServiceClient.getLastFallbackDiagnostics.mockReturnValue({
-      filtersApplied: ['exclude:artifacts', 'exclude:docs'],
-      filteredPathsCount: 9,
-      secondPassUsed: true,
+    mockServiceClient.getLastSearchDiagnostics.mockReturnValue({
+      filters_applied: ['exclude:artifacts', 'exclude:docs'],
+      filtered_paths_count: 9,
+      second_pass_used: true,
     });
 
     const result = await handleCodebaseRetrieval({ query: 'diagnostics' }, mockServiceClient as any);
@@ -101,6 +101,23 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata.filtersApplied).toEqual(['exclude:artifacts', 'exclude:docs']);
     expect(parsed.metadata.filteredPathsCount).toBe(9);
     expect(parsed.metadata.secondPassUsed).toBe(true);
+  });
+
+  it('supports legacy fallback diagnostics getter with camelCase fields', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+    delete mockServiceClient.getLastSearchDiagnostics;
+    mockServiceClient.getLastFallbackDiagnostics = jest.fn(() => ({
+      filtersApplied: ['exclude:legacy'],
+      filteredPathsCount: 3,
+      secondPassUsed: false,
+    }));
+
+    const result = await handleCodebaseRetrieval({ query: 'legacy diagnostics' }, mockServiceClient as any);
+    const parsed = JSON.parse(result);
+
+    expect(parsed.metadata.filtersApplied).toEqual(['exclude:legacy']);
+    expect(parsed.metadata.filteredPathsCount).toBe(3);
+    expect(parsed.metadata.secondPassUsed).toBe(false);
   });
 
   it('returns a structured empty payload when retrieval backend rejects', async () => {

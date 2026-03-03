@@ -94,6 +94,7 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_OPENAI_SESSION_REFRESH_MODE;
     delete process.env.CE_OPENAI_SESSION_IDENTITY_TTL_MS;
     delete process.env.CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS;
+    delete process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -176,7 +177,7 @@ describe('ContextServiceClient', () => {
       expect(mockContextInstance.search).not.toHaveBeenCalled();
     });
 
-    it('should fallback to keyword search when provider returns []', async () => {
+    it('should return [] when provider explicitly returns [] (default authoritative mode)', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-empty-array-general-'));
       fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
       fs.writeFileSync(
@@ -191,15 +192,34 @@ describe('ContextServiceClient', () => {
       const results = await fallbackClient.semanticSearch('test query', 5, { bypassCache: true });
 
       expect(providerCall).toHaveBeenCalledTimes(1);
-      expect(results.length).toBeGreaterThan(0);
-      expect(results[0].path).toContain('src/query.ts');
-      expect(results[0].matchType).toBe('keyword');
+      expect(results).toEqual([]);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('should use keyword fallback when provider returns [] for strong identifier query', async () => {
+    it('should return [] even for strong identifier query when provider explicitly returns [] (default authoritative mode)', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-empty-array-strong-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        'export function resolveAIProviderId() { return "openai_session"; }',
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const providerCall = configureOpenAISemanticProvider(fallbackClient, '[]');
+
+      const results = await fallbackClient.semanticSearch('resolveAIProviderId', 5, { bypassCache: true });
+
+      expect(providerCall).toHaveBeenCalledTimes(1);
+      expect(results).toEqual([]);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should allow compat fallback when CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK=true', async () => {
+      process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK = 'true';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-empty-array-compat-'));
       fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
       fs.writeFileSync(
         path.join(tempDir, 'src', 'provider.ts'),
@@ -215,6 +235,7 @@ describe('ContextServiceClient', () => {
       expect(providerCall).toHaveBeenCalledTimes(1);
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].path).toContain('src/provider.ts');
+      expect(results[0].matchType).toBe('keyword');
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
@@ -557,6 +578,7 @@ describe('ContextServiceClient', () => {
     });
 
     it('should prioritize src/tests paths over artifacts for code-intent fallback queries', async () => {
+      process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK = 'true';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-code-intent-priority-'));
       fs.mkdirSync(path.join(tempDir, 'src', 'ai', 'providers'), { recursive: true });
       fs.mkdirSync(path.join(tempDir, 'tests', 'ai', 'providers'), { recursive: true });
@@ -611,6 +633,7 @@ describe('ContextServiceClient', () => {
     });
 
     it('should allow artifacts for mixed ops intent queries', async () => {
+      process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK = 'true';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-mixed-intent-artifacts-'));
       fs.mkdirSync(path.join(tempDir, 'src', 'ai', 'providers'), { recursive: true });
       fs.mkdirSync(path.join(tempDir, 'artifacts', 'bench'), { recursive: true });
@@ -645,6 +668,7 @@ describe('ContextServiceClient', () => {
     });
 
     it('should allow include:artifacts override for code-intent queries', async () => {
+      process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK = 'true';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-include-artifacts-'));
       fs.mkdirSync(path.join(tempDir, 'src', 'ai', 'providers'), { recursive: true });
       fs.mkdirSync(path.join(tempDir, 'artifacts', 'bench'), { recursive: true });
@@ -679,6 +703,7 @@ describe('ContextServiceClient', () => {
     });
 
     it('should use relaxed second pass when strict filtered pass yields no results', async () => {
+      process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK = 'true';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-second-pass-relaxed-'));
       fs.mkdirSync(path.join(tempDir, 'artifacts', 'bench'), { recursive: true });
 

@@ -596,7 +596,8 @@ The server will automatically use the appropriate tools to provide relevant cont
 |----------|-------------|---------|
 | `CE_AI_PROVIDER` | Provider for AI ask calls (`openai_session` only) | `openai_session` |
 | `CE_OPENAI_SESSION_CMD` | Command used when `CE_AI_PROVIDER=openai_session` | `codex` |
-| `CE_OPENAI_SESSION_ARGS_JSON` | JSON string array of additional `codex exec` args | `[]` |
+| `CE_OPENAI_SESSION_ARGS_JSON` | JSON string array of wrapper/prefix args applied to session command invocations (including readiness checks) | `[]` |
+| `CE_OPENAI_SESSION_EXEC_ARGS_JSON` | JSON string array of additional args appended after `exec` (exec-only) | `[]` |
 | `CE_OPENAI_SESSION_REFRESH_MODE` | Session readiness check mode (`per_call` or `ttl`) | `per_call` |
 | `CE_OPENAI_SESSION_IDENTITY_TTL_MS` | TTL for session readiness cache when refresh mode is `ttl` | `30000` |
 | `CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS` | Timeout for `codex login status` readiness checks | `10000` |
@@ -616,6 +617,7 @@ Windows PATH fallback example:
 | `CE_METRICS` | Enable in-process metrics collection (Prometheus format) | `false` |
 | `CE_HTTP_METRICS` | Expose `GET /metrics` when running with `--http` | `false` |
 | `CE_AI_REQUEST_TIMEOUT_MS` | Default timeout for AI calls (`searchAndAsk`) in milliseconds | `120000` |
+| `CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK` | Compatibility mode: when `true`, explicit provider `[]` re-enables local keyword fallback | `false` |
 | `CE_SEARCH_AND_ASK_QUEUE_MAX` | Max queued `searchAndAsk` requests before rejecting (0 = unlimited) | `50` |
 | `CE_TSC_INCREMENTAL` | Enable incremental `tsc` runs for static analysis | `true` |
 | `CE_TSC_BUILDINFO_DIR` | Directory to store `tsbuildinfo` cache (defaults to OS temp) | `(os tmp)` |

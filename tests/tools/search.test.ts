@@ -26,7 +26,7 @@ describe('semantic_search Tool', () => {
         fileCount: 10,
         isStale: false,
       })),
-      getLastFallbackDiagnostics: jest.fn(() => null),
+      getLastSearchDiagnostics: jest.fn(() => null),
     };
   });
 
@@ -217,10 +217,10 @@ describe('semantic_search Tool', () => {
         { path: 'src/a.ts', content: 'alpha', lines: '1-2', relevanceScore: 0.8, matchType: 'keyword' },
       ];
       mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
-      mockServiceClient.getLastFallbackDiagnostics.mockReturnValue({
-        filtersApplied: ['exclude:artifacts'],
-        filteredPathsCount: 4,
-        secondPassUsed: true,
+      mockServiceClient.getLastSearchDiagnostics.mockReturnValue({
+        filters_applied: ['exclude:artifacts'],
+        filtered_paths_count: 4,
+        second_pass_used: true,
       });
 
       const result = await handleSemanticSearch({ query: 'audit' }, mockServiceClient as any);
@@ -229,6 +229,26 @@ describe('semantic_search Tool', () => {
       expect(result).toContain('filters_applied=exclude:artifacts');
       expect(result).toContain('filtered_paths_count=4');
       expect(result).toContain('second_pass_used=true');
+    });
+
+    it('should support legacy diagnostics getter with camelCase fields', async () => {
+      const mockResults: SearchResult[] = [
+        { path: 'src/a.ts', content: 'alpha', lines: '1-2', relevanceScore: 0.8, matchType: 'keyword' },
+      ];
+      mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+      delete mockServiceClient.getLastSearchDiagnostics;
+      mockServiceClient.getLastFallbackDiagnostics = jest.fn(() => ({
+        filtersApplied: ['exclude:legacy'],
+        filteredPathsCount: 2,
+        secondPassUsed: false,
+      }));
+
+      const result = await handleSemanticSearch({ query: 'legacy-audit' }, mockServiceClient as any);
+
+      expect(result).toContain('Fallback Diagnostics');
+      expect(result).toContain('filters_applied=exclude:legacy');
+      expect(result).toContain('filtered_paths_count=2');
+      expect(result).toContain('second_pass_used=false');
     });
   });
 

@@ -33,17 +33,25 @@ function classifyAuthError(stderr: string): boolean {
   );
 }
 
-function parseArgsJson(raw: string | undefined): string[] {
+function parseArgsJson(raw: string | undefined, envName: string): string[] {
   if (!raw || raw.trim() === '') return [];
   try {
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed) || parsed.some((item) => typeof item !== 'string')) {
-      throw new Error('CE_OPENAI_SESSION_ARGS_JSON must be a JSON string array');
+      throw new Error(`${envName} must be a JSON string array`);
     }
     return parsed;
   } catch (error) {
-    throw new Error(`Invalid CE_OPENAI_SESSION_ARGS_JSON: ${toMessage(error)}`);
+    throw new Error(`Invalid ${envName}: ${toMessage(error)}`);
   }
+}
+
+function isLikelyWindowsWrapperArgs(args: string[]): boolean {
+  if (args.length === 0) return false;
+  const lowered = args.map((arg) => arg.toLowerCase());
+  const hasCmdSwitch = lowered.includes('/c');
+  const hasBatchPath = args.some((arg) => /\.(cmd|bat)$/i.test(arg.replace(/^"+|"+$/g, '')));
+  return hasCmdSwitch && hasBatchPath;
 }
 
 function parseRefreshMode(raw: string | undefined): SessionRefreshMode {
@@ -164,7 +172,8 @@ export class CodexSessionProvider implements AIProvider {
   readonly modelLabel = 'codex-session';
 
   private readonly commandCandidates: CommandSpec[];
-  private readonly baseArgs: string[];
+  private readonly commandPrefixArgs: string[];
+  private readonly execArgs: string[];
   private readonly healthcheckTimeoutMs: number;
   private readonly refreshMode: SessionRefreshMode;
   private readonly identityTtlMs: number;
@@ -173,7 +182,28 @@ export class CodexSessionProvider implements AIProvider {
 
   constructor() {
     this.commandCandidates = this.buildCommandCandidates(process.env.CE_OPENAI_SESSION_CMD);
-    this.baseArgs = parseArgsJson(process.env.CE_OPENAI_SESSION_ARGS_JSON);
+    const legacyArgs = parseArgsJson(
+      process.env.CE_OPENAI_SESSION_ARGS_JSON,
+      'CE_OPENAI_SESSION_ARGS_JSON'
+    );
+    const hasExplicitExecArgs =
+      process.env.CE_OPENAI_SESSION_EXEC_ARGS_JSON !== undefined;
+    const explicitExecArgs = parseArgsJson(
+      process.env.CE_OPENAI_SESSION_EXEC_ARGS_JSON,
+      'CE_OPENAI_SESSION_EXEC_ARGS_JSON'
+    );
+    const legacyLooksLikeWrapper = isLikelyWindowsWrapperArgs(legacyArgs);
+    // Compatibility policy:
+    // - Legacy CE_OPENAI_SESSION_ARGS_JSON historically carried exec args.
+    // - If it looks like a Windows wrapper command tuple (e.g. /d /s /c path.cmd),
+    //   treat it as wrapper/prefix args for readiness + exec.
+    // - If CE_OPENAI_SESSION_EXEC_ARGS_JSON is set, it takes precedence for exec-only args.
+    this.commandPrefixArgs = legacyLooksLikeWrapper ? legacyArgs : [];
+    this.execArgs = hasExplicitExecArgs
+      ? explicitExecArgs
+      : legacyLooksLikeWrapper
+        ? []
+        : legacyArgs;
     this.healthcheckTimeoutMs = envMs(
       'CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS',
       DEFAULT_HEALTHCHECK_TIMEOUT_MS,
@@ -234,8 +264,16 @@ export class CodexSessionProvider implements AIProvider {
         const usesBatchWrapper = isWindowsBatchCommand(candidate.command);
         const effectiveCommand = usesBatchWrapper ? 'cmd' : candidate.command;
         const effectiveArgs = usesBatchWrapper
-          ? ['/d', '/s', '/c', candidate.command, ...candidate.prefixArgs, ...args.commandArgs]
-          : [...candidate.prefixArgs, ...args.commandArgs];
+          ? [
+              '/d',
+              '/s',
+              '/c',
+              candidate.command,
+              ...candidate.prefixArgs,
+              ...this.commandPrefixArgs,
+              ...args.commandArgs,
+            ]
+          : [...candidate.prefixArgs, ...this.commandPrefixArgs, ...args.commandArgs];
         const result = await runCommand({
           command: effectiveCommand,
           commandArgs: effectiveArgs,
@@ -325,7 +363,7 @@ export class CodexSessionProvider implements AIProvider {
     try {
       const commandArgs = [
         'exec',
-        ...this.baseArgs,
+        ...this.execArgs,
         '--json',
         '--skip-git-repo-check',
         '--color',

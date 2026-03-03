@@ -9,6 +9,7 @@ describe('AI provider factory (openai_session only)', () => {
     delete process.env.CE_AI_PROVIDER;
     delete process.env.CE_AI_OPENAI_SESSION_ONLY;
     delete process.env.CE_OPENAI_SESSION_ARGS_JSON;
+    delete process.env.CE_OPENAI_SESSION_EXEC_ARGS_JSON;
     delete process.env.CE_OPENAI_SESSION_CMD;
   });
 

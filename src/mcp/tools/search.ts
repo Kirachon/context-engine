@@ -43,14 +43,46 @@ type FallbackDiagnostics = {
   secondPassUsed?: boolean;
 };
 
+type RawFallbackDiagnostics = {
+  filters_applied?: string[];
+  filtered_paths_count?: number;
+  second_pass_used?: boolean;
+  filtersApplied?: string[];
+  filteredPathsCount?: number;
+  secondPassUsed?: boolean;
+};
+
+function normalizeFallbackDiagnostics(diagnostics: RawFallbackDiagnostics): FallbackDiagnostics {
+  return {
+    filtersApplied:
+      diagnostics.filters_applied ??
+      ('filtersApplied' in diagnostics ? diagnostics.filtersApplied : undefined),
+    filteredPathsCount:
+      diagnostics.filtered_paths_count ??
+      ('filteredPathsCount' in diagnostics ? diagnostics.filteredPathsCount : undefined),
+    secondPassUsed:
+      diagnostics.second_pass_used ??
+      ('secondPassUsed' in diagnostics ? diagnostics.secondPassUsed : undefined),
+  };
+}
+
 function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDiagnostics | null {
-  const maybeGetter = (serviceClient as ContextServiceClient & {
-    getLastFallbackDiagnostics?: () => FallbackDiagnostics | null | undefined;
-  }).getLastFallbackDiagnostics;
-  if (typeof maybeGetter !== 'function') {
-    return null;
+  const maybeClient = serviceClient as ContextServiceClient & {
+    getLastSearchDiagnostics?: () => RawFallbackDiagnostics | null | undefined;
+    getLastFallbackDiagnostics?: () => RawFallbackDiagnostics | null | undefined;
+  };
+
+  const searchDiagnostics = maybeClient.getLastSearchDiagnostics?.();
+  if (searchDiagnostics) {
+    return normalizeFallbackDiagnostics(searchDiagnostics);
   }
-  return maybeGetter() ?? null;
+
+  const fallbackDiagnostics = maybeClient.getLastFallbackDiagnostics?.();
+  if (fallbackDiagnostics) {
+    return normalizeFallbackDiagnostics(fallbackDiagnostics);
+  }
+
+  return null;
 }
 
 /**

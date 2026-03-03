@@ -2868,6 +2868,7 @@ export class ContextServiceClient {
     }
 
     const retrieveFromAIProvider = async (): Promise<SearchResult[]> => {
+      const compatEmptyArrayFallbackEnabled = process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK === 'true';
       const normalizedQuery = query.trim();
       const queryTokens = normalizedQuery
         .split(/[^a-z0-9_./-]+/i)
@@ -2883,9 +2884,12 @@ export class ContextServiceClient {
         if (parseResult.length > 0) {
           return parseResult;
         }
-        // When provider explicitly returns [] (common with LLM-only retrieval),
-        // run local keyword fallback so semantic_search/codebase_retrieval remain usable.
-        return this.keywordFallbackSearch(query, topK);
+        // Explicit [] from the provider is authoritative by default.
+        // Temporary compatibility mode can re-enable keyword fallback.
+        if (compatEmptyArrayFallbackEnabled) {
+          return this.keywordFallbackSearch(query, topK);
+        }
+        return [];
       }
 
       let searchResults = this.parseFormattedResults(rawResponse, topK);
@@ -2981,8 +2985,11 @@ export class ContextServiceClient {
 
   private parseAIProviderSearchResults(raw: string, topK: number): SearchResult[] | null {
     const timestamp = new Date().toISOString();
-    if (!raw || typeof raw !== 'string') {
-      return [];
+    if (typeof raw !== 'string') {
+      return null;
+    }
+    if (raw.trim() === '') {
+      return null;
     }
 
     const normalized = raw
