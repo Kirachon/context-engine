@@ -8,6 +8,11 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { reviewDiff, type ReviewDiffInput } from '../../reviewer/reviewDiff.js';
 import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
+import { envMs } from '../../config/env.js';
+
+const DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS = 60_000;
+const MIN_REVIEW_DIFF_LLM_TIMEOUT_MS = 1_000;
+const MAX_REVIEW_DIFF_LLM_TIMEOUT_MS = 30 * 60 * 1000;
 
 export interface ReviewDiffArgs {
   diff: string;
@@ -53,8 +58,21 @@ export async function handleReviewDiff(
     readFile: (filePath: string) => serviceClient.getFile(filePath),
   };
   if (args.options?.enable_llm) {
+    const reviewDiffLlmTimeoutMs = envMs(
+      'CE_REVIEW_DIFF_LLM_TIMEOUT_MS',
+      envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS, {
+        min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
+        max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
+      }),
+      {
+        min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
+        max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
+      }
+    );
     runtime.llm = {
-      call: (searchQuery: string, prompt: string) => serviceClient.searchAndAsk(searchQuery, prompt),
+      call: (searchQuery: string, prompt: string) => serviceClient.searchAndAsk(searchQuery, prompt, {
+        timeoutMs: reviewDiffLlmTimeoutMs,
+      }),
     };
   }
 

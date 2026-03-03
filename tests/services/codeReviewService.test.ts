@@ -591,4 +591,32 @@ index 1234567..abcdefg 100644
       });
     });
   });
+
+  describe('reviewChanges timeout controls', () => {
+    it('uses CE_REVIEW_AI_TIMEOUT_MS when calling searchAndAsk', async () => {
+      const previous = process.env.CE_REVIEW_AI_TIMEOUT_MS;
+      process.env.CE_REVIEW_AI_TIMEOUT_MS = '65000';
+
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'looks good',
+          overall_explanation: 'No issues',
+          overall_confidence_score: 0.95,
+        })
+      );
+
+      try {
+        await codeReviewService.reviewChanges({ diff: SIMPLE_DIFF });
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
+          'Review code changes for issues',
+          expect.any(String),
+          { timeoutMs: 65000 }
+        );
+      } finally {
+        if (previous === undefined) delete process.env.CE_REVIEW_AI_TIMEOUT_MS;
+        else process.env.CE_REVIEW_AI_TIMEOUT_MS = previous;
+      }
+    });
+  });
 });

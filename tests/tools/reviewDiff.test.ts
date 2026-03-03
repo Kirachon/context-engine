@@ -182,39 +182,50 @@ index 1234567..abcdefg 100644
 +export const y = 2;
 `;
 
-    let callCount = 0;
-    const resultStr = await handleReviewDiff(
-      { diff, options: { max_findings: 10, enable_llm: true, two_pass: true, risk_threshold: 3 } },
-      {
-        getWorkspacePath: () => process.cwd(),
-        getFile: async () => `export const x = 1;\nexport const y = 2;\n`,
-        getActiveAIModelLabel: () => 'test-model',
-        searchAndAsk: async () => {
-          callCount++;
-          return JSON.stringify({
-            findings: [
-              {
-                id: callCount === 1 ? 'F001' : 'F002',
-                severity: callCount === 1 ? 'HIGH' : 'MEDIUM',
-                category: callCount === 1 ? 'architecture' : 'correctness',
-                confidence: 0.9,
-                title: callCount === 1 ? 'Structural' : 'Detailed',
-                location: { file: 'src/mcp/tools/x.ts', startLine: 1, endLine: 1 },
-                evidence: ['e'],
-                impact: 'i',
-                recommendation: 'r',
-              },
-            ],
-          });
-        },
-      } as any
-    );
+    const previous = process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
+    process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = '65000';
 
-    const result = JSON.parse(resultStr);
-    expect(result.stats.llm_passes_executed).toBe(2);
-    expect(result.findings.some((f: any) => f.id === 'F001')).toBe(true);
-    expect(result.findings.some((f: any) => f.id === 'F002')).toBe(true);
-    expect(typeof result.stats.timings_ms.llm_structural).toBe('number');
+    let callCount = 0;
+    const callArgs: unknown[][] = [];
+    try {
+      const resultStr = await handleReviewDiff(
+        { diff, options: { max_findings: 10, enable_llm: true, two_pass: true, risk_threshold: 3 } },
+        {
+          getWorkspacePath: () => process.cwd(),
+          getFile: async () => `export const x = 1;\nexport const y = 2;\n`,
+          getActiveAIModelLabel: () => 'test-model',
+          searchAndAsk: async (...args: unknown[]) => {
+            callArgs.push(args);
+            callCount++;
+            return JSON.stringify({
+              findings: [
+                {
+                  id: callCount === 1 ? 'F001' : 'F002',
+                  severity: callCount === 1 ? 'HIGH' : 'MEDIUM',
+                  category: callCount === 1 ? 'architecture' : 'correctness',
+                  confidence: 0.9,
+                  title: callCount === 1 ? 'Structural' : 'Detailed',
+                  location: { file: 'src/mcp/tools/x.ts', startLine: 1, endLine: 1 },
+                  evidence: ['e'],
+                  impact: 'i',
+                  recommendation: 'r',
+                },
+              ],
+            });
+          },
+        } as any
+      );
+
+      const result = JSON.parse(resultStr);
+      expect(result.stats.llm_passes_executed).toBe(2);
+      expect(result.findings.some((f: any) => f.id === 'F001')).toBe(true);
+      expect(result.findings.some((f: any) => f.id === 'F002')).toBe(true);
+      expect(typeof result.stats.timings_ms.llm_structural).toBe('number');
+      expect(callArgs.every((args) => (args[2] as { timeoutMs?: number } | undefined)?.timeoutMs === 65000)).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
+      else process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = previous;
+    }
   });
 
   it('sets should_fail when a CRITICAL invariant is violated', async () => {

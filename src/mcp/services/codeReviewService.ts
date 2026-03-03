@@ -32,6 +32,7 @@ import {
   validateReviewResult,
 } from '../prompts/codeReview.js';
 import { postProcessReviewFindings } from './codeReviewPost.js';
+import { envMs } from '../../config/env.js';
 
 // ============================================================================
 // Constants
@@ -39,6 +40,9 @@ import { postProcessReviewFindings } from './codeReviewPost.js';
 
 /** Tool version for metadata */
 const TOOL_VERSION = '1.0.0';
+const DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS = 60_000;
+const MIN_CODE_REVIEW_AI_TIMEOUT_MS = 1_000;
+const MAX_CODE_REVIEW_AI_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Default review options */
 const DEFAULT_OPTIONS: Required<ReviewOptions> = {
@@ -82,6 +86,10 @@ export class CodeReviewService {
   async reviewChanges(input: ReviewChangesInput): Promise<ReviewResult> {
     const startTime = Date.now();
     const opts = this.resolveOptions(input.options);
+    const reviewTimeoutMs = envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS, {
+      min: MIN_CODE_REVIEW_AI_TIMEOUT_MS,
+      max: MAX_CODE_REVIEW_AI_TIMEOUT_MS,
+    });
 
     console.error(`[CodeReviewService] Starting code review...`);
 
@@ -106,7 +114,8 @@ export class CodeReviewService {
       // Step 5: Call AI to perform the review
       const response = await this.contextClient.searchAndAsk(
         'Review code changes for issues',
-        fullPrompt
+        fullPrompt,
+        { timeoutMs: reviewTimeoutMs }
       );
 
       // Step 6: Parse and validate the response
