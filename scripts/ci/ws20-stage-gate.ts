@@ -28,6 +28,25 @@ interface GateCheck {
   detail: string;
 }
 
+interface ControlledRampCheckpointThreshold {
+  percent: number;
+  min_soak_hours: number;
+}
+
+interface Ws20GateThresholds {
+  canary: {
+    min_percent: number;
+    max_percent: number;
+    min_soak_hours: number;
+  };
+  controlled_ramp: {
+    checkpoints: ControlledRampCheckpointThreshold[];
+  };
+  ga_hardening: {
+    min_soak_hours: number;
+  };
+}
+
 const STAGE_NAMES: Record<StageNumber, string> = {
   0: 'pre_rollout',
   1: 'canary',
@@ -35,11 +54,7 @@ const STAGE_NAMES: Record<StageNumber, string> = {
   3: 'ga_hardening',
 };
 
-const CONTROLLED_RAMP_MIN_SOAK_HOURS: Record<number, number> = {
-  10: 24,
-  25: 48,
-  50: 72,
-};
+const DEFAULT_THRESHOLDS_PATH = 'config/rollout-go-no-go-thresholds.json';
 
 function printHelpAndExit(code: number): never {
   // eslint-disable-next-line no-console
@@ -93,6 +108,102 @@ function parseArgs(argv: string[]): GateArgs {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function loadWs20Thresholds(
+  configPath: string = DEFAULT_THRESHOLDS_PATH
+): { thresholds: Ws20GateThresholds; resolvedPath: string } {
+  const resolvedPath = path.resolve(configPath);
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`WS20 thresholds config not found: ${resolvedPath}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(fs.readFileSync(resolvedPath, 'utf-8')) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Failed to parse WS20 thresholds config ${resolvedPath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`
+    );
+  }
+
+  if (!isRecord(parsed)) {
+    throw new Error(`WS20 thresholds config root must be an object: ${resolvedPath}`);
+  }
+
+  const ws20 = isRecord(parsed.ws20_stage_gate) ? parsed.ws20_stage_gate : undefined;
+  const canary = ws20 && isRecord(ws20.canary) ? ws20.canary : undefined;
+  const controlledRamp =
+    ws20 && isRecord(ws20.controlled_ramp) ? ws20.controlled_ramp : undefined;
+  const gaHardening =
+    ws20 && isRecord(ws20.ga_hardening) ? ws20.ga_hardening : undefined;
+
+  const canaryMinPercent = finiteNumber(canary?.min_percent);
+  const canaryMaxPercent = finiteNumber(canary?.max_percent);
+  const canaryMinSoakHours = finiteNumber(canary?.min_soak_hours);
+  const gaMinSoakHours = finiteNumber(gaHardening?.min_soak_hours);
+
+  const checkpointRows = Array.isArray(controlledRamp?.checkpoints)
+    ? controlledRamp.checkpoints
+    : undefined;
+
+  if (
+    canaryMinPercent == null ||
+    canaryMaxPercent == null ||
+    canaryMinSoakHours == null ||
+    gaMinSoakHours == null ||
+    !checkpointRows
+  ) {
+    throw new Error(
+      `WS20 thresholds config missing required fields in ${resolvedPath} (canary/controlled_ramp/ga_hardening).`
+    );
+  }
+
+  if (canaryMinPercent < 0 || canaryMaxPercent < canaryMinPercent) {
+    throw new Error(
+      `WS20 thresholds config has invalid canary percent range in ${resolvedPath}.`
+    );
+  }
+
+  if (checkpointRows.length === 0) {
+    throw new Error(`WS20 thresholds config must define at least one controlled_ramp checkpoint in ${resolvedPath}.`);
+  }
+
+  const checkpoints: ControlledRampCheckpointThreshold[] = [];
+  for (const row of checkpointRows) {
+    if (!isRecord(row)) {
+      throw new Error(
+        `WS20 thresholds config checkpoint entries must be objects in ${resolvedPath}.`
+      );
+    }
+    const percent = finiteNumber(row.percent);
+    const minSoakHours = finiteNumber(row.min_soak_hours);
+    if (percent == null || minSoakHours == null || percent < 0 || minSoakHours < 0) {
+      throw new Error(
+        `WS20 thresholds config checkpoint entries require non-negative numeric percent and min_soak_hours in ${resolvedPath}.`
+      );
+    }
+    checkpoints.push({ percent, min_soak_hours: minSoakHours });
+  }
+
+  return {
+    thresholds: {
+      canary: {
+        min_percent: canaryMinPercent,
+        max_percent: canaryMaxPercent,
+        min_soak_hours: canaryMinSoakHours,
+      },
+      controlled_ramp: {
+        checkpoints,
+      },
+      ga_hardening: {
+        min_soak_hours: gaMinSoakHours,
+      },
+    },
+    resolvedPath,
+  };
 }
 
 function readArtifactPayload(filePath: string): Record<string, unknown> {
@@ -264,7 +375,10 @@ function validateStage0(evidence: Record<string, unknown>): GateCheck[] {
   ];
 }
 
-function validateStage1(evidence: Record<string, unknown>): GateCheck[] {
+function validateStage1(
+  evidence: Record<string, unknown>,
+  thresholds: Ws20GateThresholds
+): GateCheck[] {
   const canary = isRecord(evidence.canary) ? evidence.canary : undefined;
   const canaryPercent = canary ? finiteNumber(canary.percent) : undefined;
   const canarySoak = canary ? finiteNumber(canary.soak_hours) : undefined;
@@ -279,13 +393,16 @@ function validateStage1(evidence: Record<string, unknown>): GateCheck[] {
     },
     {
       name: 'canary_percent_range',
-      ok: canaryPercent != null && canaryPercent >= 1 && canaryPercent <= 5,
-      detail: 'canary.percent must be between 1 and 5.',
+      ok:
+        canaryPercent != null &&
+        canaryPercent >= thresholds.canary.min_percent &&
+        canaryPercent <= thresholds.canary.max_percent,
+      detail: `canary.percent must be between ${thresholds.canary.min_percent} and ${thresholds.canary.max_percent}.`,
     },
     {
       name: 'canary_min_soak_24h',
-      ok: effectiveSoak != null && effectiveSoak >= 24,
-      detail: 'canary soak must be at least 24 hours (canary.soak_hours or window duration).',
+      ok: effectiveSoak != null && effectiveSoak >= thresholds.canary.min_soak_hours,
+      detail: `canary soak must be at least ${thresholds.canary.min_soak_hours} hours (canary.soak_hours or window duration).`,
     },
     {
       name: 'canary_exit_criteria',
@@ -300,7 +417,10 @@ function validateStage1(evidence: Record<string, unknown>): GateCheck[] {
   ];
 }
 
-function validateStage2(evidence: Record<string, unknown>): GateCheck[] {
+function validateStage2(
+  evidence: Record<string, unknown>,
+  thresholds: Ws20GateThresholds
+): GateCheck[] {
   const controlledRamp = isRecord(evidence.controlled_ramp) ? evidence.controlled_ramp : undefined;
   const checkpoints = Array.isArray(controlledRamp?.checkpoints)
     ? (controlledRamp?.checkpoints as unknown[])
@@ -334,8 +454,9 @@ function validateStage2(evidence: Record<string, unknown>): GateCheck[] {
     }
   }
 
-  for (const [percent, minSoak] of Object.entries(CONTROLLED_RAMP_MIN_SOAK_HOURS)) {
-    const percentValue = Number(percent);
+  for (const checkpointThreshold of thresholds.controlled_ramp.checkpoints) {
+    const percentValue = checkpointThreshold.percent;
+    const minSoak = checkpointThreshold.min_soak_hours;
     const checkpoint = byPercent.get(percentValue);
     checks.push({
       name: `checkpoint_${percentValue}_exists`,
@@ -368,7 +489,10 @@ function validateStage2(evidence: Record<string, unknown>): GateCheck[] {
   return checks;
 }
 
-function validateStage3(evidence: Record<string, unknown>): GateCheck[] {
+function validateStage3(
+  evidence: Record<string, unknown>,
+  thresholds: Ws20GateThresholds
+): GateCheck[] {
   const ga = isRecord(evidence.ga_hardening) ? evidence.ga_hardening : undefined;
   const soak = ga ? finiteNumber(ga.soak_hours) : undefined;
   return [
@@ -379,8 +503,8 @@ function validateStage3(evidence: Record<string, unknown>): GateCheck[] {
     },
     {
       name: 'ga_min_soak_24h',
-      ok: soak != null && soak >= 24,
-      detail: 'ga_hardening.soak_hours must be at least 24.',
+      ok: soak != null && soak >= thresholds.ga_hardening.min_soak_hours,
+      detail: `ga_hardening.soak_hours must be at least ${thresholds.ga_hardening.min_soak_hours}.`,
     },
     {
       name: 'ga_stability_confirmed',
@@ -395,7 +519,11 @@ function validateStage3(evidence: Record<string, unknown>): GateCheck[] {
   ];
 }
 
-function runValidation(evidence: Record<string, unknown>, expectedStage?: StageNumber): GateCheck[] {
+function runValidation(
+  evidence: Record<string, unknown>,
+  thresholds: Ws20GateThresholds,
+  expectedStage?: StageNumber
+): GateCheck[] {
   const base = collectBaseChecks(evidence, expectedStage);
   const checks = [...base.checks];
   if (base.stage == null) {
@@ -405,11 +533,11 @@ function runValidation(evidence: Record<string, unknown>, expectedStage?: StageN
   if (base.stage === 0) {
     checks.push(...validateStage0(evidence));
   } else if (base.stage === 1) {
-    checks.push(...validateStage1(evidence));
+    checks.push(...validateStage1(evidence, thresholds));
   } else if (base.stage === 2) {
-    checks.push(...validateStage2(evidence));
+    checks.push(...validateStage2(evidence, thresholds));
   } else {
-    checks.push(...validateStage3(evidence));
+    checks.push(...validateStage3(evidence, thresholds));
   }
 
   return checks;
@@ -427,13 +555,16 @@ function main(): void {
 
   try {
     const artifact = readArtifactPayload(args.artifactPath);
-    const checks = runValidation(artifact, args.expectedStage);
+    const { thresholds, resolvedPath: thresholdsPath } = loadWs20Thresholds();
+    const checks = runValidation(artifact, thresholds, args.expectedStage);
 
     const resolvedArtifact = path.resolve(args.artifactPath);
     // eslint-disable-next-line no-console
     console.log('WS20 rollout stage gate');
     // eslint-disable-next-line no-console
     console.log(`artifact=${resolvedArtifact}`);
+    // eslint-disable-next-line no-console
+    console.log(`thresholds_config=${thresholdsPath}`);
     // eslint-disable-next-line no-console
     console.log(`checks=${checks.length}`);
 

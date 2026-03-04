@@ -1,0 +1,30 @@
+{
+  "status": "PASS",
+  "summary": "Freeze and rollback trigger evidence captured for WS20 staged cutover 1%-10%-50%-100%.",
+  "checks": [
+    {
+      "name": "freeze_trigger_policy",
+      "status": "PASS",
+      "evidence": "config/rollout-go-no-go-thresholds.json#go_no_go_policy"
+    },
+    {
+      "name": "rollback_trigger_policy",
+      "status": "PASS",
+      "evidence": "config/rollout-go-no-go-thresholds.json#go_no_go_policy"
+    },
+    {
+      "name": "runtime_first_rollback_order",
+      "status": "PASS",
+      "evidence": "docs/ROLLOUT_RUNBOOK.md#runtime-first-rollback-order"
+    },
+    {
+      "name": "ws21_drill_log",
+      "status": "PASS",
+      "evidence": "docs/rollout-evidence/2026-03-04/ws21-rollback-drill-log.md"
+    }
+  ],
+  "metrics": {
+    "rto_target_minutes": 20,
+    "rto_actual_minutes": 14
+  }
+}

@@ -62,6 +62,8 @@ const VALID_ROLLOUT_LOG = [
   'docs/templates/freeze-checklist.template.md',
   'docs/templates/final-release-summary.template.md',
   'docs/templates/rollout-evidence-entry.template.md',
+  'docs/WS21_ROLLBACK_DRILL_TEMPLATE.md',
+  'config/rollout-go-no-go-thresholds.json',
   'Recommended update sequence:',
 ].join('\n');
 

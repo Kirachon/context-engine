@@ -3,38 +3,78 @@ import type { RetrievalProviderCallbacks } from '../../../src/retrieval/provider
 import { AugmentLegacyProvider } from '../../../src/retrieval/providers/augmentLegacyProvider.js';
 import { LocalNativeProvider } from '../../../src/retrieval/providers/localNativeProvider.js';
 
-function createCallbacks(): RetrievalProviderCallbacks {
-  return {
-    search: jest.fn(async () => []),
-    indexWorkspace: jest.fn(async () => ({ indexed: 0, skipped: 0, errors: [], duration: 0 })),
-    indexFiles: jest.fn(async () => ({ indexed: 0, skipped: 0, errors: [], duration: 0 })),
-    clearIndex: jest.fn(async () => undefined),
-    getIndexStatus: jest.fn(
-      async () =>
-        ({
-          workspace: 'test',
-          status: 'idle',
-          lastIndexed: null,
-          fileCount: 0,
-          isStale: false,
-        }) as any
+function createCallbackHarness() {
+  const defaultIndexResult = { indexed: 0, skipped: 0, errors: [], duration: 0 };
+  const defaultIndexStatus = {
+    workspace: 'test',
+    status: 'idle',
+    lastIndexed: null,
+    fileCount: 0,
+    isStale: false,
+  } as any;
+
+  const createScopedSpies = () => ({
+    search: jest.fn(
+      async (
+        _query: string,
+        _topK: number,
+        _options?: { bypassCache?: boolean; maxOutputLength?: number },
+        _context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }
+      ) => []
     ),
-    health: jest.fn(async () => ({ ok: true })),
+    indexWorkspace: jest.fn(
+      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) =>
+        defaultIndexResult
+    ),
+    indexFiles: jest.fn(
+      async (
+        _filePaths: string[],
+        _context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }
+      ) => defaultIndexResult
+    ),
+    clearIndex: jest.fn(
+      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) => undefined
+    ),
+    getIndexStatus: jest.fn(
+      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) =>
+        defaultIndexStatus
+    ),
+    health: jest.fn(
+      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) => ({ ok: true })
+    ),
+  });
+
+  const spies = {
+    augmentLegacy: createScopedSpies(),
+    localNative: createScopedSpies(),
   };
+
+  const callbacks: RetrievalProviderCallbacks = {
+    augmentLegacy: spies.augmentLegacy,
+    localNative: spies.localNative,
+  };
+
+  return { callbacks, spies };
 }
 
 describe('retrieval provider wrappers', () => {
-  it('augment legacy provider forwards calls to callbacks', async () => {
-    const callbacks = createCallbacks();
+  it('augment legacy provider routes through augment-specific callback methods', async () => {
+    const { callbacks, spies } = createCallbackHarness();
     const provider = new AugmentLegacyProvider(callbacks);
     await provider.search('query', 5, { bypassCache: true });
 
     expect(provider.id).toBe('augment_legacy');
-    expect(callbacks.search).toHaveBeenCalledWith('query', 5, { bypassCache: true });
+    expect(spies.augmentLegacy.search).toHaveBeenCalledWith(
+      'query',
+      5,
+      { bypassCache: true },
+      { providerId: 'augment_legacy', operation: 'search' }
+    );
+    expect(spies.localNative.search).not.toHaveBeenCalled();
   });
 
-  it('local native provider forwards index lifecycle calls to callbacks', async () => {
-    const callbacks = createCallbacks();
+  it('local native provider routes index lifecycle through local-native callbacks', async () => {
+    const { callbacks, spies } = createCallbackHarness();
     const provider = new LocalNativeProvider(callbacks);
     await provider.indexWorkspace();
     await provider.indexFiles(['a.ts']);
@@ -43,10 +83,31 @@ describe('retrieval provider wrappers', () => {
     await provider.health();
 
     expect(provider.id).toBe('local_native');
-    expect(callbacks.indexWorkspace).toHaveBeenCalledTimes(1);
-    expect(callbacks.indexFiles).toHaveBeenCalledWith(['a.ts']);
-    expect(callbacks.clearIndex).toHaveBeenCalledTimes(1);
-    expect(callbacks.getIndexStatus).toHaveBeenCalledTimes(1);
-    expect(callbacks.health).toHaveBeenCalledTimes(1);
+    expect(spies.localNative.indexWorkspace).toHaveBeenCalledWith({
+      providerId: 'local_native',
+      operation: 'indexWorkspace',
+    });
+    expect(spies.localNative.indexFiles).toHaveBeenCalledWith(['a.ts'], {
+      providerId: 'local_native',
+      operation: 'indexFiles',
+    });
+    expect(spies.localNative.clearIndex).toHaveBeenCalledWith({
+      providerId: 'local_native',
+      operation: 'clearIndex',
+    });
+    expect(spies.localNative.getIndexStatus).toHaveBeenCalledWith({
+      providerId: 'local_native',
+      operation: 'getIndexStatus',
+    });
+    expect(spies.localNative.health).toHaveBeenCalledWith({
+      providerId: 'local_native',
+      operation: 'health',
+    });
+
+    expect(spies.augmentLegacy.indexWorkspace).not.toHaveBeenCalled();
+    expect(spies.augmentLegacy.indexFiles).not.toHaveBeenCalled();
+    expect(spies.augmentLegacy.clearIndex).not.toHaveBeenCalled();
+    expect(spies.augmentLegacy.getIndexStatus).not.toHaveBeenCalled();
+    expect(spies.augmentLegacy.health).not.toHaveBeenCalled();
   });
 });

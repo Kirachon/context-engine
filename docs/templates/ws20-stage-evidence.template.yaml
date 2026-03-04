@@ -1,5 +1,6 @@
 # WS20 rollout stage evidence template
 # Copy this file, fill the fields for the stage you are validating, and keep only relevant sections.
+# Validation thresholds source: config/rollout-go-no-go-thresholds.json
 
 schema_version: 1
 rollout_id: "CE-ROLLOUT-YYYYMMDD-01"
@@ -15,32 +16,35 @@ pre_rollout:
   checklist_complete: true
 
 canary:
-  percent: 5
+  percent: 1
   soak_hours: 24
   exit_criteria_met: true
   signed_by: "release.owner"
-  evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#canary-2026-03-01"
+  evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#recorded-evidence---2026-03-04-ws20-staged-cutover-1-10-50-100"
 
 controlled_ramp:
+  # Keep required checkpoints aligned with config/rollout-go-no-go-thresholds.json.
+  # Operator-facing milestones can still be summarized as 1% -> 10% -> 50% -> 100%.
   checkpoints:
     - percent: 10
       soak_hours: 24
       status: pass
       signed_by: "release.owner"
-      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ramp-10-2026-03-02"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#recorded-evidence---2026-03-04-ws20-staged-cutover-1-10-50-100"
     - percent: 25
       soak_hours: 48
       status: pass
       signed_by: "release.owner"
-      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ramp-25-2026-03-03"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#recorded-evidence---2026-03-04-ws20-staged-cutover-1-10-50-100"
     - percent: 50
       soak_hours: 72
       status: pass
       signed_by: "release.owner"
-      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ramp-50-2026-03-06"
+      evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#recorded-evidence---2026-03-04-ws20-staged-cutover-1-10-50-100"
 
 ga_hardening:
   soak_hours: 24
   stability_confirmed: true
-  closeout_evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#ga-2026-03-07"
+  full_cutover_percent: 100
+  closeout_evidence_ref: "docs/ROLLOUT_EVIDENCE_LOG.md#recorded-evidence---2026-03-04-ws20-staged-cutover-1-10-50-100"
   signed_by: "release.owner"

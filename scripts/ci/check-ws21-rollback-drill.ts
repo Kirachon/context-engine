@@ -14,10 +14,14 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const REQUIRED_FIELDS = [
+  'rollback_event',
   'Command Path',
   'Owner',
   'Started At (UTC)',
   'Ended At (UTC)',
+  'RTO Target Minutes',
+  'RTO Actual Minutes',
+  'RTO Evidence',
   'Recovery Evidence',
   'Blocker Status',
 ] as const;
@@ -127,6 +131,25 @@ function validateLogFile(filePath: string, content: string): ValidationResult {
         );
       }
     }
+  }
+
+  const rtoTargetRaw = fields['RTO Target Minutes'];
+  const rtoActualRaw = fields['RTO Actual Minutes'];
+  const rtoTarget = rtoTargetRaw ? Number(rtoTargetRaw) : undefined;
+  const rtoActual = rtoActualRaw ? Number(rtoActualRaw) : undefined;
+
+  if (rtoTargetRaw && (!Number.isFinite(rtoTarget) || (rtoTarget as number) <= 0)) {
+    errors.push(`RTO Target Minutes must be a positive number: ${rtoTargetRaw}`);
+  }
+  if (rtoActualRaw && (!Number.isFinite(rtoActual) || (rtoActual as number) < 0)) {
+    errors.push(`RTO Actual Minutes must be a non-negative number: ${rtoActualRaw}`);
+  }
+  if (
+    Number.isFinite(rtoTarget) &&
+    Number.isFinite(rtoActual) &&
+    (rtoActual as number) > (rtoTarget as number)
+  ) {
+    errors.push('RTO Actual Minutes must be less than or equal to RTO Target Minutes.');
   }
 
   return { filePath, errors };

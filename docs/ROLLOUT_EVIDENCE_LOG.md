@@ -14,6 +14,8 @@ Use these templates when adding or updating rollout governance artifacts:
 - Freeze checklist: `docs/templates/freeze-checklist.template.md`
 - Final release summary: `docs/templates/final-release-summary.template.md`
 - Rollout evidence entry block: `docs/templates/rollout-evidence-entry.template.md`
+- WS21 rollback drill checklist/runbook: `docs/WS21_ROLLBACK_DRILL_TEMPLATE.md`
+- WS20 go/no-go thresholds config: `config/rollout-go-no-go-thresholds.json`
 
 Recommended update sequence:
 1. Fill pre-rollout baseline checklist before stage 0->1 advancement.
@@ -230,4 +232,55 @@ Final Sign-off:
 - Freeze Lift Approved (yes/no): yes (engineering evidence complete)
 - Approver: project owner
 - Release Notes Link: commits 50bd455 and 5e65968 on main
+```
+
+## Recorded Evidence - 2026-03-04 (WS20 Staged Cutover 1-10-50-100)
+
+```text
+[Controlled Ramp + GA Cutover Evidence]
+Rollout ID: CE-RETRIEVAL-CUTOVER-20260304
+Change/Release Ref: staged-cutover-evidence-refresh
+Date/Time Window (UTC): 2026-03-04
+Operator: Codex
+Environment: repo-local deterministic gate validation
+
+Flow Summary:
+- Canary: 1%
+- Controlled Ramp milestones: 10% -> 50% (with required 25% checkpoint per thresholds config)
+- GA Hardening cutover target: 100%
+
+Artifacts:
+- docs/rollout-evidence/2026-03-04/ws20-stage1-canary-1pct.yaml
+- docs/rollout-evidence/2026-03-04/ws20-stage2-ramp-10-50.yaml
+- docs/rollout-evidence/2026-03-04/ws20-stage3-ga-100pct.yaml
+- docs/rollout-evidence/2026-03-04/freeze-rollback-triggers.json
+- docs/rollout-evidence/2026-03-04/ws21-rollback-drill-log.md
+
+Gate Outputs:
+- WS20 Stage 1: PASS (`checks=9`)
+  - command: node --import tsx scripts/ci/ws20-stage-gate.ts --artifact docs/rollout-evidence/2026-03-04/ws20-stage1-canary-1pct.yaml --stage 1
+  - log: docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log
+- WS20 Stage 2: PASS (`checks=18`)
+  - command: node --import tsx scripts/ci/ws20-stage-gate.ts --artifact docs/rollout-evidence/2026-03-04/ws20-stage2-ramp-10-50.yaml --stage 2
+  - log: docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log
+- WS20 Stage 3: PASS (`checks=8`)
+  - command: node --import tsx scripts/ci/ws20-stage-gate.ts --artifact docs/rollout-evidence/2026-03-04/ws20-stage3-ga-100pct.yaml --stage 3
+  - log: docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log
+- WS21 Drill Evidence Check: PASS
+  - command: node --import tsx scripts/ci/check-ws21-rollback-drill.ts docs/rollout-evidence/2026-03-04/ws21-rollback-drill-log.md
+  - log: docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log
+- Readiness with optional stage artifacts: PASS
+  - command: node --import tsx scripts/ci/check-rollout-readiness.ts docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log docs/rollout-evidence/2026-03-04/freeze-rollback-triggers.json
+  - log: docs/rollout-evidence/2026-03-04/readiness-check-output.log
+
+Freeze/Rollback Trigger Evidence:
+- Trigger policy source: config/rollout-go-no-go-thresholds.json
+- Runtime-first rollback order source: docs/ROLLOUT_RUNBOOK.md
+- Trigger evidence artifact: docs/rollout-evidence/2026-03-04/freeze-rollback-triggers.json
+- RTO drill evidence: docs/rollout-evidence/2026-03-04/ws21-rollback-drill-log.md
+
+Decision:
+- Exit Approved (yes/no): yes
+- Approver: staged cutover evidence owner
+- Reason: all WS20/WS21/readiness gates passed with concrete logs and trigger artifacts.
 ```

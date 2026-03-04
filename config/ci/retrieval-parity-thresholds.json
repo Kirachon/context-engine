@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "metrics": {
+    "bench.perf.p95_regression_pct": {
+      "comparator": "lte",
+      "threshold": 20,
+      "missing_policy": "fail",
+      "description": "Candidate p95 latency should not regress beyond +20% vs baseline."
+    },
+    "bench.perf.p95_regression_abs_ms": {
+      "comparator": "lte",
+      "threshold": 50,
+      "missing_policy": "fail",
+      "description": "Candidate p95 absolute regression should stay within +50ms."
+    },
+    "bench.reliability.error_rate_delta_pp": {
+      "comparator": "lte",
+      "threshold": 0.5,
+      "missing_policy": "skip",
+      "description": "Error-rate increase should be <= +0.5 percentage points when metric exists."
+    },
+    "bench.reliability.timeout_rate_delta_pp": {
+      "comparator": "lte",
+      "threshold": 0.5,
+      "missing_policy": "skip",
+      "description": "Timeout-rate increase should be <= +0.5 percentage points when metric exists."
+    },
+    "bench.reliability.unique_files_drop_pct": {
+      "comparator": "lte",
+      "threshold": 10,
+      "missing_policy": "skip",
+      "description": "Unique files at k should not drop more than 10% when metric exists."
+    },
+    "replay.overlap_ratio": {
+      "comparator": "gte",
+      "threshold": 0.85,
+      "missing_policy": "skip",
+      "description": "Replay overlap should remain at or above 0.85 when replay artifact is present."
+    },
+    "replay.reliability.error_rate_delta_pp": {
+      "comparator": "lte",
+      "threshold": 0.5,
+      "missing_policy": "skip",
+      "description": "Replay error-rate increase should stay <= +0.5pp when available."
+    },
+    "replay.reliability.timeout_rate_delta_pp": {
+      "comparator": "lte",
+      "threshold": 0.5,
+      "missing_policy": "skip",
+      "description": "Replay timeout-rate increase should stay <= +0.5pp when available."
+    },
+    "replay.perf.p95_regression_pct": {
+      "comparator": "lte",
+      "threshold": 20,
+      "missing_policy": "skip",
+      "description": "Replay p95 regression should stay <= +20% when available."
+    },
+    "shadow.overlap_ratio": {
+      "comparator": "gte",
+      "threshold": 0.85,
+      "missing_policy": "skip",
+      "description": "Shadow overlap should remain at or above 0.85 when shadow artifact is present."
+    },
+    "shadow.reliability.error_rate_delta_pp": {
+      "comparator": "lte",
+      "threshold": 0.5,
+      "missing_policy": "skip",
+      "description": "Shadow error-rate increase should stay <= +0.5pp when available."
+    },
+    "shadow.reliability.timeout_rate_delta_pp": {
+      "comparator": "lte",
+      "threshold": 0.5,
+      "missing_policy": "skip",
+      "description": "Shadow timeout-rate increase should stay <= +0.5pp when available."
+    },
+    "shadow.perf.p95_regression_pct": {
+      "comparator": "lte",
+      "threshold": 20,
+      "missing_policy": "skip",
+      "description": "Shadow p95 regression should stay <= +20% when available."
+    }
+  }
+}
+

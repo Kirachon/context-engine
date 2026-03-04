@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "ws20_stage_gate": {
+    "canary": {
+      "min_percent": 1,
+      "max_percent": 5,
+      "min_soak_hours": 24
+    },
+    "controlled_ramp": {
+      "checkpoints": [
+        { "percent": 10, "min_soak_hours": 24 },
+        { "percent": 25, "min_soak_hours": 48 },
+        { "percent": 50, "min_soak_hours": 72 }
+      ]
+    },
+    "ga_hardening": {
+      "min_soak_hours": 24
+    }
+  },
+  "go_no_go_policy": {
+    "freeze_triggers": [
+      "any_stage_gate_failure",
+      "ws19_slo_gate_failure",
+      "ws21_rollback_drill_failure"
+    ],
+    "rollback_triggers": [
+      "canary_or_ramp_breach_more_than_one_soak_checkpoint",
+      "runtime_incident_requiring_kill_switch"
+    ]
+  }
+}

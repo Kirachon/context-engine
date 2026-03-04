@@ -1,7 +1,7 @@
 /**
  * Layer 2: Context Service Layer
  *
- * This layer adapts raw retrieval from the Auggie SDK (Layer 1)
+ * This layer adapts raw retrieval from the legacy runtime (Layer 1)
  * into agent-friendly context bundles optimized for prompt enhancement.
  *
  * Responsibilities:
@@ -25,74 +25,29 @@ import type { WorkerMessage } from '../worker/messages.js';
 import { featureEnabled } from '../config/features.js';
 import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
-import { JsonIndexStateStore, type IndexStateFile } from './indexStateStore.js';
+import {
+  JsonIndexStateStore,
+  type IndexStateFile,
+  type IndexStateLoadMetadata,
+} from './indexStateStore.js';
 import { createAIProvider, resolveAIProviderId } from '../ai/providers/factory.js';
 import type { AIProvider, AIProviderId } from '../ai/providers/types.js';
-
-type RetrievalProviderId = 'augment_legacy' | 'local_native';
-
-type RetrievalEnvModule = {
-  resolveRetrievalProviderId?: () => RetrievalProviderId | string;
-};
-
-type DirectContextLike = {
-  addToIndex: (...args: unknown[]) => Promise<{
-    newlyUploaded?: Array<{ path: string }>;
-    alreadyUploaded?: Array<{ path: string }>;
-    [key: string]: unknown;
-  }>;
-  search: (query: string, options?: { maxOutputLength?: number }) => Promise<string>;
-  exportToFile: (filePath: string) => Promise<void>;
-  [key: string]: unknown;
-};
-
-type DirectContextModule = {
-  DirectContext: {
-    create: () => Promise<DirectContextLike>;
-    importFromFile: (filePath: string) => Promise<DirectContextLike>;
-  };
-};
-
-const DEFAULT_RETRIEVAL_PROVIDER_ID: RetrievalProviderId = 'augment_legacy';
-
-function normalizeRetrievalProviderId(value: unknown): RetrievalProviderId | null {
-  if (typeof value !== 'string') return null;
-  const normalized = value.trim().toLowerCase();
-  if (normalized === 'augment' || normalized === 'augment_legacy') {
-    return 'augment_legacy';
-  }
-  if (normalized === 'local_native') {
-    return 'local_native';
-  }
-  return null;
-}
-
-function resolveRetrievalProviderIdFromEnvModule(): RetrievalProviderId {
-  const requireFromHere = createRequire(import.meta.url);
-  const moduleCandidates = [
-    '../retrieval/env.js',
-    '../retrieval/env.ts',
-  ];
-
-  for (const modulePath of moduleCandidates) {
-    try {
-      const maybeModule = requireFromHere(modulePath) as RetrievalEnvModule;
-      const maybeResolver = maybeModule?.resolveRetrievalProviderId;
-      if (typeof maybeResolver !== 'function') {
-        continue;
-      }
-      const resolved = normalizeRetrievalProviderId(maybeResolver());
-      if (resolved) {
-        return resolved;
-      }
-    } catch {
-      // Module may not exist in all builds; continue to deterministic fallback.
-    }
-  }
-
-  const fallback = normalizeRetrievalProviderId(process.env.CE_RETRIEVAL_PROVIDER);
-  return fallback ?? DEFAULT_RETRIEVAL_PROVIDER_ID;
-}
+import { createRetrievalProvider } from '../retrieval/providers/factory.js';
+import { resolveRetrievalProviderId, shouldRunShadowCompare } from '../retrieval/providers/env.js';
+import {
+  ensureLegacyRuntimeContext,
+  type LegacyContextInstance,
+  loadLegacyContextFactory,
+  LegacyRuntimeManager,
+  parseLegacyFormattedResults,
+  searchWithLegacySemanticRuntime,
+} from '../retrieval/providers/legacyRuntime.js';
+import type {
+  RetrievalProviderCallbackContext,
+  RetrievalProvider,
+  RetrievalProviderCallbacks,
+  RetrievalProviderId,
+} from '../retrieval/providers/types.js';
 
 // ============================================================================
 // Type Definitions
@@ -331,7 +286,7 @@ const MEMORIES_DIR = '.memories';
 /**
  * Queue for serializing searchAndAsk calls to prevent SDK concurrency issues.
  *
- * The Auggie SDK's DirectContext may not be thread-safe for concurrent
+ * The legacy DirectContext runtime may not be thread-safe for concurrent
  * searchAndAsk calls. This queue ensures only one call runs at a time
  * while allowing other operations to continue.
  *
@@ -913,12 +868,11 @@ interface IndexFingerprintFile {
 
 export class ContextServiceClient {
   private workspacePath: string;
-  private context: DirectContextLike | null = null;
-  private directContextModulePromise: Promise<DirectContextModule> | null = null;
-  private initPromise: Promise<void> | null = null;
+  private legacyRuntimeManager: LegacyRuntimeManager;
   private indexChain: Promise<void> = Promise.resolve();
   private indexStateStore: JsonIndexStateStore | null = null;
-  private restoredFromStateFile: boolean = false;
+  private indexStateProviderMismatchWarned = false;
+  private indexStateSchemaWarningWarned = false;
 
   /** LRU cache for search results */
   private searchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
@@ -977,13 +931,20 @@ export class ContextServiceClient {
   private cacheMisses: number = 0;
   private readonly aiProviderId: AIProviderId;
   private readonly retrievalProviderId: RetrievalProviderId;
+  private readonly retrievalProvider: RetrievalProvider;
   private aiProvider: AIProvider | null = null;
   private lastSearchDiagnostics: SearchDiagnostics | null = null;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
     this.aiProviderId = resolveAIProviderId();
-    this.retrievalProviderId = resolveRetrievalProviderIdFromEnvModule();
+    const activeRetrievalProviderId = resolveRetrievalProviderId();
+    this.retrievalProvider = createRetrievalProvider({
+      providerId: activeRetrievalProviderId,
+      callbacks: this.createRetrievalProviderCallbacks(),
+    });
+    this.retrievalProviderId = this.retrievalProvider.id;
+    this.legacyRuntimeManager = this.createLegacyRuntimeManager();
     this.indexStatus = {
       workspace: workspacePath,
       status: 'idle',
@@ -1020,11 +981,50 @@ export class ContextServiceClient {
     this.lastSearchDiagnostics = next;
   }
 
-  private async loadDirectContextModule(): Promise<DirectContextModule> {
-    if (!this.directContextModulePromise) {
-      this.directContextModulePromise = import('@augmentcode/auggie-sdk') as unknown as Promise<DirectContextModule>;
-    }
-    return this.directContextModulePromise;
+  private createRetrievalProviderCallbacks(): RetrievalProviderCallbacks {
+    return {
+      augmentLegacy: {
+        search: (
+          query: string,
+          topK: number,
+          options?: { bypassCache?: boolean; maxOutputLength?: number }
+        ) => this.searchWithProviderRuntime(query, topK, options),
+        indexWorkspace: () => this.indexWorkspaceWithLegacyRuntime(),
+        indexFiles: (filePaths: string[]) => this.indexFilesWithLegacyRuntime(filePaths),
+        clearIndex: () => this.clearIndexWithProviderRuntime({ localNative: false }),
+        getIndexStatus: async () => this.getIndexStatus(),
+        health: async (context?: RetrievalProviderCallbackContext) => ({
+          ok: true,
+          details: `retrieval_provider=${this.getRetrievalProviderCallbackProviderId(context)}`,
+        }),
+      },
+      localNative: {
+        search: (query: string, topK: number) => this.keywordFallbackSearch(query, topK),
+        indexWorkspace: () => this.indexWorkspaceLocalNativeFallback(),
+        indexFiles: (filePaths: string[]) => this.indexFilesLocalNativeFallback(filePaths),
+        clearIndex: () => this.clearIndexWithProviderRuntime({ localNative: true }),
+        getIndexStatus: async () => this.getIndexStatus(),
+        health: async (context?: RetrievalProviderCallbackContext) => ({
+          ok: true,
+          details: `retrieval_provider=${this.getRetrievalProviderCallbackProviderId(context)}`,
+        }),
+      },
+    };
+  }
+
+  private getRetrievalProviderCallbackProviderId(
+    context?: RetrievalProviderCallbackContext
+  ): RetrievalProviderId {
+    return context?.providerId ?? this.retrievalProviderId;
+  }
+
+  private createLegacyRuntimeManager(): LegacyRuntimeManager {
+    return new LegacyRuntimeManager({
+      stateFilePath: this.getStateFilePath(),
+      loadFactory: () => loadLegacyContextFactory(),
+      fileExists: (filePath: string) => fs.existsSync(filePath),
+      deleteFile: (filePath: string) => fs.unlinkSync(filePath),
+    });
   }
 
   private getAIProvider(): AIProvider {
@@ -1062,6 +1062,44 @@ export class ContextServiceClient {
       this.indexStateStore = new JsonIndexStateStore(this.workspacePath);
     }
     return this.indexStateStore;
+  }
+
+  private warnIndexStateLoadMetadata(metadata: IndexStateLoadMetadata): void {
+    if (metadata.warnings.length === 0 || this.indexStateSchemaWarningWarned) {
+      return;
+    }
+    this.indexStateSchemaWarningWarned = true;
+    console.warn(`[ContextServiceClient] ${metadata.warnings[0]}`);
+  }
+
+  private loadIndexStateForActiveProvider(store: JsonIndexStateStore): IndexStateFile {
+    const loaded = store.loadWithMetadata();
+    this.warnIndexStateLoadMetadata(loaded.metadata);
+
+    if (typeof loaded.metadata.unsupported_schema_version === 'number') {
+      return {
+        ...loaded.state,
+        provider_id: this.retrievalProviderId,
+        files: {},
+      };
+    }
+
+    if (loaded.state.provider_id === this.retrievalProviderId) {
+      return loaded.state;
+    }
+
+    if (!this.indexStateProviderMismatchWarned) {
+      this.indexStateProviderMismatchWarned = true;
+      console.warn(
+        `[ContextServiceClient] Ignoring index state entries for provider "${loaded.state.provider_id}" while active provider is "${this.retrievalProviderId}".`
+      );
+    }
+
+    return {
+      ...loaded.state,
+      provider_id: this.retrievalProviderId,
+      files: {},
+    };
   }
 
   private normalizeEolForHash(contents: string): string {
@@ -1233,18 +1271,6 @@ export class ContextServiceClient {
   }
 
   /**
-   * Treat any non-local/non-file API URL as remote.
-   */
-  private isRemoteApiUrl(apiUrl: string | undefined): boolean {
-    if (!apiUrl) return true; // Default SDK endpoint is remote
-    const lower = apiUrl.toLowerCase();
-    if (lower.startsWith('http://localhost') || lower.startsWith('https://localhost')) return false;
-    if (lower.startsWith('http://127.0.0.1') || lower.startsWith('https://127.0.0.1')) return false;
-    if (lower.startsWith('file://')) return false;
-    return true;
-  }
-
-  /**
    * Check if a path should be ignored based on loaded patterns
    *
    * Handles gitignore-style patterns:
@@ -1351,7 +1377,7 @@ export class ContextServiceClient {
     if (!this.indexStatus.fileCount) {
       try {
         const store = new JsonIndexStateStore(this.workspacePath);
-        const known = Object.keys(store.load().files).length;
+        const known = Object.keys(this.loadIndexStateForActiveProvider(store).files).length;
         if (known > 0) {
           nextStatus.fileCount = known;
         }
@@ -1369,23 +1395,81 @@ export class ContextServiceClient {
    * Initialize the DirectContext SDK
    * Tries to restore from saved state if available
    */
-  private async ensureInitialized(options?: { skipAutoIndex?: boolean }): Promise<DirectContextLike> {
-    if (this.context) {
-      return this.context;
-    }
-
-    // Prevent concurrent initialization
-    if (this.initPromise) {
-      await this.initPromise;
-      return this.context!;
-    }
-
-    this.initPromise = this.doInitialize(options).finally(() => {
-      // Allow retries after failures and avoid holding on to a resolved promise forever.
-      this.initPromise = null;
+  private async ensureInitialized(options?: { skipAutoIndex?: boolean }): Promise<LegacyContextInstance> {
+    const result = await ensureLegacyRuntimeContext({
+      manager: this.legacyRuntimeManager,
+      stateFilePath: this.getStateFilePath(),
+      offlineMode: this.isOfflineMode(),
+      apiUrl: process.env.AUGMENT_API_URL,
+      skipAutoIndexOnce: this.skipAutoIndexOnce,
+      skipAutoIndex: options?.skipAutoIndex,
+      onStatusError: (message) => {
+        this.updateIndexStatus({ status: 'error', lastError: message });
+      },
+      onRestoredFromState: () => {
+        this.hydrateIndexStatusFromDisk();
+      },
+      onAutoIndex: async () => {
+        await this.indexWorkspace();
+      },
+      onAutoIndexFailure: (error) => {
+        this.updateIndexStatus({
+          status: 'error',
+          lastError: String(error),
+        });
+      },
+      onAutoIndexSkip: () => {
+        this.updateIndexStatus({ status: 'idle' });
+      },
     });
-    await this.initPromise;
-    return this.context!;
+    this.skipAutoIndexOnce = result.skipAutoIndexOnce;
+    return result.context;
+  }
+
+  /**
+   * Legacy retrieval runtime boundary accessor.
+   * Keeps DirectContext lifecycle access centralized for provider-runtime callers.
+   */
+  private async ensureLegacyProviderRuntime(options?: { skipAutoIndex?: boolean }): Promise<LegacyContextInstance> {
+    return this.ensureInitialized(options);
+  }
+
+  /**
+   * Reset legacy retrieval runtime in-memory state.
+   */
+  private resetLegacyProviderRuntime(options?: { skipAutoIndexOnce?: boolean; resetDiskHydration?: boolean }): void {
+    this.legacyRuntimeManager.clearInMemoryState();
+    if (options?.resetDiskHydration ?? true) {
+      this.indexStatusDiskHydrated = false;
+    }
+    if (options?.skipAutoIndexOnce) {
+      this.skipAutoIndexOnce = true;
+    }
+  }
+
+  /**
+   * Reload legacy runtime context from persisted state when available.
+   */
+  private async reloadLegacyProviderRuntime(options?: { skipAutoIndex?: boolean }): Promise<void> {
+    this.resetLegacyProviderRuntime();
+    await this.ensureLegacyProviderRuntime(options);
+  }
+
+  private hasRestoredLegacyProviderRuntimeState(): boolean {
+    return this.legacyRuntimeManager.wasRestoredFromState();
+  }
+
+  private async persistLegacyProviderRuntimeState(): Promise<void> {
+    try {
+      const persisted = await this.legacyRuntimeManager.persistState();
+      if (!persisted) {
+        return;
+      }
+      this.writeIndexFingerprintFile(crypto.randomUUID());
+      console.error(`Context state saved to ${this.getStateFilePath()}`);
+    } catch (error) {
+      console.error('Failed to save context state:', error);
+    }
   }
 
   private enqueueIndexing<T>(fn: () => Promise<T>): Promise<T> {
@@ -1496,106 +1580,6 @@ export class ContextServiceClient {
       url: new URL('../worker/IndexWorker.dev.ts', import.meta.url),
       execArgv: ['--import', tsxEntrypoint],
     };
-  }
-
-  private async doInitialize(options?: { skipAutoIndex?: boolean }): Promise<void> {
-    const stateFilePath = this.getStateFilePath();
-    const offlineMode = this.isOfflineMode();
-    const apiUrl = process.env.AUGMENT_API_URL;
-
-    if (offlineMode && this.isRemoteApiUrl(apiUrl)) {
-      const message = 'Offline mode enforced (CONTEXT_ENGINE_OFFLINE_ONLY=1) but AUGMENT_API_URL points to a remote endpoint. Set it to a local endpoint (e.g., http://localhost) or disable offline mode.';
-      console.error(message);
-      this.updateIndexStatus({ status: 'error', lastError: message });
-      throw new Error(message);
-    }
-
-    try {
-      // Try to restore from saved state
-      if (fs.existsSync(stateFilePath)) {
-        console.error(`Restoring context from ${stateFilePath}`);
-        const { DirectContext } = await this.loadDirectContextModule();
-        this.context = await DirectContext.importFromFile(stateFilePath);
-        this.restoredFromStateFile = true;
-        console.error('Context restored successfully');
-        this.hydrateIndexStatusFromDisk();
-        return;
-      }
-    } catch (error) {
-      console.error('Failed to restore context state, creating new context:', error);
-      // Delete corrupted state file
-      try {
-        fs.unlinkSync(stateFilePath);
-        console.error('Deleted corrupted state file');
-      } catch {
-        // Ignore deletion errors
-      }
-    }
-
-    if (offlineMode) {
-      const message = `Offline mode is enabled but no saved index found at ${stateFilePath}. Connect online once to build the index or disable CONTEXT_ENGINE_OFFLINE_ONLY.`;
-      console.error(message);
-      this.updateIndexStatus({ status: 'error', lastError: message });
-      throw new Error(message);
-    }
-
-    // Create new context
-    console.error('Creating new DirectContext');
-    try {
-      const { DirectContext } = await this.loadDirectContextModule();
-      this.context = await DirectContext.create();
-      this.restoredFromStateFile = false;
-      console.error('DirectContext created successfully');
-    } catch (createError) {
-      console.error('Failed to create DirectContext:', createError);
-      // Check if this is an API/authentication error
-      const errorMessage = String(createError);
-      if (errorMessage.includes('invalid character') || errorMessage.includes('Login')) {
-        console.error('\n*** AUTHENTICATION ERROR ***');
-        console.error('The API returned an invalid response. Please check:');
-        console.error('1. AUGMENT_API_TOKEN is set correctly');
-        console.error('2. AUGMENT_API_URL is set correctly');
-        console.error('3. Your API token has not expired');
-        console.error('');
-      }
-      throw createError;
-    }
-
-    // Auto-index workspace if no state file exists (unless skipped)
-    if (!this.skipAutoIndexOnce && !options?.skipAutoIndex) {
-      console.error('No existing index found - auto-indexing workspace...');
-      try {
-        await this.indexWorkspace();
-        console.error('Auto-indexing completed');
-      } catch (error) {
-        console.error('Auto-indexing failed (you can manually call index_workspace tool):', error);
-        // Don't throw - allow server to start even if auto-indexing fails
-        // User can manually trigger indexing later
-        this.updateIndexStatus({
-          status: 'error',
-          lastError: String(error),
-        });
-      }
-    } else {
-      this.skipAutoIndexOnce = false;
-      this.updateIndexStatus({ status: 'idle' });
-    }
-  }
-
-  /**
-   * Save the current context state to disk
-   */
-  private async saveState(): Promise<void> {
-    if (!this.context) return;
-
-    try {
-      const stateFilePath = this.getStateFilePath();
-      await this.context.exportToFile(stateFilePath);
-      this.writeIndexFingerprintFile(crypto.randomUUID());
-      console.error(`Context state saved to ${stateFilePath}`);
-    } catch (error) {
-      console.error('Failed to save context state:', error);
-    }
   }
 
   // ==========================================================================
@@ -2170,7 +2154,8 @@ export class ContextServiceClient {
     }
   }
 
-  private async indexWorkspaceLocalNativeFallback(startTime: number): Promise<IndexResult> {
+  private async indexWorkspaceLocalNativeFallback(): Promise<IndexResult> {
+    const startTime = Date.now();
     this.loadIgnorePatterns();
     const filePaths = await this.discoverFiles(this.workspacePath);
     const indexedAtIso = new Date().toISOString();
@@ -2189,7 +2174,7 @@ export class ContextServiceClient {
     }
 
     const store = this.getIndexStateStore();
-    const prior = store ? store.load() : null;
+    const prior = store ? this.loadIndexStateForActiveProvider(store) : null;
     const nextFiles: Record<string, { hash: string; indexed_at: string }> = {};
     let indexed = 0;
     let skipped = 0;
@@ -2212,6 +2197,7 @@ export class ContextServiceClient {
     if (store && prior) {
       store.save({
         version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        provider_id: this.retrievalProviderId,
         updated_at: indexedAtIso,
         files: nextFiles,
       });
@@ -2236,7 +2222,8 @@ export class ContextServiceClient {
     };
   }
 
-  private async indexFilesLocalNativeFallback(filePaths: string[], startTime: number): Promise<IndexResult> {
+  private async indexFilesLocalNativeFallback(filePaths: string[]): Promise<IndexResult> {
+    const startTime = Date.now();
     this.loadIgnorePatterns();
     const uniquePaths = Array.from(new Set(filePaths));
     const normalizedPaths: string[] = [];
@@ -2273,7 +2260,7 @@ export class ContextServiceClient {
 
     const indexedAtIso = new Date().toISOString();
     const store = this.getIndexStateStore();
-    const prior = store ? store.load() : null;
+    const prior = store ? this.loadIndexStateForActiveProvider(store) : null;
     const nextFiles: Record<string, { hash: string; indexed_at: string }> = prior ? { ...prior.files } : {};
     let indexed = 0;
 
@@ -2298,6 +2285,7 @@ export class ContextServiceClient {
     if (store && prior) {
       store.save({
         version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        provider_id: this.retrievalProviderId,
         updated_at: indexedAtIso,
         files: nextFiles,
       });
@@ -2326,9 +2314,16 @@ export class ContextServiceClient {
   // ==========================================================================
 
   /**
-   * Index the workspace directory using DirectContext SDK
+   * Index the workspace directory via the active retrieval provider.
    */
   async indexWorkspace(): Promise<IndexResult> {
+    return this.retrievalProvider.indexWorkspace();
+  }
+
+  /**
+   * Index the workspace directory using legacy DirectContext runtime.
+   */
+  private async indexWorkspaceWithLegacyRuntime(): Promise<IndexResult> {
     return this.enqueueIndexing(async () => {
       const startTime = Date.now();
       let metricsResult: 'success' | 'error' = 'success';
@@ -2347,10 +2342,6 @@ export class ContextServiceClient {
       console.error(`API Token: ${process.env.AUGMENT_API_TOKEN ? '(set)' : '(NOT SET)'}`);
 
       const debugIndex = process.env.CE_DEBUG_INDEX === 'true';
-
-      if (this.isLocalNativeRetrievalProvider()) {
-        return this.indexWorkspaceLocalNativeFallback(startTime);
-      }
 
       const useWorker =
         process.env.CE_INDEX_USE_WORKER !== 'false' &&
@@ -2391,17 +2382,16 @@ export class ContextServiceClient {
             });
           }
 
-          // Ensure the in-memory context reflects the worker-written state file.
-          this.context = null;
-          this.initPromise = null;
+          // Ensure the in-memory legacy runtime reflects the worker-written state file.
+          this.resetLegacyProviderRuntime({ resetDiskHydration: false });
           this.clearCache();
-          await this.ensureInitialized({ skipAutoIndex: true });
+          await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
 
           return result;
         }
       }
 
-      const context = await this.ensureInitialized({ skipAutoIndex: true });
+      const context = await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
 
     // Discover all indexable files
     const filePaths = await this.discoverFiles(this.workspacePath);
@@ -2449,8 +2439,9 @@ export class ContextServiceClient {
     // Skipping unchanged files is only safe when we have an existing context restored from disk.
     // Otherwise we could "skip" everything and end up with an empty index.
     const skipUnchanged =
-      Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.restoredFromStateFile;
-    const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
+      Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.hasRestoredLegacyProviderRuntimeState();
+    const indexState: IndexStateFile | null =
+      skipUnchanged && store ? this.loadIndexStateForActiveProvider(store) : null;
     const indexedAtIso = new Date().toISOString();
 
     for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
@@ -2566,7 +2557,7 @@ export class ContextServiceClient {
     console.error(`\nIndexing complete: ${successCount} succeeded, ${errorCount} had errors, ${skippedCount} skipped`);
 
     if (store && successfulPaths.size > 0) {
-      const prior = store.load();
+      const prior = this.loadIndexStateForActiveProvider(store);
       const nextFiles: Record<string, { hash: string; indexed_at: string }> = {};
       const existingPaths = new Set(filePaths);
 
@@ -2585,6 +2576,7 @@ export class ContextServiceClient {
 
       store.save({
         version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        provider_id: this.retrievalProviderId,
         updated_at: new Date().toISOString(),
         files: nextFiles,
       });
@@ -2592,7 +2584,7 @@ export class ContextServiceClient {
 
     // Save state after indexing (even if some files failed)
     if (successCount > 0) {
-      await this.saveState();
+      await this.persistLegacyProviderRuntimeState();
       console.error('Context state saved');
 
       this.updateIndexStatus({
@@ -2654,6 +2646,11 @@ export class ContextServiceClient {
       throw new Error(message);
     }
 
+    if (this.isLocalNativeRetrievalProvider()) {
+      await this.indexWorkspace();
+      return;
+    }
+
     const workerSpec = this.getIndexWorkerSpec();
     if (!workerSpec) {
       console.error('[indexWorkspaceInBackground] Index worker unavailable; falling back to in-process indexing.');
@@ -2690,10 +2687,9 @@ export class ContextServiceClient {
 
             // Worker updates the persisted state file, but this instance holds an in-memory context.
             // Reset and reload so subsequent searches use the fresh index.
-            this.context = null;
-            this.initPromise = null;
+            this.resetLegacyProviderRuntime({ resetDiskHydration: false });
             this.clearCache();
-            await this.ensureInitialized();
+            await this.ensureLegacyProviderRuntime();
 
             await worker.terminate();
             resolve();
@@ -2753,6 +2749,10 @@ export class ContextServiceClient {
    * Incrementally index a list of file paths (relative to workspace)
    */
   async indexFiles(filePaths: string[]): Promise<IndexResult> {
+    return this.retrievalProvider.indexFiles(filePaths);
+  }
+
+  private async indexFilesWithLegacyRuntime(filePaths: string[]): Promise<IndexResult> {
     return this.enqueueIndexing(async () => {
       const startTime = Date.now();
 
@@ -2768,9 +2768,6 @@ export class ContextServiceClient {
       }
 
       const uniquePaths = Array.from(new Set(filePaths));
-      if (this.isLocalNativeRetrievalProvider()) {
-        return this.indexFilesLocalNativeFallback(uniquePaths, startTime);
-      }
       const useWorker =
         process.env.CE_INDEX_USE_WORKER !== 'false' &&
         // Avoid worker-based indexing in Jest unit tests (worker won't inherit mocks).
@@ -2807,17 +2804,16 @@ export class ContextServiceClient {
           }
 
           // Ensure the in-memory context reflects the worker-written state file.
-          this.context = null;
-          this.initPromise = null;
+          this.resetLegacyProviderRuntime({ resetDiskHydration: false });
           this.clearCache();
-          await this.ensureInitialized({ skipAutoIndex: true });
+          await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
 
           return result;
         }
       }
 
       this.updateIndexStatus({ status: 'indexing', lastError: undefined });
-      const context = await this.ensureInitialized({ skipAutoIndex: true });
+      const context = await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
       this.loadIgnorePatterns();
 
       const errors: string[] = [];
@@ -2828,8 +2824,9 @@ export class ContextServiceClient {
 
       const store = this.getIndexStateStore();
       const skipUnchanged =
-        Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.restoredFromStateFile;
-      const indexState: IndexStateFile | null = skipUnchanged && store ? store.load() : null;
+      Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.hasRestoredLegacyProviderRuntimeState();
+      const indexState: IndexStateFile | null =
+        skipUnchanged && store ? this.loadIndexStateForActiveProvider(store) : null;
       const indexedAtIso = new Date().toISOString();
 
       const normalizedPaths: string[] = [];
@@ -2950,7 +2947,7 @@ export class ContextServiceClient {
       }
 
       if (store && successfulPaths.size > 0) {
-        const prior = store.load();
+        const prior = this.loadIndexStateForActiveProvider(store);
         const nextFiles: Record<string, { hash: string; indexed_at: string }> = { ...prior.files };
 
         for (const p of successfulPaths) {
@@ -2961,13 +2958,14 @@ export class ContextServiceClient {
 
         store.save({
           version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+          provider_id: this.retrievalProviderId,
           updated_at: new Date().toISOString(),
           files: nextFiles,
         });
       }
 
       if (successCount > 0) {
-        await this.saveState();
+        await this.persistLegacyProviderRuntimeState();
         this.updateIndexStatus({
           status: errors.length ? 'error' : 'idle',
           lastIndexed: new Date().toISOString(),
@@ -3005,27 +3003,18 @@ export class ContextServiceClient {
    * Clear index state and caches
    */
   async clearIndex(): Promise<void> {
-    if (this.isLocalNativeRetrievalProvider()) {
+    await this.retrievalProvider.clearIndex();
+  }
+
+  private async clearIndexWithProviderRuntime(options?: { localNative?: boolean }): Promise<void> {
+    if (options?.localNative) {
       console.error('[clearIndex] Clearing local_native retrieval metadata.');
     }
 
-    // Reset SDK instances
-    this.context = null;
-    this.initPromise = null;
-    this.restoredFromStateFile = false;
-    this.indexStatusDiskHydrated = false;
-    this.skipAutoIndexOnce = true;
+    // Reset legacy runtime instances
+    this.resetLegacyProviderRuntime({ skipAutoIndexOnce: true, resetDiskHydration: true });
 
-    // Delete persisted state file if it exists
-    const stateFilePath = this.getStateFilePath();
-    if (fs.existsSync(stateFilePath)) {
-      try {
-        fs.unlinkSync(stateFilePath);
-        console.error(`Deleted state file: ${stateFilePath}`);
-      } catch (error) {
-        console.error('Failed to delete state file:', error);
-      }
-    }
+    this.legacyRuntimeManager.clearPersistedState();
 
     const fingerprintPath = path.join(this.workspacePath, INDEX_FINGERPRINT_FILE_NAME);
     if (fs.existsSync(fingerprintPath)) {
@@ -3100,44 +3089,6 @@ export class ContextServiceClient {
       }
     }
 
-    const retrieveFromAIProvider = async (): Promise<SearchResult[]> => {
-      const compatEmptyArrayFallbackEnabled = process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK === 'true';
-      const normalizedQuery = query.trim();
-      const queryTokens = normalizedQuery
-        .split(/[^a-z0-9_./-]+/i)
-        .map((token) => token.trim())
-        .filter(Boolean);
-      const hasStrongIdentifierToken = queryTokens.some((token) => token.length >= 12);
-      const isSingleTokenQuery = queryTokens.length === 1;
-
-      const prompt = this.buildSemanticSearchPrompt(query, topK, options);
-      const rawResponse = await this.searchAndAsk(query, prompt);
-      const parseResult = this.parseAIProviderSearchResults(rawResponse, topK);
-      if (parseResult !== null) {
-        if (parseResult.length > 0) {
-          return parseResult;
-        }
-        // Explicit [] from the provider is authoritative by default.
-        // Temporary compatibility mode can re-enable keyword fallback.
-        if (compatEmptyArrayFallbackEnabled) {
-          return this.keywordFallbackSearch(query, topK);
-        }
-        return [];
-      }
-
-      let searchResults = this.parseFormattedResults(rawResponse, topK);
-
-      if (searchResults.length > 0) {
-        return searchResults;
-      }
-
-      if ((rawResponse && rawResponse.trim() !== '') || isSingleTokenQuery || hasStrongIdentifierToken) {
-        return this.keywordFallbackSearch(query, topK);
-      }
-
-      return [];
-    };
-
     const indexFingerprint = this.getIndexFingerprint();
     const persistentCacheKey = (indexFingerprint !== 'no-state' && indexFingerprint !== 'unknown')
       ? `${indexFingerprint}:${memoryCacheKey}`
@@ -3165,7 +3116,7 @@ export class ContextServiceClient {
 
     let searchResults: SearchResult[] = [];
     try {
-      searchResults = await retrieveFromAIProvider();
+      searchResults = await this.retrievalProvider.search(query, topK, options);
 
       if (!bypassCache) {
         // Cache results
@@ -3210,6 +3161,18 @@ export class ContextServiceClient {
     }
   }
 
+  private async searchWithProviderRuntime(
+    query: string,
+    topK: number,
+    options?: { bypassCache?: boolean; maxOutputLength?: number }
+  ): Promise<SearchResult[]> {
+    return searchWithLegacySemanticRuntime(query, topK, options, {
+      searchAndAsk: (searchQuery, prompt) => this.searchAndAsk(searchQuery, prompt),
+      keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
+        this.keywordFallbackSearch(fallbackQuery, fallbackTopK),
+    });
+  }
+
   /**
    * Deterministic local retrieval path for internal callers that should not depend on provider output format.
    */
@@ -3218,14 +3181,14 @@ export class ContextServiceClient {
   }
 
   private maybeRunRetrievalShadowCompare(query: string, topK: number, primaryResults: SearchResult[]): void {
-    if (process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED !== 'true') {
-      return;
-    }
-    const rawSampleRate = Number.parseFloat(process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE ?? '0.1');
+    const rawSampleRate = Number.parseFloat(process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE ?? '0');
     const sampleRate = Number.isFinite(rawSampleRate)
       ? Math.max(0, Math.min(1, rawSampleRate))
-      : 0.1;
-    if (sampleRate <= 0 || Math.random() > sampleRate) {
+      : 0;
+    if (!shouldRunShadowCompare({
+      shadowCompareEnabled: process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED === 'true',
+      shadowSampleRate: sampleRate,
+    })) {
       return;
     }
 
@@ -3262,109 +3225,6 @@ export class ContextServiceClient {
     } finally {
       this.setLastSearchDiagnostics(previousDiagnostics);
     }
-  }
-
-  private parseAIProviderSearchResults(raw: string, topK: number): SearchResult[] | null {
-    const timestamp = new Date().toISOString();
-    if (typeof raw !== 'string') {
-      return null;
-    }
-    if (raw.trim() === '') {
-      return null;
-    }
-
-    const normalized = raw
-      .trim()
-      .replace(/\\`/g, '`');
-    const candidates: string[] = [];
-    const fenceMatches = normalized.matchAll(/```(?:json)?\s*([\s\S]*?)```/g);
-    for (const match of fenceMatches) {
-      const candidate = match[1]?.trim();
-      if (candidate) {
-        candidates.push(candidate);
-      }
-    }
-    if (!candidates.includes(normalized)) {
-      candidates.push(normalized);
-    }
-
-    let sawExplicitEmptyArray = false;
-    for (const candidate of candidates) {
-      if (!candidate || !candidate.startsWith('[') || !candidate.endsWith(']')) {
-        continue;
-      }
-
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(candidate);
-      } catch {
-        continue;
-      }
-
-      if (!Array.isArray(parsed)) {
-        continue;
-      }
-
-      if (parsed.length === 0) {
-        sawExplicitEmptyArray = true;
-        continue;
-      }
-
-      const results: SearchResult[] = [];
-      for (let i = 0; i < parsed.length && results.length < topK; i += 1) {
-        const item = parsed[i] as Record<string, unknown>;
-        if (!item || typeof item !== 'object') continue;
-
-        let rawPath = '';
-        if (typeof item.path === 'string') {
-          rawPath = item.path;
-        } else if (typeof item.file === 'string') {
-          rawPath = item.file;
-        } else if (typeof item.file_path === 'string') {
-          rawPath = item.file_path;
-        }
-
-        const content = typeof item.content === 'string' ? item.content.trim() : '';
-        if (!rawPath || !content) continue;
-
-        const sanitizedPath = this.sanitizeResultPath(rawPath);
-        if (!sanitizedPath) continue;
-
-        const rawScore = typeof item.relevanceScore === 'number'
-          ? item.relevanceScore
-          : typeof item.score === 'number'
-            ? item.score
-            : 0;
-
-        const result: SearchResult = {
-          path: sanitizedPath,
-          content,
-          lines: typeof item.lines === 'string' && item.lines.trim() ? item.lines.trim() : undefined,
-          relevanceScore: Number.isFinite(rawScore)
-            ? Math.max(0, Math.min(1, rawScore))
-            : undefined,
-          matchType: typeof item.matchType === 'string' && (item.matchType === 'keyword' || item.matchType === 'hybrid' || item.matchType === 'semantic')
-            ? item.matchType
-            : 'semantic',
-          retrievedAt: typeof item.retrievedAt === 'string' && item.retrievedAt.trim() ? item.retrievedAt.trim() : timestamp,
-        };
-
-        results.push(result);
-      }
-
-      if (results.length > 0) {
-        return results;
-      }
-    }
-
-    // Explicit empty array from provider means "no matches" and should not trigger fallback.
-    if (sawExplicitEmptyArray) {
-      return [];
-    }
-
-    // Any non-empty or malformed provider payload is treated as unparseable so non-strict mode
-    // can apply legacy fallbacks while strict mode can short-circuit to [].
-    return null;
   }
 
   /**
@@ -3726,31 +3586,6 @@ export class ContextServiceClient {
     }));
   }
 
-  private buildSemanticSearchPrompt(query: string, topK: number, options?: { maxOutputLength?: number }): string {
-    const maxOutputLength = options?.maxOutputLength ?? topK * 2000;
-
-    return [
-      'You are a strict JSON-only retriever for the Context Engine.',
-      `Query: ${query}`,
-      `Return up to ${topK} results as a JSON array only. Do not include markdown, prose, or code fences.`,
-      'Use this exact schema for every entry:',
-      '{ "path": "relative/path.ts", "content": "snippet", "lines": "12-20", "relevanceScore": 0.83, "matchType": "semantic", "retrievedAt": "2026-..." }',
-      `Limit content output so total response stays around ${Math.max(500, Math.min(4000, maxOutputLength))} characters.`,
-      'Only include files that are likely relevant to the query.',
-      'Prefer short snippets that include context around the match.',
-      'If no matches are found, return [] exactly.',
-    ].join('\\n');
-  }
-
-  private sanitizeResultPath(rawPath: string): string | null {
-    const normalized = rawPath.trim().replace(/\\\\/g, '/');
-    if (!normalized) return null;
-    if (path.isAbsolute(normalized)) return null;
-    if (normalized.startsWith('..') || normalized.includes('/../') || normalized.includes('..' + path.posix.sep)) return null;
-
-    return normalized;
-  }
-
   /** 
    * Parse the formatted search results from DirectContext into SearchResult objects
    * 
@@ -3767,93 +3602,7 @@ export class ContextServiceClient {
    * ```
    */
   private parseFormattedResults(formattedResults: string, topK: number): SearchResult[] {
-    const results: SearchResult[] = [];
-
-    if (!formattedResults || formattedResults.trim() === '') {
-      return results;
-    }
-
-    const retrievedAt = new Date().toISOString();
-
-    const hasPathPrefix = /^Path:\s*/m.test(formattedResults);
-    const blockSplitter = hasPathPrefix ? /(?=^Path:\s*)/m : /(?=^##\s+)/m;
-
-    // Split by detected prefix to get individual file blocks
-    const pathBlocks = formattedResults.split(blockSplitter).filter(block => block.trim());
-
-    for (const block of pathBlocks) {
-      if (results.length >= topK) break;
-
-      let filePath: string | null = null;
-      let content = '';
-      let lineRange: string | undefined;
-
-      if (hasPathPrefix) {
-        const pathMatch = block.match(/^Path:\s*(.+?)(?:\s*\n|$)/m);
-        if (!pathMatch) continue;
-
-        filePath = pathMatch[1].trim();
-
-        const contentStart = block.indexOf('\n');
-        if (contentStart === -1) continue;
-
-        content = block.substring(contentStart + 1).trim();
-      } else {
-        const headingMatch = block.match(/^##\s+(.+?)(?:\s*$|\n)/m);
-        if (!headingMatch) continue;
-        filePath = headingMatch[1].trim();
-
-        const linesMatch = block.match(/^Lines?\s+([0-9]+(?:-[0-9]+)?)/mi);
-        if (linesMatch) {
-          lineRange = linesMatch[1];
-        }
-
-        const fenceMatch = block.match(/```[a-zA-Z]*\n?([\s\S]*?)```/m);
-        if (fenceMatch && fenceMatch[1]) {
-          content = fenceMatch[1].trim();
-        } else {
-          const blankIndex = block.indexOf('\n\n');
-          content = blankIndex !== -1
-            ? block.substring(blankIndex).trim()
-            : block.substring(block.indexOf('\n') + 1).trim();
-        }
-      }
-
-      // Remove the "..." markers that indicate truncation
-      content = content.replace(/^\.\.\.\s*$/gm, '').trim();
-
-      // Remove line number prefixes (e.g., "   30  code" -> "code")
-      const lines: number[] = [];
-      const cleanedLines = content.split('\n').map(line => {
-        const lineNumMatch = line.match(/^\s*(\d+)\s{2}(.*)$/);
-        if (lineNumMatch) {
-          lines.push(parseInt(lineNumMatch[1], 10));
-          return lineNumMatch[2];
-        }
-        return line;
-      });
-      content = cleanedLines.join('\n').trim();
-
-      // Determine line range
-      if (!lineRange) {
-        lineRange = lines.length > 0
-          ? `${Math.min(...lines)}-${Math.max(...lines)}`
-          : undefined;
-      }
-
-      if (content && filePath) {
-        results.push({
-          path: filePath.replace(/\\/g, '/'), // Normalize path separators
-          content,
-          lines: lineRange,
-          relevanceScore: 1 - (results.length / topK), // Approximate relevance based on order
-          matchType: 'semantic',
-          retrievedAt,
-        });
-      }
-    }
-
-    return results;
+    return parseLegacyFormattedResults(formattedResults, topK);
   }
 
   // ==========================================================================

@@ -2,6 +2,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const DEFAULT_INDEX_STATE_VERSION = 1;
+const DEFAULT_SCHEMA_VERSION = 2;
+const LEGACY_SCHEMA_VERSION = 1;
+const DEFAULT_PROVIDER_ID = 'augment_legacy';
+const EPOCH_ISO = new Date(0).toISOString();
 
 export interface IndexStateFileEntry {
   hash: string;
@@ -10,9 +15,24 @@ export interface IndexStateFileEntry {
 
 export interface IndexStateFile {
   version: number;
+  schema_version: number;
+  provider_id: string;
   updated_at: string;
   files: Record<string, IndexStateFileEntry>;
 }
+
+export interface IndexStateLoadMetadata {
+  warnings: string[];
+  unsupported_schema_version?: number;
+}
+
+export interface IndexStateLoadResult {
+  state: IndexStateFile;
+  metadata: IndexStateLoadMetadata;
+}
+
+type IndexStateSaveInput = Omit<IndexStateFile, 'schema_version' | 'provider_id'> &
+  Partial<Pick<IndexStateFile, 'schema_version' | 'provider_id'>>;
 
 export class JsonIndexStateStore {
   private workspacePath: string;
@@ -25,33 +45,82 @@ export class JsonIndexStateStore {
     return path.join(this.workspacePath, INDEX_STATE_FILE_NAME);
   }
 
+  private getDefaultState(): IndexStateFile {
+    return {
+      version: DEFAULT_INDEX_STATE_VERSION,
+      schema_version: DEFAULT_SCHEMA_VERSION,
+      provider_id: DEFAULT_PROVIDER_ID,
+      updated_at: EPOCH_ISO,
+      files: {},
+    };
+  }
+
   load(): IndexStateFile {
+    return this.loadWithMetadata().state;
+  }
+
+  loadWithMetadata(): IndexStateLoadResult {
     const p = this.getPath();
     if (!fs.existsSync(p)) {
-      return { version: 1, updated_at: new Date(0).toISOString(), files: {} };
+      return {
+        state: this.getDefaultState(),
+        metadata: { warnings: [] },
+      };
     }
     try {
       const raw = fs.readFileSync(p, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<IndexStateFile>;
       if (!parsed || typeof parsed !== 'object') {
-        return { version: 1, updated_at: new Date(0).toISOString(), files: {} };
+        return {
+          state: this.getDefaultState(),
+          metadata: { warnings: [] },
+        };
+      }
+      const parsedSchemaVersion =
+        typeof parsed.schema_version === 'number' ? parsed.schema_version : LEGACY_SCHEMA_VERSION;
+      if (parsedSchemaVersion > DEFAULT_SCHEMA_VERSION) {
+        return {
+          state: this.getDefaultState(),
+          metadata: {
+            warnings: [
+              `Unsupported index state schema_version=${parsedSchemaVersion}; resetting to empty default state.`,
+            ],
+            unsupported_schema_version: parsedSchemaVersion,
+          },
+        };
       }
       const files = (parsed.files && typeof parsed.files === 'object') ? (parsed.files as any) : {};
       return {
-        version: typeof parsed.version === 'number' ? parsed.version : 1,
-        updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : new Date(0).toISOString(),
-        files,
+        state: {
+          version: typeof parsed.version === 'number' ? parsed.version : DEFAULT_INDEX_STATE_VERSION,
+          schema_version: parsedSchemaVersion,
+          provider_id:
+            typeof parsed.provider_id === 'string' && parsed.provider_id.trim().length > 0
+              ? parsed.provider_id
+              : DEFAULT_PROVIDER_ID,
+          updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : EPOCH_ISO,
+          files,
+        },
+        metadata: { warnings: [] },
       };
     } catch {
-      return { version: 1, updated_at: new Date(0).toISOString(), files: {} };
+      return {
+        state: this.getDefaultState(),
+        metadata: { warnings: [] },
+      };
     }
   }
 
-  save(data: IndexStateFile): void {
+  save(data: IndexStateSaveInput): void {
     const p = this.getPath();
     const tmp = `${p}.tmp`;
     const payload: IndexStateFile = {
-      version: data.version ?? 1,
+      version: data.version ?? DEFAULT_INDEX_STATE_VERSION,
+      schema_version: data.schema_version ?? DEFAULT_SCHEMA_VERSION,
+      provider_id:
+        typeof data.provider_id === 'string' && data.provider_id.trim().length > 0
+          ? data.provider_id
+          : DEFAULT_PROVIDER_ID,
       updated_at: data.updated_at ?? new Date().toISOString(),
       files: data.files ?? {},
     };
@@ -67,4 +136,3 @@ export class JsonIndexStateStore {
     }
   }
 }
-

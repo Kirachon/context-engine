@@ -3,7 +3,7 @@
  *
  * Service layer for AI-powered software planning and architecture design.
  * Integrates with the ContextServiceClient to leverage codebase context
- * and uses the Auggie SDK's searchAndAsk for AI-powered plan generation.
+ * and uses the legacy runtime's searchAndAsk for AI-powered plan generation.
  *
  * Responsibilities:
  * - Generate structured implementation plans

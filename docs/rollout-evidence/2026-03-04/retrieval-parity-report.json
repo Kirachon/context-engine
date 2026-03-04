@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-04T04:25:07.573Z",
+  "inputs": {
+    "bench_baseline": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-baseline.json",
+    "bench_candidate": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json",
+    "thresholds": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-parity-thresholds.json"
+  },
+  "metrics": {
+    "bench": {
+      "overlap_ratio": {
+        "note": "bench artifacts do not typically include overlap_ratio"
+      },
+      "reliability": {
+        "error_rate_delta_pp": {
+          "note": "error_rate unavailable in bench artifact schema"
+        },
+        "timeout_rate_delta_pp": {
+          "note": "timeout_rate unavailable in bench artifact schema"
+        },
+        "unique_files_drop_pct": {
+          "note": "unique_files@k unavailable or invalid baseline in bench artifact schema"
+        }
+      },
+      "perf": {
+        "p95_regression_pct": {
+          "value": 6.618269594509382
+        },
+        "p95_regression_abs_ms": {
+          "value": 5.143599999999992
+        }
+      }
+    },
+    "replay": {
+      "overlap_ratio": {
+        "note": "artifact not provided"
+      },
+      "reliability": {
+        "error_rate_delta_pp": {
+          "note": "artifact not provided"
+        },
+        "timeout_rate_delta_pp": {
+          "note": "artifact not provided"
+        },
+        "unique_files_drop_pct": {
+          "note": "artifact not provided"
+        }
+      },
+      "perf": {
+        "p95_regression_pct": {
+          "note": "artifact not provided"
+        },
+        "p95_regression_abs_ms": {
+          "note": "artifact not provided"
+        }
+      }
+    },
+    "shadow": {
+      "overlap_ratio": {
+        "note": "artifact not provided"
+      },
+      "reliability": {
+        "error_rate_delta_pp": {
+          "note": "artifact not provided"
+        },
+        "timeout_rate_delta_pp": {
+          "note": "artifact not provided"
+        },
+        "unique_files_drop_pct": {
+          "note": "artifact not provided"
+        }
+      },
+      "perf": {
+        "p95_regression_pct": {
+          "note": "artifact not provided"
+        },
+        "p95_regression_abs_ms": {
+          "note": "artifact not provided"
+        }
+      }
+    }
+  },
+  "evaluations": [
+    {
+      "id": "bench.perf.p95_regression_pct",
+      "status": "pass",
+      "comparator": "lte",
+      "threshold": 20,
+      "value": 6.618269594509382,
+      "message": "PASS bench.perf.p95_regression_pct: value=6.618269594509382 lte 20"
+    },
+    {
+      "id": "bench.perf.p95_regression_abs_ms",
+      "status": "pass",
+      "comparator": "lte",
+      "threshold": 50,
+      "value": 5.143599999999992,
+      "message": "PASS bench.perf.p95_regression_abs_ms: value=5.143599999999992 lte 50"
+    },
+    {
+      "id": "bench.reliability.error_rate_delta_pp",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 0.5,
+      "message": "SKIP bench.reliability.error_rate_delta_pp: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "bench.reliability.timeout_rate_delta_pp",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 0.5,
+      "message": "SKIP bench.reliability.timeout_rate_delta_pp: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "bench.reliability.unique_files_drop_pct",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 10,
+      "message": "SKIP bench.reliability.unique_files_drop_pct: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "replay.overlap_ratio",
+      "status": "skip",
+      "comparator": "gte",
+      "threshold": 0.85,
+      "message": "SKIP replay.overlap_ratio: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "replay.reliability.error_rate_delta_pp",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 0.5,
+      "message": "SKIP replay.reliability.error_rate_delta_pp: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "replay.reliability.timeout_rate_delta_pp",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 0.5,
+      "message": "SKIP replay.reliability.timeout_rate_delta_pp: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "replay.perf.p95_regression_pct",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 20,
+      "message": "SKIP replay.perf.p95_regression_pct: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "shadow.overlap_ratio",
+      "status": "skip",
+      "comparator": "gte",
+      "threshold": 0.85,
+      "message": "SKIP shadow.overlap_ratio: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "shadow.reliability.error_rate_delta_pp",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 0.5,
+      "message": "SKIP shadow.reliability.error_rate_delta_pp: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "shadow.reliability.timeout_rate_delta_pp",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 0.5,
+      "message": "SKIP shadow.reliability.timeout_rate_delta_pp: metric unavailable (policy=skip)."
+    },
+    {
+      "id": "shadow.perf.p95_regression_pct",
+      "status": "skip",
+      "comparator": "lte",
+      "threshold": 20,
+      "message": "SKIP shadow.perf.p95_regression_pct: metric unavailable (policy=skip)."
+    }
+  ],
+  "gate": {
+    "enabled": true,
+    "status": "pass",
+    "failed_metric_ids": []
+  }
+}

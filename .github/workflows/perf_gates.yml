@@ -17,11 +17,17 @@ permissions:
 
 jobs:
   pr_gate:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' && (matrix.provider_lane == 'local_native' || secrets.AUGMENT_API_TOKEN != '')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        provider_lane: [local_native, augment_legacy]
     env:
       AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
       AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
+      CE_RETRIEVAL_PROVIDER: ${{ matrix.provider_lane }}
+      BENCH_PROVIDER_LANE: ${{ matrix.provider_lane }}
     steps:
       - uses: actions/checkout@v4
 
@@ -42,20 +48,29 @@ jobs:
       - name: Run WS19 SLO threshold gate (index/search family)
         run: node --import tsx scripts/ci/ws19-slo-gate.ts --family index_search --artifact artifacts/bench/pr-candidate.json
 
+      - name: Generate retrieval parity artifact + threshold gate (PR mode)
+        run: node --import tsx scripts/ci/retrieval-parity-gate.ts --bench-baseline artifacts/bench/pr-baseline.json --bench-candidate artifacts/bench/pr-candidate.json --thresholds config/ci/retrieval-parity-thresholds.json --out artifacts/bench/retrieval-parity-pr.json
+
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perf-gate-pr-artifacts
+          name: perf-gate-pr-artifacts-${{ matrix.provider_lane }}
           path: artifacts/bench/
           if-no-files-found: warn
 
   nightly_gate:
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (matrix.provider_lane == 'local_native' || secrets.AUGMENT_API_TOKEN != '')
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        provider_lane: [local_native, augment_legacy]
     env:
       AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
       AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
+      CE_RETRIEVAL_PROVIDER: ${{ matrix.provider_lane }}
+      BENCH_PROVIDER_LANE: ${{ matrix.provider_lane }}
     steps:
       - uses: actions/checkout@v4
 
@@ -76,10 +91,13 @@ jobs:
       - name: Run WS19 SLO threshold gate (index/search family)
         run: node --import tsx scripts/ci/ws19-slo-gate.ts --family index_search --artifact artifacts/bench/nightly-candidate.json
 
+      - name: Generate retrieval parity artifact + threshold gate (Nightly mode)
+        run: node --import tsx scripts/ci/retrieval-parity-gate.ts --bench-baseline artifacts/bench/nightly-baseline.json --bench-candidate artifacts/bench/nightly-candidate.json --thresholds config/ci/retrieval-parity-thresholds.json --out artifacts/bench/retrieval-parity-nightly.json
+
       - name: Upload benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perf-gate-nightly-artifacts
+          name: perf-gate-nightly-artifacts-${{ matrix.provider_lane }}
           path: artifacts/bench/
           if-no-files-found: warn

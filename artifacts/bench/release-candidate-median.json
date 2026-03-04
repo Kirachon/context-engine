@@ -1,0 +1,37 @@
+{
+  "meta": {
+    "node": "v24.5.0",
+    "platform": "win32 x64",
+    "pid": 31640,
+    "started_at": "2026-02-28T01:37:16.801Z",
+    "env": {
+      "AUGMENT_API_TOKEN_set": false
+    }
+  },
+  "total_ms": 65.5152,
+  "payload": {
+    "mode": "scan",
+    "workspace": "D:\\GitProjects\\context-engine",
+    "readFiles": true,
+    "fileCount": 343,
+    "totalBytes": 4434075,
+    "readBytes": 4434075,
+    "elapsed_ms": 64.86140000000006,
+    "files_per_sec": 5288.199144637638,
+    "mb_per_sec": 65.1953772894054,
+    "timing": {
+      "p95_ms": 63.74329999999998,
+      "p50_ms": 63.74329999999998,
+      "avg_ms": 63.74329999999998
+    }
+  },
+  "release": {
+    "bench_mode": "scan",
+    "candidate_runs": [
+      64.86140000000006,
+      63.74329999999998,
+      57.4246
+    ],
+    "candidate_median_p95_ms": 63.74329999999998
+  }
+}

@@ -33,10 +33,14 @@ describe('scripts/ci/check-ws21-rollback-drill.ts', () => {
       logPath,
       [
         'Log ID: WS21-20260228-001',
+        'rollback_event: canary_latency_regression',
         'Command Path: cmd1 -> cmd2 -> cmd3',
         'Owner: rollout-owner',
         'Started At (UTC): 2026-02-28T08:00:00Z',
         'Ended At (UTC): 2026-02-28T08:05:00Z',
+        'RTO Target Minutes: 15',
+        'RTO Actual Minutes: 5',
+        'RTO Evidence: artifacts/ws21/rto-proof.log',
         'Recovery Evidence: artifacts/ws21/recovery.log',
         'Blocker Status: none',
       ].join('\n')
@@ -57,10 +61,14 @@ describe('scripts/ci/check-ws21-rollback-drill.ts', () => {
       logPath,
       [
         'Log ID: WS21-20260228-002',
+        'rollback_event: gate_breach',
         'Command Path: cmd1 -> cmd2',
         'Owner: rollout-owner',
         'Started At (UTC): 2026-02-28T08:00:00Z',
         'Ended At (UTC): 2026-02-28T08:03:00Z',
+        'RTO Target Minutes: 15',
+        'RTO Actual Minutes: 3',
+        'RTO Evidence: artifacts/ws21/rto-proof.log',
         'Blocker Status: none',
       ].join('\n')
     );
@@ -79,10 +87,14 @@ describe('scripts/ci/check-ws21-rollback-drill.ts', () => {
     writeLog(
       logPath,
       [
+        'rollback_event: canary_failure',
         'Command Path: cmd1 -> cmd2',
         'Owner: rollout-owner',
         'Started At (UTC): 2026-02-28T08:10:00Z',
         'Ended At (UTC): 2026-02-28T08:05:00Z',
+        'RTO Target Minutes: 15',
+        'RTO Actual Minutes: 6',
+        'RTO Evidence: artifacts/ws21/rto-proof.log',
         'Recovery Evidence: artifacts/ws21/recovery.log',
         'Blocker Status: none',
       ].join('\n')
@@ -103,10 +115,14 @@ describe('scripts/ci/check-ws21-rollback-drill.ts', () => {
     writeLog(
       logPath,
       [
+        'rollback_event: incident_failover',
         'Command Path: cmd1 -> cmd2',
         'Owner: rollout-owner',
         'Started At (UTC): 2026-02-28T08:00:00Z',
         'Ended At (UTC): 2026-02-28T08:05:00Z',
+        'RTO Target Minutes: 15',
+        'RTO Actual Minutes: 5',
+        'RTO Evidence: artifacts/ws21/rto-proof.log',
         'Recovery Evidence: artifacts/ws21/recovery.log',
         'Blocker Status: open',
       ].join('\n')
@@ -115,6 +131,34 @@ describe('scripts/ci/check-ws21-rollback-drill.ts', () => {
     const result = runChecker([logPath]);
     expect(result.status).toBe(1);
     expect(result.stdout).toContain('Blocker Status indicates unresolved blocker (open).');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('fails when RTO actual exceeds target', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-ws21-rto-breach-'));
+    const logPath = path.join(tmp, 'ws21.md');
+    writeLog(
+      logPath,
+      [
+        'rollback_event: rollback_drill_timeout',
+        'Command Path: cmd1 -> cmd2',
+        'Owner: rollout-owner',
+        'Started At (UTC): 2026-02-28T08:00:00Z',
+        'Ended At (UTC): 2026-02-28T08:30:00Z',
+        'RTO Target Minutes: 15',
+        'RTO Actual Minutes: 30',
+        'RTO Evidence: artifacts/ws21/rto-proof.log',
+        'Recovery Evidence: artifacts/ws21/recovery.log',
+        'Blocker Status: none',
+      ].join('\n')
+    );
+
+    const result = runChecker([logPath]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain(
+      'RTO Actual Minutes must be less than or equal to RTO Target Minutes.'
+    );
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -31,6 +31,12 @@ describe('retrieval provider env resolution', () => {
     expect(resolveRetrievalProviderEnv().providerId).toBe('local_native');
   });
 
+  it('normalizes augment alias to augment_legacy', () => {
+    process.env.CE_RETRIEVAL_PROVIDER = 'augment';
+
+    expect(resolveRetrievalProviderEnv().providerId).toBe('augment_legacy');
+  });
+
   it('force legacy override pins provider to augment_legacy', () => {
     process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
     process.env.CE_RETRIEVAL_FORCE_LEGACY = 'true';

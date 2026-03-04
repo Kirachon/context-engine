@@ -10,6 +10,12 @@ export interface RetrievalProviderEnv {
   shadowSampleRate: number;
 }
 
+export function resolveRetrievalProviderId(
+  env: NodeJS.ProcessEnv = process.env
+): RetrievalProviderId {
+  return resolveRetrievalProviderEnv(env).providerId;
+}
+
 export function resolveRetrievalProviderEnv(env: NodeJS.ProcessEnv = process.env): RetrievalProviderEnv {
   const configuredProvider = parseProviderId(env.CE_RETRIEVAL_PROVIDER);
   const forceLegacy = parseBooleanEnv(env.CE_RETRIEVAL_FORCE_LEGACY, false, 'CE_RETRIEVAL_FORCE_LEGACY');
@@ -48,9 +54,12 @@ function parseProviderId(raw: string | undefined): RetrievalProviderId | undefin
   if (raw === undefined || raw.trim() === '') {
     return undefined;
   }
-  const normalized = raw.trim();
-  if (normalized === 'augment_legacy' || normalized === 'local_native') {
-    return normalized;
+  const normalized = raw.trim().toLowerCase();
+  if (normalized === 'augment' || normalized === 'augment_legacy') {
+    return 'augment_legacy';
+  }
+  if (normalized === 'local_native') {
+    return 'local_native';
   }
   throw new Error(
     `Invalid CE_RETRIEVAL_PROVIDER value "${raw}". Allowed values: augment_legacy, local_native`

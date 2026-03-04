@@ -44,9 +44,9 @@ This document provides a comprehensive, phased implementation plan for the React
 │          └── PlanPersistenceService [+SQLite backend option]    │
 │          └── PlanHistoryService [+reactive versioning]          │
 ├─────────────────────────────────────────────────────────────────┤
-│ Layer 1: Core Engine (Auggie SDK - DirectContext)               │
+│ Layer 1: Core Engine (legacy SDK runtime - DirectContext)       │
 ├─────────────────────────────────────────────────────────────────┤
-│ Layer 5: Storage Backend (Auggie + Optional SQLite)             │
+│ Layer 5: Storage Backend (legacy runtime + Optional SQLite)     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -992,7 +992,7 @@ export class HITLCheckpointService {
 
 | Dependency | Risk | Mitigation |
 |------------|------|------------|
-| Auggie SDK | API changes | Pin version, adapter layer |
+| Legacy SDK runtime | API changes | Pin version, adapter layer |
 | SQLite (better-sqlite3) | Native module issues | Fallback to JSON files (existing) |
 | Git operations | Permission/access | Graceful error handling |
 | Existing services | Interface changes | Version checks, feature flags |
@@ -1370,4 +1370,3 @@ Week 9:    GA Release
 *This document is the authoritative implementation guide for the Reactive AI Code Review Engine. All implementation work should follow this specification to ensure compatibility with the existing Context Engine MCP server.*
 
 **Key Principle**: Extend, don't duplicate. Every new feature should first check if existing services can be enhanced rather than creating parallel implementations.
-

@@ -79,8 +79,8 @@ export async function handleReviewChanges(
       args.diff,
       'Missing or invalid "diff" argument. Provide a unified diff string.'
     );
-    assertNonEmptyDiffScope(normalizedDiff, undefined);
     validateMaxLength(normalizedDiff, MAX_DIFF_LENGTH, `Invalid "diff": maximum ${MAX_DIFF_LENGTH} characters`);
+    assertNonEmptyDiffScope(normalizedDiff, undefined);
 
     const customInstructions = validateOptionalString(
       args.custom_instructions,

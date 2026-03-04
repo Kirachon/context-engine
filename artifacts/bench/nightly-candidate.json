@@ -1,0 +1,55 @@
+{
+  "meta": {
+    "node": "v24.5.0",
+    "platform": "win32 x64",
+    "pid": 39016,
+    "started_at": "2026-02-28T01:56:39.130Z",
+    "env": {
+      "AUGMENT_API_TOKEN_set": false
+    }
+  },
+  "total_ms": 98.73210000000006,
+  "payload": {
+    "mode": "scan",
+    "workspace": "D:\\GitProjects\\context-engine",
+    "readFiles": true,
+    "fileCount": 351,
+    "totalBytes": 4909761,
+    "readBytes": 4909761,
+    "elapsed_ms": 97.89789999999994,
+    "files_per_sec": 3585.3680211730816,
+    "mb_per_sec": 47.82853325140855,
+    "timing": {
+      "count": 9,
+      "avg_ms": 86.63338888888887,
+      "p50_ms": 84.66900000000004,
+      "p95_ms": 98.37180000000001,
+      "p99_ms": 98.37180000000001,
+      "min_ms": 76.69320000000005,
+      "max_ms": 98.37180000000001
+    }
+  },
+  "provenance": {
+    "commit_sha": "4f7c59c671aacbfa809eb80d7574d45f6f7ae1e1",
+    "bench_mode": "scan",
+    "dataset_id": "workspace:context-engine",
+    "node_version": "v24.5.0",
+    "env_fingerprint": "e3799b8908671551"
+  },
+  "suite": {
+    "role": "candidate",
+    "bench_mode": "scan",
+    "aggregated_from_runs": 9,
+    "p95_samples_ms": [
+      97.89789999999994,
+      93.13580000000002,
+      98.37180000000001,
+      90.76509999999996,
+      77.77300000000002,
+      77.606,
+      82.78869999999995,
+      76.69320000000005,
+      84.66900000000004
+    ]
+  }
+}

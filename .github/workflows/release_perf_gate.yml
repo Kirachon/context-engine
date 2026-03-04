@@ -37,10 +37,17 @@ permissions:
 
 jobs:
   release_gate:
+    if: matrix.provider_lane == 'local_native' || secrets.AUGMENT_API_TOKEN != ''
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        provider_lane: [local_native, augment_legacy]
     env:
       AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
       AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
+      CE_RETRIEVAL_PROVIDER: ${{ matrix.provider_lane }}
+      BENCH_PROVIDER_LANE: ${{ matrix.provider_lane }}
       BENCH_MODE: ${{ inputs.mode }}
       BASELINE_PATH: ${{ inputs.baseline_path }}
       CANDIDATE_PATH_INPUT: ${{ inputs.candidate_path }}
@@ -98,10 +105,25 @@ jobs:
       - name: Run WS19 SLO threshold gate (index/search family)
         run: node --import tsx scripts/ci/ws19-slo-gate.ts --family index_search --artifact ${{ env.BENCH_ARTIFACT_DIR }}/release-candidate-median.json
 
+      - name: Generate retrieval parity artifact + threshold gate (Release mode)
+        shell: bash
+        run: |
+          set -euo pipefail
+          RESOLVED_BASELINE="${BASELINE_PATH}"
+          if [ ! -f "${RESOLVED_BASELINE}" ]; then
+            RESOLVED_BASELINE="${BENCH_ARTIFACT_DIR}/${BASELINE_PATH}"
+          fi
+
+          node --import tsx scripts/ci/retrieval-parity-gate.ts \
+            --bench-baseline "${RESOLVED_BASELINE}" \
+            --bench-candidate "${BENCH_ARTIFACT_DIR}/release-candidate-median.json" \
+            --thresholds config/ci/retrieval-parity-thresholds.json \
+            --out "${BENCH_ARTIFACT_DIR}/retrieval-parity-release.json"
+
       - name: Upload release benchmark artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: release-perf-gate-artifacts
+          name: release-perf-gate-artifacts-${{ matrix.provider_lane }}
           path: ${{ env.BENCH_ARTIFACT_DIR }}/
           if-no-files-found: warn

@@ -1,0 +1,23 @@
+{
+  "meta": {
+    "node": "v24.5.0",
+    "platform": "win32 x64",
+    "pid": 35320,
+    "started_at": "2026-02-28T01:37:18.015Z",
+    "env": {
+      "AUGMENT_API_TOKEN_set": false
+    }
+  },
+  "total_ms": 58.06389999999999,
+  "payload": {
+    "mode": "scan",
+    "workspace": "D:\\GitProjects\\context-engine",
+    "readFiles": true,
+    "fileCount": 343,
+    "totalBytes": 4434061,
+    "readBytes": 4434061,
+    "elapsed_ms": 57.4246,
+    "files_per_sec": 5973.049877578599,
+    "mb_per_sec": 73.63830297605232
+  }
+}

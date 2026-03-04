@@ -105,6 +105,135 @@ describe('ContextServiceClient', () => {
     FEATURE_FLAGS.hash_normalize_eol = false;
   });
 
+  describe('Retrieval Provider Dispatch', () => {
+    it('should expose provider-scoped retrieval callbacks without callback-layer branching', async () => {
+      const localClient = new ContextServiceClient(testWorkspace);
+      const searchWithProviderRuntimeSpy = jest
+        .spyOn(localClient as any, 'searchWithProviderRuntime')
+        .mockResolvedValue([]);
+      const keywordFallbackSpy = jest
+        .spyOn(localClient as any, 'keywordFallbackSearch')
+        .mockResolvedValue([]);
+      const indexWorkspaceLegacySpy = jest
+        .spyOn(localClient as any, 'indexWorkspaceWithLegacyRuntime')
+        .mockResolvedValue({ indexed: 2, skipped: 0, errors: [], duration: 1 });
+      const indexWorkspaceLocalSpy = jest
+        .spyOn(localClient as any, 'indexWorkspaceLocalNativeFallback')
+        .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
+      const indexFilesLegacySpy = jest
+        .spyOn(localClient as any, 'indexFilesWithLegacyRuntime')
+        .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
+      const indexFilesLocalSpy = jest
+        .spyOn(localClient as any, 'indexFilesLocalNativeFallback')
+        .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
+      const clearIndexSpy = jest
+        .spyOn(localClient as any, 'clearIndexWithProviderRuntime')
+        .mockResolvedValue(undefined);
+
+      const callbacks = (localClient as any).createRetrievalProviderCallbacks();
+
+      await callbacks.augmentLegacy.search('provider query', 3, { bypassCache: true });
+      await callbacks.localNative.search('provider query', 3, { bypassCache: true });
+      await callbacks.augmentLegacy.indexWorkspace();
+      await callbacks.localNative.indexWorkspace();
+      await callbacks.augmentLegacy.indexFiles(['src/file.ts']);
+      await callbacks.localNative.indexFiles(['src/file.ts']);
+      await callbacks.augmentLegacy.clearIndex();
+      await callbacks.localNative.clearIndex();
+      const health = await callbacks.localNative.health({
+        providerId: 'local_native',
+        operation: 'health',
+      });
+
+      expect(searchWithProviderRuntimeSpy).toHaveBeenCalledWith('provider query', 3, { bypassCache: true });
+      expect(keywordFallbackSpy).toHaveBeenCalledWith('provider query', 3);
+      expect(indexWorkspaceLegacySpy).toHaveBeenCalledTimes(1);
+      expect(indexWorkspaceLocalSpy).toHaveBeenCalledTimes(1);
+      expect(indexFilesLegacySpy).toHaveBeenCalledWith(['src/file.ts']);
+      expect(indexFilesLocalSpy).toHaveBeenCalledWith(['src/file.ts']);
+      expect(clearIndexSpy).toHaveBeenCalledWith({ localNative: false });
+      expect(clearIndexSpy).toHaveBeenCalledWith({ localNative: true });
+      expect(health).toEqual({ ok: true, details: 'retrieval_provider=local_native' });
+    });
+
+    it('should route semantic search through the active retrieval provider instance', async () => {
+      const providerSearch = jest.fn(
+        async (_query: string, _topK: number, _options?: { bypassCache?: boolean; maxOutputLength?: number }) => [
+        { path: 'src/provider.ts', content: 'provider result', relevanceScore: 0.9 },
+      ]);
+      (client as any).retrievalProvider = {
+        id: 'augment_legacy',
+        search: providerSearch,
+        indexWorkspace: jest.fn(),
+        indexFiles: jest.fn(),
+        clearIndex: jest.fn(),
+        getIndexStatus: jest.fn(async () => client.getIndexStatus()),
+        health: jest.fn(async () => ({ ok: true })),
+      };
+
+      const results = await client.semanticSearch('provider query', 3, { bypassCache: true });
+
+      expect(providerSearch).toHaveBeenCalledWith('provider query', 3, { bypassCache: true });
+      expect(results).toEqual([
+        expect.objectContaining({ path: 'src/provider.ts', content: 'provider result' }),
+      ]);
+    });
+
+    it('should route index lifecycle methods through active retrieval provider instance', async () => {
+      const indexWorkspace = jest.fn(async () => ({ indexed: 2, skipped: 0, errors: [], duration: 1 }));
+      const indexFiles = jest.fn(async (_paths: string[]) => ({ indexed: 1, skipped: 0, errors: [], duration: 1 }));
+      const clearIndex = jest.fn(async () => undefined);
+      (client as any).retrievalProvider = {
+        id: 'augment_legacy',
+        search: jest.fn(async () => []),
+        indexWorkspace,
+        indexFiles,
+        clearIndex,
+        getIndexStatus: jest.fn(async () => client.getIndexStatus()),
+        health: jest.fn(async () => ({ ok: true })),
+      };
+
+      const workspaceResult = await client.indexWorkspace();
+      const filesResult = await client.indexFiles(['src/file.ts']);
+      await client.clearIndex();
+
+      expect(indexWorkspace).toHaveBeenCalledTimes(1);
+      expect(indexFiles).toHaveBeenCalledWith(['src/file.ts']);
+      expect(clearIndex).toHaveBeenCalledTimes(1);
+      expect(workspaceResult.indexed).toBe(2);
+      expect(filesResult.indexed).toBe(1);
+    });
+
+    it('should route local_native semantic search via provider boundary without touching legacy runtime parsing path', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-provider-dispatch-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'needle.ts'),
+        'export const localNativeProviderDispatchNeedle = true;',
+        'utf-8'
+      );
+
+      const localClient = new ContextServiceClient(tempDir);
+      const searchWithProviderRuntimeSpy = jest.spyOn(localClient as any, 'searchWithProviderRuntime');
+      const keywordFallbackSpy = jest.spyOn(localClient as any, 'keywordFallbackSearch');
+      const searchAndAskSpy = jest.spyOn(localClient as any, 'searchAndAsk');
+      const parseFormattedResultsSpy = jest.spyOn(localClient as any, 'parseFormattedResults');
+
+      const results = await localClient.semanticSearch('localNativeProviderDispatchNeedle', 5, { bypassCache: true });
+
+      expect(searchWithProviderRuntimeSpy).not.toHaveBeenCalled();
+      expect(keywordFallbackSpy).toHaveBeenCalledTimes(1);
+      expect(searchAndAskSpy).not.toHaveBeenCalled();
+      expect(parseFormattedResultsSpy).not.toHaveBeenCalled();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].path).toContain('src/needle.ts');
+      expect(results.every((result) => result.matchType === 'keyword')).toBe(true);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+  });
+
   describe('Path Validation', () => {
     it('should reject absolute paths', async () => {
       const absolutePath = process.platform === 'win32'
@@ -995,10 +1124,12 @@ describe('ContextServiceClient', () => {
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
 
       const localClient = new ContextServiceClient(tempDir);
+      const legacyIndexWorkspaceSpy = jest.spyOn(localClient as any, 'indexWorkspaceWithLegacyRuntime');
       const result = await localClient.indexWorkspace();
 
       expect(result.errors).toEqual([]);
       expect(result.indexed).toBeGreaterThan(0);
+      expect(legacyIndexWorkspaceSpy).not.toHaveBeenCalled();
       expect(mockDirectContext.create).not.toHaveBeenCalled();
       expect(mockDirectContext.importFromFile).not.toHaveBeenCalled();
       expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
@@ -1041,10 +1172,12 @@ describe('ContextServiceClient', () => {
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
 
       const localClient = new ContextServiceClient(tempDir);
+      const legacyIndexFilesSpy = jest.spyOn(localClient as any, 'indexFilesWithLegacyRuntime');
       const result = await localClient.indexFiles(['a.ts']);
 
       expect(result.errors).toEqual([]);
       expect(result.indexed).toBe(1);
+      expect(legacyIndexFilesSpy).not.toHaveBeenCalled();
       expect(mockDirectContext.create).not.toHaveBeenCalled();
       expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
       expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(true);
@@ -1053,6 +1186,111 @@ describe('ContextServiceClient', () => {
       expect(status.status).toBe('idle');
       expect(status.fileCount).toBeGreaterThan(0);
 
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should ignore mismatched provider index-state entries, warn once, and save current provider_id', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-provider-mismatch-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 5,
+            schema_version: 2,
+            provider_id: 'augment_legacy',
+            updated_at: '2026-03-04T03:00:00.000Z',
+            files: {
+              'stale.ts': {
+                hash: 'abc',
+                indexed_at: '2026-03-04T03:00:00.000Z',
+              },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const localClient = new ContextServiceClient(tempDir);
+      localClient.getIndexStatus();
+      const result = await localClient.indexFiles(['a.ts']);
+
+      expect(result.indexed).toBe(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toMatch(/Ignoring index state entries for provider/i);
+
+      const parsedState = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+      ) as {
+        provider_id: string;
+        files: Record<string, { hash: string; indexed_at: string }>;
+      };
+
+      expect(parsedState.provider_id).toBe('local_native');
+      expect(parsedState.files['a.ts']).toBeDefined();
+      expect(parsedState.files['stale.ts']).toBeUndefined();
+
+      warnSpy.mockRestore();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should reset unsupported index-state schema and continue with current provider state', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-unsupported-schema-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 5,
+            schema_version: 999,
+            provider_id: 'local_native',
+            updated_at: '2026-03-04T04:00:00.000Z',
+            files: {
+              'stale.ts': {
+                hash: 'abc',
+                indexed_at: '2026-03-04T04:00:00.000Z',
+              },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const localClient = new ContextServiceClient(tempDir);
+      const result = await localClient.indexFiles(['a.ts']);
+
+      expect(result.indexed).toBe(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toMatch(/Unsupported index state schema_version/i);
+
+      const parsedState = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+      ) as {
+        schema_version: number;
+        provider_id: string;
+        files: Record<string, { hash: string; indexed_at: string }>;
+      };
+
+      expect(parsedState.schema_version).toBe(2);
+      expect(parsedState.provider_id).toBe('local_native');
+      expect(parsedState.files['a.ts']).toBeDefined();
+      expect(parsedState.files['stale.ts']).toBeUndefined();
+
+      warnSpy.mockRestore();
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
@@ -1106,9 +1344,13 @@ describe('ContextServiceClient', () => {
 
       const rawState = fs.readFileSync(indexStatePath, 'utf-8');
       const parsedState = JSON.parse(rawState) as {
+        schema_version: number;
+        provider_id: string;
         files: Record<string, { hash: string; indexed_at: string }>;
       };
 
+      expect(parsedState.schema_version).toBe(2);
+      expect(parsedState.provider_id).toBe('augment_legacy');
       expect(parsedState.files['a.ts']).toBeDefined();
       expect(parsedState.files['a.ts'].hash).toMatch(/^[a-f0-9]{64}$/);
       expect(parsedState.files['a.ts'].indexed_at).toBeTruthy();

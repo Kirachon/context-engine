@@ -4,7 +4,7 @@ Target: `context-engine-mcp-server` (MCP server + VS Code extension)
 
 Constraints followed:
 - Open-source only
-- Kept `@augmentcode/auggie-sdk` as the core engine and `@modelcontextprotocol/sdk` for MCP
+- Kept the legacy retrieval SDK bridge and `@modelcontextprotocol/sdk` for MCP
 - No breaking changes to MCP tool names/args/outputs
 
 ## Executive Summary (Top 3)
@@ -94,4 +94,3 @@ Suggested measurement primitives:
 ## Validation
 
 - All Jest tests pass (`npm test`).
-
