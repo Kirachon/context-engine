@@ -29,6 +29,12 @@ import { JsonIndexStateStore, type IndexStateFile } from './indexStateStore.js';
 import { createAIProvider, resolveAIProviderId } from '../ai/providers/factory.js';
 import type { AIProvider, AIProviderId } from '../ai/providers/types.js';
 
+type RetrievalProviderId = 'augment_legacy' | 'local_native';
+
+type RetrievalEnvModule = {
+  resolveRetrievalProviderId?: () => RetrievalProviderId | string;
+};
+
 type DirectContextLike = {
   addToIndex: (...args: unknown[]) => Promise<{
     newlyUploaded?: Array<{ path: string }>;
@@ -46,6 +52,47 @@ type DirectContextModule = {
     importFromFile: (filePath: string) => Promise<DirectContextLike>;
   };
 };
+
+const DEFAULT_RETRIEVAL_PROVIDER_ID: RetrievalProviderId = 'augment_legacy';
+
+function normalizeRetrievalProviderId(value: unknown): RetrievalProviderId | null {
+  if (typeof value !== 'string') return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'augment' || normalized === 'augment_legacy') {
+    return 'augment_legacy';
+  }
+  if (normalized === 'local_native') {
+    return 'local_native';
+  }
+  return null;
+}
+
+function resolveRetrievalProviderIdFromEnvModule(): RetrievalProviderId {
+  const requireFromHere = createRequire(import.meta.url);
+  const moduleCandidates = [
+    '../retrieval/env.js',
+    '../retrieval/env.ts',
+  ];
+
+  for (const modulePath of moduleCandidates) {
+    try {
+      const maybeModule = requireFromHere(modulePath) as RetrievalEnvModule;
+      const maybeResolver = maybeModule?.resolveRetrievalProviderId;
+      if (typeof maybeResolver !== 'function') {
+        continue;
+      }
+      const resolved = normalizeRetrievalProviderId(maybeResolver());
+      if (resolved) {
+        return resolved;
+      }
+    } catch {
+      // Module may not exist in all builds; continue to deterministic fallback.
+    }
+  }
+
+  const fallback = normalizeRetrievalProviderId(process.env.CE_RETRIEVAL_PROVIDER);
+  return fallback ?? DEFAULT_RETRIEVAL_PROVIDER_ID;
+}
 
 // ============================================================================
 // Type Definitions
@@ -929,12 +976,14 @@ export class ContextServiceClient {
   /** Cache miss counter for telemetry */
   private cacheMisses: number = 0;
   private readonly aiProviderId: AIProviderId;
+  private readonly retrievalProviderId: RetrievalProviderId;
   private aiProvider: AIProvider | null = null;
   private lastSearchDiagnostics: SearchDiagnostics | null = null;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
     this.aiProviderId = resolveAIProviderId();
+    this.retrievalProviderId = resolveRetrievalProviderIdFromEnvModule();
     this.indexStatus = {
       workspace: workspacePath,
       status: 'idle',
@@ -946,6 +995,10 @@ export class ContextServiceClient {
 
   getActiveAIProviderId(): AIProviderId {
     return this.aiProviderId;
+  }
+
+  getActiveRetrievalProviderId(): RetrievalProviderId {
+    return this.retrievalProviderId;
   }
 
   getActiveAIModelLabel(): string {
@@ -2016,8 +2069,8 @@ export class ContextServiceClient {
    * @param topK Number of results
    * @returns Cache key string
    */
-  private getCommitAwareCacheKey(query: string, topK: number, providerId?: AIProviderId): string {
-    const retrievalProvider = providerId ?? this.getActiveAIProviderId();
+  private getCommitAwareCacheKey(query: string, topK: number, providerId?: RetrievalProviderId): string {
+    const retrievalProvider = providerId ?? this.getActiveRetrievalProviderId();
     const baseKey = `${retrievalProvider}:${query}:${topK}`;
     if (this.commitCacheEnabled && this.currentCommitHash) {
       return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
@@ -2099,6 +2152,175 @@ export class ContextServiceClient {
     };
   }
 
+  private isLocalNativeRetrievalProvider(): boolean {
+    return this.retrievalProviderId === 'local_native';
+  }
+
+  private writeLocalNativeStateMarker(indexedAtIso: string): void {
+    const stateFilePath = this.getStateFilePath();
+    const payload = {
+      version: 1,
+      provider: this.retrievalProviderId,
+      indexedAt: indexedAtIso,
+    };
+    try {
+      fs.writeFileSync(stateFilePath, JSON.stringify(payload), 'utf-8');
+    } catch {
+      // Best-effort; index status can still be derived from in-memory metadata.
+    }
+  }
+
+  private async indexWorkspaceLocalNativeFallback(startTime: number): Promise<IndexResult> {
+    this.loadIgnorePatterns();
+    const filePaths = await this.discoverFiles(this.workspacePath);
+    const indexedAtIso = new Date().toISOString();
+    if (filePaths.length === 0) {
+      this.updateIndexStatus({
+        status: 'error',
+        lastError: 'No indexable files found',
+        fileCount: 0,
+      });
+      return {
+        indexed: 0,
+        skipped: 0,
+        errors: ['No indexable files found'],
+        duration: Date.now() - startTime,
+      };
+    }
+
+    const store = this.getIndexStateStore();
+    const prior = store ? store.load() : null;
+    const nextFiles: Record<string, { hash: string; indexed_at: string }> = {};
+    let indexed = 0;
+    let skipped = 0;
+
+    for (const relativePath of filePaths) {
+      const contents = await this.readFileContentsAsync(relativePath);
+      if (contents === null) {
+        skipped += 1;
+        continue;
+      }
+      indexed += 1;
+      if (store) {
+        nextFiles[relativePath] = {
+          hash: this.hashContent(contents),
+          indexed_at: indexedAtIso,
+        };
+      }
+    }
+
+    if (store && prior) {
+      store.save({
+        version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        updated_at: indexedAtIso,
+        files: nextFiles,
+      });
+    }
+
+    this.writeLocalNativeStateMarker(indexedAtIso);
+    this.writeIndexFingerprintFile(crypto.randomUUID());
+    this.updateIndexStatus({
+      status: 'idle',
+      lastIndexed: indexedAtIso,
+      fileCount: filePaths.length - skipped,
+      lastError: undefined,
+    });
+    this.clearCache();
+
+    return {
+      indexed,
+      skipped,
+      errors: [],
+      duration: Date.now() - startTime,
+      totalIndexable: filePaths.length - skipped,
+    };
+  }
+
+  private async indexFilesLocalNativeFallback(filePaths: string[], startTime: number): Promise<IndexResult> {
+    this.loadIgnorePatterns();
+    const uniquePaths = Array.from(new Set(filePaths));
+    const normalizedPaths: string[] = [];
+    let skipped = 0;
+
+    for (const rawPath of uniquePaths) {
+      const relativePath = path.isAbsolute(rawPath)
+        ? path.relative(this.workspacePath, rawPath)
+        : rawPath;
+      if (!relativePath || relativePath.startsWith('..')) {
+        skipped += 1;
+        continue;
+      }
+      if (this.shouldIgnorePath(relativePath) || !this.shouldIndexFile(relativePath)) {
+        skipped += 1;
+        continue;
+      }
+      normalizedPaths.push(relativePath);
+    }
+
+    if (normalizedPaths.length === 0) {
+      this.updateIndexStatus({
+        status: 'error',
+        lastError: 'No indexable file changes provided',
+      });
+      this.clearCache();
+      return {
+        indexed: 0,
+        skipped,
+        errors: ['No indexable file changes provided'],
+        duration: Date.now() - startTime,
+      };
+    }
+
+    const indexedAtIso = new Date().toISOString();
+    const store = this.getIndexStateStore();
+    const prior = store ? store.load() : null;
+    const nextFiles: Record<string, { hash: string; indexed_at: string }> = prior ? { ...prior.files } : {};
+    let indexed = 0;
+
+    for (const relativePath of normalizedPaths) {
+      const contents = await this.readFileContentsAsync(relativePath);
+      if (contents === null) {
+        skipped += 1;
+        if (store) {
+          delete nextFiles[relativePath];
+        }
+        continue;
+      }
+      indexed += 1;
+      if (store) {
+        nextFiles[relativePath] = {
+          hash: this.hashContent(contents),
+          indexed_at: indexedAtIso,
+        };
+      }
+    }
+
+    if (store && prior) {
+      store.save({
+        version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        updated_at: indexedAtIso,
+        files: nextFiles,
+      });
+    }
+
+    this.writeLocalNativeStateMarker(indexedAtIso);
+    this.writeIndexFingerprintFile(crypto.randomUUID());
+    this.updateIndexStatus({
+      status: indexed > 0 ? 'idle' : 'error',
+      lastIndexed: indexed > 0 ? indexedAtIso : undefined,
+      fileCount: store ? Object.keys(nextFiles).length : Math.max(this.indexStatus.fileCount, indexed),
+      lastError: indexed > 0 ? undefined : 'No indexable file changes provided',
+    });
+    this.clearCache();
+
+    return {
+      indexed,
+      skipped,
+      errors: indexed > 0 ? [] : ['No indexable file changes provided'],
+      duration: Date.now() - startTime,
+    };
+  }
+
   // ==========================================================================
   // Core Operations
   // ==========================================================================
@@ -2125,6 +2347,10 @@ export class ContextServiceClient {
       console.error(`API Token: ${process.env.AUGMENT_API_TOKEN ? '(set)' : '(NOT SET)'}`);
 
       const debugIndex = process.env.CE_DEBUG_INDEX === 'true';
+
+      if (this.isLocalNativeRetrievalProvider()) {
+        return this.indexWorkspaceLocalNativeFallback(startTime);
+      }
 
       const useWorker =
         process.env.CE_INDEX_USE_WORKER !== 'false' &&
@@ -2542,6 +2768,9 @@ export class ContextServiceClient {
       }
 
       const uniquePaths = Array.from(new Set(filePaths));
+      if (this.isLocalNativeRetrievalProvider()) {
+        return this.indexFilesLocalNativeFallback(uniquePaths, startTime);
+      }
       const useWorker =
         process.env.CE_INDEX_USE_WORKER !== 'false' &&
         // Avoid worker-based indexing in Jest unit tests (worker won't inherit mocks).
@@ -2776,6 +3005,10 @@ export class ContextServiceClient {
    * Clear index state and caches
    */
   async clearIndex(): Promise<void> {
+    if (this.isLocalNativeRetrievalProvider()) {
+      console.error('[clearIndex] Clearing local_native retrieval metadata.');
+    }
+
     // Reset SDK instances
     this.context = null;
     this.initPromise = null;
@@ -2838,7 +3071,7 @@ export class ContextServiceClient {
     const metricsStart = Date.now();
     const debugSearch = process.env.CE_DEBUG_SEARCH === 'true';
     const bypassCache = options?.bypassCache ?? false;
-    const retrievalProvider = this.getActiveAIProviderId();
+    const retrievalProvider = this.getActiveRetrievalProviderId();
     this.setLastSearchDiagnostics(null);
 
     // Use commit-aware cache key when reactive mode is enabled
@@ -2941,6 +3174,7 @@ export class ContextServiceClient {
           this.setPersistentSearch(persistentCacheKey, searchResults);
         }
       }
+      this.maybeRunRetrievalShadowCompare(query, topK, searchResults);
       incCounter(
         'context_engine_semantic_search_total',
         { cache: 'miss', bypass: bypassCache ? 'true' : 'false' },
@@ -2981,6 +3215,53 @@ export class ContextServiceClient {
    */
   async localKeywordSearch(query: string, topK: number = 10): Promise<SearchResult[]> {
     return this.keywordFallbackSearch(query, topK);
+  }
+
+  private maybeRunRetrievalShadowCompare(query: string, topK: number, primaryResults: SearchResult[]): void {
+    if (process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED !== 'true') {
+      return;
+    }
+    const rawSampleRate = Number.parseFloat(process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE ?? '0.1');
+    const sampleRate = Number.isFinite(rawSampleRate)
+      ? Math.max(0, Math.min(1, rawSampleRate))
+      : 0.1;
+    if (sampleRate <= 0 || Math.random() > sampleRate) {
+      return;
+    }
+
+    setImmediate(() => {
+      void this.runRetrievalShadowCompare(query, topK, primaryResults, sampleRate);
+    });
+  }
+
+  private async runRetrievalShadowCompare(
+    query: string,
+    topK: number,
+    primaryResults: SearchResult[],
+    sampleRate: number
+  ): Promise<void> {
+    const previousDiagnostics = this.getLastSearchDiagnostics();
+    try {
+      const shadowResults = await this.keywordFallbackSearch(query, topK);
+      const primaryPaths = new Set(primaryResults.map((result) => result.path));
+      const shadowPaths = new Set(shadowResults.map((result) => result.path));
+      let overlap = 0;
+      for (const candidate of primaryPaths) {
+        if (shadowPaths.has(candidate)) {
+          overlap += 1;
+        }
+      }
+
+      const queryHash = crypto.createHash('sha1').update(query).digest('hex').slice(0, 10);
+      console.error(
+        `[retrieval_shadow_compare] provider=${this.getActiveRetrievalProviderId()} sample_rate=${sampleRate.toFixed(2)} ` +
+        `query_hash=${queryHash} primary=${primaryResults.length} shadow=${shadowResults.length} overlap=${overlap}`
+      );
+    } catch {
+      // Shadow compare is best-effort only and must not affect primary retrieval.
+    } finally {
+      this.setLastSearchDiagnostics(previousDiagnostics);
+    }
   }
 
   private parseAIProviderSearchResults(raw: string, topK: number): SearchResult[] | null {

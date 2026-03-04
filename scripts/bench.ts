@@ -16,6 +16,7 @@ import { internalRetrieveCode } from '../src/internal/handlers/retrieval.js';
 
 type Mode = 'scan' | 'index' | 'search' | 'retrieve';
 type RetrieveMode = 'fast' | 'deep';
+type RetrievalProvider = 'openai_session' | 'augment_legacy';
 
 interface Args {
   mode: Mode;
@@ -28,6 +29,27 @@ interface Args {
   bypassCache: boolean;
   retrieveMode: RetrieveMode;
   json: boolean;
+}
+
+function resolveRetrievalProvider(): {
+  provider: RetrievalProvider;
+  source: 'CE_RETRIEVAL_PROVIDER' | 'default';
+  raw: string | null;
+} {
+  const raw = process.env.CE_RETRIEVAL_PROVIDER?.trim();
+  if (!raw) {
+    return { provider: 'openai_session', source: 'default', raw: null };
+  }
+  if (raw === 'openai_session' || raw === 'augment_legacy') {
+    return { provider: raw, source: 'CE_RETRIEVAL_PROVIDER', raw };
+  }
+
+  // Keep fallback safe for unknown values.
+  // eslint-disable-next-line no-console
+  console.error(
+    `[bench] Unsupported CE_RETRIEVAL_PROVIDER="${raw}". Falling back to openai_session.`
+  );
+  return { provider: 'openai_session', source: 'default', raw };
 }
 
 function parseArgs(argv: string[]): Args {
@@ -132,7 +154,7 @@ Usage:
   npm run bench -- --mode retrieve --workspace . --query "..." --topk 10 --iterations 20 [--retrieve-mode fast|deep] [--bypass-cache] [--cold] [--json]
 
 Options:
-  --mode <scan|index|search>
+  --mode <scan|index|search|retrieve>
   --workspace, -w <path>
   --iterations, -n <number>    (search/retrieve; default 10)
   --query <string>             (search/retrieve)
@@ -233,14 +255,16 @@ async function scanWorkspace(root: string, readFiles: boolean) {
   };
 }
 
-function ensureAuggieCreds(): void {
-  if (!process.env.AUGMENT_API_TOKEN) {
-    throw new Error('Missing AUGMENT_API_TOKEN in environment (required for index/search benchmarks).');
+function ensureProviderRequirements(provider: RetrievalProvider, mode: Mode): void {
+  if (provider === 'augment_legacy' && !process.env.AUGMENT_API_TOKEN) {
+    throw new Error(
+      `Missing AUGMENT_API_TOKEN in environment (required when CE_RETRIEVAL_PROVIDER=augment_legacy for ${mode} benchmark mode).`
+    );
   }
 }
 
-async function benchIndex(workspace: string) {
-  ensureAuggieCreds();
+async function benchIndex(workspace: string, provider: RetrievalProvider) {
+  ensureProviderRequirements(provider, 'index');
   const client = new ContextServiceClient(workspace);
   const started = performance.now();
   const result = await client.indexWorkspace();
@@ -253,8 +277,14 @@ async function benchIndex(workspace: string) {
   };
 }
 
-async function benchSearch(workspace: string, query: string, topK: number, iterations: number) {
-  ensureAuggieCreds();
+async function benchSearch(
+  workspace: string,
+  query: string,
+  topK: number,
+  iterations: number,
+  provider: RetrievalProvider
+) {
+  ensureProviderRequirements(provider, 'search');
   const samples: number[] = [];
   let lastCount = 0;
   let cold = false;
@@ -289,9 +319,10 @@ async function benchRetrieve(
   iterations: number,
   retrieveMode: RetrieveMode,
   bypassCache: boolean,
-  cold: boolean
+  cold: boolean,
+  provider: RetrievalProvider
 ) {
-  ensureAuggieCreds();
+  ensureProviderRequirements(provider, 'retrieve');
   const samples: number[] = [];
   let lastCount = 0;
   let lastUniqueFiles = 0;
@@ -357,6 +388,7 @@ async function benchRetrieve(
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
+  const retrievalProvider = resolveRetrievalProvider();
 
   const started = performance.now();
   const meta = {
@@ -364,12 +396,16 @@ async function main(): Promise<void> {
     platform: `${process.platform} ${process.arch}`,
     pid: process.pid,
     started_at: new Date().toISOString(),
+    retrieval_provider: retrievalProvider.provider,
+    retrieval_provider_source: retrievalProvider.source,
     env: {
+      CE_RETRIEVAL_PROVIDER: process.env.CE_RETRIEVAL_PROVIDER,
       CE_INDEX_USE_WORKER: process.env.CE_INDEX_USE_WORKER,
       CE_INDEX_FILES_WORKER_THRESHOLD: process.env.CE_INDEX_FILES_WORKER_THRESHOLD,
       CE_INDEX_BATCH_SIZE: process.env.CE_INDEX_BATCH_SIZE,
       CE_DEBUG_INDEX: process.env.CE_DEBUG_INDEX,
       CE_DEBUG_SEARCH: process.env.CE_DEBUG_SEARCH,
+      CE_AI_PROVIDER: process.env.CE_AI_PROVIDER,
       AUGMENT_API_URL: process.env.AUGMENT_API_URL,
       AUGMENT_API_TOKEN_set: Boolean(process.env.AUGMENT_API_TOKEN),
     },
@@ -379,7 +415,7 @@ async function main(): Promise<void> {
   if (args.mode === 'scan') {
     payload = await scanWorkspace(args.workspace, args.readFiles);
   } else if (args.mode === 'index') {
-    payload = await benchIndex(args.workspace);
+    payload = await benchIndex(args.workspace, retrievalProvider.provider);
   } else if (args.mode === 'retrieve') {
     payload = await benchRetrieve(
       args.workspace,
@@ -388,13 +424,14 @@ async function main(): Promise<void> {
       args.iterations,
       args.retrieveMode,
       args.bypassCache,
-      args.cold
+      args.cold,
+      retrievalProvider.provider
     );
   } else {
     if (!args.cold) {
       // Warm-cache mode: single client, first call warms, the rest measure hot cache.
       const client = new ContextServiceClient(args.workspace);
-      ensureAuggieCreds();
+      ensureProviderRequirements(retrievalProvider.provider, 'search');
       await client.semanticSearch(args.query, args.topK);
 
       const samples: number[] = [];
@@ -418,7 +455,13 @@ async function main(): Promise<void> {
         timing: summarizeMs(samples),
       };
     } else {
-      payload = await benchSearch(args.workspace, args.query, args.topK, args.iterations);
+      payload = await benchSearch(
+        args.workspace,
+        args.query,
+        args.topK,
+        args.iterations,
+        retrievalProvider.provider
+      );
     }
   }
 

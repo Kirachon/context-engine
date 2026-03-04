@@ -592,6 +592,42 @@ index 1234567..abcdefg 100644
     });
   });
 
+  describe('review metadata model_used', () => {
+    it('derives model_used from active provider/model label when available', async () => {
+      mockServiceClient.getActiveAIProviderId = jest.fn(() => 'openai_session');
+      mockServiceClient.getActiveAIModelLabel = jest.fn(() => 'codex-session');
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'needs attention',
+          overall_explanation: 'No issues',
+          overall_confidence_score: 0.95,
+        })
+      );
+
+      const result = await codeReviewService.reviewChanges({ diff: SIMPLE_DIFF });
+      expect(result.metadata.model_used).toBe('openai_session:codex-session');
+    });
+
+    it('falls back to legacy model_used when provider metadata is unavailable', async () => {
+      mockServiceClient.getActiveAIProviderId = jest.fn(() => {
+        throw new Error('provider unavailable');
+      });
+      mockServiceClient.getActiveAIModelLabel = jest.fn(() => 'codex-session');
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'needs attention',
+          overall_explanation: 'No issues',
+          overall_confidence_score: 0.95,
+        })
+      );
+
+      const result = await codeReviewService.reviewChanges({ diff: SIMPLE_DIFF });
+      expect(result.metadata.model_used).toBe('auggie-context-engine');
+    });
+  });
+
   describe('reviewChanges timeout controls', () => {
     it('uses CE_REVIEW_AI_TIMEOUT_MS when calling searchAndAsk', async () => {
       const previous = process.env.CE_REVIEW_AI_TIMEOUT_MS;

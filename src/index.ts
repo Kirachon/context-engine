@@ -86,6 +86,7 @@ Options:
   --help, -h               Show this help message
 
 Environment Variables:
+  CE_RETRIEVAL_PROVIDER    Retrieval provider preference: openai_session (default) | augment_legacy
   AUGMENT_API_TOKEN        Augment-provider token (not required for openai_session)
   AUGMENT_API_URL          Augment-provider URL (default: https://api.augmentcode.com; not required for openai_session)
   CE_AI_PROVIDER           AI provider for ask calls: openai_session

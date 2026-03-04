@@ -95,6 +95,9 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_OPENAI_SESSION_IDENTITY_TTL_MS;
     delete process.env.CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS;
     delete process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK;
+    delete process.env.CE_RETRIEVAL_PROVIDER;
+    delete process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED;
+    delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -534,7 +537,7 @@ describe('ContextServiceClient', () => {
       expect(results[0].path).toBe('src/utils.ts');
     });
 
-    it('should prefix cache keys with openai_session provider id by default', () => {
+    it('should prefix cache keys with retrieval provider id by default', () => {
       const defaultClient = new ContextServiceClient(testWorkspace);
       const defaultKey = (defaultClient as any).getCommitAwareCacheKey('cache mix', 3);
 
@@ -544,11 +547,13 @@ describe('ContextServiceClient', () => {
 
       expect(defaultClient.getActiveAIProviderId()).toBe('openai_session');
       expect(explicitClient.getActiveAIProviderId()).toBe('openai_session');
+      expect(defaultClient.getActiveRetrievalProviderId()).toBe('augment_legacy');
+      expect(explicitClient.getActiveRetrievalProviderId()).toBe('augment_legacy');
       expect(defaultKey).toEqual(explicitKey);
-      expect(defaultKey.startsWith('openai_session:')).toBe(true);
+      expect(defaultKey.startsWith('augment_legacy:')).toBe(true);
     });
 
-    it('should cache results under openai_session-scoped keys', async () => {
+    it('should cache results under retrieval-provider-scoped keys', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-openai-provider-cache-'));
       const openAIClient = new ContextServiceClient(tempDir);
       const providerCall = configureOpenAISemanticProvider(
@@ -565,6 +570,7 @@ describe('ContextServiceClient', () => {
       );
       const query = 'cache isolation query';
       const openAIKey = (openAIClient as any).getCommitAwareCacheKey(query, 5);
+      expect(openAIKey.startsWith('augment_legacy:')).toBe(true);
 
       const firstResults = await openAIClient.semanticSearch(query, 5);
       const secondResults = await openAIClient.semanticSearch(query, 5);
@@ -575,6 +581,53 @@ describe('ContextServiceClient', () => {
       expect((openAIClient as any).searchCache.get(openAIKey)).toBeTruthy();
 
       fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should include local_native retrieval provider in cache keys when configured', () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const localNativeClient = new ContextServiceClient(testWorkspace);
+
+      const cacheKey = (localNativeClient as any).getCommitAwareCacheKey('cache mix', 3);
+      expect(localNativeClient.getActiveAIProviderId()).toBe('openai_session');
+      expect(localNativeClient.getActiveRetrievalProviderId()).toBe('local_native');
+      expect(cacheKey.startsWith('local_native:')).toBe(true);
+    });
+
+    it('should run retrieval shadow compare without changing primary semantic results', async () => {
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
+      process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE = '1';
+
+      const shadowClient = new ContextServiceClient(testWorkspace);
+      configureOpenAISemanticProvider(
+        shadowClient,
+        JSON.stringify([
+          {
+            path: 'src/shadow.ts',
+            content: 'export const primaryShadow = true;',
+            lines: '1-1',
+            relevanceScore: 0.92,
+          },
+        ])
+      );
+
+      const fallbackSpy = jest
+        .spyOn(shadowClient as any, 'keywordFallbackSearch')
+        .mockResolvedValue([{ path: 'src/shadow.ts', content: 'shadow', matchType: 'keyword' }]);
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+
+      const results = await shadowClient.semanticSearch('shadow compare query', 5, { bypassCache: true });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(results).toHaveLength(1);
+      expect(results[0].path).toBe('src/shadow.ts');
+      expect(results[0].matchType).toBe('semantic');
+      expect(fallbackSpy).toHaveBeenCalledTimes(1);
+      expect(
+        errorSpy.mock.calls.some((call) => String(call[0]).includes('[retrieval_shadow_compare]'))
+      ).toBe(true);
+
+      errorSpy.mockRestore();
+      fallbackSpy.mockRestore();
     });
 
     it('should prioritize src/tests paths over artifacts for code-intent fallback queries', async () => {
@@ -935,9 +988,74 @@ describe('ContextServiceClient', () => {
 
       expect(mockContextInstance.exportToFile).toHaveBeenCalled();
     });
+
+    it('should use deterministic local_native fallback without DirectContext calls', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-index-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
+
+      const localClient = new ContextServiceClient(tempDir);
+      const result = await localClient.indexWorkspace();
+
+      expect(result.errors).toEqual([]);
+      expect(result.indexed).toBeGreaterThan(0);
+      expect(mockDirectContext.create).not.toHaveBeenCalled();
+      expect(mockDirectContext.importFromFile).not.toHaveBeenCalled();
+      expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
+
+      const status = localClient.getIndexStatus();
+      expect(status.status).toBe('idle');
+      expect(status.lastIndexed).toBeTruthy();
+      expect(status.fileCount).toBeGreaterThan(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should clear local_native index metadata without DirectContext calls', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-clear-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
+
+      const localClient = new ContextServiceClient(tempDir);
+      await localClient.indexWorkspace();
+      await localClient.clearIndex();
+
+      expect(mockDirectContext.create).not.toHaveBeenCalled();
+      expect(mockDirectContext.importFromFile).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(tempDir, '.augment-context-state.json'))).toBe(false);
+      expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(false);
+
+      const status = localClient.getIndexStatus();
+      expect(status.status).toBe('idle');
+      expect(status.fileCount).toBe(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
   });
 
   describe('Indexing', () => {
+    it('should use deterministic local_native fallback for indexFiles without DirectContext calls', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-index-files-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
+
+      const localClient = new ContextServiceClient(tempDir);
+      const result = await localClient.indexFiles(['a.ts']);
+
+      expect(result.errors).toEqual([]);
+      expect(result.indexed).toBe(1);
+      expect(mockDirectContext.create).not.toHaveBeenCalled();
+      expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
+      expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(true);
+
+      const status = localClient.getIndexStatus();
+      expect(status.status).toBe('idle');
+      expect(status.fileCount).toBeGreaterThan(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
     it('should not skip unchanged files when there is no restored context state', async () => {
       FEATURE_FLAGS.index_state_store = true;
       FEATURE_FLAGS.skip_unchanged_indexing = true;

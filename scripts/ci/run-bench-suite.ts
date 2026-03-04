@@ -4,8 +4,8 @@
  *
  * Responsibilities:
  * - Generate deterministic baseline + candidate JSON artifacts.
- * - Prefer retrieve/search benchmarks when AUGMENT_API_TOKEN is available.
- * - Fallback to scan benchmark when Augment credentials are unavailable.
+ * - Prefer retrieve/search benchmarks based on retrieval provider preference.
+ * - Fallback to scan benchmark when higher-signal modes are unavailable.
  * - Compare baseline vs candidate using scripts/ci/bench-compare.ts.
  */
 
@@ -16,6 +16,7 @@ import { createHash } from 'crypto';
 
 type SuiteMode = 'pr' | 'nightly';
 type BenchMode = 'scan' | 'search' | 'retrieve';
+type RetrievalProvider = 'openai_session' | 'augment_legacy';
 
 interface SuiteArgs {
   mode: SuiteMode;
@@ -33,6 +34,7 @@ interface BenchOutput {
 interface ProvenanceMetadata {
   commit_sha: string;
   bench_mode: BenchMode;
+  retrieval_provider?: RetrievalProvider;
   dataset_id: string;
   node_version: string;
   env_fingerprint: string;
@@ -181,6 +183,8 @@ function resolveEnvFingerprint(): string {
     'GITHUB_ACTIONS',
     'RUNNER_OS',
     'RUNNER_ARCH',
+    'CE_RETRIEVAL_PROVIDER',
+    'CE_AI_PROVIDER',
     'AUGMENT_API_URL',
     'AUGMENT_API_TOKEN',
     'npm_config_user_agent',
@@ -193,10 +197,15 @@ function resolveEnvFingerprint(): string {
   return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
 }
 
-function makeProvenance(benchMode: BenchMode, workspace: string): ProvenanceMetadata {
+function makeProvenance(
+  benchMode: BenchMode,
+  workspace: string,
+  retrievalProvider: RetrievalProvider
+): ProvenanceMetadata {
   return {
     commit_sha: resolveCommitSha(),
     bench_mode: benchMode,
+    retrieval_provider: retrievalProvider,
     dataset_id: resolveDatasetId(workspace),
     node_version: process.version,
     env_fingerprint: resolveEnvFingerprint(),
@@ -222,6 +231,13 @@ function assertProvenanceForSuite(
   if (baselineProv.bench_mode !== candidateProv.bench_mode) {
     throw new Error(
       `Benchmark mode mismatch for suite compare: baseline=${baselineProv.bench_mode} candidate=${candidateProv.bench_mode}.`
+    );
+  }
+  const baselineProvider = baselineProv.retrieval_provider ?? 'augment_legacy';
+  const candidateProvider = candidateProv.retrieval_provider ?? 'augment_legacy';
+  if (baselineProvider !== candidateProvider) {
+    throw new Error(
+      `Retrieval provider mismatch for suite compare: baseline=${baselineProvider} candidate=${candidateProvider}.`
     );
   }
 
@@ -416,9 +432,35 @@ function makeRunConfig(mode: SuiteMode, benchMode: BenchMode, workspace: string)
   };
 }
 
-function resolveRunConfig(mode: SuiteMode, workspace: string): RunConfig {
-  const hasToken = Boolean(process.env.AUGMENT_API_TOKEN);
-  const modeOrder: BenchMode[] = hasToken ? ['retrieve', 'search', 'scan'] : ['scan'];
+function resolveRetrievalProvider(): {
+  provider: RetrievalProvider;
+  source: 'CE_RETRIEVAL_PROVIDER' | 'default';
+  raw: string | null;
+} {
+  const raw = process.env.CE_RETRIEVAL_PROVIDER?.trim();
+  if (!raw) {
+    return { provider: 'openai_session', source: 'default', raw: null };
+  }
+  if (raw === 'openai_session' || raw === 'augment_legacy') {
+    return { provider: raw, source: 'CE_RETRIEVAL_PROVIDER', raw };
+  }
+
+  // eslint-disable-next-line no-console
+  console.error(
+    `[run-bench-suite] Unsupported CE_RETRIEVAL_PROVIDER="${raw}". Falling back to openai_session.`
+  );
+  return { provider: 'openai_session', source: 'default', raw };
+}
+
+function resolveRunConfig(
+  mode: SuiteMode,
+  workspace: string,
+  retrievalProvider: RetrievalProvider
+): RunConfig {
+  const modeOrder: BenchMode[] =
+    retrievalProvider === 'augment_legacy'
+      ? ['retrieve', 'search', 'scan']
+      : ['retrieve', 'search', 'scan'];
   const errors: string[] = [];
 
   for (const benchMode of modeOrder) {
@@ -475,7 +517,8 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   fs.mkdirSync(args.outDir, { recursive: true });
 
-  const runConfig = resolveRunConfig(args.mode, args.workspace);
+  const retrievalProvider = resolveRetrievalProvider();
+  const runConfig = resolveRunConfig(args.mode, args.workspace, retrievalProvider.provider);
   const suitePrefix = args.mode;
   const baselinePath = path.join(args.outDir, `${suitePrefix}-baseline.json`);
   const candidatePath = path.join(args.outDir, `${suitePrefix}-candidate.json`);
@@ -506,7 +549,7 @@ async function main(): Promise<void> {
       'baseline',
       runConfig.benchMode,
       baselineRuns,
-      makeProvenance(runConfig.benchMode, args.workspace)
+      makeProvenance(runConfig.benchMode, args.workspace, retrievalProvider.provider)
     );
   }
 
@@ -514,7 +557,7 @@ async function main(): Promise<void> {
     'candidate',
     runConfig.benchMode,
     candidateRuns,
-    makeProvenance(runConfig.benchMode, args.workspace)
+    makeProvenance(runConfig.benchMode, args.workspace, retrievalProvider.provider)
   );
 
   assertProvenanceForSuite(args.mode, baseline, candidate);
@@ -526,6 +569,8 @@ async function main(): Promise<void> {
   console.log(`Suite mode: ${args.mode}`);
   // eslint-disable-next-line no-console
   console.log(`Benchmark mode: ${runConfig.benchMode}`);
+  // eslint-disable-next-line no-console
+  console.log(`Retrieval provider: ${retrievalProvider.provider} (${retrievalProvider.source})`);
   // eslint-disable-next-line no-console
   console.log(`Baseline artifact: ${baselinePath}`);
   // eslint-disable-next-line no-console

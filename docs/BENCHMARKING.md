@@ -8,8 +8,8 @@ For consistent comparisons over time, also follow `docs/PERF_DATASET.md`.
 
 Provider requirements summary:
 - `scan` mode: no `AUGMENT_API_TOKEN` required.
-- `index`, `search`, and `retrieve` in `scripts/bench.ts`: currently require `AUGMENT_API_TOKEN`.
-- OpenAI-session runtime (`CE_AI_PROVIDER=openai_session`) can still run normal MCP `semantic_search` / `codebase_retrieval`; use MCP-level timing if you need OpenAI-only perf measurements.
+- `index`, `search`, and `retrieve` default to `CE_RETRIEVAL_PROVIDER=openai_session` and do not require `AUGMENT_API_TOKEN`.
+- `AUGMENT_API_TOKEN` is only required when `CE_RETRIEVAL_PROVIDER=augment_legacy` is explicitly selected.
 
 ### 1) Local scan (no provider token needed)
 
@@ -23,19 +23,15 @@ To include raw file read throughput:
 npm run bench -- --mode scan --workspace . --read
 ```
 
-### 2) Workspace indexing (currently requires `AUGMENT_API_TOKEN`)
+### 2) Workspace indexing
 
 ```bash
-export AUGMENT_API_TOKEN=...
-
 npm run bench -- --mode index --workspace .
 ```
 
-### 3) Search latency via `scripts/bench.ts` (currently requires `AUGMENT_API_TOKEN` + indexed state)
+### 3) Search latency via `scripts/bench.ts` (indexed state recommended)
 
 ```bash
-export AUGMENT_API_TOKEN=...
-
 npm run bench -- --mode search --workspace . --query "file watcher" --topk 10 --iterations 25
 ```
 
@@ -50,7 +46,7 @@ To benchmark “deep” semantic_search mode via MCP (higher accuracy, slower), 
 - optionally `bypass_cache: true` for a true cold measurement
 - optionally `timeout_ms` to cap worst-case latency
 
-### 4) Retrieval pipeline latency via `scripts/bench.ts` (fast vs deep; currently requires `AUGMENT_API_TOKEN`)
+### 4) Retrieval pipeline latency via `scripts/bench.ts` (fast vs deep)
 
 The `semantic_search` tool uses an internal retrieval pipeline. You can benchmark that pipeline directly:
 
@@ -168,8 +164,9 @@ npm run bench:ci:pr
 
 Behavior:
 - Writes `artifacts/bench/pr-baseline.json` and `artifacts/bench/pr-candidate.json`.
-- If `AUGMENT_API_TOKEN` is present: uses deterministic `retrieve` benchmark settings.
-- If `AUGMENT_API_TOKEN` is missing: falls back to deterministic `scan` benchmark runs and normalizes output to `payload.timing.p95_ms` for comparison (even if runtime provider is `openai_session`).
+- Prefers mode probes in this order: `retrieve`, `search`, then `scan`.
+- Honors `CE_RETRIEVAL_PROVIDER` when set; falls back safely to the first runnable mode.
+- Includes `provenance.retrieval_provider` in suite artifacts for traceability.
 - Compares with PR thresholds:
   - `--max-regression-pct 12`
   - `--max-regression-abs 30`
