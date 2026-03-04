@@ -109,13 +109,18 @@ function normalizeContractOutput(value: unknown, tmpDir: string): unknown {
         continue;
       }
       normalized[key] = normalizeContractOutput(innerValue, tmpDir);
+      if (key === 'file_path' && typeof normalized[key] === 'string') {
+        normalized[key] = (normalized[key] as string).replaceAll('\\', '/');
+      }
     }
     return normalized;
   }
 
   if (typeof value === 'string') {
     if (value.startsWith('approval_')) return '<approval-id>';
-    if (value.includes(tmpDir)) return value.replaceAll(tmpDir, '<workspace>');
+    if (value.includes(tmpDir)) {
+      return value.replaceAll(tmpDir, '<workspace>').replaceAll('\\', '/');
+    }
     return value;
   }
 
