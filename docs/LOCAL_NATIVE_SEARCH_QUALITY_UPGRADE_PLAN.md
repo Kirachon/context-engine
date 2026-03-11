@@ -80,8 +80,8 @@ This plan keeps current parity/reliability protections while adding judged quali
 
 ### Phase 2
 - [x] Define dense index and embedding provider interfaces.
-- [ ] Implement local persisted dense index path.
-- [ ] Add incremental refresh/version linkage to index state.
+- [x] Implement local persisted dense index path.
+- [x] Add incremental refresh/version linkage to index state.
 - [x] Add dense + lexical hybrid candidate fusion tests.
 
 ### Phase 3

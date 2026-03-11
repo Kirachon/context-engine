@@ -1,36 +1,236 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import type { DenseRetriever, EmbeddingProvider } from './embeddingProvider.js';
 
-export interface DenseIndexDocument {
-  id: string;
+const DENSE_INDEX_FILE_NAME = '.augment-dense-index.json';
+const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const INDEX_VERSION = 1;
+
+interface DenseIndexEntry {
   path: string;
+  hash: string;
   content: string;
   lines?: string;
   embedding: number[];
+  indexed_at: string;
 }
 
-export interface DenseIndex {
-  version: string;
-  updatedAt: string;
-  upsert: (documents: DenseIndexDocument[]) => Promise<void>;
-  search: (queryEmbedding: number[], topK: number) => Promise<SearchResult[]>;
+interface DenseIndexFile {
+  version: number;
+  embedding_provider: string;
+  updated_at: string;
+  docs: Record<string, DenseIndexEntry>;
 }
 
-export interface DenseIndexFactoryOptions {
+interface IndexStateFileEntry {
+  hash: string;
+  indexed_at: string;
+}
+
+interface IndexStateFile {
+  files: Record<string, IndexStateFileEntry>;
+}
+
+export interface WorkspaceDenseRetrieverOptions {
+  workspacePath: string;
   embeddingProvider: EmbeddingProvider;
-  index: DenseIndex;
+  denseIndexPath?: string;
+  indexStatePath?: string;
 }
 
-/**
- * Adapter that turns index + embedding primitives into a retriever contract.
- * This is intentionally lightweight scaffolding for Phase 2.
- */
-export function createDenseRetriever(options: DenseIndexFactoryOptions): DenseRetriever {
+function clampTopK(topK: number): number {
+  return Math.max(1, Math.min(50, Math.floor(topK)));
+}
+
+function cosineSimilarity(a: number[], b: number[]): number {
+  if (a.length === 0 || b.length === 0 || a.length !== b.length) return 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  if (normA <= 0 || normB <= 0) return 0;
+  return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+}
+
+function safeReadJson<T>(filePath: string, fallback: T): T {
+  try {
+    if (!fs.existsSync(filePath)) return fallback;
+    const raw = fs.readFileSync(filePath, 'utf8');
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function safeWriteJson(filePath: string, payload: unknown): void {
+  const tmp = `${filePath}.tmp`;
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  try {
+    fs.writeFileSync(tmp, JSON.stringify(payload), 'utf8');
+    fs.renameSync(tmp, filePath);
+  } catch {
+    try {
+      if (fs.existsSync(tmp)) fs.unlinkSync(tmp);
+    } catch {
+      // ignore cleanup failures
+    }
+  }
+}
+
+function readIndexState(filePath: string): IndexStateFile {
+  const parsed = safeReadJson<Partial<IndexStateFile>>(filePath, {});
+  if (!parsed || typeof parsed !== 'object' || !parsed.files || typeof parsed.files !== 'object') {
+    return { files: {} };
+  }
+  return { files: parsed.files as Record<string, IndexStateFileEntry> };
+}
+
+function readDenseIndex(filePath: string, providerId: string): DenseIndexFile {
+  const fallback: DenseIndexFile = {
+    version: INDEX_VERSION,
+    embedding_provider: providerId,
+    updated_at: new Date(0).toISOString(),
+    docs: {},
+  };
+
+  const parsed = safeReadJson<Partial<DenseIndexFile>>(filePath, fallback);
+  if (!parsed || typeof parsed !== 'object') {
+    return fallback;
+  }
+  if (parsed.embedding_provider !== providerId) {
+    return fallback;
+  }
+  return {
+    version: typeof parsed.version === 'number' ? parsed.version : INDEX_VERSION,
+    embedding_provider: providerId,
+    updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : fallback.updated_at,
+    docs: parsed.docs && typeof parsed.docs === 'object' ? (parsed.docs as Record<string, DenseIndexEntry>) : {},
+  };
+}
+
+function sanitizePath(relativePath: string): string | null {
+  const normalized = relativePath.replace(/\\/g, '/').trim();
+  if (!normalized) return null;
+  if (normalized.startsWith('..') || normalized.includes('/../')) return null;
+  if (path.isAbsolute(normalized)) return null;
+  return normalized;
+}
+
+function readDocumentContent(workspacePath: string, relativePath: string): string | null {
+  const sanitized = sanitizePath(relativePath);
+  if (!sanitized) return null;
+  const absolute = path.join(workspacePath, sanitized);
+  try {
+    const stat = fs.statSync(absolute);
+    if (!stat.isFile()) return null;
+    if (stat.size > 1_000_000) return null;
+    const content = fs.readFileSync(absolute, 'utf8');
+    if (!content.trim()) return null;
+    return content.slice(0, 4000);
+  } catch {
+    return null;
+  }
+}
+
+async function refreshDenseIndex(
+  workspacePath: string,
+  denseIndex: DenseIndexFile,
+  indexState: IndexStateFile,
+  embeddingProvider: EmbeddingProvider
+): Promise<DenseIndexFile> {
+  const nextDocs: Record<string, DenseIndexEntry> = {};
+  const toEmbedPaths: string[] = [];
+  const toEmbedDocs: string[] = [];
+  const nowIso = new Date().toISOString();
+
+  for (const [relativePath, stateEntry] of Object.entries(indexState.files)) {
+    const safePath = sanitizePath(relativePath);
+    if (!safePath || !stateEntry || typeof stateEntry.hash !== 'string') {
+      continue;
+    }
+
+    const existing = denseIndex.docs[safePath];
+    if (existing && existing.hash === stateEntry.hash) {
+      nextDocs[safePath] = existing;
+      continue;
+    }
+
+    const content = readDocumentContent(workspacePath, safePath);
+    if (!content) {
+      continue;
+    }
+    toEmbedPaths.push(safePath);
+    toEmbedDocs.push(content);
+    nextDocs[safePath] = {
+      path: safePath,
+      hash: stateEntry.hash,
+      content,
+      indexed_at: nowIso,
+      embedding: [],
+    };
+  }
+
+  if (toEmbedDocs.length > 0) {
+    const embeddings = await embeddingProvider.embedDocuments(toEmbedDocs);
+    for (let i = 0; i < toEmbedPaths.length; i += 1) {
+      const docPath = toEmbedPaths[i];
+      const embedding = embeddings[i] ?? [];
+      nextDocs[docPath].embedding = embedding;
+    }
+  }
+
+  return {
+    version: INDEX_VERSION,
+    embedding_provider: embeddingProvider.id,
+    updated_at: nowIso,
+    docs: nextDocs,
+  };
+}
+
+export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOptions): DenseRetriever {
+  const denseIndexPath = options.denseIndexPath ?? path.join(options.workspacePath, DENSE_INDEX_FILE_NAME);
+  const indexStatePath = options.indexStatePath ?? path.join(options.workspacePath, INDEX_STATE_FILE_NAME);
+
   return {
     id: `dense:${options.embeddingProvider.id}`,
     async search(query: string, topK: number): Promise<SearchResult[]> {
-      const embedding = await options.embeddingProvider.embedQuery(query);
-      return options.index.search(embedding, topK);
+      const safeTopK = clampTopK(topK);
+      const indexState = readIndexState(indexStatePath);
+      const existingDense = readDenseIndex(denseIndexPath, options.embeddingProvider.id);
+      const refreshedDense = await refreshDenseIndex(
+        options.workspacePath,
+        existingDense,
+        indexState,
+        options.embeddingProvider
+      );
+      safeWriteJson(denseIndexPath, refreshedDense);
+
+      const queryEmbedding = await options.embeddingProvider.embedQuery(query);
+      const ranked = Object.values(refreshedDense.docs)
+        .map((doc) => {
+          const score = cosineSimilarity(queryEmbedding, doc.embedding);
+          return {
+            path: doc.path,
+            content: doc.content,
+            relevanceScore: Math.max(0, Math.min(1, score)),
+            matchType: 'semantic' as const,
+            retrievedAt: refreshedDense.updated_at,
+          };
+        })
+        .sort((a, b) => {
+          if (b.relevanceScore !== a.relevanceScore) {
+            return b.relevanceScore - a.relevanceScore;
+          }
+          return a.path.localeCompare(b.path);
+        })
+        .slice(0, safeTopK);
+
+      return ranked;
     },
   };
 }

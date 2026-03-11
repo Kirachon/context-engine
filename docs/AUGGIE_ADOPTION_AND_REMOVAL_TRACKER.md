@@ -259,6 +259,8 @@ Wave status: `Completed`
 Scope for this wave:
 - [x] Add embedding and dense index scaffolding interfaces.
 - [x] Add optional dense retrieval candidate scoring path behind `enableDense`.
+- [x] Add persisted workspace dense index file path (`.augment-dense-index.json`).
+- [x] Link dense index incremental refresh to index-state hashes (`.augment-index-state.json`).
 - [x] Extend fusion to handle semantic + lexical + dense weighting.
 - [x] Add and pass dense retrieval unit tests without changing default runtime behavior.
 
@@ -266,7 +268,7 @@ Wave receipt:
 - Owner: `Codex`
 - Date: `2026-03-11`
 - Status: `Pass`
-- Evidence links: `npm test -- --runInBand tests/internal/retrieval/dense.test.ts tests/internal/retrieval/fusion.test.ts tests/internal/retrieval/retrieve.test.ts`, `npm run build`
+- Evidence links: `npm test -- --runInBand tests/internal/retrieval/dense.test.ts tests/internal/retrieval/denseIndex.test.ts tests/internal/retrieval/fusion.test.ts tests/internal/retrieval/retrieve.test.ts`, `npm run build`
 
 Final sign-off:
 - Owner: `____________________`

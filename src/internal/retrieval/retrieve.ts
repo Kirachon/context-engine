@@ -3,6 +3,8 @@ import { featureEnabled } from '../../config/features.js';
 import { expandQuery } from './expandQuery.js';
 import { dedupeResults } from './dedupe.js';
 import { scoreDenseCandidates } from './dense.js';
+import { createWorkspaceDenseRetriever } from './denseIndex.js';
+import { createHashEmbeddingProvider } from './embeddingProvider.js';
 import { fuseCandidates } from './fusion.js';
 import { scoreLexicalCandidates } from './lexical.js';
 import { rerankResults } from './rerank.js';
@@ -87,6 +89,23 @@ function buildExpandedQueries(query: string, options: NormalizedRetrievalOptions
   return expanded;
 }
 
+function resolveDenseProvider(
+  settings: NormalizedRetrievalOptions,
+  serviceClient: ContextServiceClient
+): RetrievalOptions['denseProvider'] | undefined {
+  if (!settings.enableDense) return undefined;
+  if (settings.denseProvider) return settings.denseProvider;
+
+  const workspacePath = typeof (serviceClient as unknown as { workspacePath?: unknown }).workspacePath === 'string'
+    ? ((serviceClient as unknown as { workspacePath: string }).workspacePath)
+    : process.cwd();
+
+  return createWorkspaceDenseRetriever({
+    workspacePath,
+    embeddingProvider: createHashEmbeddingProvider(),
+  });
+}
+
 export async function retrieve(
   query: string,
   serviceClient: ContextServiceClient,
@@ -110,6 +129,7 @@ export async function retrieve(
   const semanticCandidates: InternalSearchResult[] = [];
   const lexicalCandidates: InternalSearchResult[] = [];
   const denseCandidates: InternalSearchResult[] = [];
+  const denseProvider = resolveDenseProvider(settings, serviceClient);
   const localKeywordSearch = (serviceClient as ContextServiceClient & {
     localKeywordSearch?: (input: string, topK: number) => Promise<SearchResult[]>;
   }).localKeywordSearch;
@@ -160,10 +180,10 @@ export async function retrieve(
       }
     }
 
-    if (settings.enableDense && settings.denseProvider) {
+    if (settings.enableDense && denseProvider) {
       try {
         const denseResults = await withTimeout(
-          settings.denseProvider.search(variant.query, settings.perQueryTopK),
+          denseProvider.search(variant.query, settings.perQueryTopK),
           settings.timeoutMs,
           []
         );
@@ -189,7 +209,7 @@ export async function retrieve(
   if (settings.enableDedupe) {
     // Keep cross-source signals for fusion by deduping inside each source first.
     const dedupedSemantic = dedupeResults(
-      processed.filter((candidate) => candidate.retrievalSource !== 'lexical')
+      processed.filter((candidate) => candidate.retrievalSource === 'semantic' || candidate.retrievalSource === 'hybrid')
     );
     const dedupedLexical = dedupeResults(
       processed.filter((candidate) => candidate.retrievalSource === 'lexical')

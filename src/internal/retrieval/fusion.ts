@@ -39,7 +39,11 @@ export function fuseCandidates(
   const denseNormWeight = denseWeight / totalWeight;
 
   const maxSemantic = results.reduce((max, item) => {
-    const score = item.semanticScore ?? item.relevanceScore ?? item.score ?? 0;
+    const score = item.semanticScore ?? (
+      item.retrievalSource === 'semantic' || item.retrievalSource === 'hybrid'
+        ? item.relevanceScore ?? item.score ?? 0
+        : 0
+    );
     return Math.max(max, score);
   }, 0);
   const maxLexical = results.reduce((max, item) => {
@@ -64,7 +68,11 @@ export function fuseCandidates(
   for (const group of groups.values()) {
     const representative = group[0];
     const semanticScore = group.reduce((max, item) => {
-      const value = item.semanticScore ?? (item.retrievalSource !== 'lexical' ? item.relevanceScore ?? item.score ?? 0 : 0);
+      const value = item.semanticScore ?? (
+        item.retrievalSource === 'semantic' || item.retrievalSource === 'hybrid'
+          ? item.relevanceScore ?? item.score ?? 0
+          : 0
+      );
       return Math.max(max, value);
     }, 0);
     const lexicalScore = group.reduce((max, item) => {
