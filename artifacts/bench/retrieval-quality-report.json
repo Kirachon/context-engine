@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-11T14:14:18.921Z",
+  "generated_at": "2026-03-11T14:43:10.363Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json"
@@ -53,11 +53,23 @@
       "status": "pass",
       "value": 2.4,
       "message": "PASS resource.dense_index_size_ratio: value=2.4 max=2.5"
+    },
+    {
+      "id": "telemetry.dense_skipped_docs_rate_pct",
+      "status": "pass",
+      "value": 0,
+      "message": "PASS telemetry.dense_skipped_docs_rate_pct: value=0 max=10"
+    },
+    {
+      "id": "telemetry.dense_embed_batch_p95_ms",
+      "status": "pass",
+      "value": 45,
+      "message": "PASS telemetry.dense_embed_batch_p95_ms: value=45 max=120"
     }
   ],
   "summary": {
-    "total": 8,
-    "pass": 8,
+    "total": 10,
+    "pass": 10,
     "fail": 0,
     "skip": 0,
     "pass_rate": 1

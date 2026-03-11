@@ -83,4 +83,54 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('supports json_path telemetry threshold checks', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-telemetry-'));
+    const fixturePath = path.join(tmp, 'fixture.json');
+    const telemetryPath = path.join(tmp, 'telemetry.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    writeJson(telemetryPath, {
+      dense_refresh: {
+        skipped_docs_rate_pct: 4.5,
+        embed_batch_p95_ms: 80,
+      },
+    });
+
+    writeJson(fixturePath, {
+      checks: [
+        {
+          id: 'telemetry.skipped_docs_rate_pct',
+          kind: 'json_path_threshold_max',
+          path: telemetryPath,
+          json_path: 'dense_refresh.skipped_docs_rate_pct',
+          max: 10,
+          missing_status: 'fail',
+        },
+        {
+          id: 'telemetry.embed_batch_p95_ms',
+          kind: 'json_path_threshold_max',
+          path: telemetryPath,
+          json_path: 'dense_refresh.embed_batch_p95_ms',
+          max: 120,
+          missing_status: 'fail',
+        },
+      ],
+      gate_rules: {
+        min_pass_rate: 1,
+        required_ids: ['telemetry.skipped_docs_rate_pct', 'telemetry.embed_batch_p95_ms'],
+      },
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--out', outPath]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('gate_status=pass');
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const evaluations = artifact.evaluations as Array<Record<string, unknown>>;
+    const statuses = evaluations.map((item) => item.status);
+    expect(statuses).toEqual(['pass', 'pass']);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

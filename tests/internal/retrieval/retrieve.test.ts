@@ -121,4 +121,93 @@ describe('retrieve internal pipeline', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('uses rerankTopN and preserves tail ordering', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/a.ts', content: 'a', relevanceScore: 0.9, lines: '1-2' },
+        { path: 'src/b.ts', content: 'b', relevanceScore: 0.8, lines: '1-2' },
+        { path: 'src/c.ts', content: 'c', relevanceScore: 0.7, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const reranker = {
+      id: 'mock-reranker',
+      rerank: jest.fn(async (_query: string, candidates: any[]) => [candidates[1], candidates[0]]),
+    };
+
+    const results = await retrieve('abc', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      reranker,
+      rerankTopN: 2,
+      topK: 5,
+    });
+
+    expect(reranker.rerank).toHaveBeenCalledTimes(1);
+    expect(results.map((item) => item.path)).toEqual(['src/b.ts', 'src/a.ts', 'src/c.ts']);
+  });
+
+  it('fails open when reranker throws', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/x.ts', content: 'x', relevanceScore: 0.9, lines: '1-2' },
+        { path: 'src/y.ts', content: 'y', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const reranker = {
+      id: 'failing-reranker',
+      rerank: jest.fn(async () => {
+        throw new Error('boom');
+      }),
+    };
+
+    const results = await retrieve('xy', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      reranker,
+      rerankTopN: 2,
+      topK: 5,
+    });
+
+    expect(results.map((item) => item.path)).toEqual(['src/x.ts', 'src/y.ts']);
+  });
+
+  it('fails open when reranker times out', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/t1.ts', content: 't1', relevanceScore: 0.9, lines: '1-2' },
+        { path: 'src/t2.ts', content: 't2', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const reranker = {
+      id: 'slow-reranker',
+      rerank: jest.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 25));
+        return [];
+      }),
+    };
+
+    const results = await retrieve('tt', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      reranker,
+      rerankTopN: 2,
+      rerankTimeoutMs: 5,
+      topK: 5,
+    });
+
+    expect(results.map((item) => item.path)).toEqual(['src/t1.ts', 'src/t2.ts']);
+  });
 });

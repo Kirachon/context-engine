@@ -38,7 +38,8 @@
     "ci:generate:auggie-parity-report": "node --import tsx scripts/ci/generate-auggie-parity-report.ts --fixture-pack config/ci/auggie-parity-fixture-pack.json --matrix config/ci/auggie-capability-matrix.json --out artifacts/bench/retrieval-parity-pr.json",
     "ci:archive:auggie-parity-history": "node --import tsx scripts/ci/archive-auggie-parity-history.ts --artifact artifacts/bench/auggie-capability-parity-gate.json --history-dir artifacts/bench/auggie-parity-history",
     "ci:check:auggie-capability-parity:strict": "npm run -s ci:check:auggie-capability-parity && npm run -s ci:archive:auggie-parity-history && node --import tsx scripts/ci/check-auggie-capability-parity.ts --report artifacts/bench/retrieval-parity-pr.json --matrix config/ci/auggie-capability-matrix.json --out artifacts/bench/auggie-capability-parity-gate.json --require-consecutive 3 --history-dir artifacts/bench/auggie-parity-history",
-    "ci:generate:retrieval-quality-report": "node --import tsx scripts/ci/generate-retrieval-quality-report.ts --fixture-pack config/ci/retrieval-quality-fixture-pack.json --out artifacts/bench/retrieval-quality-report.json",
+    "ci:generate:retrieval-quality-telemetry": "node --import tsx scripts/ci/generate-retrieval-quality-telemetry.ts --out artifacts/bench/retrieval-quality-telemetry.json",
+    "ci:generate:retrieval-quality-report": "npm run -s ci:generate:retrieval-quality-telemetry && node --import tsx scripts/ci/generate-retrieval-quality-report.ts --fixture-pack config/ci/retrieval-quality-fixture-pack.json --out artifacts/bench/retrieval-quality-report.json",
     "ci:check:retrieval-quality-gate": "npm run -s ci:generate:retrieval-quality-report && node --import tsx scripts/ci/check-retrieval-quality-gate.ts --report artifacts/bench/retrieval-quality-report.json --out artifacts/bench/retrieval-quality-gate.json"
   },
   "keywords": [

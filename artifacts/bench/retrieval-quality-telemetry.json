@@ -1,0 +1,7 @@
+{
+  "generated_at": "2026-03-11T14:43:10.006Z",
+  "dense_refresh": {
+    "skipped_docs_rate_pct": 0,
+    "embed_batch_p95_ms": 45
+  }
+}

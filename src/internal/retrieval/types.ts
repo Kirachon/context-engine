@@ -28,6 +28,11 @@ export interface DenseSearchProvider {
   search: (query: string, topK: number) => Promise<SearchResult[]>;
 }
 
+export interface RetrievalReranker {
+  id: string;
+  rerank: (query: string, candidates: InternalSearchResult[], options?: { timeoutMs?: number }) => Promise<InternalSearchResult[]>;
+}
+
 export interface RetrievalOptions {
   topK?: number;
   perQueryTopK?: number;
@@ -39,6 +44,9 @@ export interface RetrievalOptions {
   enableDense?: boolean;
   enableFusion?: boolean;
   enableRerank?: boolean;
+  rerankTopN?: number;
+  rerankTimeoutMs?: number;
+  reranker?: RetrievalReranker;
   semanticWeight?: number;
   lexicalWeight?: number;
   denseWeight?: number;

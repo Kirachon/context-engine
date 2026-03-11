@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-11T14:14:19.189Z",
+  "generated_at": "2026-03-11T14:43:10.642Z",
   "inputs": {
     "report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-gate.json"
   },
   "summary": {
-    "total": 8,
-    "pass": 8,
+    "total": 10,
+    "pass": 10,
     "fail": 0,
     "skip": 0,
     "pass_rate": 1

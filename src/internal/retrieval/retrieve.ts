@@ -1,5 +1,7 @@
 import { ContextServiceClient, SearchResult } from '../../mcp/serviceClient.js';
 import { featureEnabled } from '../../config/features.js';
+import { envMs } from '../../config/env.js';
+import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
 import { expandQuery } from './expandQuery.js';
 import { dedupeResults } from './dedupe.js';
 import { scoreDenseCandidates } from './dense.js';
@@ -13,10 +15,11 @@ import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.j
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disable', 'disabled']);
 
 type NormalizedRetrievalOptions =
-  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider'> & {
+  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider' | 'reranker'> & {
     bypassCache: boolean;
     maxOutputLength?: number;
     denseProvider?: RetrievalOptions['denseProvider'];
+    reranker?: RetrievalOptions['reranker'];
   };
 
 export function isRetrievalPipelineEnabled(): boolean {
@@ -41,6 +44,7 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     0,
     Math.min(10000, options?.timeoutMs ?? envTimeout ?? 0)
   );
+  const rerankTimeoutMs = envMs('CONTEXT_ENGINE_RERANK_TIMEOUT_MS', 80, { min: 10, max: 2000 });
 
   return {
     topK,
@@ -53,6 +57,9 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     enableDense: options?.enableDense ?? false,
     enableFusion: options?.enableFusion ?? true,
     enableRerank: options?.enableRerank ?? true,
+    rerankTopN: Math.max(1, Math.min(100, options?.rerankTopN ?? 20)),
+    rerankTimeoutMs: Math.max(10, Math.min(2000, options?.rerankTimeoutMs ?? rerankTimeoutMs)),
+    reranker: options?.reranker,
     semanticWeight: Math.max(0, Math.min(1, options?.semanticWeight ?? 0.7)),
     lexicalWeight: Math.max(0, Math.min(1, options?.lexicalWeight ?? 0.3)),
     denseWeight: Math.max(0, Math.min(1, options?.denseWeight ?? 0)),
@@ -61,6 +68,60 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     bypassCache: options?.bypassCache ?? false,
     maxOutputLength: options?.maxOutputLength,
   };
+}
+
+async function applyRerankStage(
+  query: string,
+  candidates: InternalSearchResult[],
+  settings: NormalizedRetrievalOptions
+): Promise<InternalSearchResult[]> {
+  if (!settings.enableRerank || candidates.length === 0) {
+    return candidates;
+  }
+
+  const topN = Math.min(settings.rerankTopN, candidates.length);
+  const head = candidates.slice(0, topN);
+  const tail = candidates.slice(topN);
+  const stageStart = Date.now();
+
+  try {
+    let rerankedHead: InternalSearchResult[];
+    if (settings.reranker) {
+      const providerResult = await withTimeout<InternalSearchResult[] | null>(
+        settings.reranker.rerank(query, head, { timeoutMs: settings.rerankTimeoutMs }),
+        settings.rerankTimeoutMs,
+        null
+      );
+      if (!providerResult || providerResult.length === 0) {
+        incCounter(
+          'context_engine_retrieval_rerank_fail_open_total',
+          { reason: 'timeout_or_empty', reranker: settings.reranker.id },
+          1,
+          'Rerank fail-open fallbacks.'
+        );
+        return candidates;
+      }
+      rerankedHead = providerResult.slice(0, topN);
+    } else {
+      rerankedHead = rerankResults(head, { originalQuery: query });
+    }
+
+    observeDurationMs(
+      'context_engine_retrieval_rerank_duration_seconds',
+      { reranker: settings.reranker?.id ?? 'heuristic' },
+      Date.now() - stageStart,
+      { help: 'Retrieval rerank stage duration in seconds.' }
+    );
+    return [...rerankedHead, ...tail];
+  } catch {
+    incCounter(
+      'context_engine_retrieval_rerank_fail_open_total',
+      { reason: 'error', reranker: settings.reranker?.id ?? 'heuristic' },
+      1,
+      'Rerank fail-open fallbacks.'
+    );
+    return candidates;
+  }
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
@@ -228,9 +289,7 @@ export async function retrieve(
     });
   }
 
-  if (settings.enableRerank) {
-    processed = rerankResults(processed, { originalQuery: query });
-  }
+  processed = await applyRerankStage(query, processed, settings);
 
   return processed.slice(0, settings.topK);
 }

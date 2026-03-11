@@ -52,6 +52,22 @@
       "kind": "threshold_max",
       "value": 2.4,
       "max": 2.5
+    },
+    {
+      "id": "telemetry.dense_skipped_docs_rate_pct",
+      "kind": "json_path_threshold_max",
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "json_path": "dense_refresh.skipped_docs_rate_pct",
+      "max": 10,
+      "missing_status": "skip"
+    },
+    {
+      "id": "telemetry.dense_embed_batch_p95_ms",
+      "kind": "json_path_threshold_max",
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "json_path": "dense_refresh.embed_batch_p95_ms",
+      "max": 120,
+      "missing_status": "skip"
     }
   ],
   "gate_rules": {

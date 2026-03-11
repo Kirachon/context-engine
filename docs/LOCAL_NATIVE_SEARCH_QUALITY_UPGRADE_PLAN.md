@@ -85,8 +85,8 @@ This plan keeps current parity/reliability protections while adding judged quali
 - [x] Add dense + lexical hybrid candidate fusion tests.
 
 ### Phase 3
-- [ ] Implement optional top-N reranker path.
-- [ ] Add timeout/fail-open fallback behavior.
+- [x] Implement optional top-N reranker path.
+- [x] Add timeout/fail-open fallback behavior.
 - [ ] Add profile-based reranker controls and tests.
 
 ### Phase 4

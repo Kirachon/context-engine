@@ -11,7 +11,13 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 type EvalStatus = 'pass' | 'fail' | 'skip';
-type Comparator = 'delta_pct_min' | 'threshold_max' | 'threshold_min';
+type Comparator =
+  | 'delta_pct_min'
+  | 'threshold_max'
+  | 'threshold_min'
+  | 'json_path_threshold_max'
+  | 'json_path_threshold_min';
+type MissingStatus = 'skip' | 'fail';
 
 interface CliArgs {
   fixturePackPath: string;
@@ -47,7 +53,28 @@ interface ThresholdMinCheck extends BaseCheck {
   min: number;
 }
 
-type MetricCheck = DeltaPctMinCheck | ThresholdMaxCheck | ThresholdMinCheck;
+interface JsonPathThresholdMaxCheck extends BaseCheck {
+  kind: 'json_path_threshold_max';
+  path: string;
+  json_path: string;
+  max: number;
+  missing_status?: MissingStatus;
+}
+
+interface JsonPathThresholdMinCheck extends BaseCheck {
+  kind: 'json_path_threshold_min';
+  path: string;
+  json_path: string;
+  min: number;
+  missing_status?: MissingStatus;
+}
+
+type MetricCheck =
+  | DeltaPctMinCheck
+  | ThresholdMaxCheck
+  | ThresholdMinCheck
+  | JsonPathThresholdMaxCheck
+  | JsonPathThresholdMinCheck;
 
 interface FixturePack {
   schema_version?: number;
@@ -174,7 +201,13 @@ function toMetricChecks(rawChecks: unknown): MetricCheck[] {
     if (typeof id !== 'string' || id.trim().length === 0) {
       throw new Error(`Invalid checks[${index}].id`);
     }
-    if (kind !== 'delta_pct_min' && kind !== 'threshold_max' && kind !== 'threshold_min') {
+    if (
+      kind !== 'delta_pct_min' &&
+      kind !== 'threshold_max' &&
+      kind !== 'threshold_min' &&
+      kind !== 'json_path_threshold_max' &&
+      kind !== 'json_path_threshold_min'
+    ) {
       throw new Error(`Invalid checks[${index}].kind`);
     }
 
@@ -195,6 +228,38 @@ function toMetricChecks(rawChecks: unknown): MetricCheck[] {
         max: asFiniteNumber(obj.max, `${id}.max`),
       } satisfies ThresholdMaxCheck;
     }
+    if (kind === 'json_path_threshold_max') {
+      if (typeof obj.path !== 'string' || obj.path.trim().length === 0) {
+        throw new Error(`Invalid checks[${index}].path`);
+      }
+      if (typeof obj.json_path !== 'string' || obj.json_path.trim().length === 0) {
+        throw new Error(`Invalid checks[${index}].json_path`);
+      }
+      return {
+        id,
+        kind,
+        path: obj.path,
+        json_path: obj.json_path,
+        max: asFiniteNumber(obj.max, `${id}.max`),
+        missing_status: obj.missing_status === 'fail' ? 'fail' : 'skip',
+      } satisfies JsonPathThresholdMaxCheck;
+    }
+    if (kind === 'json_path_threshold_min') {
+      if (typeof obj.path !== 'string' || obj.path.trim().length === 0) {
+        throw new Error(`Invalid checks[${index}].path`);
+      }
+      if (typeof obj.json_path !== 'string' || obj.json_path.trim().length === 0) {
+        throw new Error(`Invalid checks[${index}].json_path`);
+      }
+      return {
+        id,
+        kind,
+        path: obj.path,
+        json_path: obj.json_path,
+        min: asFiniteNumber(obj.min, `${id}.min`),
+        missing_status: obj.missing_status === 'fail' ? 'fail' : 'skip',
+      } satisfies JsonPathThresholdMinCheck;
+    }
 
     return {
       id,
@@ -203,6 +268,23 @@ function toMetricChecks(rawChecks: unknown): MetricCheck[] {
       min: asFiniteNumber(obj.min, `${id}.min`),
     } satisfies ThresholdMinCheck;
   });
+}
+
+function readJsonPathValue(filePath: string, jsonPath: string): number | null {
+  try {
+    const parsed = readJsonFile(filePath) as Record<string, unknown>;
+    const tokens = jsonPath.split('.').map((token) => token.trim()).filter(Boolean);
+    if (tokens.length === 0) return null;
+    let cursor: unknown = parsed;
+    for (const token of tokens) {
+      if (!cursor || typeof cursor !== 'object' || Array.isArray(cursor)) return null;
+      cursor = (cursor as Record<string, unknown>)[token];
+    }
+    if (typeof cursor !== 'number' || !Number.isFinite(cursor)) return null;
+    return cursor;
+  } catch {
+    return null;
+  }
 }
 
 function evaluateCheck(check: MetricCheck): EvaluationResult {
@@ -233,6 +315,46 @@ function evaluateCheck(check: MetricCheck): EvaluationResult {
       status,
       value: check.value,
       message: `${status.toUpperCase()} ${check.id}: value=${check.value} max=${check.max}`,
+    };
+  }
+
+  if (check.kind === 'json_path_threshold_max') {
+    const value = readJsonPathValue(check.path, check.json_path);
+    if (value === null) {
+      const status: EvalStatus = check.missing_status === 'fail' ? 'fail' : 'skip';
+      return {
+        id: check.id,
+        status,
+        value: 0,
+        message: `${status.toUpperCase()} ${check.id}: missing value at ${check.path}#${check.json_path}`,
+      };
+    }
+    const status: EvalStatus = value <= check.max ? 'pass' : 'fail';
+    return {
+      id: check.id,
+      status,
+      value,
+      message: `${status.toUpperCase()} ${check.id}: value=${value} max=${check.max}`,
+    };
+  }
+
+  if (check.kind === 'json_path_threshold_min') {
+    const value = readJsonPathValue(check.path, check.json_path);
+    if (value === null) {
+      const status: EvalStatus = check.missing_status === 'fail' ? 'fail' : 'skip';
+      return {
+        id: check.id,
+        status,
+        value: 0,
+        message: `${status.toUpperCase()} ${check.id}: missing value at ${check.path}#${check.json_path}`,
+      };
+    }
+    const status: EvalStatus = value >= check.min ? 'pass' : 'fail';
+    return {
+      id: check.id,
+      status,
+      value,
+      message: `${status.toUpperCase()} ${check.id}: value=${value} min=${check.min}`,
     };
   }
 

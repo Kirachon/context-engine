@@ -272,6 +272,25 @@ Wave receipt:
 - Status: `Pass`
 - Evidence links: `npm test -- --runInBand tests/internal/retrieval/dense.test.ts tests/internal/retrieval/denseIndex.test.ts tests/internal/retrieval/fusion.test.ts tests/internal/retrieval/retrieve.test.ts`, `npm run build`
 
+### 4.6 Quality Telemetry Assertions + Phase 3 Rerank Guardrails
+Wave owner: `Codex`
+Wave date: `2026-03-11`
+Wave status: `Completed`
+
+Scope for this wave:
+- [x] Add retrieval quality telemetry artifact generation.
+- [x] Add JSON-path telemetry threshold checks to retrieval quality report generation.
+- [x] Wire telemetry artifact generation into quality gate script chain.
+- [x] Add optional reranker stage controls (`rerankTopN`, `rerankTimeoutMs`, provider hook).
+- [x] Enforce reranker fail-open behavior on timeout/error.
+- [x] Add tests for telemetry checks and reranker fail-open semantics.
+
+Wave receipt:
+- Owner: `Codex`
+- Date: `2026-03-11`
+- Status: `Pass`
+- Evidence links: `npm test -- --runInBand tests/ci/generateRetrievalQualityTelemetry.test.ts tests/ci/generateRetrievalQualityReport.test.ts tests/ci/checkRetrievalQualityGate.test.ts tests/internal/retrieval/retrieve.test.ts tests/internal/retrieval/denseIndex.test.ts`, `npm run -s ci:check:retrieval-quality-gate`, `npm run build`, `npm run -s ci:check:no-legacy-auggie`
+
 Final sign-off:
 - Owner: `____________________`
 - Date: `YYYY-MM-DD`
