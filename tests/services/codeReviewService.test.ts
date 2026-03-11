@@ -609,7 +609,7 @@ index 1234567..abcdefg 100644
       expect(result.metadata.model_used).toBe('openai_session:codex-session');
     });
 
-    it('falls back to legacy model_used when provider metadata is unavailable', async () => {
+    it('falls back to local-native model_used when provider metadata is unavailable', async () => {
       mockServiceClient.getActiveAIProviderId = jest.fn(() => {
         throw new Error('provider unavailable');
       });
@@ -624,7 +624,7 @@ index 1234567..abcdefg 100644
       );
 
       const result = await codeReviewService.reviewChanges({ diff: SIMPLE_DIFF });
-      expect(result.metadata.model_used).toBe('auggie-context-engine');
+      expect(result.metadata.model_used).toBe('local-native-context-engine');
     });
   });
 

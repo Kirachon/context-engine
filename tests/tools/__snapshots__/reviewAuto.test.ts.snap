@@ -123,7 +123,7 @@ exports[`review_auto tool selects review_git_diff when no diff is provided 1`] =
         ],
         "confidence_threshold": 0.7,
         "findings_filtered": 1,
-        "model_used": "auggie-context-engine",
+        "model_used": "local-native-context-engine",
         "review_duration_ms": 0,
         "reviewed_at": "<fixed>",
         "tool_version": "1.0.0",
@@ -137,3 +137,4 @@ exports[`review_auto tool selects review_git_diff when no diff is provided 1`] =
   "selected_tool": "review_git_diff",
 }
 `;
+

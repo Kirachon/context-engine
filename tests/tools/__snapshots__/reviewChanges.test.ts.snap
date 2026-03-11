@@ -40,7 +40,7 @@ exports[`review_changes tool returns structured JSON (snapshot) for a mocked LLM
     ],
     "confidence_threshold": 0.7,
     "findings_filtered": 1,
-    "model_used": "auggie-context-engine",
+    "model_used": "local-native-context-engine",
     "review_duration_ms": 0,
     "reviewed_at": "<fixed>",
     "tool_version": "1.0.0",
@@ -50,3 +50,4 @@ exports[`review_changes tool returns structured JSON (snapshot) for a mocked LLM
   "overall_explanation": "Mocked output.",
 }
 `;
+

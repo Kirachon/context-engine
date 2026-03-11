@@ -2,6 +2,8 @@
 
 Detailed architecture documentation for the Context Engine MCP Server.
 
+> Historical note: parts of this document still describe the earlier Auggie-based architecture. The current active runtime is `local_native`, and Auggie is no longer part of the live provider path.
+
 ## Overview
 
 This project implements a **local-first, agent-agnostic context engine** using the Model Context Protocol (MCP) as the interface layer and Auggie SDK as the core engine.
@@ -591,4 +593,3 @@ See [TESTING.md](TESTING.md) for comprehensive testing guide.
 - [plan.md](plan.md) - Original architecture plan
 - [MCP Documentation](https://modelcontextprotocol.io/)
 - [Auggie SDK](https://docs.augmentcode.com/)
-

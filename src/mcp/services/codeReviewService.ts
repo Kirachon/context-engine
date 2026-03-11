@@ -40,7 +40,7 @@ import { envMs } from '../../config/env.js';
 
 /** Tool version for metadata */
 const TOOL_VERSION = '1.0.0';
-const LEGACY_MODEL_USED = 'auggie-context-engine';
+const FALLBACK_MODEL_USED = 'local-native-context-engine';
 const DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS = 60_000;
 const MIN_CODE_REVIEW_AI_TIMEOUT_MS = 1_000;
 const MAX_CODE_REVIEW_AI_TIMEOUT_MS = 30 * 60 * 1000;
@@ -249,10 +249,10 @@ export class CodeReviewService {
       if (providerId && modelLabel) {
         return `${providerId}:${modelLabel}`;
       }
-      return modelLabel || providerId || LEGACY_MODEL_USED;
+      return modelLabel || providerId || FALLBACK_MODEL_USED;
     } catch {
       // Keep backward-compatible behavior for tests/mocks and failure cases.
-      return LEGACY_MODEL_USED;
+      return FALLBACK_MODEL_USED;
     }
   }
 
