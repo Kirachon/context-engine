@@ -4,8 +4,9 @@ import { isRetrievalPipelineEnabled, retrieve } from '../retrieval/retrieve.js';
 import { internalContextSnippet } from './context.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
 
-const DEFAULT_ENHANCE_TIMEOUT_MS = 8_000;
+const DEFAULT_ENHANCE_TIMEOUT_MS = 20_000;
 const DEFAULT_RETRIEVAL_TIMEOUT_MS = 1_500;
+const DEFAULT_ENHANCE_RETRY_ATTEMPTS = 1;
 const DEFAULT_ENHANCE_PROMPT_MODE: EnhancePromptMode = 'light';
 const DEFAULT_SNIPPET_CACHE_TTL_MS = 10 * 60 * 1000;
 const CONTEXT_CACHE_KEY_VERSION = 'v2';
@@ -58,6 +59,12 @@ function readEnhancePromptMode(): EnhancePromptMode {
 
 function normalizePromptCacheTtl(raw: string | undefined): number {
   return normalizeTimeout(raw, DEFAULT_SNIPPET_CACHE_TTL_MS, 0, 24 * 60 * 60 * 1000);
+}
+
+function normalizeEnhanceRetryAttempts(raw: string | undefined): number {
+  const parsed = raw ? Number(raw) : NaN;
+  if (!Number.isFinite(parsed)) return DEFAULT_ENHANCE_RETRY_ATTEMPTS;
+  return Math.max(0, Math.min(3, Math.floor(parsed)));
 }
 
 function createBudgetManager(totalBudgetMs: number, retrievalBudgetMs: number): BudgetManager {
@@ -199,7 +206,7 @@ function isFallbackEligibleError(errorMessage: string): boolean {
 }
 
 function isAuthOrConfigError(errorMessage: string): boolean {
-  return /api key|authentication|unauthorized|forbidden|login|openai session|provider.+(missing|not configured|invalid)|configuration|misconfig|CE_AI_/i.test(
+  return /api key|authentication|unauthorized|forbidden|login|openai session|provider.+(missing|not configured|invalid)|configuration|misconfig|CE_AI_|usage limit|quota|more access now|try again at/i.test(
     errorMessage
   );
 }
@@ -312,8 +319,10 @@ export async function internalPromptEnhancerDetailed(
     10_000
   );
   const budget = createBudgetManager(totalBudgetMs, retrievalBudgetMs);
+  const retryAttempts = normalizeEnhanceRetryAttempts(process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS);
 
-  let enhancementPrompt = buildAIEnhancementPrompt(prompt);
+  const baseEnhancementPrompt = buildAIEnhancementPrompt(prompt);
+  let enhancementPrompt = baseEnhancementPrompt;
   const retrievalEnabled = mode !== 'off' && (mode === 'light' || isRetrievalPipelineEnabled());
 
   if (retrievalEnabled) {
@@ -348,7 +357,7 @@ export async function internalPromptEnhancerDetailed(
 
           if (typeof localSearch === 'function') {
             const localResults = await withTimeout(
-              localSearch(prompt, DEFAULT_CONTEXT_TOP_K),
+              localSearch.call(serviceClient, prompt, DEFAULT_CONTEXT_TOP_K),
               retrievalStageTimeoutMs,
               'Local keyword retrieval'
             );
@@ -398,11 +407,50 @@ export async function internalPromptEnhancerDetailed(
 
   try {
     const modelStartMs = Date.now();
-    // Use searchAndAsk to get the enhancement with relevant codebase context
-    // The original prompt is used as the search query to find relevant code
-    const response = await serviceClient.searchAndAsk(prompt, enhancementPrompt, {
-      timeoutMs: budget.stageBudgetMs('enhancement'),
-    });
+    // Use searchAndAsk to get the enhancement with relevant codebase context.
+    // Retry transient failures (timeouts/queue pressure) before using fallback output.
+    let response = '';
+    let attemptPrompt = enhancementPrompt;
+    let lastTransientError: unknown = null;
+    for (let attempt = 0; attempt <= retryAttempts; attempt++) {
+      const stageTimeoutMs = budget.stageBudgetMs('enhancement');
+      if (stageTimeoutMs <= 0) {
+        throw new Error('AI enhancement timed out');
+      }
+
+      try {
+        response = await serviceClient.searchAndAsk(prompt, attemptPrompt, {
+          timeoutMs: stageTimeoutMs,
+        });
+        break;
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        if (isAuthOrConfigError(errorMessage)) {
+          throw error;
+        }
+
+        const canRetry =
+          isFallbackEligibleError(errorMessage) &&
+          attempt < retryAttempts &&
+          budget.remainingMs() > 250;
+        if (!canRetry) {
+          throw error;
+        }
+
+        // Retry with a lean prompt to reduce model/context pressure.
+        attemptPrompt = baseEnhancementPrompt;
+        lastTransientError = error;
+        incCounter(
+          'context_engine_enhance_prompt_retry_total',
+          { mode, reason: 'timeout_or_queue_or_transient' },
+          1,
+          'Enhance prompt transient retries before fallback.'
+        );
+      }
+    }
+    if (!response && lastTransientError) {
+      throw lastTransientError;
+    }
 
     // Parse the enhanced prompt from the response
     const enhanced = parseEnhancedPrompt(response);
@@ -446,6 +494,18 @@ export async function internalPromptEnhancerDetailed(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[AI Enhancement] Error: ${errorMessage}`);
+
+    if (/usage limit|quota|more access now|try again at/i.test(errorMessage)) {
+      observeDurationMs(
+        'context_engine_enhance_prompt_duration_seconds',
+        { mode, result: 'quota_error' },
+        Date.now() - totalStartMs,
+        { help: 'Enhance prompt end-to-end duration in seconds.' }
+      );
+      throw new Error(
+        'AI enhancement is blocked because the Codex session has hit its usage limit. Wait for the quota window to reset, then retry.'
+      );
+    }
 
     if (isAuthOrConfigError(errorMessage)) {
       incCounter(

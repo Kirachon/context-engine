@@ -33,6 +33,16 @@ function classifyAuthError(stderr: string): boolean {
   );
 }
 
+function classifyUsageLimitError(output: string): boolean {
+  const normalized = output.toLowerCase();
+  return (
+    normalized.includes('usage limit') ||
+    normalized.includes('more access now') ||
+    normalized.includes('try again at') ||
+    normalized.includes('quota')
+  );
+}
+
 function parseArgsJson(raw: string | undefined, envName: string): string[] {
   if (!raw || raw.trim() === '') return [];
   try {
@@ -222,6 +232,15 @@ export class CodexSessionProvider implements AIProvider {
       return [{ command: explicit, prefixArgs: [], label: explicit }];
     }
 
+    if (process.platform === 'win32') {
+      return [
+        { command: 'codex.cmd', prefixArgs: [], label: 'codex.cmd' },
+        { command: DEFAULT_CODEX_COMMAND, prefixArgs: [], label: DEFAULT_CODEX_COMMAND },
+        { command: 'npx.cmd', prefixArgs: ['-y', '@openai/codex'], label: 'npx.cmd -y @openai/codex' },
+        { command: 'npx', prefixArgs: ['-y', '@openai/codex'], label: 'npx -y @openai/codex' },
+      ];
+    }
+
     const defaults: CommandSpec[] = [
       { command: DEFAULT_CODEX_COMMAND, prefixArgs: [], label: DEFAULT_CODEX_COMMAND },
       { command: 'npx', prefixArgs: ['-y', '@openai/codex'], label: 'npx -y @openai/codex' },
@@ -396,14 +415,17 @@ export class CodexSessionProvider implements AIProvider {
 
       if (result.exitCode !== 0) {
         const authFailure = classifyAuthError(result.stderr);
-        const stderrSummary = summarizeStderr(result.stderr);
+        const combinedSummary = summarizeStderr([result.stderr, result.stdout].filter(Boolean).join(' '));
+        const usageLimitFailure = classifyUsageLimitError(`${result.stdout}\n${result.stderr}`);
         throw new AIProviderError({
           code: authFailure ? 'provider_auth' : 'provider_exec_error',
           provider: this.id,
           message: authFailure
             ? 'Codex session authentication failed. Run "codex login" and retry.'
-            : `Codex session provider failed with exit code ${result.exitCode}${stderrSummary ? `: ${stderrSummary}` : ''}.`,
-          retryable: !authFailure,
+            : usageLimitFailure
+              ? `Codex session usage limit reached${combinedSummary ? `: ${combinedSummary}` : ''}.`
+              : `Codex session provider failed with exit code ${result.exitCode}${combinedSummary ? `: ${combinedSummary}` : ''}.`,
+          retryable: !authFailure && !usageLimitFailure,
         });
       }
 

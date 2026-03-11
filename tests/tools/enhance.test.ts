@@ -26,6 +26,7 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
     delete process.env.CE_ENHANCE_PROMPT_USE_RETRIEVAL;
     delete process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT;
     delete process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS;
+    delete process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS;
     delete process.env.CE_ENHANCE_PROMPT_TOOL_VERSION;
     delete process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE;
   });
@@ -89,7 +90,7 @@ Here is an enhanced version of the original instruction that is more specific an
       );
       const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
       expect(timeoutMs).toBeGreaterThanOrEqual(1000);
-      expect(timeoutMs).toBeLessThanOrEqual(8000);
+      expect(timeoutMs).toBeLessThanOrEqual(20000);
     });
   });
 
@@ -118,11 +119,12 @@ Here is an enhanced version of the original instruction that is more specific an
         );
         const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
         expect(timeoutMs).toBeGreaterThanOrEqual(1000);
-        expect(timeoutMs).toBeLessThanOrEqual(8000);
+        expect(timeoutMs).toBeLessThanOrEqual(20000);
       });
 
       it('should use deterministic fallback when enhance mode is off', async () => {
         process.env.CE_ENHANCE_PROMPT_MODE = 'off';
+        process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '0';
         mockServiceClient.searchAndAsk.mockRejectedValue(new Error('request timeout while enhancing'));
 
         const result = await handleEnhancePrompt({
@@ -161,6 +163,59 @@ Here is an enhanced version of the original instruction that is more specific an
         expect(promptText).toContain('Here is relevant code context that may help:');
         expect(promptText).toContain('File: src/auth/login.ts');
       });
+    });
+
+    it('should retry transient timeout once before succeeding', async () => {
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '1';
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('Network timeout'))
+        .mockResolvedValueOnce(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Recovered after retry.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+      const result = await handleEnhancePrompt({
+        prompt: 'retry once please',
+      }, mockServiceClient as any);
+
+      expect(result).toBe('Recovered after retry.');
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+    });
+
+    it('should retry with lean prompt context after transient failure', async () => {
+      process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '1';
+      process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE = '1';
+      mockServiceClient.semanticSearch = jest.fn(async () => [
+        {
+          path: 'src/auth/retry.ts',
+          content: 'export function retryPath() { return true; }',
+          relevanceScore: 0.91,
+        },
+      ]);
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('SEARCH_QUEUE_FULL: queue saturated'))
+        .mockResolvedValueOnce(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Lean retry succeeded.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+      const result = await handleEnhancePrompt({
+        prompt: 'retry with lean prompt',
+      }, mockServiceClient as any);
+
+      expect(result).toBe('Lean retry succeeded.');
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+      const firstPrompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
+      const secondPrompt = mockServiceClient.searchAndAsk.mock.calls[1][1];
+      expect(firstPrompt).toContain('Here is relevant code context that may help:');
+      expect(secondPrompt).not.toContain('Here is relevant code context that may help:');
     });
 
     it('should use searchAndAsk for AI enhancement', async () => {
@@ -240,11 +295,24 @@ Here is an enhanced version of the original instruction that is more specific an
     });
 
     it('should throw authentication error with helpful message', async () => {
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '2';
       mockServiceClient.searchAndAsk.mockRejectedValue(new Error('API key is required'));
 
       await expect(handleEnhancePrompt({
         prompt: 'test',
       }, mockServiceClient as any)).rejects.toThrow(/authentication/i);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+    });
+
+    it('should surface usage limit errors instead of falling back', async () => {
+      mockServiceClient.searchAndAsk.mockRejectedValue(
+        new Error('Codex session usage limit reached. Try again at Mar 12th, 2026 3:00 AM.')
+      );
+
+      await expect(handleEnhancePrompt({
+        prompt: 'quota blocked prompt',
+      }, mockServiceClient as any)).rejects.toThrow(/usage limit/i);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
     });
 
     it('should fallback deterministically on timeout errors', async () => {
