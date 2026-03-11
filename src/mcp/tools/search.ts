@@ -31,6 +31,8 @@ export interface SemanticSearchArgs {
   top_k?: number;
   /** fast: default pipeline; deep: more expansion + larger per-variant budget */
   mode?: 'fast' | 'deep';
+  /** Explicit retrieval profile override. When provided, takes precedence over mode. */
+  profile?: 'fast' | 'balanced' | 'rich';
   /** When true, bypass caches for this request */
   bypass_cache?: boolean;
   /** Max time to spend on retrieval pipeline (ms). 0/undefined means no timeout. */
@@ -96,17 +98,61 @@ function formatRelevance(score: number | undefined): string {
   return '📌';
 }
 
+type RetrievalProfile = 'fast' | 'balanced' | 'rich';
+
+type RetrievalProfileSettings = {
+  perQueryMultiplier: number;
+  maxVariants: number;
+  maxOutputLengthPerResult: number;
+  enableExpansion: boolean;
+};
+
+const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> = {
+  fast: {
+    perQueryMultiplier: 1,
+    maxVariants: 1,
+    maxOutputLengthPerResult: 2000,
+    enableExpansion: false,
+  },
+  balanced: {
+    perQueryMultiplier: 2,
+    maxVariants: 4,
+    maxOutputLengthPerResult: 3000,
+    enableExpansion: true,
+  },
+  rich: {
+    perQueryMultiplier: 3,
+    maxVariants: 6,
+    maxOutputLengthPerResult: 4000,
+    enableExpansion: true,
+  },
+};
+
+function resolveSearchProfile(mode: 'fast' | 'deep', profile?: RetrievalProfile): RetrievalProfile {
+  if (profile) {
+    return profile;
+  }
+  return mode === 'deep' ? 'rich' : 'fast';
+}
+
 export async function handleSemanticSearch(
   args: SemanticSearchArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const { query, top_k = 10, mode = 'fast', bypass_cache = false, timeout_ms } = args;
+  const { query, top_k = 10, mode = 'fast', profile, bypass_cache = false, timeout_ms } = args;
 
   // Validate inputs
   const validQuery = validateTrimmedNonEmptyString(query, 'Invalid query parameter: must be a non-empty string');
   validateMaxLength(validQuery, 500, 'Query too long: maximum 500 characters');
   validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
   validateOneOf(mode, ['fast', 'deep'] as const, 'Invalid mode parameter: must be "fast" or "deep"');
+  if (profile !== undefined) {
+    validateOneOf(
+      profile,
+      ['fast', 'balanced', 'rich'] as const,
+      'Invalid profile parameter: must be "fast", "balanced", or "rich"'
+    );
+  }
   validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
   validateFiniteNumberInRange(
     timeout_ms,
@@ -116,27 +162,17 @@ export async function handleSemanticSearch(
   );
 
   const effectiveTimeoutMs = timeout_ms ?? (bypass_cache ? 10000 : 0);
-
-  const retrievalOptions =
-    mode === 'deep'
-      ? {
-          topK: top_k,
-          perQueryTopK: Math.min(50, top_k * 3),
-          maxVariants: 6,
-          timeoutMs: effectiveTimeoutMs,
-          bypassCache: bypass_cache,
-          maxOutputLength: top_k * 4000,
-          enableExpansion: true,
-        }
-      : {
-          topK: top_k,
-          perQueryTopK: top_k,
-          maxVariants: 1,
-          timeoutMs: effectiveTimeoutMs,
-          bypassCache: bypass_cache,
-          maxOutputLength: top_k * 2000,
-          enableExpansion: false,
-        };
+  const effectiveProfile = resolveSearchProfile(mode, profile);
+  const profileSettings = RETRIEVAL_PROFILE_MAP[effectiveProfile];
+  const retrievalOptions = {
+    topK: top_k,
+    perQueryTopK: Math.min(50, top_k * profileSettings.perQueryMultiplier),
+    maxVariants: profileSettings.maxVariants,
+    timeoutMs: effectiveTimeoutMs,
+    bypassCache: bypass_cache,
+    maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,
+    enableExpansion: profileSettings.enableExpansion,
+  };
 
   const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);
   const results = retrieval.results;
@@ -272,6 +308,11 @@ For comprehensive context with file summaries and related files, use get_context
         description: 'Search mode: "fast" (default) uses cached results and moderate expansion; "deep" increases expansion/budget for better recall at higher latency.',
         default: 'fast',
         enum: ['fast', 'deep'],
+      },
+      profile: {
+        type: 'string',
+        description: 'Optional retrieval profile override. "fast" is low-latency, "balanced" increases recall, "rich" maximizes recall/cost.',
+        enum: ['fast', 'balanced', 'rich'],
       },
       bypass_cache: {
         type: 'boolean',

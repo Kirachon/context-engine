@@ -66,6 +66,8 @@ describe('ContextServiceClient', () => {
     // Set up environment for tests
     process.env.AUGMENT_API_TOKEN = 'test-token';
     process.env.AUGMENT_API_URL = 'https://test.api.augmentcode.com';
+    process.env.CE_AI_PROVIDER = 'openai_session';
+    process.env.CE_RETRIEVAL_PROVIDER = 'augment_legacy';
 
     // Reset mocks
     jest.clearAllMocks();
@@ -94,6 +96,9 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_OPENAI_SESSION_REFRESH_MODE;
     delete process.env.CE_OPENAI_SESSION_IDENTITY_TTL_MS;
     delete process.env.CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS;
+    delete process.env.CE_SEARCH_AND_ASK_QUEUE_MAX;
+    delete process.env.CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND;
+    delete process.env.CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE;
     delete process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK;
     delete process.env.CE_RETRIEVAL_PROVIDER;
     delete process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED;
@@ -1025,6 +1030,196 @@ describe('ContextServiceClient', () => {
       );
       expect(providerCall).toHaveBeenCalledTimes(1);
     });
+
+    it('should route background lane independently when interactive lane is saturated', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '1';
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND = '1';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let releaseInteractive: () => void = () => undefined;
+      const interactiveGate = new Promise<void>((resolve) => {
+        releaseInteractive = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery.startsWith('interactive-hold')) {
+          await interactiveGate;
+          return { text: `released:${request.searchQuery}`, model: 'codex-session' };
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const interactiveFirst = laneClient.searchAndAsk('interactive-hold-1', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+      const interactiveSecond = laneClient.searchAndAsk('interactive-hold-2', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await expect(
+        laneClient.searchAndAsk('interactive-overflow', 'overflow', { priority: 'interactive' })
+      ).rejects.toThrow(/Search queue is full for interactive lane/i);
+
+      await expect(
+        laneClient.searchAndAsk('background-fast', 'background', { priority: 'background' })
+      ).resolves.toBe('ok:background-fast');
+
+      releaseInteractive();
+      await expect(interactiveFirst).resolves.toBe('released:interactive-hold-1');
+      await expect(interactiveSecond).resolves.toBe('released:interactive-hold-2');
+    });
+
+    it('should enforce queue-full behavior per lane using lane-specific limits', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '2';
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND = '1';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let releaseBackground: () => void = () => undefined;
+      const backgroundGate = new Promise<void>((resolve) => {
+        releaseBackground = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery.startsWith('background-hold')) {
+          await backgroundGate;
+          return { text: `released:${request.searchQuery}`, model: 'codex-session' };
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const backgroundFirst = laneClient.searchAndAsk('background-hold-1', 'hold', { priority: 'background' });
+      await new Promise((resolve) => setImmediate(resolve));
+      const backgroundSecond = laneClient.searchAndAsk('background-hold-2', 'hold', { priority: 'background' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await expect(
+        laneClient.searchAndAsk('background-overflow', 'overflow', { priority: 'background' })
+      ).rejects.toThrow(/Search queue is full for background lane/i);
+
+      await expect(
+        laneClient.searchAndAsk('interactive-fast', 'interactive', { priority: 'interactive' })
+      ).resolves.toBe('ok:interactive-fast');
+
+      releaseBackground();
+      await expect(backgroundFirst).resolves.toBe('released:background-hold-1');
+      await expect(backgroundSecond).resolves.toBe('released:background-hold-2');
+    });
+
+    it('should include retry_after_ms hint when queue rejection is enforced', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '1';
+      process.env.CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE = 'enforce';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery === 'hold') {
+          await gate;
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const first = laneClient.searchAndAsk('hold', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+      const second = laneClient.searchAndAsk('hold-2', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await expect(
+        laneClient.searchAndAsk('overflow', 'overflow', { priority: 'interactive' })
+      ).rejects.toThrow(/retry_after_ms=\d+/i);
+
+      release();
+      await expect(first).resolves.toBe('ok:hold');
+      await expect(second).resolves.toBe('ok:hold-2');
+    });
+
+    it('should allow observed saturation in shadow mode without immediate rejection', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '1';
+      process.env.CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE = 'shadow';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery === 'hold') {
+          await gate;
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const first = laneClient.searchAndAsk('hold', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+      const second = laneClient.searchAndAsk('hold-2', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+      const overflow = laneClient.searchAndAsk('overflow', 'overflow', { priority: 'interactive' });
+
+      release();
+      await expect(first).resolves.toBe('ok:hold');
+      await expect(second).resolves.toBe('ok:hold-2');
+      await expect(overflow).resolves.toBe('ok:overflow');
+    });
+
+    it('should propagate cancellation while request is waiting in queue', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '2';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery === 'hold') {
+          await gate;
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const first = laneClient.searchAndAsk('hold', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      const controller = new AbortController();
+      const queued = laneClient.searchAndAsk('cancel-me', 'cancel', {
+        priority: 'interactive',
+        signal: controller.signal,
+      });
+      controller.abort();
+
+      await expect(queued).rejects.toThrow(/cancelled while waiting in queue/i);
+      release();
+      await expect(first).resolves.toBe('ok:hold');
+    });
   });
 
   describe('Cache Management', () => {
@@ -1165,6 +1360,21 @@ describe('ContextServiceClient', () => {
   });
 
   describe('Indexing', () => {
+    it('should retain lastError until a successful indexing cycle completes', () => {
+      const statusClient = new ContextServiceClient(testWorkspace);
+      const updateIndexStatus = (statusClient as any).updateIndexStatus.bind(statusClient) as
+        (partial: Record<string, unknown>) => void;
+
+      updateIndexStatus({ status: 'error', lastError: 'index worker failed' });
+      expect(statusClient.getIndexStatus().lastError).toBe('index worker failed');
+
+      updateIndexStatus({ status: 'indexing', lastError: undefined });
+      expect(statusClient.getIndexStatus().lastError).toBe('index worker failed');
+
+      updateIndexStatus({ status: 'idle', lastIndexed: new Date().toISOString(), lastError: undefined });
+      expect(statusClient.getIndexStatus().lastError).toBeUndefined();
+    });
+
     it('should use deterministic local_native fallback for indexFiles without DirectContext calls', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       FEATURE_FLAGS.index_state_store = true;

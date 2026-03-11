@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createRetrievalProvider, getRetrievalProviderRegistry } from '../../../src/retrieval/providers/factory.js';
+import { RetrievalProviderError } from '../../../src/retrieval/providers/types.js';
 import type { RetrievalProviderCallbacks } from '../../../src/retrieval/providers/types.js';
 
 const ORIGINAL_ENV = { ...process.env };
@@ -63,16 +64,18 @@ describe('retrieval provider factory', () => {
     process.env = { ...ORIGINAL_ENV };
     delete process.env.CE_RETRIEVAL_PROVIDER;
     delete process.env.CE_RETRIEVAL_FORCE_LEGACY;
+    delete process.env.AUGMENT_API_TOKEN;
+    delete process.env.AUGMENT_API_URL;
   });
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it('creates augment_legacy by default', () => {
+  it('creates local_native by default', () => {
     const { callbacks } = createCallbackHarness();
     const provider = createRetrievalProvider({ callbacks });
-    expect(provider.id).toBe('augment_legacy');
+    expect(provider.id).toBe('local_native');
   });
 
   it('creates local_native when configured via env', () => {
@@ -85,6 +88,7 @@ describe('retrieval provider factory', () => {
   it('applies force-legacy override from env', () => {
     process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
     process.env.CE_RETRIEVAL_FORCE_LEGACY = 'true';
+    process.env.AUGMENT_API_TOKEN = 'test-token';
     const { callbacks } = createCallbackHarness();
     const provider = createRetrievalProvider({ callbacks });
     expect(provider.id).toBe('augment_legacy');
@@ -92,12 +96,44 @@ describe('retrieval provider factory', () => {
 
   it('respects explicit providerId override', () => {
     process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+    process.env.AUGMENT_API_TOKEN = 'test-token';
     const { callbacks } = createCallbackHarness();
     const provider = createRetrievalProvider({
       providerId: 'augment_legacy',
       callbacks,
     });
     expect(provider.id).toBe('augment_legacy');
+  });
+
+  it('fails fast with typed error when env explicitly selects augment_legacy without token', () => {
+    process.env.CE_RETRIEVAL_PROVIDER = 'augment_legacy';
+    const { callbacks } = createCallbackHarness();
+
+    try {
+      createRetrievalProvider({ callbacks });
+      throw new Error('expected createRetrievalProvider to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RetrievalProviderError);
+      const typed = error as RetrievalProviderError;
+      expect(typed.code).toBe('provider_auth_missing');
+      expect(typed.provider).toBe('augment_legacy');
+      expect(typed.envVar).toBe('AUGMENT_API_TOKEN');
+    }
+  });
+
+  it('fails fast with typed error for explicit augment_legacy providerId override without token', () => {
+    const { callbacks } = createCallbackHarness();
+
+    try {
+      createRetrievalProvider({ providerId: 'augment_legacy', callbacks });
+      throw new Error('expected createRetrievalProvider to throw');
+    } catch (error) {
+      expect(error).toBeInstanceOf(RetrievalProviderError);
+      const typed = error as RetrievalProviderError;
+      expect(typed.code).toBe('provider_auth_missing');
+      expect(typed.provider).toBe('augment_legacy');
+      expect(typed.envVar).toBe('AUGMENT_API_TOKEN');
+    }
   });
 
   it('exposes both providers in registry', () => {

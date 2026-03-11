@@ -9,16 +9,25 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
-import { validateFiniteNumberInRange, validateMaxLength, validateTrimmedNonEmptyString } from '../tooling/validation.js';
+import {
+  validateFiniteNumberInRange,
+  validateMaxLength,
+  validateOneOf,
+  validateTrimmedNonEmptyString,
+} from '../tooling/validation.js';
 
 export interface CodebaseRetrievalArgs {
   query: string;
   top_k?: number;
+  response_version?: 'v1' | 'v2';
+  compact?: boolean;
+  profile?: 'fast' | 'balanced' | 'rich';
 }
 
 export interface CodebaseRetrievalResult {
   file: string;
-  content: string;
+  content?: string;
+  preview?: string;
   score: number;
   lines?: string;
   reason: string;
@@ -41,6 +50,8 @@ export interface CodebaseRetrievalOutput {
     filtersApplied: string[];
     filteredPathsCount: number;
     secondPassUsed: boolean;
+    responseVersion?: 'v2';
+    providerResolution?: string;
   };
 }
 
@@ -57,6 +68,36 @@ type RawFallbackDiagnostics = {
   filtersApplied?: string[];
   filteredPathsCount?: number;
   secondPassUsed?: boolean;
+};
+
+type RetrievalProfile = 'fast' | 'balanced' | 'rich';
+
+type RetrievalProfileSettings = {
+  perQueryMultiplier: number;
+  maxVariants: number;
+  maxOutputLengthPerResult: number;
+  enableExpansion: boolean;
+};
+
+const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> = {
+  fast: {
+    perQueryMultiplier: 1,
+    maxVariants: 1,
+    maxOutputLengthPerResult: 2000,
+    enableExpansion: false,
+  },
+  balanced: {
+    perQueryMultiplier: 2,
+    maxVariants: 4,
+    maxOutputLengthPerResult: 3000,
+    enableExpansion: true,
+  },
+  rich: {
+    perQueryMultiplier: 3,
+    maxVariants: 6,
+    maxOutputLengthPerResult: 4000,
+    enableExpansion: true,
+  },
 };
 
 function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDiagnostics | null {
@@ -88,7 +129,9 @@ export async function handleCodebaseRetrieval(
   serviceClient: ContextServiceClient
 ): Promise<string> {
   const startTime = Date.now();
-  const { query, top_k = 10 } = args;
+  const { query, top_k = 10, response_version = 'v1', compact = false, profile } = args;
+  const useV2 = response_version === 'v2';
+  const useCompactPreview = useV2 && compact;
   const normalizedQuery = validateTrimmedNonEmptyString(
     query,
     'Invalid query parameter: must be a non-empty string'
@@ -97,20 +140,57 @@ export async function handleCodebaseRetrieval(
   // Validate inputs
   validateMaxLength(normalizedQuery, 1000, 'Query too long: maximum 1000 characters');
   validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
+  if (profile !== undefined) {
+    validateOneOf(
+      profile,
+      ['fast', 'balanced', 'rich'] as const,
+      'Invalid profile parameter: must be "fast", "balanced", or "rich"'
+    );
+  }
 
-  const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, { topK: top_k });
+  const retrievalOptions = profile
+    ? {
+        topK: top_k,
+        perQueryTopK: Math.min(50, top_k * RETRIEVAL_PROFILE_MAP[profile].perQueryMultiplier),
+        maxVariants: RETRIEVAL_PROFILE_MAP[profile].maxVariants,
+        maxOutputLength: top_k * RETRIEVAL_PROFILE_MAP[profile].maxOutputLengthPerResult,
+        enableExpansion: RETRIEVAL_PROFILE_MAP[profile].enableExpansion,
+      }
+    : { topK: top_k };
+
+  const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, retrievalOptions);
   const searchResults = retrieval.results;
   const fallbackDiagnostics = getFallbackDiagnostics(serviceClient);
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status);
 
-  const results: CodebaseRetrievalResult[] = searchResults.map((r) => ({
-    file: r.path,
-    content: r.content,
-    score: r.relevanceScore || 0,
-    lines: r.lines,
-    reason: `Semantic match for: "${normalizedQuery}"`,
-  }));
+  const results: CodebaseRetrievalResult[] = searchResults.map((r) => {
+    const snippet = useCompactPreview
+      ? { preview: r.content.slice(0, 240) }
+      : { content: r.content };
+    return {
+      file: r.path,
+      ...snippet,
+      score: r.relevanceScore || 0,
+      lines: r.lines,
+      reason: `Semantic match for: "${normalizedQuery}"`,
+    };
+  });
+
+  const maybeClient = serviceClient as unknown as {
+    getActiveRetrievalProviderId?: () => unknown;
+  };
+  const providerResolution =
+    useV2 && typeof maybeClient.getActiveRetrievalProviderId === 'function'
+      ? (() => {
+          try {
+            const value = maybeClient.getActiveRetrievalProviderId?.();
+            return typeof value === 'string' ? value : undefined;
+          } catch {
+            return undefined;
+          }
+        })()
+      : undefined;
 
   const output: CodebaseRetrievalOutput = {
     results,
@@ -129,6 +209,8 @@ export async function handleCodebaseRetrieval(
       filtersApplied: fallbackDiagnostics?.filtersApplied ?? [],
       filteredPathsCount: fallbackDiagnostics?.filteredPathsCount ?? 0,
       secondPassUsed: fallbackDiagnostics?.secondPassUsed ?? false,
+      responseVersion: useV2 ? 'v2' : undefined,
+      providerResolution,
     },
   };
 
@@ -192,6 +274,22 @@ Before editing a file, ALWAYS first call the codebase-retrieval MCP tool, asking
         type: 'number',
         description: 'Maximum number of results to return (default: 10, max: 50).',
         default: 10,
+      },
+      profile: {
+        type: 'string',
+        enum: ['fast', 'balanced', 'rich'],
+        description: 'Optional retrieval profile override. Defaults to legacy behavior when omitted.',
+      },
+      response_version: {
+        type: 'string',
+        enum: ['v1', 'v2'],
+        description: 'Response shape version. Default is v1.',
+        default: 'v1',
+      },
+      compact: {
+        type: 'boolean',
+        description: 'Use compact snippet previews instead of full content (only effective in response_version v2).',
+        default: false,
       },
     },
     required: ['query'],

@@ -8,6 +8,8 @@ const DEFAULT_ENHANCE_TIMEOUT_MS = 8_000;
 const DEFAULT_RETRIEVAL_TIMEOUT_MS = 1_500;
 const DEFAULT_ENHANCE_PROMPT_MODE: EnhancePromptMode = 'light';
 const DEFAULT_SNIPPET_CACHE_TTL_MS = 10 * 60 * 1000;
+const CONTEXT_CACHE_KEY_VERSION = 'v2';
+const ENHANCE_PROMPT_TOOL_VERSION = '1.0.0';
 const ENHANCE_RETRIEVAL_ENABLED_VALUES = new Set(['1', 'true', 'yes', 'on']);
 const ENHANCE_RETRIEVAL_DISABLED_VALUES = new Set(['0', 'false', 'no', 'off']);
 const ENHANCE_PROMPT_MODES = new Set<EnhancePromptMode>(['off', 'light', 'rich']);
@@ -130,8 +132,31 @@ function buildContextCacheKey(
   providerId: string,
   indexFingerprint: string
 ): string {
-  const promptHash = hashString(prompt.trim());
-  return `enhance-context:${promptHash}:${mode}:topK=${topK}:maxFiles=${maxFiles}:maxChars=${maxChars}:${providerId}:${indexFingerprint}`;
+  const queryHash = hashString(prompt.trim());
+  const profile = mode;
+  const toolVersion = process.env.CE_ENHANCE_PROMPT_TOOL_VERSION?.trim() || ENHANCE_PROMPT_TOOL_VERSION;
+  const identity = JSON.stringify({
+    key_version: CONTEXT_CACHE_KEY_VERSION,
+    query_hash: queryHash,
+    profile,
+    provider: providerId,
+    index_fingerprint: indexFingerprint,
+    tool_version: toolVersion,
+    top_k: topK,
+    max_files: maxFiles,
+    max_chars: maxChars,
+  });
+
+  return [
+    'enhance-context',
+    `key_version=${CONTEXT_CACHE_KEY_VERSION}`,
+    `query_hash=${queryHash}`,
+    `profile=${profile}`,
+    `provider=${providerId}`,
+    `index_fingerprint=${indexFingerprint}`,
+    `tool_version=${toolVersion}`,
+    `identity_hash=${hashString(identity)}`,
+  ].join(':');
 }
 
 function getCachedContextSnippet(cacheKey: string): string | null | undefined {
@@ -244,10 +269,27 @@ export function parseEnhancedPrompt(response: string): string | null {
   return null;
 }
 
+export interface PromptEnhancementResult {
+  enhancedPrompt: string;
+  source: 'ai' | 'fallback' | 'raw_response';
+  reasonCode:
+    | 'ai_enhanced'
+    | 'fallback_timeout_or_queue_or_transient'
+    | 'unexpected_response_format';
+}
+
 export async function internalPromptEnhancer(
   prompt: string,
   serviceClient: ContextServiceClient
 ): Promise<string> {
+  const result = await internalPromptEnhancerDetailed(prompt, serviceClient);
+  return result.enhancedPrompt;
+}
+
+export async function internalPromptEnhancerDetailed(
+  prompt: string,
+  serviceClient: ContextServiceClient
+): Promise<PromptEnhancementResult> {
   const totalStartMs = Date.now();
   console.error(`[AI Enhancement] Enhancing prompt: "${prompt.substring(0, 100)}..."`);
   const mode = readEnhancePromptMode();
@@ -373,7 +415,11 @@ export async function internalPromptEnhancer(
       // Try to extract any useful content from the response
       // If the response doesn't contain the expected tags, it might still be useful
       if (response && response.length > 0) {
-        return `${response}\n\n---\n_Note: AI enhancement completed but response format was unexpected._`;
+        return {
+          enhancedPrompt: `${response}\n\n---\n_Note: AI enhancement completed but response format was unexpected._`,
+          source: 'raw_response',
+          reasonCode: 'unexpected_response_format',
+        };
       }
 
       throw new Error('AI enhancement returned empty response');
@@ -392,7 +438,11 @@ export async function internalPromptEnhancer(
       Date.now() - totalStartMs,
       { help: 'Enhance prompt end-to-end duration in seconds.' }
     );
-    return enhanced;
+    return {
+      enhancedPrompt: enhanced,
+      source: 'ai',
+      reasonCode: 'ai_enhanced',
+    };
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[AI Enhancement] Error: ${errorMessage}`);
@@ -429,7 +479,11 @@ export async function internalPromptEnhancer(
         Date.now() - totalStartMs,
         { help: 'Enhance prompt end-to-end duration in seconds.' }
       );
-      return buildFastFallbackEnhancement(prompt);
+      return {
+        enhancedPrompt: buildFastFallbackEnhancement(prompt),
+        source: 'fallback',
+        reasonCode: 'fallback_timeout_or_queue_or_transient',
+      };
     }
 
     observeDurationMs(

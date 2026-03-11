@@ -22,7 +22,7 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
-import { internalPromptEnhancer } from '../../internal/handlers/enhancement.js';
+import { internalPromptEnhancerDetailed } from '../../internal/handlers/enhancement.js';
 import { validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
 
 export interface EnhancePromptArgs {
@@ -31,6 +31,7 @@ export interface EnhancePromptArgs {
 }
 
 const MAX_PROMPT_LENGTH = 10000;
+const ENHANCE_RESPONSE_FORMATS = new Set(['text', 'json']);
 
 // ============================================================================
 // AI-Powered Enhancement (using searchAndAsk)
@@ -63,7 +64,26 @@ export async function handleEnhancePrompt(
 
   // Always use AI-powered enhancement
   console.error('[enhance_prompt] Using AI-powered enhancement mode');
-  return internalPromptEnhancer(validatedPrompt, serviceClient);
+  const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient);
+  const responseFormat = process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT?.trim().toLowerCase() ?? 'text';
+
+  if (!ENHANCE_RESPONSE_FORMATS.has(responseFormat)) {
+    return enhancement.enhancedPrompt;
+  }
+
+  if (responseFormat === 'json') {
+    return JSON.stringify(
+      {
+        enhanced_prompt: enhancement.enhancedPrompt,
+        source: enhancement.source,
+        reason_code: enhancement.reasonCode,
+      },
+      null,
+      2
+    );
+  }
+
+  return enhancement.enhancedPrompt;
 }
 
 /**

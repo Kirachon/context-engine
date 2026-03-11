@@ -88,6 +88,83 @@ index 1234567..abcdefg 100644
     expect(normalizeReviewAuto(parsed)).toMatchSnapshot();
   });
 
+  it('adds v2 skipped_steps metadata for disabled heavy review_diff paths', async () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => '',
+      searchAndAsk: async () => '',
+    } as any;
+
+    const resultStr = await handleReviewAuto(
+      {
+        diff,
+        response_version: 'v2',
+        review_diff_options: { enable_llm: false, enable_static_analysis: false, include_sarif: false, include_markdown: false },
+      },
+      mockServiceClient
+    );
+
+    const parsed = JSON.parse(resultStr);
+    expect(parsed.skipped_steps).toEqual([
+      {
+        step: 'llm_pass',
+        reason: 'Skipped because review_diff options.enable_llm is disabled.',
+      },
+      {
+        step: 'static_analysis',
+        reason: 'Skipped because review_diff options.enable_static_analysis is disabled.',
+      },
+    ]);
+    expect(parsed.requested_by).toBe('user');
+  });
+
+  it('marks review_diff heavy paths as default-skipped in v2 when options are omitted', async () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const mockServiceClient = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => '',
+      searchAndAsk: async () => '',
+    } as any;
+
+    const resultStr = await handleReviewAuto(
+      {
+        diff,
+        response_version: 'v2',
+      },
+      mockServiceClient
+    );
+
+    const parsed = JSON.parse(resultStr);
+    expect(parsed.skipped_steps).toEqual([
+      {
+        step: 'llm_pass',
+        reason: 'Skipped because review_diff options.enable_llm is disabled.',
+      },
+      {
+        step: 'static_analysis',
+        reason: 'Skipped because review_diff options.enable_static_analysis is disabled.',
+      },
+    ]);
+    expect(parsed.requested_by).toBe('default');
+  });
+
   it('selects review_git_diff when no diff is provided', async () => {
     const tmp = createRepoWithStagedChange();
 
@@ -124,6 +201,48 @@ index 1234567..abcdefg 100644
 
     const parsed = JSON.parse(resultStr);
     expect(normalizeReviewAuto(parsed)).toMatchSnapshot();
+  });
+
+  it('requires explicit diff or target when strict scope mode is enabled', async () => {
+    process.env.CE_REVIEW_AUTO_REQUIRE_EXPLICIT_SCOPE = 'true';
+    try {
+      const mockServiceClient = {
+        getWorkspacePath: () => process.cwd(),
+        searchAndAsk: async () => '',
+      } as any;
+      await expect(handleReviewAuto({}, mockServiceClient)).rejects.toThrow(
+        /requires explicit scope/i
+      );
+    } finally {
+      delete process.env.CE_REVIEW_AUTO_REQUIRE_EXPLICIT_SCOPE;
+    }
+  });
+
+  it('adds v2 metadata for review_git_diff path', async () => {
+    const tmp = createRepoWithStagedChange();
+
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () =>
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'looks good',
+          overall_explanation: 'Mocked output.',
+          overall_confidence_score: 0.8,
+        }),
+    } as any;
+
+    const resultStr = await handleReviewAuto(
+      {
+        target: 'staged',
+        response_version: 'v2',
+      },
+      mockServiceClient
+    );
+
+    const parsed = JSON.parse(resultStr);
+    expect(parsed.skipped_steps).toEqual([]);
+    expect(parsed.requested_by).toBe('config');
   });
 
   it('blocks when auto-select routes to review_git_diff with empty staged scope', async () => {

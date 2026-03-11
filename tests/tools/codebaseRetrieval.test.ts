@@ -17,6 +17,7 @@ describe('codebase_retrieval Tool', () => {
     mockServiceClient = {
       semanticSearch: jest.fn(),
       getLastSearchDiagnostics: jest.fn(() => null),
+      getActiveRetrievalProviderId: jest.fn(() => 'hybrid'),
       getIndexStatus: jest.fn(() => ({
         workspace: '/tmp/workspace',
         lastIndexed: '2024-01-01T00:00:00.000Z',
@@ -37,6 +38,12 @@ describe('codebase_retrieval Tool', () => {
     await expect(
       handleCodebaseRetrieval({ query: '   ' } as any, mockServiceClient as any)
     ).rejects.toThrow(/invalid query/i);
+  });
+
+  it('rejects invalid profile', async () => {
+    await expect(
+      handleCodebaseRetrieval({ query: 'test', profile: 'turbo' as any }, mockServiceClient as any)
+    ).rejects.toThrow(/invalid profile/i);
   });
 
   it('returns JSON string with expected structure', async () => {
@@ -65,6 +72,93 @@ describe('codebase_retrieval Tool', () => {
     await handleCodebaseRetrieval({ query: 'test', top_k: 5 }, mockServiceClient as any);
 
     expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith('test', 5);
+  });
+
+  it('applies explicit balanced profile settings when requested', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+    await handleCodebaseRetrieval(
+      { query: 'audit', top_k: 5, profile: 'balanced' },
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+      'audit',
+      10,
+      expect.objectContaining({ bypassCache: false, maxOutputLength: 15000 })
+    );
+  });
+
+  it('applies explicit rich profile settings when requested', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+    await handleCodebaseRetrieval(
+      { query: 'audit', top_k: 5, profile: 'rich' },
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+      'audit',
+      15,
+      expect.objectContaining({ bypassCache: false, maxOutputLength: 20000 })
+    );
+  });
+
+  it('keeps v1 result shape when compact is requested', async () => {
+    const mockResults: SearchResult[] = [
+      { path: 'src/v1.ts', content: 'full snippet', lines: '3-6', relevanceScore: 0.8 },
+    ];
+    mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleCodebaseRetrieval(
+      { query: 'v1 compact ignored', compact: true, response_version: 'v1' },
+      mockServiceClient as any
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.results[0].content).toBe('full snippet');
+    expect(parsed.results[0]).not.toHaveProperty('preview');
+    expect(parsed.metadata).not.toHaveProperty('responseVersion');
+    expect(parsed.metadata).not.toHaveProperty('providerResolution');
+  });
+
+  it('adds v2 metadata including provider resolution when requested', async () => {
+    const mockResults: SearchResult[] = [
+      { path: 'src/v2.ts', content: 'v2 snippet', lines: '10-12', relevanceScore: 0.7 },
+    ];
+    mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleCodebaseRetrieval(
+      { query: 'v2 metadata', response_version: 'v2' },
+      mockServiceClient as any
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.metadata.responseVersion).toBe('v2');
+    expect(parsed.metadata.providerResolution).toBe('hybrid');
+    expect(parsed.results[0].content).toBe('v2 snippet');
+    expect(parsed.results[0]).not.toHaveProperty('preview');
+  });
+
+  it('uses compact preview snippets only in v2 mode', async () => {
+    const content = 'x'.repeat(320);
+    const mockResults: SearchResult[] = [
+      { path: 'src/compact.ts', content, lines: '1-20', relevanceScore: 0.99 },
+    ];
+    mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleCodebaseRetrieval(
+      { query: 'compact', response_version: 'v2', compact: true },
+      mockServiceClient as any
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.results[0].file).toBe('src/compact.ts');
+    expect(parsed.results[0].score).toBeCloseTo(0.99);
+    expect(parsed.results[0].lines).toBe('1-20');
+    expect(parsed.results[0].preview).toHaveLength(240);
+    expect(parsed.results[0]).not.toHaveProperty('content');
+    expect(parsed.metadata.responseVersion).toBe('v2');
   });
 
   it('trims query before delegating to semanticSearch', async () => {
@@ -199,5 +293,6 @@ describe('codebase_retrieval Tool', () => {
   it('exposes correct tool schema', () => {
     expect(codebaseRetrievalTool.name).toBe('codebase_retrieval');
     expect(codebaseRetrievalTool.inputSchema.required).toContain('query');
+    expect(Object.keys(codebaseRetrievalTool.inputSchema.properties)).toContain('profile');
   });
 });

@@ -24,6 +24,9 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
   afterEach(() => {
     delete process.env.CE_ENHANCE_PROMPT_MODE;
     delete process.env.CE_ENHANCE_PROMPT_USE_RETRIEVAL;
+    delete process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT;
+    delete process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS;
+    delete process.env.CE_ENHANCE_PROMPT_TOOL_VERSION;
     delete process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE;
   });
 
@@ -268,6 +271,219 @@ Here is an enhanced version of the original instruction that is more specific an
       await expect(handleEnhancePrompt({
         prompt: 'test config failure',
       }, mockServiceClient as any)).rejects.toThrow(/authentication and valid provider configuration/i);
+    });
+
+    it('returns structured JSON metadata when CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json and AI succeeds', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Structured AI enhancement output.</enhanced-prompt>
+
+### END RESPONSE ###`
+      );
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'structured response please' },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+      expect(parsed.enhanced_prompt).toBe('Structured AI enhancement output.');
+      expect(parsed.source).toBe('ai');
+      expect(parsed.reason_code).toBe('ai_enhanced');
+    });
+
+    it('returns structured JSON metadata when CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json and fallback is used', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      mockServiceClient.searchAndAsk.mockRejectedValue(new Error('SEARCH_QUEUE_FULL: queue saturated'));
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'fallback json please' },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+      expect(parsed.source).toBe('fallback');
+      expect(parsed.reason_code).toBe('fallback_timeout_or_queue_or_transient');
+      expect(parsed.enhanced_prompt).toContain('Improve and execute this request');
+    });
+
+    describe('Snippet cache hardening', () => {
+      it('reuses cached snippet for deterministic same-key inputs', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '60000';
+        mockServiceClient.getActiveAIProviderId = jest.fn(() => 'provider-alpha');
+        mockServiceClient.getIndexFingerprint = jest.fn(() => 'index-fingerprint-1');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/login.ts',
+            content: 'export function login() { return true; }',
+            relevanceScore: 0.9,
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Deterministic cache reuse output.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+        await handleEnhancePrompt({ prompt: 'cache deterministic same-key prompt' }, mockServiceClient as any);
+        await handleEnhancePrompt({ prompt: 'cache deterministic same-key prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+      });
+
+      it('invalidates cache when provider changes', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '60000';
+        mockServiceClient.getActiveAIProviderId = jest
+          .fn()
+          .mockReturnValueOnce('provider-alpha')
+          .mockReturnValueOnce('provider-beta');
+        mockServiceClient.getIndexFingerprint = jest.fn(() => 'index-fingerprint-1');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/login.ts',
+            content: 'export function login() { return true; }',
+            relevanceScore: 0.9,
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Provider-isolated cache output.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+        await handleEnhancePrompt({ prompt: 'cache provider boundary prompt' }, mockServiceClient as any);
+        await handleEnhancePrompt({ prompt: 'cache provider boundary prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
+      });
+
+      it('invalidates cache when index fingerprint changes', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '60000';
+        mockServiceClient.getActiveAIProviderId = jest.fn(() => 'provider-alpha');
+        mockServiceClient.getIndexFingerprint = jest
+          .fn()
+          .mockReturnValueOnce('index-fingerprint-1')
+          .mockReturnValueOnce('index-fingerprint-2');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/login.ts',
+            content: 'export function login() { return true; }',
+            relevanceScore: 0.9,
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Index-isolated cache output.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+        await handleEnhancePrompt({ prompt: 'cache index boundary prompt' }, mockServiceClient as any);
+        await handleEnhancePrompt({ prompt: 'cache index boundary prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
+      });
+
+      it('invalidates cache when retrieval profile changes', async () => {
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '60000';
+        process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE = '1';
+        mockServiceClient.getActiveAIProviderId = jest.fn(() => 'provider-alpha');
+        mockServiceClient.getIndexFingerprint = jest.fn(() => 'index-fingerprint-1');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/light.ts',
+            content: 'export function localLightSearch() { return true; }',
+            relevanceScore: 0.95,
+          },
+        ]);
+        mockServiceClient.semanticSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/rich.ts',
+            content: 'export function richSearch() { return true; }',
+            relevanceScore: 0.92,
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Profile-isolated cache output.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        await handleEnhancePrompt({ prompt: 'cache profile boundary prompt' }, mockServiceClient as any);
+        process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+        await handleEnhancePrompt({ prompt: 'cache profile boundary prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.semanticSearch).toHaveBeenCalled();
+      });
+
+      it('invalidates cache when tool version changes', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '60000';
+        mockServiceClient.getActiveAIProviderId = jest.fn(() => 'provider-alpha');
+        mockServiceClient.getIndexFingerprint = jest.fn(() => 'index-fingerprint-1');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/login.ts',
+            content: 'export function login() { return true; }',
+            relevanceScore: 0.9,
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Tool-version-isolated cache output.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+        process.env.CE_ENHANCE_PROMPT_TOOL_VERSION = 'test-tool-v1';
+        await handleEnhancePrompt({ prompt: 'cache tool version boundary prompt' }, mockServiceClient as any);
+
+        process.env.CE_ENHANCE_PROMPT_TOOL_VERSION = 'test-tool-v2';
+        await handleEnhancePrompt({ prompt: 'cache tool version boundary prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
+      });
+
+      it('does not reuse stale entries after TTL expiry', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '5';
+        mockServiceClient.getActiveAIProviderId = jest.fn(() => 'provider-alpha');
+        mockServiceClient.getIndexFingerprint = jest.fn(() => 'index-fingerprint-1');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/login.ts',
+            content: 'export function login() { return true; }',
+            relevanceScore: 0.9,
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>TTL cache output.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+        await handleEnhancePrompt({ prompt: 'cache ttl expiry prompt' }, mockServiceClient as any);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await handleEnhancePrompt({ prompt: 'cache ttl expiry prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
+      });
     });
   });
 

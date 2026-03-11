@@ -1,11 +1,12 @@
 import { AugmentLegacyProvider } from './augmentLegacyProvider.js';
-import { resolveRetrievalProviderId } from './env.js';
+import { resolveRetrievalProviderId, validateAugmentLegacyAuthConfig } from './env.js';
 import { LocalNativeProvider } from './localNativeProvider.js';
 import type {
   RetrievalProvider,
   RetrievalProviderCallbacks,
   RetrievalProviderId,
 } from './types.js';
+import { RetrievalProviderError } from './types.js';
 
 type RetrievalProviderConstructor = new (
   callbacks: RetrievalProviderCallbacks
@@ -25,9 +26,16 @@ export function createRetrievalProvider(
   options: CreateRetrievalProviderOptions
 ): RetrievalProvider {
   const providerId = options.providerId ?? resolveRetrievalProviderId();
+  if (providerId === 'augment_legacy' && options.providerId === 'augment_legacy') {
+    validateAugmentLegacyAuthConfig(process.env, { selectionSource: 'providerId' });
+  }
   const ProviderCtor = PROVIDER_REGISTRY[providerId];
   if (!ProviderCtor) {
-    throw new Error(`Unsupported retrieval provider "${providerId}"`);
+    throw new RetrievalProviderError({
+      code: 'provider_unsupported',
+      provider: providerId,
+      message: `Unsupported retrieval provider "${providerId}"`,
+    });
   }
 
   return new ProviderCtor(options.callbacks);

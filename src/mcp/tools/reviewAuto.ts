@@ -50,12 +50,24 @@ export interface ReviewAutoArgs {
    * Options for review_git_diff (same as review_changes).
    */
   review_git_diff_options?: ReviewOptions;
+
+  /**
+   * Response shape version. Default: v1.
+   */
+  response_version?: 'v1' | 'v2';
+}
+
+interface ReviewAutoSkippedStep {
+  step: 'llm_pass' | 'static_analysis';
+  reason: string;
 }
 
 export interface ReviewAutoResult {
   selected_tool: ReviewAutoSelectedTool;
   rationale: string;
   output: EnterpriseReviewResult | ReviewGitDiffOutput;
+  skipped_steps?: ReviewAutoSkippedStep[];
+  requested_by?: 'default' | 'config' | 'user';
 }
 
 function selectTool(args: ReviewAutoArgs): { selected: ReviewAutoSelectedTool; rationale: string } {
@@ -79,8 +91,51 @@ function parseJsonOrThrow<T = unknown>(value: string, context: string): T {
   }
 }
 
+function buildV2SkipMetadata(
+  selected: ReviewAutoSelectedTool,
+  args: ReviewAutoArgs
+): { skipped_steps: ReviewAutoSkippedStep[]; requested_by: 'default' | 'config' | 'user' } {
+  if (selected !== 'review_diff') {
+    return { skipped_steps: [], requested_by: 'config' };
+  }
+
+  const options = args.review_diff_options;
+  const llmEnabled = options?.enable_llm ?? false;
+  const staticAnalysisEnabled = options?.enable_static_analysis ?? false;
+
+  const skipped_steps: ReviewAutoSkippedStep[] = [];
+  if (!llmEnabled) {
+    skipped_steps.push({
+      step: 'llm_pass',
+      reason: 'Skipped because review_diff options.enable_llm is disabled.',
+    });
+  }
+  if (!staticAnalysisEnabled) {
+    skipped_steps.push({
+      step: 'static_analysis',
+      reason: 'Skipped because review_diff options.enable_static_analysis is disabled.',
+    });
+  }
+
+  const userSpecifiedDisable =
+    options?.enable_llm === false || options?.enable_static_analysis === false;
+
+  return {
+    skipped_steps,
+    requested_by: userSpecifiedDisable ? 'user' : 'default',
+  };
+}
+
 export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: ContextServiceClient): Promise<string> {
+  const requireExplicitScope = process.env.CE_REVIEW_AUTO_REQUIRE_EXPLICIT_SCOPE === 'true';
+  if (requireExplicitScope && !normalizeOptionalDiffInput(args.diff) && !args.target) {
+    throw new Error(
+      'review_auto requires explicit scope in this environment: provide diff or target.'
+    );
+  }
   const { selected, rationale } = selectTool(args);
+  const responseVersion = args.response_version ?? 'v1';
+  const useV2 = responseVersion === 'v2';
   const normalizedDiff = normalizeOptionalDiffInput(args.diff);
 
   if (selected === 'review_diff') {
@@ -102,6 +157,11 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
     );
     const output = parseJsonOrThrow<EnterpriseReviewResult>(resultStr, 'review_diff output');
     const result: ReviewAutoResult = { selected_tool: selected, rationale, output };
+    if (useV2) {
+      const v2Metadata = buildV2SkipMetadata(selected, args);
+      result.skipped_steps = v2Metadata.skipped_steps;
+      result.requested_by = v2Metadata.requested_by;
+    }
     return JSON.stringify(result, null, 2);
   }
 
@@ -126,6 +186,11 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
   );
   const output = parseJsonOrThrow<ReviewGitDiffOutput>(resultStr, 'review_git_diff output');
   const result: ReviewAutoResult = { selected_tool: selected, rationale, output };
+  if (useV2) {
+    const v2Metadata = buildV2SkipMetadata(selected, args);
+    result.skipped_steps = v2Metadata.skipped_steps;
+    result.requested_by = v2Metadata.requested_by;
+  }
   return JSON.stringify(result, null, 2);
 }
 
@@ -149,6 +214,12 @@ export const reviewAutoTool = {
       include_patterns: { type: 'array', items: { type: 'string' }, description: 'File globs to include (review_git_diff only)' },
       review_diff_options: { type: 'object', description: 'Options passed through to review_diff (advanced/CI-oriented)' },
       review_git_diff_options: { type: 'object', description: 'Options passed through to review_git_diff (same as review_changes options)' },
+      response_version: {
+        type: 'string',
+        enum: ['v1', 'v2'],
+        description: 'Response shape version. Default is v1.',
+        default: 'v1',
+      },
     },
     required: [],
   },

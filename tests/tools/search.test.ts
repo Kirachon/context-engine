@@ -67,6 +67,11 @@ describe('semantic_search Tool', () => {
         .rejects.toThrow(/invalid mode/i);
     });
 
+    it('should reject invalid profile values', async () => {
+      await expect(handleSemanticSearch({ query: 'test', profile: 'turbo' as any }, mockServiceClient as any))
+        .rejects.toThrow(/invalid profile/i);
+    });
+
     it('should reject non-boolean bypass_cache', async () => {
       await expect(handleSemanticSearch({ query: 'test', bypass_cache: 'true' as any }, mockServiceClient as any))
         .rejects.toThrow(/invalid bypass_cache/i);
@@ -95,6 +100,46 @@ describe('semantic_search Tool', () => {
         'test query',
         10,
         expect.objectContaining({ bypassCache: false })
+      );
+    });
+
+    it('maps mode=deep to rich retrieval profile settings', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch({ query: 'audit', top_k: 5, mode: 'deep' }, mockServiceClient as any);
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'audit',
+        15,
+        expect.objectContaining({ bypassCache: false, maxOutputLength: 20000 })
+      );
+    });
+
+    it('supports explicit balanced retrieval profile', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch({ query: 'audit', top_k: 5, profile: 'balanced' }, mockServiceClient as any);
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'audit',
+        10,
+        expect.objectContaining({ bypassCache: false, maxOutputLength: 15000 })
+      );
+    });
+
+    it('prefers explicit profile over mode compatibility mapping', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch(
+        { query: 'audit', top_k: 5, mode: 'deep', profile: 'fast' },
+        mockServiceClient as any
+      );
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'audit',
+        5,
+        expect.objectContaining({ bypassCache: false, maxOutputLength: 10000 })
       );
     });
   });
@@ -265,6 +310,7 @@ describe('semantic_search Tool', () => {
       const props = Object.keys(semanticSearchTool.inputSchema.properties);
       expect(props).toContain('query');
       expect(props).toContain('top_k');
+      expect(props).toContain('profile');
     });
   });
 });

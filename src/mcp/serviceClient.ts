@@ -254,6 +254,16 @@ const DEFAULT_SEARCH_QUEUE_MAX = 50;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD = 2;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS = 2500;
 const SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS = 2000;
+type SearchAndAskPriority = 'interactive' | 'background';
+type SearchQueueRejectMode = 'observe' | 'shadow' | 'enforce';
+
+function resolveSearchQueueRejectMode(raw: string | undefined): SearchQueueRejectMode {
+  const normalized = raw?.trim().toLowerCase();
+  if (normalized === 'observe' || normalized === 'shadow' || normalized === 'enforce') {
+    return normalized;
+  }
+  return 'enforce';
+}
 
 /** State file name for persisting index state */
 const STATE_FILE_NAME = '.augment-context-state.json';
@@ -294,21 +304,28 @@ const MEMORIES_DIR = '.memories';
  */
 class SearchQueueFullError extends Error {
   readonly code = 'SEARCH_QUEUE_FULL';
+  readonly retryAfterMs: number;
 
-  constructor(maxQueueSize: number) {
+  constructor(
+    maxQueueSize: number,
+    lane: SearchAndAskPriority,
+    envVarName: 'CE_SEARCH_AND_ASK_QUEUE_MAX' | 'CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND',
+    retryAfterMs: number
+  ) {
     super(
-      `Search queue is full (max ${maxQueueSize}). Try again later or increase CE_SEARCH_AND_ASK_QUEUE_MAX.`
+      `Search queue is full for ${lane} lane (max ${maxQueueSize}). Try again later or increase ${envVarName}. retry_after_ms=${retryAfterMs}`
     );
     this.name = 'SearchQueueFullError';
+    this.retryAfterMs = retryAfterMs;
   }
 }
 
 class SearchQueuePressureTimeoutError extends Error {
   readonly code = 'SEARCH_QUEUE_PRESSURE_TIMEOUT';
 
-  constructor(timeoutMs: number, queueDepth: number, minimumBudgetMs: number) {
+  constructor(timeoutMs: number, queueDepth: number, minimumBudgetMs: number, lane: SearchAndAskPriority) {
     super(
-      `searchAndAsk timeout budget (${timeoutMs}ms) is too small for current queue depth (${queueDepth}). ` +
+      `searchAndAsk timeout budget (${timeoutMs}ms) is too small for ${lane} lane queue depth (${queueDepth}). ` +
       `Estimated minimum budget: ${minimumBudgetMs}ms. Retry with a larger timeout or when queue pressure is lower.`
     );
     this.name = 'SearchQueuePressureTimeoutError';
@@ -326,9 +343,20 @@ class SearchQueue {
   }> = [];
   private running = false;
   private maxQueueSize: number;
+  private lane: SearchAndAskPriority;
+  private maxQueueEnvVarName: 'CE_SEARCH_AND_ASK_QUEUE_MAX' | 'CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND';
+  private rejectMode: SearchQueueRejectMode;
 
-  constructor(maxQueueSize: number) {
+  constructor(
+    maxQueueSize: number,
+    lane: SearchAndAskPriority,
+    maxQueueEnvVarName: 'CE_SEARCH_AND_ASK_QUEUE_MAX' | 'CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND',
+    rejectMode: SearchQueueRejectMode
+  ) {
     this.maxQueueSize = maxQueueSize;
+    this.lane = lane;
+    this.maxQueueEnvVarName = maxQueueEnvVarName;
+    this.rejectMode = rejectMode;
   }
 
   /**
@@ -357,12 +385,36 @@ class SearchQueue {
    * @param fn The function to execute
    * @param timeoutMs Timeout in milliseconds (default: 120000 = 2 minutes)
    */
-  async enqueue(fn: () => Promise<string>, timeoutMs: number = DEFAULT_API_TIMEOUT_MS): Promise<string> {
+  async enqueue(
+    fn: () => Promise<string>,
+    timeoutMs: number = DEFAULT_API_TIMEOUT_MS,
+    signal?: AbortSignal
+  ): Promise<string> {
+    if (signal?.aborted) {
+      return Promise.reject(new Error('searchAndAsk request cancelled before queue admission.'));
+    }
     if (this.maxQueueSize > 0 && this.queue.length >= this.maxQueueSize) {
-      return Promise.reject(new SearchQueueFullError(this.maxQueueSize));
+      const retryAfterMs =
+        Math.max(1, this.queue.length) * SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS + SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS;
+      if (this.rejectMode === 'enforce') {
+        return Promise.reject(
+          new SearchQueueFullError(this.maxQueueSize, this.lane, this.maxQueueEnvVarName, retryAfterMs)
+        );
+      }
+      console.error(
+        `[SearchQueue] ${this.rejectMode} mode: queue saturation observed for ${this.lane} lane; ` +
+        `max=${this.maxQueueSize} current=${this.queue.length} retry_after_ms=${retryAfterMs}`
+      );
     }
     return new Promise<string>((resolve, reject) => {
-      const item = {
+      const item: {
+        execute: () => Promise<string>;
+        resolve: (value: string) => void;
+        reject: (error: Error) => void;
+        timeoutMs: number;
+        settled: boolean;
+        timer: NodeJS.Timeout;
+      } = {
         execute: fn,
         resolve,
         reject,
@@ -378,6 +430,15 @@ class SearchQueue {
           );
         }, timeoutMs),
       };
+      const onAbort = () => {
+        if (item.settled) return;
+        item.settled = true;
+        clearTimeout(item.timer);
+        item.reject(new Error('searchAndAsk request cancelled while waiting in queue.'));
+      };
+      if (signal) {
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
       this.queue.push(item);
       this.processQueue();
     });
@@ -906,13 +967,30 @@ export class ContextServiceClient {
   private ignorePatternsLoaded: boolean = false;
 
   /**
-   * Queue for serializing searchAndAsk calls to prevent SDK concurrency issues.
-   * This ensures only one AI call runs at a time while allowing other operations
-   * to proceed in parallel.
+   * Queue lanes for serializing searchAndAsk calls to prevent SDK concurrency issues.
+   * Interactive lane remains default behavior. Background lane isolates long-running
+   * non-interactive work so it cannot starve user-facing requests.
    */
-  private searchQueue: SearchQueue = new SearchQueue(
-    envInt('CE_SEARCH_AND_ASK_QUEUE_MAX', DEFAULT_SEARCH_QUEUE_MAX)
+  private readonly searchQueueInteractiveMax = envInt('CE_SEARCH_AND_ASK_QUEUE_MAX', DEFAULT_SEARCH_QUEUE_MAX);
+  private readonly searchQueueBackgroundMax = envInt(
+    'CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND',
+    this.searchQueueInteractiveMax
   );
+  private readonly searchQueueRejectMode = resolveSearchQueueRejectMode(process.env.CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE);
+  private readonly searchQueues: Record<SearchAndAskPriority, SearchQueue> = {
+    interactive: new SearchQueue(
+      this.searchQueueInteractiveMax,
+      'interactive',
+      'CE_SEARCH_AND_ASK_QUEUE_MAX',
+      this.searchQueueRejectMode
+    ),
+    background: new SearchQueue(
+      this.searchQueueBackgroundMax,
+      'background',
+      'CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND',
+      this.searchQueueRejectMode
+    ),
+  };
 
   // ============================================================================
   // Reactive Commit Cache (Phase 1)
@@ -1167,15 +1245,31 @@ export class ContextServiceClient {
    * Update index status with staleness recompute
    */
   private updateIndexStatus(partial: Partial<IndexStatus>): void {
+    const isSuccessfulIndexCycle =
+      this.indexStatus.status === 'indexing' &&
+      partial.status === 'idle' &&
+      partial.lastIndexed !== undefined &&
+      partial.lastIndexed !== null;
+    const shouldClearLastError = Object.prototype.hasOwnProperty.call(partial, 'lastError')
+      && partial.lastError === undefined
+      && isSuccessfulIndexCycle;
+    const normalizedPartial: Partial<IndexStatus> = { ...partial };
+    if (
+      !shouldClearLastError &&
+      Object.prototype.hasOwnProperty.call(normalizedPartial, 'lastError') &&
+      normalizedPartial.lastError === undefined
+    ) {
+      delete normalizedPartial.lastError;
+    }
     const nextLastIndexed = this.resolveLastIndexed(partial.lastIndexed);
     const nextIsStale =
-      partial.isStale !== undefined
-        ? partial.isStale
+      normalizedPartial.isStale !== undefined
+        ? normalizedPartial.isStale
         : this.computeIsStale(nextLastIndexed);
 
     this.indexStatus = {
       ...this.indexStatus,
-      ...partial,
+      ...normalizedPartial,
       lastIndexed: nextLastIndexed,
       isStale: nextIsStale,
     };
@@ -3238,22 +3332,19 @@ export class ContextServiceClient {
   async searchAndAsk(
     searchQuery: string,
     prompt?: string,
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number; priority?: SearchAndAskPriority; signal?: AbortSignal }
   ): Promise<string> {
     const metricsStart = Date.now();
     const providerId = this.getActiveAIProviderId();
+    const priority: SearchAndAskPriority = options?.priority === 'background' ? 'background' : 'interactive';
+    const searchQueue = this.searchQueues[priority];
     if (this.isOfflineMode()) {
       throw new Error(
         'Offline mode enforced (CONTEXT_ENGINE_OFFLINE_ONLY=1) does not allow CE_AI_PROVIDER=openai_session. Disable offline mode to use openai_session.'
       );
     }
 
-    setGauge(
-      'context_engine_search_and_ask_queue_depth',
-      undefined,
-      this.searchQueue.depth,
-      'Number of searchAndAsk requests in-flight or waiting in the queue.'
-    );
+    this.publishSearchQueueDepthMetrics();
     incCounter('context_engine_search_and_ask_total', undefined, 1, 'Total searchAndAsk calls.');
 
     // Use the search queue to serialize searchAndAsk calls
@@ -3267,16 +3358,16 @@ export class ContextServiceClient {
     const requestedTimeoutMs = Number.isFinite(timeoutCandidate) ? timeoutCandidate : defaultTimeoutMs;
     const timeoutMs = Math.max(MIN_API_TIMEOUT_MS, Math.min(MAX_API_TIMEOUT_MS, requestedTimeoutMs));
     try {
-      const admissionTimeoutError = this.getQueueTimeoutAdmissionError(timeoutMs);
+      const admissionTimeoutError = this.getQueueTimeoutAdmissionError(timeoutMs, priority);
       if (admissionTimeoutError) {
         throw admissionTimeoutError;
       }
 
-      const response = await this.searchQueue.enqueue(async () => {
+      const response = await searchQueue.enqueue(async () => {
         try {
-          const queueLength = this.searchQueue.length;
+          const queueLength = searchQueue.length;
           console.error(
-            `[searchAndAsk] Provider=${providerId}; query=${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
+            `[searchAndAsk] Provider=${providerId}; lane=${priority}; query=${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
           );
 
           const provider = this.getAIProvider();
@@ -3297,7 +3388,7 @@ export class ContextServiceClient {
           console.error('[searchAndAsk] Failed:', error);
           throw error;
         }
-      }, timeoutMs);
+      }, timeoutMs, options?.signal);
       observeDurationMs(
         'context_engine_search_and_ask_duration_seconds',
         { result: 'success' },
@@ -3343,21 +3434,29 @@ export class ContextServiceClient {
       }
       throw e;
     } finally {
-      setGauge(
-        'context_engine_search_and_ask_queue_depth',
-        undefined,
-        this.searchQueue.depth,
-        'Number of searchAndAsk requests in-flight or waiting in the queue.'
-      );
+      this.publishSearchQueueDepthMetrics();
     }
+  }
+
+  private publishSearchQueueDepthMetrics(): void {
+    const interactiveDepth = this.searchQueues.interactive.depth;
+    const backgroundDepth = this.searchQueues.background.depth;
+    const helpText = 'Number of searchAndAsk requests in-flight or waiting in the queue.';
+
+    setGauge('context_engine_search_and_ask_queue_depth', undefined, interactiveDepth + backgroundDepth, helpText);
+    setGauge('context_engine_search_and_ask_queue_depth', { lane: 'interactive' }, interactiveDepth, helpText);
+    setGauge('context_engine_search_and_ask_queue_depth', { lane: 'background' }, backgroundDepth, helpText);
   }
 
   /**
    * Conservative queue-admission heuristic for fast-fail timeout budgeting.
    * This avoids spending very small request budgets in high queue pressure scenarios.
    */
-  private getQueueTimeoutAdmissionError(timeoutMs: number): SearchQueuePressureTimeoutError | null {
-    const queueDepth = this.searchQueue.depth;
+  private getQueueTimeoutAdmissionError(
+    timeoutMs: number,
+    priority: SearchAndAskPriority
+  ): SearchQueuePressureTimeoutError | null {
+    const queueDepth = this.searchQueues[priority].depth;
     if (queueDepth < SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD) {
       return null;
     }
@@ -3368,7 +3467,7 @@ export class ContextServiceClient {
       return null;
     }
 
-    return new SearchQueuePressureTimeoutError(timeoutMs, queueDepth, minimumBudgetMs);
+    return new SearchQueuePressureTimeoutError(timeoutMs, queueDepth, minimumBudgetMs, priority);
   }
 
   /**
