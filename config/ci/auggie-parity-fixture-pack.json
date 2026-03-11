@@ -1,0 +1,192 @@
+{
+  "schema_version": 1,
+  "generated_for": "auggie-parity-report-generator",
+  "pack_id": "local-native-parity-v1",
+  "defaults": {
+    "retrieval_parity_path": "docs/rollout-evidence/2026-03-04/retrieval-parity-report.json",
+    "working_directory": "."
+  },
+  "checks": [
+    {
+      "id": "parity.search.relevance_score",
+      "kind": "command_exit_zero",
+      "description": "Search contract suite must stay green for core relevance behavior.",
+      "command": "npm test -- --runInBand tests/tools/search.test.ts"
+    },
+    {
+      "id": "parity.search.rank_stability",
+      "kind": "command_exit_zero",
+      "description": "Provider-backed semantic search behavior must remain stable.",
+      "command": "npm test -- --runInBand tests/serviceClient.test.ts"
+    },
+    {
+      "id": "parity.search.result_consistency",
+      "kind": "command_exit_zero",
+      "description": "Service client search regression suite acts as the first consistency receipt.",
+      "command": "npm test -- --runInBand tests/serviceClient.test.ts"
+    },
+    {
+      "id": "parity.search.query_behavior_match",
+      "kind": "command_exit_zero",
+      "description": "Search tool behavior must match existing query expectations.",
+      "command": "npm test -- --runInBand tests/tools/search.test.ts"
+    },
+    {
+      "id": "parity.search.filter_behavior_match",
+      "kind": "command_exit_zero",
+      "description": "Filter and fallback behavior must remain covered by serviceClient tests.",
+      "command": "npm test -- --runInBand tests/serviceClient.test.ts"
+    },
+    {
+      "id": "parity.vector.ingest_success_rate",
+      "kind": "command_exit_zero",
+      "description": "Index lifecycle coverage stands in for ingest success proof.",
+      "command": "npm test -- --runInBand tests/serviceClient.test.ts tests/mcp/indexStateStore.test.ts"
+    },
+    {
+      "id": "parity.vector.embedding_latency_p95",
+      "kind": "json_path_compare",
+      "description": "Use existing bench parity artifact as the first latency receipt.",
+      "path": "@retrieval_parity",
+      "json_path": "metrics.bench.perf.p95_regression_pct.value",
+      "comparator": "lte",
+      "threshold": 20
+    },
+    {
+      "id": "parity.vector.retrieval_accuracy",
+      "kind": "command_exit_zero",
+      "description": "Search contract suite remains the first retrieval-accuracy guard.",
+      "command": "npm test -- --runInBand tests/tools/search.test.ts tests/serviceClient.test.ts"
+    },
+    {
+      "id": "parity.tools.schema_match_rate",
+      "kind": "command_exit_zero",
+      "description": "Core tool contract suites must stay green.",
+      "command": "npm test -- --runInBand tests/tools/search.test.ts tests/tools/codebaseRetrieval.test.ts tests/tools/enhance.test.ts tests/tools/reviewAuto.test.ts"
+    },
+    {
+      "id": "parity.tools.response_contract_match",
+      "kind": "command_exit_zero",
+      "description": "Tool response contract suites must stay green.",
+      "command": "npm test -- --runInBand tests/tools/search.test.ts tests/tools/codebaseRetrieval.test.ts tests/tools/enhance.test.ts tests/tools/reviewAuto.test.ts"
+    },
+    {
+      "id": "parity.tools.error_surface_match",
+      "kind": "command_exit_zero",
+      "description": "Provider and fallback error-surface tests must stay green.",
+      "command": "npm test -- --runInBand tests/serviceClient.test.ts"
+    },
+    {
+      "id": "parity.tools.request_id_coverage",
+      "kind": "command_exit_zero",
+      "description": "Approval workflow and plan-management request-id flows must stay green.",
+      "command": "npm test -- --runInBand tests/services/approvalWorkflowService.test.ts tests/tools/planManagement.contract.test.ts"
+    },
+    {
+      "id": "parity.tools.trace_completeness",
+      "kind": "text_contains",
+      "description": "Readiness evidence log should still show pass markers for rollout traces.",
+      "path": "docs/rollout-evidence/2026-03-04/readiness-check-output.log",
+      "patterns": ["Readiness check passed.", "PASS"],
+      "mode": "all"
+    },
+    {
+      "id": "parity.reliability.recovery_success_rate",
+      "kind": "command_exit_zero",
+      "description": "Timeout and zombie recovery suites are the first recovery receipts.",
+      "command": "npm test -- --runInBand tests/integration/timeoutResilience.test.ts tests/integration/zombieSessionRecovery.test.ts"
+    },
+    {
+      "id": "parity.reliability.retry_effectiveness",
+      "kind": "command_exit_zero",
+      "description": "Integration recovery suites double as retry-effectiveness evidence.",
+      "command": "npm test -- --runInBand tests/integration/timeoutResilience.test.ts tests/integration/zombieSessionRecovery.test.ts"
+    },
+    {
+      "id": "parity.reliability.fallback_safety",
+      "kind": "command_exit_zero",
+      "description": "Fallback and provider-error behavior must remain green.",
+      "command": "npm test -- --runInBand tests/serviceClient.test.ts"
+    },
+    {
+      "id": "parity.reliability.shadow_delta_rate",
+      "kind": "retrieval_eval_status",
+      "description": "Use legacy retrieval parity shadow overlap metric when available.",
+      "evaluation_id": "shadow.overlap_ratio",
+      "missing_status": "skip"
+    },
+    {
+      "id": "parity.reliability.canary_alert_budget",
+      "kind": "text_contains",
+      "description": "Canary/ramp gate output must remain passing.",
+      "path": "docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log",
+      "patterns": ["WS20 stage gate passed.", "PASS"],
+      "mode": "all"
+    },
+    {
+      "id": "parity.reliability.soak_stability_index",
+      "kind": "text_contains",
+      "description": "GA soak gate output must remain passing.",
+      "path": "docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log",
+      "patterns": ["WS20 stage gate passed.", "PASS"],
+      "mode": "all"
+    },
+    {
+      "id": "parity.performance.query_latency_p95",
+      "kind": "json_path_compare",
+      "description": "Current PR bench candidate p95 should remain within the historical candidate envelope.",
+      "path": "artifacts/bench/pr-candidate.json",
+      "json_path": "payload.timing.p95_ms",
+      "comparator": "lte",
+      "threshold": 100
+    },
+    {
+      "id": "parity.performance.throughput_qps",
+      "kind": "json_path_compare",
+      "description": "Current PR bench candidate throughput should remain healthy.",
+      "path": "artifacts/bench/pr-candidate.json",
+      "json_path": "payload.files_per_sec",
+      "comparator": "gte",
+      "threshold": 4000
+    },
+    {
+      "id": "parity.performance.cpu_memory_budget",
+      "kind": "json_path_compare",
+      "description": "Use MB/sec budget as the first resource-efficiency proxy until a dedicated CPU/memory artifact lands.",
+      "path": "artifacts/bench/pr-candidate.json",
+      "json_path": "payload.mb_per_sec",
+      "comparator": "gte",
+      "threshold": 50
+    },
+    {
+      "id": "parity.ops.shadow_receipt_present",
+      "kind": "file_exists",
+      "description": "Shadow parity artifact must be present.",
+      "path": "docs/rollout-evidence/2026-03-04/retrieval-parity-report.json"
+    },
+    {
+      "id": "parity.ops.canary_receipt_present",
+      "kind": "file_exists",
+      "description": "Canary receipt must be present.",
+      "path": "docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log"
+    },
+    {
+      "id": "parity.ops.soak_receipt_present",
+      "kind": "file_exists",
+      "description": "Soak receipt must be present.",
+      "path": "docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log"
+    },
+    {
+      "id": "parity.ops.rollback_drill_receipt_present",
+      "kind": "file_exists",
+      "description": "Rollback drill receipt must be present.",
+      "path": "docs/rollout-evidence/2026-03-04/ws21-rollback-drill-log.md"
+    },
+    {
+      "id": "parity.ops.no_legacy_scan_receipt_present",
+      "kind": "command_exit_zero",
+      "description": "Current no-legacy scan must pass.",
+      "command": "npm run -s ci:check:no-legacy-auggie"
+    }
+  ]
+}

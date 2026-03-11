@@ -198,6 +198,32 @@ Receipt fields:
 - [ ] Attach rollback drill receipt.
 - [ ] Attach removal completion receipt.
 
+### 4.3 First Parity Evidence Baseline
+Wave owner: `Codex`
+Wave date: `2026-03-11`
+Wave status: `Completed`
+
+Scope for this wave:
+- [x] Add a checked-in parity fixture pack at [`config/ci/auggie-parity-fixture-pack.json`](/D:/GitProjects/context-engine/config/ci/auggie-parity-fixture-pack.json).
+- [x] Add a report generator at [`generate-auggie-parity-report.ts`](/D:/GitProjects/context-engine/scripts/ci/generate-auggie-parity-report.ts) that emits the checker-compatible `evaluations[]` report.
+- [x] Wire package scripts so parity evidence generation runs before the Auggie capability gate.
+- [x] Add generator-focused tests and an end-to-end checker handoff test.
+- [x] Produce the first real parity baseline artifact pair under `artifacts/bench/`.
+
+Execution notes:
+- Current baseline artifacts:
+  - [`retrieval-parity-pr.json`](/D:/GitProjects/context-engine/artifacts/bench/retrieval-parity-pr.json)
+  - [`auggie-capability-parity-gate.json`](/D:/GitProjects/context-engine/artifacts/bench/auggie-capability-parity-gate.json)
+- Baseline score: `96.67`
+- Critical journeys: `100%` on `search-core-relevance`, `tool-invoke-contracts`, and `recovery-after-provider-failure`
+- Current gap: `shadow-canary-soak-stability` is at `66.67`, so the pipeline is working but deeper live-stage evidence can still improve this area.
+
+Wave receipt:
+- Owner: `Codex`
+- Date: `2026-03-11`
+- Status: `Pass`
+- Evidence links: `npm test -- --runInBand tests/ci/generateAuggieParityReport.test.ts tests/ci/checkAuggieCapabilityParity.test.ts`, `npm run -s ci:generate:auggie-parity-report`, `npm run -s ci:check:auggie-capability-parity`, `npm run build`
+
 Final sign-off:
 - Owner: `____________________`
 - Date: `YYYY-MM-DD`
