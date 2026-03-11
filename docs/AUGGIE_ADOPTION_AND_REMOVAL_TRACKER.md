@@ -261,6 +261,8 @@ Scope for this wave:
 - [x] Add optional dense retrieval candidate scoring path behind `enableDense`.
 - [x] Add persisted workspace dense index file path (`.augment-dense-index.json`).
 - [x] Link dense index incremental refresh to index-state hashes (`.augment-index-state.json`).
+- [x] Add dense refresh performance hardening (refresh-doc cap + embed batch sizing).
+- [x] Add dense refresh telemetry counters/duration metrics.
 - [x] Extend fusion to handle semantic + lexical + dense weighting.
 - [x] Add and pass dense retrieval unit tests without changing default runtime behavior.
 

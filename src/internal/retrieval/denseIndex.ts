@@ -1,11 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { SearchResult } from '../../mcp/serviceClient.js';
+import { envInt } from '../../config/env.js';
+import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
 import type { DenseRetriever, EmbeddingProvider } from './embeddingProvider.js';
 
 const DENSE_INDEX_FILE_NAME = '.augment-dense-index.json';
 const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const INDEX_VERSION = 1;
+const DEFAULT_DENSE_REFRESH_MAX_DOCS = 500;
+const DEFAULT_DENSE_EMBED_BATCH_SIZE = 64;
 
 interface DenseIndexEntry {
   path: string;
@@ -143,10 +147,22 @@ async function refreshDenseIndex(
   indexState: IndexStateFile,
   embeddingProvider: EmbeddingProvider
 ): Promise<DenseIndexFile> {
+  const refreshMaxDocs = envInt(
+    'CE_DENSE_REFRESH_MAX_DOCS',
+    DEFAULT_DENSE_REFRESH_MAX_DOCS,
+    { min: 1, max: 10_000 }
+  );
+  const embedBatchSize = envInt(
+    'CE_DENSE_EMBED_BATCH_SIZE',
+    DEFAULT_DENSE_EMBED_BATCH_SIZE,
+    { min: 1, max: 512 }
+  );
+  const refreshStart = Date.now();
   const nextDocs: Record<string, DenseIndexEntry> = {};
   const toEmbedPaths: string[] = [];
   const toEmbedDocs: string[] = [];
   const nowIso = new Date().toISOString();
+  let refreshedDocs = 0;
 
   for (const [relativePath, stateEntry] of Object.entries(indexState.files)) {
     const safePath = sanitizePath(relativePath);
@@ -164,6 +180,15 @@ async function refreshDenseIndex(
     if (!content) {
       continue;
     }
+    if (refreshedDocs >= refreshMaxDocs) {
+      incCounter(
+        'context_engine_dense_refresh_skipped_docs_total',
+        { reason: 'refresh_limit' },
+        1,
+        'Dense refresh skipped docs due to refresh max-docs cap.'
+      );
+      continue;
+    }
     toEmbedPaths.push(safePath);
     toEmbedDocs.push(content);
     nextDocs[safePath] = {
@@ -173,16 +198,53 @@ async function refreshDenseIndex(
       indexed_at: nowIso,
       embedding: [],
     };
+    refreshedDocs += 1;
   }
 
   if (toEmbedDocs.length > 0) {
-    const embeddings = await embeddingProvider.embedDocuments(toEmbedDocs);
-    for (let i = 0; i < toEmbedPaths.length; i += 1) {
-      const docPath = toEmbedPaths[i];
-      const embedding = embeddings[i] ?? [];
-      nextDocs[docPath].embedding = embedding;
+    for (let i = 0; i < toEmbedDocs.length; i += embedBatchSize) {
+      const batchDocs = toEmbedDocs.slice(i, i + embedBatchSize);
+      const batchPaths = toEmbedPaths.slice(i, i + embedBatchSize);
+      const batchStart = Date.now();
+      const embeddings = await embeddingProvider.embedDocuments(batchDocs);
+      observeDurationMs(
+        'context_engine_dense_embed_batch_duration_seconds',
+        { provider: embeddingProvider.id },
+        Date.now() - batchStart,
+        { help: 'Dense embedding batch duration in seconds.' }
+      );
+      incCounter(
+        'context_engine_dense_embed_batches_total',
+        { provider: embeddingProvider.id },
+        1,
+        'Total dense embedding batches.'
+      );
+      incCounter(
+        'context_engine_dense_embed_docs_total',
+        { provider: embeddingProvider.id },
+        batchDocs.length,
+        'Total dense embedding documents processed.'
+      );
+      for (let j = 0; j < batchPaths.length; j += 1) {
+        const docPath = batchPaths[j];
+        const embedding = embeddings[j] ?? [];
+        nextDocs[docPath].embedding = embedding;
+      }
     }
   }
+
+  observeDurationMs(
+    'context_engine_dense_refresh_duration_seconds',
+    { provider: embeddingProvider.id },
+    Date.now() - refreshStart,
+    { help: 'Dense refresh duration in seconds.' }
+  );
+  incCounter(
+    'context_engine_dense_refresh_docs_total',
+    { provider: embeddingProvider.id },
+    refreshedDocs,
+    'Total dense-refresh docs recomputed.'
+  );
 
   return {
     version: INDEX_VERSION,
@@ -234,4 +296,3 @@ export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOp
     },
   };
 }
-

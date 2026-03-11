@@ -10,6 +10,14 @@ function writeJson(filePath: string, value: unknown): void {
 }
 
 describe('createWorkspaceDenseRetriever', () => {
+  const originalEnv = { ...process.env };
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    delete process.env.CE_DENSE_REFRESH_MAX_DOCS;
+    delete process.env.CE_DENSE_EMBED_BATCH_SIZE;
+  });
+
   it('builds and incrementally refreshes persisted dense index using index state hashes', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-index-'));
     const fileA = path.join(tmp, 'src', 'a.ts');
@@ -60,5 +68,48 @@ describe('createWorkspaceDenseRetriever', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
-});
 
+  it('respects refresh-doc cap and embedding batch size', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-index-cap-'));
+    const indexStatePath = path.join(tmp, '.augment-index-state.json');
+    const denseIndexPath = path.join(tmp, '.augment-dense-index.json');
+    const files: Record<string, { hash: string; indexed_at: string }> = {};
+
+    for (let i = 0; i < 5; i += 1) {
+      const relative = `src/file-${i}.ts`;
+      const absolute = path.join(tmp, relative);
+      fs.mkdirSync(path.dirname(absolute), { recursive: true });
+      fs.writeFileSync(absolute, `export const file${i} = "dense ${i}";`, 'utf8');
+      files[relative] = { hash: `h${i}`, indexed_at: new Date().toISOString() };
+    }
+    writeJson(indexStatePath, { files });
+
+    process.env.CE_DENSE_REFRESH_MAX_DOCS = '2';
+    process.env.CE_DENSE_EMBED_BATCH_SIZE = '1';
+
+    const embeddingProvider = {
+      id: 'test-provider',
+      embedQuery: jest.fn(async () => [1, 0, 0]),
+      embedDocuments: jest.fn(async (documents: string[]) => documents.map(() => [1, 0, 0])),
+    };
+
+    const retriever = createWorkspaceDenseRetriever({
+      workspacePath: tmp,
+      indexStatePath,
+      denseIndexPath,
+      embeddingProvider,
+    });
+
+    const results = await retriever.search('dense', 10);
+    expect(results.length).toBe(2);
+    expect(embeddingProvider.embedDocuments).toHaveBeenCalledTimes(2);
+    expect(embeddingProvider.embedDocuments).toHaveBeenNthCalledWith(1, [expect.stringContaining('file0')]);
+    expect(embeddingProvider.embedDocuments).toHaveBeenNthCalledWith(2, [expect.stringContaining('file1')]);
+
+    const denseFile = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as { docs: Record<string, unknown> };
+    expect(Object.keys(denseFile.docs).length).toBe(2);
+    expect(Object.keys(denseFile.docs).sort()).toEqual(['src/file-0.ts', 'src/file-1.ts']);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+});
