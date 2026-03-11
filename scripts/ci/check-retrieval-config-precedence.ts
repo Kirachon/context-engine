@@ -32,6 +32,7 @@ assertDeepEqual(
   resolve({
     CE_RETRIEVAL_PROVIDER: 'local_native',
     CE_RETRIEVAL_FORCE_LEGACY: 'true',
+    AUGMENT_API_TOKEN: 'ci-test-token',
   }),
   {
     providerId: 'augment_legacy',
@@ -46,6 +47,7 @@ assertDeepEqual(
   resolve({
     CE_RETRIEVAL_PROVIDER: 'local_native',
     CE_RETRIEVAL_FORCE_LEGACY: '1',
+    AUGMENT_API_TOKEN: 'ci-test-token',
   }),
   {
     providerId: 'augment_legacy',
