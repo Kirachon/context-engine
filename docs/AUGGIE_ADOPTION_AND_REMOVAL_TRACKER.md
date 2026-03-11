@@ -214,15 +214,17 @@ Execution notes:
 - Current baseline artifacts:
   - [`retrieval-parity-pr.json`](/D:/GitProjects/context-engine/artifacts/bench/retrieval-parity-pr.json)
   - [`auggie-capability-parity-gate.json`](/D:/GitProjects/context-engine/artifacts/bench/auggie-capability-parity-gate.json)
-- Baseline score: `96.67`
+- Strengthened baseline score: `100.00`
 - Critical journeys: `100%` on `search-core-relevance`, `tool-invoke-contracts`, and `recovery-after-provider-failure`
-- Current gap: `shadow-canary-soak-stability` is at `66.67`, so the pipeline is working but deeper live-stage evidence can still improve this area.
+- Stability journey: `100%` on `shadow-canary-soak-stability`
+- History proof: latest `3` archived parity gate artifacts passed under [`artifacts/bench/auggie-parity-history`](/D:/GitProjects/context-engine/artifacts/bench/auggie-parity-history)
+- Strict gate proof now uses `require_consecutive=3` and passes cleanly.
 
 Wave receipt:
 - Owner: `Codex`
 - Date: `2026-03-11`
 - Status: `Pass`
-- Evidence links: `npm test -- --runInBand tests/ci/generateAuggieParityReport.test.ts tests/ci/checkAuggieCapabilityParity.test.ts`, `npm run -s ci:generate:auggie-parity-report`, `npm run -s ci:check:auggie-capability-parity`, `npm run build`
+- Evidence links: `npm test -- --runInBand tests/ci/generateAuggieParityReport.test.ts tests/ci/archiveAuggieParityHistory.test.ts tests/ci/checkAuggieCapabilityParity.test.ts`, `npm run -s ci:check:auggie-capability-parity`, `npm run -s ci:archive:auggie-parity-history`, `npm run -s ci:check:auggie-capability-parity:strict`, `npm run build`
 
 Final sign-off:
 - Owner: `____________________`

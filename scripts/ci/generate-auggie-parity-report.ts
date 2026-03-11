@@ -82,6 +82,14 @@ interface JsonPathCompareCheck extends BaseMetricCheck {
   missing_status?: MissingStatus;
 }
 
+interface JsonPathEqualsCheck extends BaseMetricCheck {
+  kind: 'json_path_equals';
+  path: string;
+  json_path: string;
+  expected: string | number | boolean;
+  missing_status?: MissingStatus;
+}
+
 interface RetrievalEvalStatusCheck extends BaseMetricCheck {
   kind: 'retrieval_eval_status';
   evaluation_id: string;
@@ -94,6 +102,7 @@ type MetricCheck =
   | FileExistsCheck
   | TextContainsCheck
   | JsonPathCompareCheck
+  | JsonPathEqualsCheck
   | RetrievalEvalStatusCheck;
 
 interface EvaluationResult {
@@ -437,6 +446,32 @@ function main(): void {
           status: ok ? 'pass' : 'fail',
           message: `${ok ? 'PASS' : 'FAIL'} ${check.id}: value=${rawValue} ${check.comparator} ${check.threshold}`,
           value: rawValue,
+          note: `${resolvedPath}#${check.json_path}`,
+        };
+      }
+
+      if (check.kind === 'json_path_equals') {
+        const resolvedPath = resolveFixturePath(check.path, defaultWorkingDir, retrievalParityPath);
+        const rawValue = getByPath(readCachedJson(resolvedPath), check.json_path);
+        if (rawValue === undefined) {
+          const status: EvalStatus = (check.missing_status ?? 'skip') === 'fail' ? 'fail' : 'skip';
+          return {
+            status,
+            message:
+              status === 'fail'
+                ? `FAIL ${check.id}: value missing at ${check.json_path}`
+                : `SKIP ${check.id}: value missing at ${check.json_path}`,
+            note: resolvedPath,
+          };
+        }
+        const ok = rawValue === check.expected;
+        return {
+          status: ok ? 'pass' : 'fail',
+          message: `${ok ? 'PASS' : 'FAIL'} ${check.id}: value=${String(rawValue)} expected=${String(check.expected)}`,
+          value:
+            typeof rawValue === 'string' || typeof rawValue === 'number' || typeof rawValue === 'boolean'
+              ? rawValue
+              : JSON.stringify(rawValue),
           note: `${resolvedPath}#${check.json_path}`,
         };
       }

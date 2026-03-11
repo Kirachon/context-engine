@@ -205,4 +205,50 @@ describe('scripts/ci/generate-auggie-parity-report.ts', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('passes json_path_equals checks when the expected gate status is present', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-parity-generator-json-equals-'));
+    const matrixPath = path.join(tmp, 'matrix.json');
+    const fixturePath = path.join(tmp, 'fixture-pack.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    writeJson(matrixPath, {
+      journeys: [
+        {
+          id: 'shadow-proof',
+          metric_refs: ['parity.reliability.shadow_delta_rate'],
+        },
+      ],
+      weights: { 'shadow-proof': 1 },
+      gate_rules: { min_overall_score: 100, critical_required: 100 },
+    });
+    writeJson(path.join(tmp, 'retrieval-parity.json'), {
+      gate: { status: 'pass' },
+    });
+    writeJson(fixturePath, {
+      schema_version: 1,
+      pack_id: 'tmp-json-equals',
+      defaults: {
+        retrieval_parity_path: 'retrieval-parity.json',
+      },
+      checks: [
+        {
+          id: 'parity.reliability.shadow_delta_rate',
+          kind: 'json_path_equals',
+          path: '@retrieval_parity',
+          json_path: 'gate.status',
+          expected: 'pass',
+          missing_status: 'fail',
+        },
+      ],
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--matrix', matrixPath, '--out', outPath], tmp);
+    expect(result.status).toBe(0);
+    const report = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const evaluations = report.evaluations as Array<Record<string, unknown>>;
+    expect(evaluations[0].status).toBe('pass');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-11T13:22:48.864Z",
+  "generated_at": "2026-03-11T13:33:12.350Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-parity-fixture-pack.json",
     "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-capability-matrix.json",
@@ -90,8 +90,8 @@
     },
     {
       "id": "parity.reliability.shadow_delta_rate",
-      "status": "skip",
-      "message": "SKIP parity.reliability.shadow_delta_rate: retrieval metric shadow.overlap_ratio returned skip"
+      "status": "pass",
+      "message": "PASS parity.reliability.shadow_delta_rate: value=pass expected=pass"
     },
     {
       "id": "parity.reliability.canary_alert_budget",
@@ -195,7 +195,8 @@
       "note": "Fallback and provider-error behavior must remain green."
     },
     "parity.reliability.shadow_delta_rate": {
-      "note": "shadow.overlap_ratio"
+      "value": "pass",
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json#gate.status"
     },
     "parity.reliability.canary_alert_budget": {
       "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage2-gate-output.log"
@@ -330,9 +331,9 @@
     },
     {
       "id": "parity.reliability.shadow_delta_rate",
-      "kind": "retrieval_eval_status",
-      "status": "skip",
-      "message": "SKIP parity.reliability.shadow_delta_rate: retrieval metric shadow.overlap_ratio returned skip"
+      "kind": "json_path_equals",
+      "status": "pass",
+      "message": "PASS parity.reliability.shadow_delta_rate: value=pass expected=pass"
     },
     {
       "id": "parity.reliability.canary_alert_budget",

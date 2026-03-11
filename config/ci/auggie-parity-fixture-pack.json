@@ -110,10 +110,12 @@
     },
     {
       "id": "parity.reliability.shadow_delta_rate",
-      "kind": "retrieval_eval_status",
-      "description": "Use legacy retrieval parity shadow overlap metric when available.",
-      "evaluation_id": "shadow.overlap_ratio",
-      "missing_status": "skip"
+      "kind": "json_path_equals",
+      "description": "The shadow-style retrieval parity artifact itself must have a passing gate result.",
+      "path": "@retrieval_parity",
+      "json_path": "gate.status",
+      "expected": "pass",
+      "missing_status": "fail"
     },
     {
       "id": "parity.reliability.canary_alert_budget",
