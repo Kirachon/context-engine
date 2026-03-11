@@ -21,6 +21,7 @@ function clampWeight(value: number | undefined, fallback: number): number {
 export interface FusionOptions {
   semanticWeight?: number;
   lexicalWeight?: number;
+  denseWeight?: number;
 }
 
 export function fuseCandidates(
@@ -31,9 +32,11 @@ export function fuseCandidates(
 
   const semanticWeight = clampWeight(options.semanticWeight, 0.7);
   const lexicalWeight = clampWeight(options.lexicalWeight, 0.3);
-  const totalWeight = semanticWeight + lexicalWeight || 1;
+  const denseWeight = clampWeight(options.denseWeight, 0);
+  const totalWeight = semanticWeight + lexicalWeight + denseWeight || 1;
   const semanticNormWeight = semanticWeight / totalWeight;
   const lexicalNormWeight = lexicalWeight / totalWeight;
+  const denseNormWeight = denseWeight / totalWeight;
 
   const maxSemantic = results.reduce((max, item) => {
     const score = item.semanticScore ?? item.relevanceScore ?? item.score ?? 0;
@@ -41,6 +44,10 @@ export function fuseCandidates(
   }, 0);
   const maxLexical = results.reduce((max, item) => {
     const score = item.lexicalScore ?? (item.retrievalSource === 'lexical' ? item.relevanceScore ?? 0 : 0);
+    return Math.max(max, score);
+  }, 0);
+  const maxDense = results.reduce((max, item) => {
+    const score = item.denseScore ?? (item.retrievalSource === 'dense' ? item.relevanceScore ?? 0 : 0);
     return Math.max(max, score);
   }, 0);
 
@@ -64,18 +71,30 @@ export function fuseCandidates(
       const value = item.lexicalScore ?? (item.retrievalSource === 'lexical' ? item.relevanceScore ?? item.score ?? 0 : 0);
       return Math.max(max, value);
     }, 0);
+    const denseScore = group.reduce((max, item) => {
+      const value = item.denseScore ?? (item.retrievalSource === 'dense' ? item.relevanceScore ?? item.score ?? 0 : 0);
+      return Math.max(max, value);
+    }, 0);
 
     const normalizedSemantic = maxSemantic > 0 ? semanticScore / maxSemantic : 0;
     const normalizedLexical = maxLexical > 0 ? lexicalScore / maxLexical : 0;
-    const fusedScore = (normalizedSemantic * semanticNormWeight) + (normalizedLexical * lexicalNormWeight);
+    const normalizedDense = maxDense > 0 ? denseScore / maxDense : 0;
+    const fusedScore =
+      (normalizedSemantic * semanticNormWeight) +
+      (normalizedLexical * lexicalNormWeight) +
+      (normalizedDense * denseNormWeight);
 
     const hasSemantic = semanticScore > 0;
     const hasLexical = lexicalScore > 0;
-    const retrievalSource = hasSemantic && hasLexical
+    const hasDense = denseScore > 0;
+    const sourceCount = Number(hasSemantic) + Number(hasLexical) + Number(hasDense);
+    const retrievalSource = sourceCount > 1
       ? 'hybrid'
       : hasSemantic
         ? 'semantic'
-        : 'lexical';
+        : hasLexical
+          ? 'lexical'
+          : 'dense';
 
     const bestVariant = group.reduce((best, item) => {
       if (item.variantWeight > best.variantWeight) return item;
@@ -87,6 +106,7 @@ export function fuseCandidates(
       retrievalSource,
       semanticScore,
       lexicalScore,
+      denseScore,
       fusedScore,
       combinedScore: fusedScore,
       relevanceScore: fusedScore,

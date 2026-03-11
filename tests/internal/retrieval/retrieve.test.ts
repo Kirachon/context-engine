@@ -53,4 +53,36 @@ describe('retrieve internal pipeline', () => {
     expect((results[0] as any).retrievalSource).toBe('hybrid');
     expect((results[0] as any).combinedScore).toBeGreaterThan(0);
   });
+
+  it('supports optional dense candidates behind enableDense flag', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/query.ts', content: 'semantic hit', relevanceScore: 0.4, lines: '5-9' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const denseProvider = {
+      id: 'dense:test',
+      search: jest.fn(async () => [
+        { path: 'src/query.ts', content: 'dense hit', relevanceScore: 0.95, lines: '5-9' },
+      ]),
+    };
+
+    const results = await retrieve('query', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableDense: true,
+      denseProvider,
+      enableFusion: true,
+      semanticWeight: 0.2,
+      denseWeight: 0.8,
+      topK: 5,
+    });
+
+    expect(denseProvider.search).toHaveBeenCalledTimes(1);
+    expect(results).toHaveLength(1);
+    expect((results[0] as any).retrievalSource).toBe('hybrid');
+    expect((results[0] as any).denseScore).toBeGreaterThan(0);
+  });
 });

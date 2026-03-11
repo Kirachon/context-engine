@@ -59,4 +59,32 @@ describe('fuseCandidates', () => {
     expect(fused[0].path).toBe('src/a.ts');
     expect(fused[1].path).toBe('src/b.ts');
   });
+
+  it('includes dense score when dense candidates are provided', () => {
+    const fused = fuseCandidates([
+      makeCandidate({
+        path: 'src/ranker.ts',
+        lines: '3-8',
+        retrievalSource: 'semantic',
+        semanticScore: 0.6,
+        relevanceScore: 0.6,
+      }),
+      makeCandidate({
+        path: 'src/ranker.ts',
+        lines: '3-8',
+        retrievalSource: 'dense',
+        denseScore: 0.9,
+        relevanceScore: 0.9,
+      }),
+    ], {
+      semanticWeight: 0.5,
+      lexicalWeight: 0,
+      denseWeight: 0.5,
+    });
+
+    expect(fused).toHaveLength(1);
+    expect(fused[0].retrievalSource).toBe('hybrid');
+    expect(fused[0].denseScore).toBeCloseTo(0.9);
+    expect((fused[0].combinedScore ?? 0)).toBeGreaterThan(0);
+  });
 });

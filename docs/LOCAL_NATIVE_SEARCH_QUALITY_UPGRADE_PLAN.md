@@ -79,10 +79,10 @@ This plan keeps current parity/reliability protections while adding judged quali
 - [x] Add and pass unit/integration tests for fusion ordering.
 
 ### Phase 2
-- [ ] Define dense index and embedding provider interfaces.
+- [x] Define dense index and embedding provider interfaces.
 - [ ] Implement local persisted dense index path.
 - [ ] Add incremental refresh/version linkage to index state.
-- [ ] Add dense + lexical hybrid candidate fusion tests.
+- [x] Add dense + lexical hybrid candidate fusion tests.
 
 ### Phase 3
 - [ ] Implement optional top-N reranker path.

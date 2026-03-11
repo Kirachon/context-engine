@@ -2,6 +2,7 @@ import { ContextServiceClient, SearchResult } from '../../mcp/serviceClient.js';
 import { featureEnabled } from '../../config/features.js';
 import { expandQuery } from './expandQuery.js';
 import { dedupeResults } from './dedupe.js';
+import { scoreDenseCandidates } from './dense.js';
 import { fuseCandidates } from './fusion.js';
 import { scoreLexicalCandidates } from './lexical.js';
 import { rerankResults } from './rerank.js';
@@ -10,9 +11,10 @@ import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.j
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disable', 'disabled']);
 
 type NormalizedRetrievalOptions =
-  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength'> & {
+  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider'> & {
     bypassCache: boolean;
     maxOutputLength?: number;
+    denseProvider?: RetrievalOptions['denseProvider'];
   };
 
 export function isRetrievalPipelineEnabled(): boolean {
@@ -46,10 +48,13 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     enableExpansion: options?.enableExpansion ?? true,
     enableDedupe: options?.enableDedupe ?? true,
     enableLexical: options?.enableLexical ?? true,
+    enableDense: options?.enableDense ?? false,
     enableFusion: options?.enableFusion ?? true,
     enableRerank: options?.enableRerank ?? true,
     semanticWeight: Math.max(0, Math.min(1, options?.semanticWeight ?? 0.7)),
     lexicalWeight: Math.max(0, Math.min(1, options?.lexicalWeight ?? 0.3)),
+    denseWeight: Math.max(0, Math.min(1, options?.denseWeight ?? 0)),
+    denseProvider: options?.denseProvider,
     log: options?.log ?? false,
     bypassCache: options?.bypassCache ?? false,
     maxOutputLength: options?.maxOutputLength,
@@ -104,6 +109,7 @@ export async function retrieve(
   const expandedQueries = buildExpandedQueries(query, settings);
   const semanticCandidates: InternalSearchResult[] = [];
   const lexicalCandidates: InternalSearchResult[] = [];
+  const denseCandidates: InternalSearchResult[] = [];
   const localKeywordSearch = (serviceClient as ContextServiceClient & {
     localKeywordSearch?: (input: string, topK: number) => Promise<SearchResult[]>;
   }).localKeywordSearch;
@@ -134,34 +140,51 @@ export async function retrieve(
       }
     }
 
-    if (!settings.enableLexical || typeof localKeywordSearch !== 'function') {
-      continue;
+    if (settings.enableLexical && typeof localKeywordSearch === 'function') {
+      try {
+        const lexicalResults = await withTimeout(
+          localKeywordSearch(variant.query, settings.perQueryTopK),
+          settings.timeoutMs,
+          []
+        );
+        lexicalCandidates.push(...scoreLexicalCandidates(lexicalResults, {
+          query,
+          queryVariant: variant.query,
+          variantIndex: variant.index,
+          variantWeight: variant.weight,
+        }));
+      } catch (error) {
+        if (settings.log) {
+          console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
+        }
+      }
     }
 
-    try {
-      const lexicalResults = await withTimeout(
-        localKeywordSearch(variant.query, settings.perQueryTopK),
-        settings.timeoutMs,
-        []
-      );
-      lexicalCandidates.push(...scoreLexicalCandidates(lexicalResults, {
-        query,
-        queryVariant: variant.query,
-        variantIndex: variant.index,
-        variantWeight: variant.weight,
-      }));
-    } catch (error) {
-      if (settings.log) {
-        console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
+    if (settings.enableDense && settings.denseProvider) {
+      try {
+        const denseResults = await withTimeout(
+          settings.denseProvider.search(variant.query, settings.perQueryTopK),
+          settings.timeoutMs,
+          []
+        );
+        denseCandidates.push(...scoreDenseCandidates(denseResults, {
+          queryVariant: variant.query,
+          variantIndex: variant.index,
+          variantWeight: variant.weight,
+        }));
+      } catch (error) {
+        if (settings.log) {
+          console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
+        }
       }
     }
   }
 
-  if (semanticCandidates.length === 0 && lexicalCandidates.length === 0) {
+  if (semanticCandidates.length === 0 && lexicalCandidates.length === 0 && denseCandidates.length === 0) {
     return [];
   }
 
-  let processed: InternalSearchResult[] = [...semanticCandidates, ...lexicalCandidates];
+  let processed: InternalSearchResult[] = [...semanticCandidates, ...lexicalCandidates, ...denseCandidates];
 
   if (settings.enableDedupe) {
     // Keep cross-source signals for fusion by deduping inside each source first.
@@ -171,13 +194,17 @@ export async function retrieve(
     const dedupedLexical = dedupeResults(
       processed.filter((candidate) => candidate.retrievalSource === 'lexical')
     );
-    processed = [...dedupedSemantic, ...dedupedLexical];
+    const dedupedDense = dedupeResults(
+      processed.filter((candidate) => candidate.retrievalSource === 'dense')
+    );
+    processed = [...dedupedSemantic, ...dedupedLexical, ...dedupedDense];
   }
 
   if (settings.enableFusion) {
     processed = fuseCandidates(processed, {
       semanticWeight: settings.semanticWeight,
       lexicalWeight: settings.lexicalWeight,
+      denseWeight: settings.denseWeight,
     });
   }
 

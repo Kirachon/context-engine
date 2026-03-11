@@ -251,6 +251,23 @@ Wave receipt:
 - Status: `Pass`
 - Evidence links: `npm test -- --runInBand tests/internal/retrieval/lexical.test.ts tests/internal/retrieval/fusion.test.ts tests/internal/retrieval/retrieve.test.ts tests/ci/generateRetrievalQualityReport.test.ts tests/ci/checkRetrievalQualityGate.test.ts`, `npm run -s ci:check:retrieval-quality-gate`, `npm run build`
 
+### 4.5 Local-Native Dense Scaffolding (Phase 2 start)
+Wave owner: `Codex`
+Wave date: `2026-03-11`
+Wave status: `Completed`
+
+Scope for this wave:
+- [x] Add embedding and dense index scaffolding interfaces.
+- [x] Add optional dense retrieval candidate scoring path behind `enableDense`.
+- [x] Extend fusion to handle semantic + lexical + dense weighting.
+- [x] Add and pass dense retrieval unit tests without changing default runtime behavior.
+
+Wave receipt:
+- Owner: `Codex`
+- Date: `2026-03-11`
+- Status: `Pass`
+- Evidence links: `npm test -- --runInBand tests/internal/retrieval/dense.test.ts tests/internal/retrieval/fusion.test.ts tests/internal/retrieval/retrieve.test.ts`, `npm run build`
+
 Final sign-off:
 - Owner: `____________________`
 - Date: `YYYY-MM-DD`
