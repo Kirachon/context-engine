@@ -3,10 +3,10 @@ import { resolveRetrievalProviderEnv } from '../../src/retrieval/providers/env.t
 type EnvInput = Record<string, string | undefined>;
 
 assertDeepEqual(
-  'default env resolves to augment_legacy without force flag',
+  'default env resolves to local_native without force flag',
   resolve({}),
   {
-    providerId: 'augment_legacy',
+    providerId: 'local_native',
     forceLegacy: false,
     shadowCompareEnabled: false,
     shadowSampleRate: 0,

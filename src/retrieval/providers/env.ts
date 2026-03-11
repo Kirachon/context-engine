@@ -27,7 +27,7 @@ export function resolveRetrievalProviderEnv(env: NodeJS.ProcessEnv = process.env
   const shadowSampleRate = parseSampleRate(env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE);
 
   return {
-    providerId: forceLegacy ? 'augment_legacy' : configuredProvider ?? 'augment_legacy',
+    providerId: forceLegacy ? 'augment_legacy' : configuredProvider ?? 'local_native',
     forceLegacy,
     shadowCompareEnabled,
     shadowSampleRate,

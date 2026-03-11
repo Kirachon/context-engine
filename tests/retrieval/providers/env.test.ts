@@ -16,9 +16,9 @@ describe('retrieval provider env resolution', () => {
     process.env = { ...ORIGINAL_ENV };
   });
 
-  it('defaults to augment_legacy with shadow compare disabled', () => {
+  it('defaults to local_native with shadow compare disabled', () => {
     expect(resolveRetrievalProviderEnv()).toEqual({
-      providerId: 'augment_legacy',
+      providerId: 'local_native',
       forceLegacy: false,
       shadowCompareEnabled: false,
       shadowSampleRate: 0,
