@@ -7,6 +7,8 @@ Use these templates when adding or updating rollout governance artifacts:
 - docs/templates/freeze-checklist.template.md
 - docs/templates/final-release-summary.template.md
 - docs/templates/rollout-evidence-entry.template.md
+- docs/WS21_ROLLBACK_DRILL_TEMPLATE.md
+- config/rollout-go-no-go-thresholds.json
 
 Recommended update sequence:
 1. Fill pre-rollout baseline checklist before stage 0->1 advancement.
