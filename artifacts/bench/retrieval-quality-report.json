@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-11T14:14:18.921Z",
+  "inputs": {
+    "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json"
+  },
+  "evaluations": [
+    {
+      "id": "quality.ndcg_at_10",
+      "status": "pass",
+      "value": 13.99999999999999,
+      "message": "PASS quality.ndcg_at_10: delta_pct=14.000 min=12"
+    },
+    {
+      "id": "quality.mrr_at_10",
+      "status": "pass",
+      "value": 12.499999999999996,
+      "message": "PASS quality.mrr_at_10: delta_pct=12.500 min=10"
+    },
+    {
+      "id": "quality.recall_at_50",
+      "status": "pass",
+      "value": 21.999999999999996,
+      "message": "PASS quality.recall_at_50: delta_pct=22.000 min=20"
+    },
+    {
+      "id": "latency.fast.p95_ms",
+      "status": "pass",
+      "value": 340,
+      "message": "PASS latency.fast.p95_ms: value=340 max=350"
+    },
+    {
+      "id": "latency.balanced.p95_ms",
+      "status": "pass",
+      "value": 680,
+      "message": "PASS latency.balanced.p95_ms: value=680 max=700"
+    },
+    {
+      "id": "latency.rich.p95_ms",
+      "status": "pass",
+      "value": 1180,
+      "message": "PASS latency.rich.p95_ms: value=1180 max=1200"
+    },
+    {
+      "id": "resource.rss_growth_pct",
+      "status": "pass",
+      "value": 22,
+      "message": "PASS resource.rss_growth_pct: value=22 max=25"
+    },
+    {
+      "id": "resource.dense_index_size_ratio",
+      "status": "pass",
+      "value": 2.4,
+      "message": "PASS resource.dense_index_size_ratio: value=2.4 max=2.5"
+    }
+  ],
+  "summary": {
+    "total": 8,
+    "pass": 8,
+    "fail": 0,
+    "skip": 0,
+    "pass_rate": 1
+  },
+  "gate_rules": {
+    "min_pass_rate": 1,
+    "required_ids": [
+      "quality.ndcg_at_10",
+      "quality.mrr_at_10",
+      "quality.recall_at_50",
+      "latency.fast.p95_ms",
+      "latency.balanced.p95_ms",
+      "latency.rich.p95_ms"
+    ]
+  },
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  }
+}

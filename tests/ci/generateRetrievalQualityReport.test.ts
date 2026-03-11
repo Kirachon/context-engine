@@ -1,0 +1,86 @@
+import { describe, expect, it } from '@jest/globals';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { spawnSync } from 'child_process';
+
+function writeJson(filePath: string, value: unknown): void {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2), 'utf8');
+}
+
+function runGenerator(args: string[]): { status: number; stdout: string; stderr: string } {
+  const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
+  const script = path.join(process.cwd(), 'scripts', 'ci', 'generate-retrieval-quality-report.ts');
+  const res = spawnSync(process.execPath, [tsxCli, script, ...args], {
+    cwd: process.cwd(),
+    env: process.env,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  return {
+    status: res.status ?? -1,
+    stdout: res.stdout ?? '',
+    stderr: res.stderr ?? '',
+  };
+}
+
+describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
+  it('creates a pass report from a passing fixture pack', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-pass-'));
+    const fixturePath = path.join(tmp, 'fixture.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    writeJson(fixturePath, {
+      checks: [
+        { id: 'quality.ndcg_at_10', kind: 'delta_pct_min', baseline: 0.5, candidate: 0.56, min_delta_pct: 10 },
+        { id: 'latency.fast.p95_ms', kind: 'threshold_max', value: 340, max: 350 },
+        { id: 'resource.rss_growth_pct', kind: 'threshold_max', value: 20, max: 25 },
+      ],
+      gate_rules: {
+        min_pass_rate: 1,
+        required_ids: ['quality.ndcg_at_10', 'latency.fast.p95_ms'],
+      },
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--out', outPath]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('gate_status=pass');
+    expect(fs.existsSync(outPath)).toBe(true);
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const gate = artifact.gate as Record<string, unknown>;
+    expect(gate.status).toBe('pass');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('creates a fail report when required metrics fail', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-fail-'));
+    const fixturePath = path.join(tmp, 'fixture.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    writeJson(fixturePath, {
+      checks: [
+        { id: 'quality.mrr_at_10', kind: 'delta_pct_min', baseline: 0.4, candidate: 0.41, min_delta_pct: 10 },
+        { id: 'latency.fast.p95_ms', kind: 'threshold_max', value: 370, max: 350 },
+      ],
+      gate_rules: {
+        min_pass_rate: 1,
+        required_ids: ['quality.mrr_at_10', 'latency.fast.p95_ms'],
+      },
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--out', outPath]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('gate_status=fail');
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const gate = artifact.gate as Record<string, unknown>;
+    expect(gate.status).toBe('fail');
+    const reasons = gate.reasons as string[];
+    expect(reasons.length).toBeGreaterThan(0);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+});

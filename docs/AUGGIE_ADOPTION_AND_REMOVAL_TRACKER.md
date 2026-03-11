@@ -8,6 +8,10 @@ Plan version: Finalized v2
 ## Objective
 Execute a controlled adoption of practical Auggie-style capabilities into `local_native`, then remove legacy dependency/runtime paths with measurable parity and hard go/no-go gates.
 
+## Next Wave Pointer
+- Active follow-up implementation plan: [`docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md)
+- Current focus: Phase 0 and Phase 1 foundations (quality gate scaffolding, lexical/fusion retrieval upgrades).
+
 ## Tracker Metadata
 - Owner: `____________________`
 - Date: `YYYY-MM-DD`
@@ -225,6 +229,27 @@ Wave receipt:
 - Date: `2026-03-11`
 - Status: `Pass`
 - Evidence links: `npm test -- --runInBand tests/ci/generateAuggieParityReport.test.ts tests/ci/archiveAuggieParityHistory.test.ts tests/ci/checkAuggieCapabilityParity.test.ts`, `npm run -s ci:check:auggie-capability-parity`, `npm run -s ci:archive:auggie-parity-history`, `npm run -s ci:check:auggie-capability-parity:strict`, `npm run build`
+
+### 4.4 Local-Native Search Quality Kickoff (Phase 0 + Phase 1)
+Wave owner: `Codex / multi-agent wave`
+Wave date: `2026-03-11`
+Wave status: `Completed`
+
+Scope for this wave:
+- [x] Save and publish the implementation plan at [`docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md).
+- [x] Add retrieval quality fixture pack at [`config/ci/retrieval-quality-fixture-pack.json`](/D:/GitProjects/context-engine/config/ci/retrieval-quality-fixture-pack.json).
+- [x] Add deterministic quality report and gate scripts.
+- [x] Add `npm` script wiring for quality report/gate execution.
+- [x] Implement lexical retrieval scoring and weighted fusion in the internal retrieval pipeline.
+- [x] Add unit tests for lexical scoring, fusion, and updated retrieval pipeline behavior.
+- [x] Add CI tests for retrieval quality report/gate scripts.
+- [x] Produce first retrieval-quality report/gate artifacts under `artifacts/bench/`.
+
+Wave receipt:
+- Owner: `Codex / multi-agent wave`
+- Date: `2026-03-11`
+- Status: `Pass`
+- Evidence links: `npm test -- --runInBand tests/internal/retrieval/lexical.test.ts tests/internal/retrieval/fusion.test.ts tests/internal/retrieval/retrieve.test.ts tests/ci/generateRetrievalQualityReport.test.ts tests/ci/checkRetrievalQualityGate.test.ts`, `npm run -s ci:check:retrieval-quality-gate`, `npm run build`
 
 Final sign-off:
 - Owner: `____________________`

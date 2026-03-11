@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "generated_for": "local-native-search-quality-upgrade",
+  "checks": [
+    {
+      "id": "quality.ndcg_at_10",
+      "kind": "delta_pct_min",
+      "baseline": 0.5,
+      "candidate": 0.57,
+      "min_delta_pct": 12
+    },
+    {
+      "id": "quality.mrr_at_10",
+      "kind": "delta_pct_min",
+      "baseline": 0.4,
+      "candidate": 0.45,
+      "min_delta_pct": 10
+    },
+    {
+      "id": "quality.recall_at_50",
+      "kind": "delta_pct_min",
+      "baseline": 0.5,
+      "candidate": 0.61,
+      "min_delta_pct": 20
+    },
+    {
+      "id": "latency.fast.p95_ms",
+      "kind": "threshold_max",
+      "value": 340,
+      "max": 350
+    },
+    {
+      "id": "latency.balanced.p95_ms",
+      "kind": "threshold_max",
+      "value": 680,
+      "max": 700
+    },
+    {
+      "id": "latency.rich.p95_ms",
+      "kind": "threshold_max",
+      "value": 1180,
+      "max": 1200
+    },
+    {
+      "id": "resource.rss_growth_pct",
+      "kind": "threshold_max",
+      "value": 22,
+      "max": 25
+    },
+    {
+      "id": "resource.dense_index_size_ratio",
+      "kind": "threshold_max",
+      "value": 2.4,
+      "max": 2.5
+    }
+  ],
+  "gate_rules": {
+    "min_pass_rate": 1,
+    "required_ids": [
+      "quality.ndcg_at_10",
+      "quality.mrr_at_10",
+      "quality.recall_at_50",
+      "latency.fast.p95_ms",
+      "latency.balanced.p95_ms",
+      "latency.rich.p95_ms"
+    ]
+  }
+}
