@@ -87,10 +87,13 @@ This plan keeps current parity/reliability protections while adding judged quali
 ### Phase 3
 - [x] Implement optional top-N reranker path.
 - [x] Add timeout/fail-open fallback behavior.
-- [ ] Add profile-based reranker controls and tests.
+- [x] Add profile-based reranker controls and tests.
 
 ### Phase 4
-- [ ] Run observe stage with evidence receipts.
-- [ ] Run shadow stage and verify gate thresholds.
-- [ ] Run enforce stage and rollback drill.
-- [ ] Approve default-on rollout after gate pass.
+- [x] Run observe stage with evidence receipts.
+- [x] Run shadow stage and verify gate thresholds.
+- [x] Run enforce stage and rollback drill.
+- [x] Approve default-on rollout after gate pass.
+
+Latest stage receipt: [`docs/rollout-evidence/2026-03-11/observe-shadow-enforce-default-on-receipt.md`](./rollout-evidence/2026-03-11/observe-shadow-enforce-default-on-receipt.md)
+Current status: observe/shadow/enforce/default-on all passed on 2026-03-11 (`overall_score=100.00` on strict parity gate).

@@ -105,6 +105,9 @@ type RetrievalProfileSettings = {
   maxVariants: number;
   maxOutputLengthPerResult: number;
   enableExpansion: boolean;
+  enableRerank: boolean;
+  rerankTopN: number;
+  rerankTimeoutMs: number;
 };
 
 const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> = {
@@ -113,18 +116,27 @@ const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> 
     maxVariants: 1,
     maxOutputLengthPerResult: 2000,
     enableExpansion: false,
+    enableRerank: false,
+    rerankTopN: 10,
+    rerankTimeoutMs: 50,
   },
   balanced: {
     perQueryMultiplier: 2,
     maxVariants: 4,
     maxOutputLengthPerResult: 3000,
     enableExpansion: true,
+    enableRerank: true,
+    rerankTopN: 20,
+    rerankTimeoutMs: 80,
   },
   rich: {
     perQueryMultiplier: 3,
     maxVariants: 6,
     maxOutputLengthPerResult: 4000,
     enableExpansion: true,
+    enableRerank: true,
+    rerankTopN: 40,
+    rerankTimeoutMs: 160,
   },
 };
 
@@ -164,6 +176,7 @@ export async function handleSemanticSearch(
   const effectiveTimeoutMs = timeout_ms ?? (bypass_cache ? 10000 : 0);
   const effectiveProfile = resolveSearchProfile(mode, profile);
   const profileSettings = RETRIEVAL_PROFILE_MAP[effectiveProfile];
+  const rerankTopN = Math.max(top_k, profileSettings.rerankTopN);
   const retrievalOptions = {
     topK: top_k,
     perQueryTopK: Math.min(50, top_k * profileSettings.perQueryMultiplier),
@@ -172,6 +185,9 @@ export async function handleSemanticSearch(
     bypassCache: bypass_cache,
     maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,
     enableExpansion: profileSettings.enableExpansion,
+    enableRerank: profileSettings.enableRerank,
+    rerankTopN,
+    rerankTimeoutMs: profileSettings.rerankTimeoutMs,
   };
 
   const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);

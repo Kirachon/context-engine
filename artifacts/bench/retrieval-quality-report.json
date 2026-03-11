@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-11T14:43:10.363Z",
+  "generated_at": "2026-03-11T15:09:24.566Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json"

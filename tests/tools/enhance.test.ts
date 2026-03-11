@@ -425,7 +425,7 @@ Here is an enhanced version of the original instruction that is more specific an
         process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
         await handleEnhancePrompt({ prompt: 'cache profile boundary prompt' }, mockServiceClient as any);
 
-        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
         expect(mockServiceClient.semanticSearch).toHaveBeenCalled();
       });
 

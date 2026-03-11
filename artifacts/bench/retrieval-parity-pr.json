@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-11T13:33:12.350Z",
+  "generated_at": "2026-03-11T15:10:23.456Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-parity-fixture-pack.json",
     "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-capability-matrix.json",
