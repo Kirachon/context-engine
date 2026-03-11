@@ -5,7 +5,7 @@ const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const DEFAULT_INDEX_STATE_VERSION = 1;
 const DEFAULT_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
-const DEFAULT_PROVIDER_ID = 'augment_legacy';
+const DEFAULT_PROVIDER_ID = 'local_native';
 const EPOCH_ISO = new Date(0).toISOString();
 
 export interface IndexStateFileEntry {

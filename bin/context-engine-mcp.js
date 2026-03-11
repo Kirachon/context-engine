@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * CLI wrapper for context-engine-mcp server
- * Uses tsx to handle ESM resolution issues with @augmentcode/auggie-sdk
+ * Uses tsx to handle ESM resolution for the built ESM entry point
  */
 
 import { spawn } from 'child_process';
@@ -27,4 +27,3 @@ const child = spawn(
 child.on('exit', (code) => {
   process.exit(code ?? 0);
 });
-

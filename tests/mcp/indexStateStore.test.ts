@@ -45,7 +45,7 @@ describe('JsonIndexStateStore', () => {
 
     expect(loaded.version).toBe(7);
     expect(loaded.schema_version).toBe(1);
-    expect(loaded.provider_id).toBe('augment_legacy');
+    expect(loaded.provider_id).toBe('local_native');
     expect(loaded.updated_at).toBe(legacyUpdatedAt);
     expect(loaded.files['src/a.ts']).toEqual({
       hash: 'abc123',
@@ -80,7 +80,7 @@ describe('JsonIndexStateStore', () => {
 
     expect(persisted.version).toBe(2);
     expect(persisted.schema_version).toBe(2);
-    expect(persisted.provider_id).toBe('augment_legacy');
+    expect(persisted.provider_id).toBe('local_native');
     expect(persisted.files['src/b.ts']).toEqual({
       hash: 'def456',
       indexed_at: '2026-03-04T01:00:00.000Z',
@@ -113,7 +113,7 @@ describe('JsonIndexStateStore', () => {
 
     expect(loaded.state.version).toBe(1);
     expect(loaded.state.schema_version).toBe(2);
-    expect(loaded.state.provider_id).toBe('augment_legacy');
+    expect(loaded.state.provider_id).toBe('local_native');
     expect(loaded.state.files).toEqual({});
     expect(loaded.metadata.unsupported_schema_version).toBe(999);
     expect(loaded.metadata.warnings.length).toBeGreaterThan(0);

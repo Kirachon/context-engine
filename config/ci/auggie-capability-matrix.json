@@ -1,0 +1,121 @@
+{
+  "schema_version": "1.0.0",
+  "generated_for": "auggie-adoption-removal-finalized-plan",
+  "weights": {
+    "retrieval_quality": 40,
+    "tool_behavior": 20,
+    "reliability_recovery": 20,
+    "performance": 10,
+    "ops_evidence": 10
+  },
+  "journeys": [
+    {
+      "id": "search-core-relevance",
+      "domain": "retrieval_quality",
+      "weight": 20,
+      "critical": true,
+      "metric_refs": [
+        "parity.search.relevance_score",
+        "parity.search.rank_stability",
+        "parity.search.result_consistency"
+      ]
+    },
+    {
+      "id": "search-behavior-contract",
+      "domain": "retrieval_quality",
+      "weight": 20,
+      "critical": false,
+      "metric_refs": [
+        "parity.search.query_behavior_match",
+        "parity.search.filter_behavior_match"
+      ]
+    },
+    {
+      "id": "vector-embedding-path",
+      "domain": "retrieval_quality",
+      "weight": 20,
+      "critical": false,
+      "metric_refs": [
+        "parity.vector.ingest_success_rate",
+        "parity.vector.embedding_latency_p95",
+        "parity.vector.retrieval_accuracy"
+      ]
+    },
+    {
+      "id": "tool-invoke-contracts",
+      "domain": "tool_behavior",
+      "weight": 20,
+      "critical": true,
+      "metric_refs": [
+        "parity.tools.schema_match_rate",
+        "parity.tools.response_contract_match",
+        "parity.tools.error_surface_match"
+      ]
+    },
+    {
+      "id": "tool-observability-signals",
+      "domain": "tool_behavior",
+      "weight": 20,
+      "critical": false,
+      "metric_refs": [
+        "parity.tools.request_id_coverage",
+        "parity.tools.trace_completeness"
+      ]
+    },
+    {
+      "id": "recovery-after-provider-failure",
+      "domain": "reliability_recovery",
+      "weight": 20,
+      "critical": true,
+      "metric_refs": [
+        "parity.reliability.recovery_success_rate",
+        "parity.reliability.retry_effectiveness",
+        "parity.reliability.fallback_safety"
+      ]
+    },
+    {
+      "id": "shadow-canary-soak-stability",
+      "domain": "reliability_recovery",
+      "weight": 20,
+      "critical": false,
+      "metric_refs": [
+        "parity.reliability.shadow_delta_rate",
+        "parity.reliability.canary_alert_budget",
+        "parity.reliability.soak_stability_index"
+      ]
+    },
+    {
+      "id": "retrieval-performance-baseline",
+      "domain": "performance",
+      "weight": 10,
+      "critical": false,
+      "metric_refs": [
+        "parity.performance.query_latency_p95",
+        "parity.performance.throughput_qps",
+        "parity.performance.cpu_memory_budget"
+      ]
+    },
+    {
+      "id": "ops-proof-and-runbook-receipts",
+      "domain": "ops_evidence",
+      "weight": 10,
+      "critical": false,
+      "metric_refs": [
+        "parity.ops.shadow_receipt_present",
+        "parity.ops.canary_receipt_present",
+        "parity.ops.soak_receipt_present",
+        "parity.ops.rollback_drill_receipt_present",
+        "parity.ops.no_legacy_scan_receipt_present"
+      ]
+    }
+  ],
+  "critical_journeys": [
+    "search-core-relevance",
+    "tool-invoke-contracts",
+    "recovery-after-provider-failure"
+  ],
+  "gate_rules": {
+    "min_overall_score": 90,
+    "critical_required": 100
+  }
+}

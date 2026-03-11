@@ -3,9 +3,9 @@
  * Lightweight benchmark harness (opt-in; not used in CI).
  *
  * Modes:
- * - scan: local filesystem scan/read throughput (no Auggie credentials required)
- * - index: run ContextServiceClient.indexWorkspace() (requires Auggie credentials)
- * - search: run ContextServiceClient.semanticSearch() (requires Auggie credentials + indexed state)
+ * - scan: local filesystem scan/read throughput
+ * - index: run ContextServiceClient.indexWorkspace() using the active local-native retrieval path
+ * - search: run ContextServiceClient.semanticSearch() using the active local-native retrieval path
  */
 
 import * as fs from 'fs';
@@ -16,7 +16,7 @@ import { internalRetrieveCode } from '../src/internal/handlers/retrieval.js';
 
 type Mode = 'scan' | 'index' | 'search' | 'retrieve';
 type RetrieveMode = 'fast' | 'deep';
-type RetrievalProvider = 'openai_session' | 'augment_legacy';
+type RetrievalProvider = 'local_native';
 
 interface Args {
   mode: Mode;
@@ -38,18 +38,18 @@ function resolveRetrievalProvider(): {
 } {
   const raw = process.env.CE_RETRIEVAL_PROVIDER?.trim();
   if (!raw) {
-    return { provider: 'openai_session', source: 'default', raw: null };
+    return { provider: 'local_native', source: 'default', raw: null };
   }
-  if (raw === 'openai_session' || raw === 'augment_legacy') {
+  if (raw === 'local_native') {
     return { provider: raw, source: 'CE_RETRIEVAL_PROVIDER', raw };
   }
 
   // Keep fallback safe for unknown values.
   // eslint-disable-next-line no-console
   console.error(
-    `[bench] Unsupported CE_RETRIEVAL_PROVIDER="${raw}". Falling back to openai_session.`
+    `[bench] Unsupported CE_RETRIEVAL_PROVIDER="${raw}". Falling back to local_native.`
   );
-  return { provider: 'openai_session', source: 'default', raw };
+  return { provider: 'local_native', source: 'default', raw };
 }
 
 function parseArgs(argv: string[]): Args {
@@ -255,12 +255,8 @@ async function scanWorkspace(root: string, readFiles: boolean) {
   };
 }
 
-function ensureProviderRequirements(provider: RetrievalProvider, mode: Mode): void {
-  if (provider === 'augment_legacy' && !process.env.AUGMENT_API_TOKEN) {
-    throw new Error(
-      `Missing AUGMENT_API_TOKEN in environment (required when CE_RETRIEVAL_PROVIDER=augment_legacy for ${mode} benchmark mode).`
-    );
-  }
+function ensureProviderRequirements(_provider: RetrievalProvider, _mode: Mode): void {
+  // Retrieval benchmarking is local-native only in the migrated runtime.
 }
 
 async function benchIndex(workspace: string, provider: RetrievalProvider) {
@@ -406,8 +402,6 @@ async function main(): Promise<void> {
       CE_DEBUG_INDEX: process.env.CE_DEBUG_INDEX,
       CE_DEBUG_SEARCH: process.env.CE_DEBUG_SEARCH,
       CE_AI_PROVIDER: process.env.CE_AI_PROVIDER,
-      AUGMENT_API_URL: process.env.AUGMENT_API_URL,
-      AUGMENT_API_TOKEN_set: Boolean(process.env.AUGMENT_API_TOKEN),
     },
   };
 

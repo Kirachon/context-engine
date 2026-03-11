@@ -7,60 +7,30 @@ assertDeepEqual(
   resolve({}),
   {
     providerId: 'local_native',
-    forceLegacy: false,
     shadowCompareEnabled: false,
     shadowSampleRate: 0,
   }
 );
 
 assertDeepEqual(
-  'configured local_native provider is honored when force flag is off',
+  'configured local_native provider is honored when legacy override is off',
   resolve({
     CE_RETRIEVAL_PROVIDER: 'local_native',
-    CE_RETRIEVAL_FORCE_LEGACY: 'false',
   }),
   {
     providerId: 'local_native',
-    forceLegacy: false,
-    shadowCompareEnabled: false,
-    shadowSampleRate: 0,
-  }
-);
-
-assertDeepEqual(
-  'force legacy overrides configured provider',
-  resolve({
-    CE_RETRIEVAL_PROVIDER: 'local_native',
-    CE_RETRIEVAL_FORCE_LEGACY: 'true',
-    AUGMENT_API_TOKEN: 'ci-test-token',
-  }),
-  {
-    providerId: 'augment_legacy',
-    forceLegacy: true,
-    shadowCompareEnabled: false,
-    shadowSampleRate: 0,
-  }
-);
-
-assertDeepEqual(
-  'force legacy supports enabled shorthand values',
-  resolve({
-    CE_RETRIEVAL_PROVIDER: 'local_native',
-    CE_RETRIEVAL_FORCE_LEGACY: '1',
-    AUGMENT_API_TOKEN: 'ci-test-token',
-  }),
-  {
-    providerId: 'augment_legacy',
-    forceLegacy: true,
     shadowCompareEnabled: false,
     shadowSampleRate: 0,
   }
 );
 
 assertThrows(
-  'invalid force legacy value fails fast',
-  () => resolve({ CE_RETRIEVAL_FORCE_LEGACY: 'maybe' }),
-  /CE_RETRIEVAL_FORCE_LEGACY/i
+  'removed provider selection is rejected',
+  () =>
+    resolve({
+      CE_RETRIEVAL_PROVIDER: 'augment_legacy',
+    }),
+  /Invalid CE_RETRIEVAL_PROVIDER value/i
 );
 
 console.log('Retrieval config precedence check passed.');

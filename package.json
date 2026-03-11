@@ -28,6 +28,8 @@
     "ci:matrix:migrated-families": "node --import tsx scripts/ci/run-migrated-family-matrix.ts",
     "ci:check:stale-cache-guards": "node --import tsx scripts/ci/check-stale-cache-guards.ts",
     "ci:check:retrieval-dependency-boundary": "node --import tsx scripts/ci/check-retrieval-provider-boundary.ts",
+    "ci:check:auggie-capability-parity": "node --import tsx scripts/ci/check-auggie-capability-parity.ts --report artifacts/bench/retrieval-parity-pr.json --matrix config/ci/auggie-capability-matrix.json --out artifacts/bench/auggie-capability-parity-gate.json",
+    "ci:check:no-legacy-auggie": "node --import tsx scripts/ci/check-auggie-no-legacy-references.ts --allowlist config/ci/auggie-no-legacy-allowlist.txt",
     "ci:check:retrieval-config-precedence": "node --import tsx scripts/ci/check-retrieval-config-precedence.ts",
     "ci:check:retrieval-provider-dist-parity": "node --import tsx scripts/ci/check-retrieval-provider-dist-parity.ts",
     "ci:check:ws-owner-assignment-lock": "node --import tsx scripts/ci/check-ws-owner-assignment-lock.ts",
@@ -44,7 +46,6 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
-    "@augmentcode/auggie-sdk": "^0.1.11",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "chokidar": "^3.5.3",
     "cors": "^2.8.5",

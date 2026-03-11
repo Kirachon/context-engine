@@ -8,8 +8,8 @@
  * - Context bundling
  * - Caching behavior
  *
- * These tests mock the DirectContext SDK to simulate API responses,
- * allowing comprehensive testing without requiring actual API authentication.
+ * These tests stub provider responses and local-native indexing behavior
+ * without requiring actual API authentication.
  */
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
@@ -17,7 +17,6 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-// Mock DirectContext before importing the module under test
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockContextInstance: Record<string, jest.Mock<any>> = {
   addToIndex: jest.fn(),
@@ -27,17 +26,7 @@ const mockContextInstance: Record<string, jest.Mock<any>> = {
   getIndexedPaths: jest.fn(() => []),
 };
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const mockDirectContext: Record<string, jest.Mock<any>> = {
-  create: jest.fn(),
-  importFromFile: jest.fn(),
-};
-
-jest.unstable_mockModule('@augmentcode/auggie-sdk', () => ({
-  DirectContext: mockDirectContext,
-}));
-
-// Import after mocking
+// Import after establishing test doubles
 const { ContextServiceClient } = await import('../src/mcp/serviceClient.js');
 const { FEATURE_FLAGS } = await import('../src/config/features.js');
 
@@ -64,17 +53,12 @@ describe('ContextServiceClient', () => {
 
   beforeEach(() => {
     // Set up environment for tests
-    process.env.AUGMENT_API_TOKEN = 'test-token';
-    process.env.AUGMENT_API_URL = 'https://test.api.augmentcode.com';
     process.env.CE_AI_PROVIDER = 'openai_session';
-    process.env.CE_RETRIEVAL_PROVIDER = 'augment_legacy';
+    process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
 
     // Reset mocks
     jest.clearAllMocks();
 
-    // Setup default mock behavior
-    mockDirectContext.create.mockResolvedValue(mockContextInstance);
-    mockDirectContext.importFromFile.mockRejectedValue(new Error('No state file'));
     mockContextInstance.search.mockResolvedValue('');
     mockContextInstance.addToIndex.mockResolvedValue({ newlyUploaded: [], alreadyUploaded: [] });
     mockContextInstance.exportToFile.mockResolvedValue(undefined);
@@ -84,8 +68,6 @@ describe('ContextServiceClient', () => {
   });
 
   afterEach(() => {
-    delete process.env.AUGMENT_API_TOKEN;
-    delete process.env.AUGMENT_API_URL;
     delete process.env.CONTEXT_ENGINE_OFFLINE_ONLY;
     delete process.env.CE_AI_RATE_LIMIT_MAX_RETRIES;
     delete process.env.CE_AI_RATE_LIMIT_BACKOFF_MS;
@@ -119,14 +101,8 @@ describe('ContextServiceClient', () => {
       const keywordFallbackSpy = jest
         .spyOn(localClient as any, 'keywordFallbackSearch')
         .mockResolvedValue([]);
-      const indexWorkspaceLegacySpy = jest
-        .spyOn(localClient as any, 'indexWorkspaceWithLegacyRuntime')
-        .mockResolvedValue({ indexed: 2, skipped: 0, errors: [], duration: 1 });
       const indexWorkspaceLocalSpy = jest
         .spyOn(localClient as any, 'indexWorkspaceLocalNativeFallback')
-        .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
-      const indexFilesLegacySpy = jest
-        .spyOn(localClient as any, 'indexFilesWithLegacyRuntime')
         .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
       const indexFilesLocalSpy = jest
         .spyOn(localClient as any, 'indexFilesLocalNativeFallback')
@@ -137,13 +113,9 @@ describe('ContextServiceClient', () => {
 
       const callbacks = (localClient as any).createRetrievalProviderCallbacks();
 
-      await callbacks.augmentLegacy.search('provider query', 3, { bypassCache: true });
       await callbacks.localNative.search('provider query', 3, { bypassCache: true });
-      await callbacks.augmentLegacy.indexWorkspace();
       await callbacks.localNative.indexWorkspace();
-      await callbacks.augmentLegacy.indexFiles(['src/file.ts']);
       await callbacks.localNative.indexFiles(['src/file.ts']);
-      await callbacks.augmentLegacy.clearIndex();
       await callbacks.localNative.clearIndex();
       const health = await callbacks.localNative.health({
         providerId: 'local_native',
@@ -151,12 +123,9 @@ describe('ContextServiceClient', () => {
       });
 
       expect(searchWithProviderRuntimeSpy).toHaveBeenCalledWith('provider query', 3, { bypassCache: true });
-      expect(keywordFallbackSpy).toHaveBeenCalledWith('provider query', 3);
-      expect(indexWorkspaceLegacySpy).toHaveBeenCalledTimes(1);
+      expect(keywordFallbackSpy).not.toHaveBeenCalled();
       expect(indexWorkspaceLocalSpy).toHaveBeenCalledTimes(1);
-      expect(indexFilesLegacySpy).toHaveBeenCalledWith(['src/file.ts']);
       expect(indexFilesLocalSpy).toHaveBeenCalledWith(['src/file.ts']);
-      expect(clearIndexSpy).toHaveBeenCalledWith({ localNative: false });
       expect(clearIndexSpy).toHaveBeenCalledWith({ localNative: true });
       expect(health).toEqual({ ok: true, details: 'retrieval_provider=local_native' });
     });
@@ -167,7 +136,7 @@ describe('ContextServiceClient', () => {
         { path: 'src/provider.ts', content: 'provider result', relevanceScore: 0.9 },
       ]);
       (client as any).retrievalProvider = {
-        id: 'augment_legacy',
+        id: 'local_native',
         search: providerSearch,
         indexWorkspace: jest.fn(),
         indexFiles: jest.fn(),
@@ -189,7 +158,7 @@ describe('ContextServiceClient', () => {
       const indexFiles = jest.fn(async (_paths: string[]) => ({ indexed: 1, skipped: 0, errors: [], duration: 1 }));
       const clearIndex = jest.fn(async () => undefined);
       (client as any).retrievalProvider = {
-        id: 'augment_legacy',
+        id: 'local_native',
         search: jest.fn(async () => []),
         indexWorkspace,
         indexFiles,
@@ -227,9 +196,9 @@ describe('ContextServiceClient', () => {
 
       const results = await localClient.semanticSearch('localNativeProviderDispatchNeedle', 5, { bypassCache: true });
 
-      expect(searchWithProviderRuntimeSpy).not.toHaveBeenCalled();
+      expect(searchWithProviderRuntimeSpy).toHaveBeenCalledTimes(1);
       expect(keywordFallbackSpy).toHaveBeenCalledTimes(1);
-      expect(searchAndAskSpy).not.toHaveBeenCalled();
+      expect(searchAndAskSpy).toHaveBeenCalledTimes(1);
       expect(parseFormattedResultsSpy).not.toHaveBeenCalled();
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].path).toContain('src/needle.ts');
@@ -472,7 +441,7 @@ describe('ContextServiceClient', () => {
   });
 
   describe('Semantic Search with openai_session provider', () => {
-    it('should never initialize DirectContext when CE_AI_PROVIDER=openai_session', async () => {
+    it('should never initialize the removed legacy runtime when CE_AI_PROVIDER=openai_session', async () => {
       process.env.CE_AI_PROVIDER = 'openai_session';
       const openAIClient = new ContextServiceClient(testWorkspace);
 
@@ -482,8 +451,6 @@ describe('ContextServiceClient', () => {
 
       expect(Array.isArray(results)).toBe(true);
       expect(mockContextInstance.search).not.toHaveBeenCalled();
-      expect(mockDirectContext.create).not.toHaveBeenCalled();
-      expect(mockDirectContext.importFromFile).not.toHaveBeenCalled();
     });
 
     it('should parse provider JSON responses into SearchResult objects', async () => {
@@ -681,10 +648,10 @@ describe('ContextServiceClient', () => {
 
       expect(defaultClient.getActiveAIProviderId()).toBe('openai_session');
       expect(explicitClient.getActiveAIProviderId()).toBe('openai_session');
-      expect(defaultClient.getActiveRetrievalProviderId()).toBe('augment_legacy');
-      expect(explicitClient.getActiveRetrievalProviderId()).toBe('augment_legacy');
+      expect(defaultClient.getActiveRetrievalProviderId()).toBe('local_native');
+      expect(explicitClient.getActiveRetrievalProviderId()).toBe('local_native');
       expect(defaultKey).toEqual(explicitKey);
-      expect(defaultKey.startsWith('augment_legacy:')).toBe(true);
+      expect(defaultKey.startsWith('local_native:')).toBe(true);
     });
 
     it('should cache results under retrieval-provider-scoped keys', async () => {
@@ -704,7 +671,7 @@ describe('ContextServiceClient', () => {
       );
       const query = 'cache isolation query';
       const openAIKey = (openAIClient as any).getCommitAwareCacheKey(query, 5);
-      expect(openAIKey.startsWith('augment_legacy:')).toBe(true);
+      expect(openAIKey.startsWith('local_native:')).toBe(true);
 
       const firstResults = await openAIClient.semanticSearch(query, 5);
       const secondResults = await openAIClient.semanticSearch(query, 5);
@@ -1282,10 +1249,12 @@ describe('ContextServiceClient', () => {
   });
 
   describe('Index Workspace', () => {
-    it('should call DirectContext SDK to index files', async () => {
-      await client.indexWorkspace();
+    it('should index files via local_native fallback by default', async () => {
+      const result = await client.indexWorkspace();
 
-      expect(mockContextInstance.addToIndex).toHaveBeenCalled();
+      expect(result.errors).toEqual([]);
+      expect(result.indexed).toBeGreaterThan(0);
+      expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
     });
 
     it('should clear cache after indexing', async () => {
@@ -1307,26 +1276,32 @@ describe('ContextServiceClient', () => {
       expect(providerCall).toHaveBeenCalledTimes(2);
     });
 
-    it('should save state after indexing', async () => {
-      await client.indexWorkspace();
+    it('should persist local-native index state after indexing', async () => {
+      FEATURE_FLAGS.index_state_store = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-state-save-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
 
-      expect(mockContextInstance.exportToFile).toHaveBeenCalled();
+      const indexingClient = new ContextServiceClient(tempDir);
+      await indexingClient.indexWorkspace();
+
+      expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(true);
+      expect(mockContextInstance.exportToFile).not.toHaveBeenCalled();
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('should use deterministic local_native fallback without DirectContext calls', async () => {
+    it('should use deterministic local_native fallback without legacy runtime calls', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-index-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
 
       const localClient = new ContextServiceClient(tempDir);
-      const legacyIndexWorkspaceSpy = jest.spyOn(localClient as any, 'indexWorkspaceWithLegacyRuntime');
+      const localIndexWorkspaceSpy = jest.spyOn(localClient as any, 'indexWorkspaceLocalNativeFallback');
       const result = await localClient.indexWorkspace();
 
       expect(result.errors).toEqual([]);
       expect(result.indexed).toBeGreaterThan(0);
-      expect(legacyIndexWorkspaceSpy).not.toHaveBeenCalled();
-      expect(mockDirectContext.create).not.toHaveBeenCalled();
-      expect(mockDirectContext.importFromFile).not.toHaveBeenCalled();
+      expect(localIndexWorkspaceSpy).toHaveBeenCalledTimes(1);
       expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
 
       const status = localClient.getIndexStatus();
@@ -1337,7 +1312,7 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('should clear local_native index metadata without DirectContext calls', async () => {
+    it('should clear local_native index metadata without legacy runtime calls', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-clear-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
@@ -1346,8 +1321,6 @@ describe('ContextServiceClient', () => {
       await localClient.indexWorkspace();
       await localClient.clearIndex();
 
-      expect(mockDirectContext.create).not.toHaveBeenCalled();
-      expect(mockDirectContext.importFromFile).not.toHaveBeenCalled();
       expect(fs.existsSync(path.join(tempDir, '.augment-context-state.json'))).toBe(false);
       expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(false);
 
@@ -1375,20 +1348,19 @@ describe('ContextServiceClient', () => {
       expect(statusClient.getIndexStatus().lastError).toBeUndefined();
     });
 
-    it('should use deterministic local_native fallback for indexFiles without DirectContext calls', async () => {
+    it('should use deterministic local_native fallback for indexFiles without legacy runtime calls', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       FEATURE_FLAGS.index_state_store = true;
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-index-files-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
 
       const localClient = new ContextServiceClient(tempDir);
-      const legacyIndexFilesSpy = jest.spyOn(localClient as any, 'indexFilesWithLegacyRuntime');
+      const localIndexFilesSpy = jest.spyOn(localClient as any, 'indexFilesLocalNativeFallback');
       const result = await localClient.indexFiles(['a.ts']);
 
       expect(result.errors).toEqual([]);
       expect(result.indexed).toBe(1);
-      expect(legacyIndexFilesSpy).not.toHaveBeenCalled();
-      expect(mockDirectContext.create).not.toHaveBeenCalled();
+      expect(localIndexFilesSpy).toHaveBeenCalledWith(['a.ts']);
       expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
       expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(true);
 
@@ -1411,7 +1383,7 @@ describe('ContextServiceClient', () => {
           {
             version: 5,
             schema_version: 2,
-            provider_id: 'augment_legacy',
+            provider_id: 'legacy_disabled',
             updated_at: '2026-03-04T03:00:00.000Z',
             files: {
               'stale.ts': {
@@ -1504,15 +1476,15 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('should not skip unchanged files when there is no restored context state', async () => {
+    it('should skip unchanged files when local_native index-state hash already matches', async () => {
       FEATURE_FLAGS.index_state_store = true;
       FEATURE_FLAGS.skip_unchanged_indexing = true;
 
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
 
-      // Pre-populate index state store with a matching hash to simulate "unchanged",
-      // but DO NOT provide a context state file. We must still index the file.
+      // Local-native indexing can safely rely on the index-state hash without restoring
+      // a legacy runtime context file first.
       const crypto = await import('crypto');
       const hash = crypto.createHash('sha256').update('export const a = 1;\n').digest('hex');
       const indexStatePath = path.join(tempDir, '.augment-index-state.json');
@@ -1531,11 +1503,13 @@ describe('ContextServiceClient', () => {
       );
 
       const indexingClient = new ContextServiceClient(tempDir);
-      await indexingClient.indexWorkspace();
+      const result = await indexingClient.indexWorkspace();
 
-      expect(mockContextInstance.addToIndex).toHaveBeenCalled();
-      const firstCallArgs = mockContextInstance.addToIndex.mock.calls[0]?.[0] as Array<{ path: string }>;
-      expect(firstCallArgs.map((x) => x.path)).toContain('a.ts');
+      expect(result.indexed).toBe(0);
+      expect(result.errors).toEqual([]);
+      expect(result.totalIndexable).toBe(1);
+      expect(result.unchangedSkipped).toBe(1);
+      expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
     });
 
     it('should persist index-state file entries even when unchanged-skip optimization is disabled', async () => {
@@ -1560,7 +1534,7 @@ describe('ContextServiceClient', () => {
       };
 
       expect(parsedState.schema_version).toBe(2);
-      expect(parsedState.provider_id).toBe('augment_legacy');
+      expect(parsedState.provider_id).toBe('local_native');
       expect(parsedState.files['a.ts']).toBeDefined();
       expect(parsedState.files['a.ts'].hash).toMatch(/^[a-f0-9]{64}$/);
       expect(parsedState.files['a.ts'].indexed_at).toBeTruthy();
@@ -1574,11 +1548,6 @@ describe('ContextServiceClient', () => {
 
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
-
-      // Provide a context state file so initialization restores from disk.
-      const statePath = path.join(tempDir, '.augment-context-state.json');
-      fs.writeFileSync(statePath, '{}', 'utf-8');
-      mockDirectContext.importFromFile.mockResolvedValueOnce(mockContextInstance);
 
       const crypto = await import('crypto');
       const hash = crypto.createHash('sha256').update('export const a = 1;\n').digest('hex');
@@ -1613,9 +1582,7 @@ describe('ContextServiceClient', () => {
     it('should hydrate index status fileCount from persisted index state on restore', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-restore-'));
 
-      // Ensure restore path is used.
       fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
-      mockDirectContext.importFromFile.mockResolvedValueOnce(mockContextInstance);
       fs.writeFileSync(
         path.join(tempDir, '.augment-index-state.json'),
         JSON.stringify(
@@ -1634,8 +1601,6 @@ describe('ContextServiceClient', () => {
       );
 
       const restoredClient = new ContextServiceClient(tempDir);
-      await (restoredClient as any).ensureInitialized();
-
       const status = restoredClient.getIndexStatus();
       expect(status.fileCount).toBe(2);
       expect(status.status).toBe('idle');
@@ -1647,9 +1612,7 @@ describe('ContextServiceClient', () => {
     it('should hydrate lastIndexed on restore even when persisted index state has zero files', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-restore-empty-'));
 
-      // Ensure restore path is used.
       fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
-      mockDirectContext.importFromFile.mockResolvedValueOnce(mockContextInstance);
       fs.writeFileSync(
         path.join(tempDir, '.augment-index-state.json'),
         JSON.stringify(
@@ -1665,8 +1628,6 @@ describe('ContextServiceClient', () => {
       );
 
       const restoredClient = new ContextServiceClient(tempDir);
-      await (restoredClient as any).ensureInitialized();
-
       const status = restoredClient.getIndexStatus();
       expect(status.status).toBe('idle');
       expect(status.fileCount).toBe(0);

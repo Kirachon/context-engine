@@ -74,7 +74,7 @@ describe('scripts/ci/check-retrieval-provider-boundary.ts', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('Retrieval provider boundary check failed.');
       expect(result.stderr).toContain('Allowed legacy runtime owner files:');
-      expect(result.stderr).toContain(' - src/retrieval/providers/legacyRuntime.ts');
+      expect(result.stderr).toContain(' - (none)');
       expect(result.stderr).toContain(
         `${fixtureRelativePath}: unexpected @augmentcode/auggie-sdk reference outside allowlist`
       );
@@ -95,12 +95,18 @@ describe('scripts/ci/check-retrieval-provider-boundary.ts', () => {
       expect(result.status).toBe(1);
       expect(result.stderr).toContain('Retrieval provider boundary check failed.');
       expect(result.stderr).toContain('Allowed DirectContext files:');
-      expect(result.stderr).toContain(' - src/retrieval/providers/legacyRuntime.ts');
+      expect(result.stderr).toContain(' - (none)');
       expect(result.stderr).toContain(
         `${fixtureRelativePath}: unexpected DirectContext usage outside allowlist`
       );
     } finally {
       removeFileIfExists(fixtureAbsolutePath);
     }
+  });
+
+  it('keeps the runtime quarantine allowlist empty after migration', () => {
+    const result = runBoundaryCheck();
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe('');
   });
 });

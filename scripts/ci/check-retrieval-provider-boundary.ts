@@ -10,12 +10,8 @@ const ROOT = process.cwd();
 const RETRIEVAL_PROVIDER_RUNTIME_ROOT = path.join(ROOT, 'src', 'retrieval', 'providers');
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|js|mjs|cjs)$/i;
 
-// Approved runtime ownership boundary for legacy retrieval internals after extraction.
-// Keep this list narrow: only files that are allowed to touch legacy SDK/runtime internals.
-const LEGACY_RUNTIME_OWNER_ALLOWLIST = new Set<string>([
-  // Extracted legacy runtime module.
-  normalizeRelative('src/retrieval/providers/legacyRuntime.ts'),
-]);
+// No runtime file should retain Auggie ownership after the local_native migration.
+const LEGACY_RUNTIME_OWNER_ALLOWLIST = new Set<string>();
 
 const SDK_ALLOWLIST = new Set<string>(LEGACY_RUNTIME_OWNER_ALLOWLIST);
 const DIRECT_CONTEXT_ALLOWLIST = new Set<string>(LEGACY_RUNTIME_OWNER_ALLOWLIST);
@@ -49,16 +45,28 @@ for (const filePath of filesToScan) {
 if (violations.length > 0) {
   console.error('Retrieval provider boundary check failed.');
   console.error('Allowed legacy runtime owner files:');
-  for (const allowed of Array.from(LEGACY_RUNTIME_OWNER_ALLOWLIST).sort()) {
-    console.error(` - ${allowed}`);
+  if (LEGACY_RUNTIME_OWNER_ALLOWLIST.size === 0) {
+    console.error(' - (none)');
+  } else {
+    for (const allowed of Array.from(LEGACY_RUNTIME_OWNER_ALLOWLIST).sort()) {
+      console.error(` - ${allowed}`);
+    }
   }
   console.error('Allowed SDK files:');
-  for (const allowed of Array.from(SDK_ALLOWLIST).sort()) {
-    console.error(` - ${allowed}`);
+  if (SDK_ALLOWLIST.size === 0) {
+    console.error(' - (none)');
+  } else {
+    for (const allowed of Array.from(SDK_ALLOWLIST).sort()) {
+      console.error(` - ${allowed}`);
+    }
   }
   console.error('Allowed DirectContext files:');
-  for (const allowed of Array.from(DIRECT_CONTEXT_ALLOWLIST).sort()) {
-    console.error(` - ${allowed}`);
+  if (DIRECT_CONTEXT_ALLOWLIST.size === 0) {
+    console.error(' - (none)');
+  } else {
+    for (const allowed of Array.from(DIRECT_CONTEXT_ALLOWLIST).sort()) {
+      console.error(` - ${allowed}`);
+    }
   }
   console.error('Violations:');
   for (const violation of violations) {

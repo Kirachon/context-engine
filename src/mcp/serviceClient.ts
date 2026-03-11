@@ -35,13 +35,9 @@ import type { AIProvider, AIProviderId } from '../ai/providers/types.js';
 import { createRetrievalProvider } from '../retrieval/providers/factory.js';
 import { resolveRetrievalProviderId, shouldRunShadowCompare } from '../retrieval/providers/env.js';
 import {
-  ensureLegacyRuntimeContext,
-  type LegacyContextInstance,
-  loadLegacyContextFactory,
-  LegacyRuntimeManager,
-  parseLegacyFormattedResults,
-  searchWithLegacySemanticRuntime,
-} from '../retrieval/providers/legacyRuntime.js';
+  parseFormattedResults as parseFormattedSemanticResults,
+  searchWithSemanticRuntime,
+} from '../retrieval/providers/semanticRuntime.js';
 import type {
   RetrievalProviderCallbackContext,
   RetrievalProvider,
@@ -294,9 +290,9 @@ const MEMORIES_DIR = '.memories';
 // ============================================================================
 
 /**
- * Queue for serializing searchAndAsk calls to prevent SDK concurrency issues.
+ * Queue for serializing searchAndAsk calls to prevent provider runtime concurrency issues.
  *
- * The legacy DirectContext runtime may not be thread-safe for concurrent
+ * The active semantic retrieval runtime may not be thread-safe for concurrent
  * searchAndAsk calls. This queue ensures only one call runs at a time
  * while allowing other operations to continue.
  *
@@ -929,7 +925,6 @@ interface IndexFingerprintFile {
 
 export class ContextServiceClient {
   private workspacePath: string;
-  private legacyRuntimeManager: LegacyRuntimeManager;
   private indexChain: Promise<void> = Promise.resolve();
   private indexStateStore: JsonIndexStateStore | null = null;
   private indexStateProviderMismatchWarned = false;
@@ -956,9 +951,6 @@ export class ContextServiceClient {
 
   /** Whether lightweight disk hydration has already been attempted for this process. */
   private indexStatusDiskHydrated = false;
-
-  /** Skip auto-index on next initialization (used after clearing state) */
-  private skipAutoIndexOnce = false;
 
   /** Loaded ignore patterns (from .gitignore and .contextignore) */
   private ignorePatterns: string[] = [];
@@ -1022,7 +1014,6 @@ export class ContextServiceClient {
       callbacks: this.createRetrievalProviderCallbacks(),
     });
     this.retrievalProviderId = this.retrievalProvider.id;
-    this.legacyRuntimeManager = this.createLegacyRuntimeManager();
     this.indexStatus = {
       workspace: workspacePath,
       status: 'idle',
@@ -1061,23 +1052,12 @@ export class ContextServiceClient {
 
   private createRetrievalProviderCallbacks(): RetrievalProviderCallbacks {
     return {
-      augmentLegacy: {
+      localNative: {
         search: (
           query: string,
           topK: number,
           options?: { bypassCache?: boolean; maxOutputLength?: number }
         ) => this.searchWithProviderRuntime(query, topK, options),
-        indexWorkspace: () => this.indexWorkspaceWithLegacyRuntime(),
-        indexFiles: (filePaths: string[]) => this.indexFilesWithLegacyRuntime(filePaths),
-        clearIndex: () => this.clearIndexWithProviderRuntime({ localNative: false }),
-        getIndexStatus: async () => this.getIndexStatus(),
-        health: async (context?: RetrievalProviderCallbackContext) => ({
-          ok: true,
-          details: `retrieval_provider=${this.getRetrievalProviderCallbackProviderId(context)}`,
-        }),
-      },
-      localNative: {
-        search: (query: string, topK: number) => this.keywordFallbackSearch(query, topK),
         indexWorkspace: () => this.indexWorkspaceLocalNativeFallback(),
         indexFiles: (filePaths: string[]) => this.indexFilesLocalNativeFallback(filePaths),
         clearIndex: () => this.clearIndexWithProviderRuntime({ localNative: true }),
@@ -1096,22 +1076,13 @@ export class ContextServiceClient {
     return context?.providerId ?? this.retrievalProviderId;
   }
 
-  private createLegacyRuntimeManager(): LegacyRuntimeManager {
-    return new LegacyRuntimeManager({
-      stateFilePath: this.getStateFilePath(),
-      loadFactory: () => loadLegacyContextFactory(),
-      fileExists: (filePath: string) => fs.existsSync(filePath),
-      deleteFile: (filePath: string) => fs.unlinkSync(filePath),
-    });
-  }
-
   private getAIProvider(): AIProvider {
     if (!this.aiProvider) {
       try {
         this.aiProvider = createAIProvider({
           providerId: this.aiProviderId,
           getAugmentContext: async () => {
-            throw new Error('OpenAI-only provider policy: DirectContext provider path is disabled.');
+            throw new Error('OpenAI-only provider policy: legacy retrieval runtime path is disabled.');
           },
           maxRateLimitRetries: envInt('CE_AI_RATE_LIMIT_MAX_RETRIES', DEFAULT_RATE_LIMIT_MAX_RETRIES, {
             min: 0,
@@ -1482,87 +1453,6 @@ export class ContextServiceClient {
 
     if (Object.keys(nextStatus).length > 0) {
       this.updateIndexStatus(nextStatus);
-    }
-  }
-
-  /**
-   * Initialize the DirectContext SDK
-   * Tries to restore from saved state if available
-   */
-  private async ensureInitialized(options?: { skipAutoIndex?: boolean }): Promise<LegacyContextInstance> {
-    const result = await ensureLegacyRuntimeContext({
-      manager: this.legacyRuntimeManager,
-      stateFilePath: this.getStateFilePath(),
-      offlineMode: this.isOfflineMode(),
-      apiUrl: process.env.AUGMENT_API_URL,
-      skipAutoIndexOnce: this.skipAutoIndexOnce,
-      skipAutoIndex: options?.skipAutoIndex,
-      onStatusError: (message) => {
-        this.updateIndexStatus({ status: 'error', lastError: message });
-      },
-      onRestoredFromState: () => {
-        this.hydrateIndexStatusFromDisk();
-      },
-      onAutoIndex: async () => {
-        await this.indexWorkspace();
-      },
-      onAutoIndexFailure: (error) => {
-        this.updateIndexStatus({
-          status: 'error',
-          lastError: String(error),
-        });
-      },
-      onAutoIndexSkip: () => {
-        this.updateIndexStatus({ status: 'idle' });
-      },
-    });
-    this.skipAutoIndexOnce = result.skipAutoIndexOnce;
-    return result.context;
-  }
-
-  /**
-   * Legacy retrieval runtime boundary accessor.
-   * Keeps DirectContext lifecycle access centralized for provider-runtime callers.
-   */
-  private async ensureLegacyProviderRuntime(options?: { skipAutoIndex?: boolean }): Promise<LegacyContextInstance> {
-    return this.ensureInitialized(options);
-  }
-
-  /**
-   * Reset legacy retrieval runtime in-memory state.
-   */
-  private resetLegacyProviderRuntime(options?: { skipAutoIndexOnce?: boolean; resetDiskHydration?: boolean }): void {
-    this.legacyRuntimeManager.clearInMemoryState();
-    if (options?.resetDiskHydration ?? true) {
-      this.indexStatusDiskHydrated = false;
-    }
-    if (options?.skipAutoIndexOnce) {
-      this.skipAutoIndexOnce = true;
-    }
-  }
-
-  /**
-   * Reload legacy runtime context from persisted state when available.
-   */
-  private async reloadLegacyProviderRuntime(options?: { skipAutoIndex?: boolean }): Promise<void> {
-    this.resetLegacyProviderRuntime();
-    await this.ensureLegacyProviderRuntime(options);
-  }
-
-  private hasRestoredLegacyProviderRuntimeState(): boolean {
-    return this.legacyRuntimeManager.wasRestoredFromState();
-  }
-
-  private async persistLegacyProviderRuntimeState(): Promise<void> {
-    try {
-      const persisted = await this.legacyRuntimeManager.persistState();
-      if (!persisted) {
-        return;
-      }
-      this.writeIndexFingerprintFile(crypto.randomUUID());
-      console.error(`Context state saved to ${this.getStateFilePath()}`);
-    } catch (error) {
-      console.error('Failed to save context state:', error);
     }
   }
 
@@ -2272,6 +2162,8 @@ export class ContextServiceClient {
     const nextFiles: Record<string, { hash: string; indexed_at: string }> = {};
     let indexed = 0;
     let skipped = 0;
+    let unchangedSkipped = 0;
+    const skipUnchanged = Boolean(store) && featureEnabled('skip_unchanged_indexing');
 
     for (const relativePath of filePaths) {
       const contents = await this.readFileContentsAsync(relativePath);
@@ -2279,18 +2171,29 @@ export class ContextServiceClient {
         skipped += 1;
         continue;
       }
+
+      const nextHash = this.hashContent(contents);
+      if (skipUnchanged) {
+        const previous = prior?.files[relativePath];
+        if (previous?.hash === nextHash) {
+          unchangedSkipped += 1;
+          nextFiles[relativePath] = previous;
+          continue;
+        }
+      }
+
       indexed += 1;
       if (store) {
         nextFiles[relativePath] = {
-          hash: this.hashContent(contents),
+          hash: nextHash,
           indexed_at: indexedAtIso,
         };
       }
     }
 
-    if (store && prior) {
+    if (store) {
       store.save({
-        version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+        version: typeof prior?.version === 'number' ? prior.version + 1 : 2,
         provider_id: this.retrievalProviderId,
         updated_at: indexedAtIso,
         files: nextFiles,
@@ -2302,17 +2205,18 @@ export class ContextServiceClient {
     this.updateIndexStatus({
       status: 'idle',
       lastIndexed: indexedAtIso,
-      fileCount: filePaths.length - skipped,
+      fileCount: store ? Object.keys(nextFiles).length : filePaths.length - skipped,
       lastError: undefined,
     });
     this.clearCache();
 
     return {
       indexed,
-      skipped,
+      skipped: skipped + unchangedSkipped,
       errors: [],
       duration: Date.now() - startTime,
       totalIndexable: filePaths.length - skipped,
+      unchangedSkipped,
     };
   }
 
@@ -2415,321 +2319,6 @@ export class ContextServiceClient {
   }
 
   /**
-   * Index the workspace directory using legacy DirectContext runtime.
-   */
-  private async indexWorkspaceWithLegacyRuntime(): Promise<IndexResult> {
-    return this.enqueueIndexing(async () => {
-      const startTime = Date.now();
-      let metricsResult: 'success' | 'error' = 'success';
-      try {
-
-	    if (this.isOfflineMode()) {
-	      const message = 'Indexing is disabled while CONTEXT_ENGINE_OFFLINE_ONLY is enabled.';
-	      console.error(message);
-	      this.updateIndexStatus({ status: 'error', lastError: message });
-	      throw new Error(message);
-	    }
-
-      this.updateIndexStatus({ status: 'indexing', lastError: undefined });
-      console.error(`Indexing workspace: ${this.workspacePath}`);
-      console.error(`API URL: ${process.env.AUGMENT_API_URL || '(default)'}`);
-      console.error(`API Token: ${process.env.AUGMENT_API_TOKEN ? '(set)' : '(NOT SET)'}`);
-
-      const debugIndex = process.env.CE_DEBUG_INDEX === 'true';
-
-      const useWorker =
-        process.env.CE_INDEX_USE_WORKER !== 'false' &&
-        // Avoid worker-based indexing in Jest unit tests (worker won't inherit mocks).
-        !process.env.JEST_WORKER_ID;
-
-      if (useWorker) {
-        let result: IndexResult | null = null;
-        try {
-          result = await this.runIndexWorker();
-        } catch (e) {
-          console.error('[indexWorkspace] Worker indexing unavailable; falling back to in-process indexing:', e);
-          result = null;
-        }
-
-        if (!result) {
-          // fall through to in-process path
-        } else {
-          // If the worker does not provide totalIndexable (older worker builds), avoid
-          // clobbering a previously-known fileCount with a small per-run indexed count.
-          const nextFileCount =
-            result.totalIndexable ??
-            (this.indexStatus.fileCount > 0 ? this.indexStatus.fileCount : result.indexed);
-
-          if (result.indexed > 0) {
-            this.updateIndexStatus({
-              status: result.errors.length ? 'error' : 'idle',
-              lastIndexed: new Date().toISOString(),
-              fileCount: nextFileCount,
-              lastError: result.errors.length ? result.errors[result.errors.length - 1] : undefined,
-            });
-          } else {
-            this.updateIndexStatus({
-              status: result.errors.length ? 'error' : 'idle',
-              lastIndexed: new Date().toISOString(),
-              fileCount: nextFileCount,
-              lastError: result.errors[0],
-            });
-          }
-
-          // Ensure the in-memory legacy runtime reflects the worker-written state file.
-          this.resetLegacyProviderRuntime({ resetDiskHydration: false });
-          this.clearCache();
-          await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
-
-          return result;
-        }
-      }
-
-      const context = await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
-
-    // Discover all indexable files
-    const filePaths = await this.discoverFiles(this.workspacePath);
-    console.error(`Found ${filePaths.length} files to index`);
-
-    if (filePaths.length === 0) {
-      console.error('No indexable files found');
-      this.updateIndexStatus({
-        status: 'error',
-        lastError: 'No indexable files found',
-        fileCount: 0,
-      });
-      return {
-        indexed: 0,
-        skipped: 0,
-        errors: ['No indexable files found'],
-        duration: Date.now() - startTime,
-      };
-    }
-
-    if (debugIndex) {
-      // Log all discovered files for debugging (only first 50 to avoid log spam)
-      console.error('Files to index (showing first 50):');
-      for (const fp of filePaths.slice(0, 50)) {
-        console.error(`  - ${fp}`);
-      }
-      if (filePaths.length > 50) {
-        console.error(`  ... and ${filePaths.length - 50} more files`);
-      }
-    }
-
-    // STREAMING APPROACH: Read and index files in batches to minimize memory usage
-    // Instead of loading all files into memory, we read files just-in-time for each batch
-    const BATCH_SIZE = Number.parseInt(process.env.CE_INDEX_BATCH_SIZE ?? '10', 10) || 10;
-    const totalBatches = Math.ceil(filePaths.length / BATCH_SIZE);
-    let successCount = 0;
-    let errorCount = 0;
-    let skippedCount = 0;
-    let unchangedSkippedCount = 0;
-    const errors: string[] = [];
-    const successfulPaths: Set<string> = new Set();
-    const contentHashes: Map<string, string> = new Map();
-
-    const store = this.getIndexStateStore();
-    // Skipping unchanged files is only safe when we have an existing context restored from disk.
-    // Otherwise we could "skip" everything and end up with an empty index.
-    const skipUnchanged =
-      Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.hasRestoredLegacyProviderRuntimeState();
-    const indexState: IndexStateFile | null =
-      skipUnchanged && store ? this.loadIndexStateForActiveProvider(store) : null;
-    const indexedAtIso = new Date().toISOString();
-
-    for (let i = 0; i < filePaths.length; i += BATCH_SIZE) {
-      const batchPaths = filePaths.slice(i, i + BATCH_SIZE);
-      const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-      const isLastBatch = i + BATCH_SIZE >= filePaths.length;
-
-      // Read file contents for this batch only (streaming approach)
-      const batch: Array<{ path: string; contents: string }> = [];
-      const contentsByPath = await Promise.all(
-        batchPaths.map(async (relativePath) => ({
-          relativePath,
-          contents: await this.readFileContentsAsync(relativePath),
-        }))
-      );
-
-      for (const { relativePath, contents } of contentsByPath) {
-        if (contents === null) {
-          skippedCount++;
-          continue;
-        }
-
-        const hash = store ? this.hashContent(contents) : null;
-        if (hash) {
-          contentHashes.set(relativePath, hash);
-        }
-
-        if (skipUnchanged && indexState) {
-          const previous = indexState.files[relativePath]?.hash;
-          if (previous && previous === hash) {
-            unchangedSkippedCount++;
-            continue;
-          }
-        }
-
-        batch.push({ path: relativePath, contents });
-      }
-
-      if (batch.length === 0) {
-        console.error(`  Batch ${batchNum}/${totalBatches}: All files skipped`);
-        continue;
-      }
-
-      if (debugIndex) {
-        console.error(`\nIndexing batch ${batchNum}/${totalBatches}:`);
-        for (const file of batch) {
-          console.error(`  - ${file.path} (${file.contents.length} chars)`);
-        }
-      }
-
-      try {
-        // Don't wait for indexing on intermediate batches
-        await context.addToIndex(batch, { waitForIndexing: isLastBatch });
-        successCount += batch.length;
-        for (const file of batch) {
-          successfulPaths.add(file.path);
-        }
-        if (debugIndex) {
-          console.error(`  ✓ Batch ${batchNum} indexed successfully`);
-        }
-      } catch (error) {
-        errors.push(`Batch ${batchNum}: ${error instanceof Error ? error.message : String(error)}`);
-        console.error(`  ✗ Batch ${batchNum} failed:`, error);
-
-        // Try indexing files individually to isolate the problematic file
-        if (debugIndex) {
-          console.error(`  Attempting individual file indexing for batch ${batchNum}...`);
-        }
-        for (const file of batch) {
-          try {
-            await context.addToIndex([file], { waitForIndexing: false });
-            successCount++;
-            successfulPaths.add(file.path);
-            if (debugIndex) {
-              console.error(`    ✓ ${file.path}`);
-            }
-          } catch (fileError) {
-            errorCount++;
-            if (debugIndex) {
-              console.error(`    ✗ ${file.path} FAILED:`, fileError);
-            } else {
-              console.error(`    ✗ ${file.path} FAILED`);
-            }
-            errors.push(`${file.path}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
-          }
-        }
-      }
-
-      // Allow GC to reclaim memory from this batch before loading the next
-      // The batch array goes out of scope at end of loop iteration
-    }
-
-    // Check if any files were actually indexed
-    const totalIndexable = filePaths.length - skippedCount;
-    const allUnchanged = successCount === 0 && unchangedSkippedCount > 0 && errorCount === 0;
-    if (successCount === 0 && !allUnchanged) {
-      console.error('No files were successfully indexed');
-      this.updateIndexStatus({
-        status: 'error',
-        lastError: errors[0] || 'No files could be indexed',
-        fileCount: 0,
-      });
-      return {
-        indexed: 0,
-        skipped: skippedCount + errorCount + unchangedSkippedCount,
-        errors: errors.length > 0 ? errors : ['No files could be indexed'],
-        duration: Date.now() - startTime,
-        totalIndexable,
-        unchangedSkipped: unchangedSkippedCount,
-      };
-    }
-
-    console.error(`\nIndexing complete: ${successCount} succeeded, ${errorCount} had errors, ${skippedCount} skipped`);
-
-    if (store && successfulPaths.size > 0) {
-      const prior = this.loadIndexStateForActiveProvider(store);
-      const nextFiles: Record<string, { hash: string; indexed_at: string }> = {};
-      const existingPaths = new Set(filePaths);
-
-      // Carry forward entries for files that still exist.
-      for (const [p, entry] of Object.entries(prior.files)) {
-        if (!existingPaths.has(p)) continue;
-        nextFiles[p] = entry;
-      }
-
-      // Update entries for successfully indexed files.
-      for (const p of successfulPaths) {
-        const hash = contentHashes.get(p);
-        if (!hash) continue;
-        nextFiles[p] = { hash, indexed_at: indexedAtIso };
-      }
-
-      store.save({
-        version: typeof prior.version === 'number' ? prior.version + 1 : 2,
-        provider_id: this.retrievalProviderId,
-        updated_at: new Date().toISOString(),
-        files: nextFiles,
-      });
-    }
-
-    // Save state after indexing (even if some files failed)
-    if (successCount > 0) {
-      await this.persistLegacyProviderRuntimeState();
-      console.error('Context state saved');
-
-      this.updateIndexStatus({
-        status: errorCount > 0 ? 'error' : 'idle',
-        lastIndexed: new Date().toISOString(),
-        fileCount: totalIndexable,
-        lastError: errors.length ? errors[errors.length - 1] : undefined,
-      });
-    } else {
-      // Nothing to write, but treat as a successful no-op when everything is unchanged.
-      this.updateIndexStatus({
-        status: errorCount > 0 ? 'error' : 'idle',
-        lastIndexed: new Date().toISOString(),
-        fileCount: totalIndexable,
-        lastError: errors.length ? errors[errors.length - 1] : undefined,
-      });
-    }
-
-    // Clear cache after reindexing
-    this.clearCache();
-    console.error('Workspace indexing finished');
-
-	      return {
-	        indexed: successCount,
-	        skipped: skippedCount + errorCount + unchangedSkippedCount,
-	        errors,
-	        duration: Date.now() - startTime,
-          totalIndexable,
-          unchangedSkipped: unchangedSkippedCount,
-	      };
-      } catch (e) {
-        metricsResult = 'error';
-        throw e;
-      } finally {
-        incCounter(
-          'context_engine_index_workspace_runs_total',
-          { result: metricsResult },
-          1,
-          'Total indexWorkspace runs.'
-        );
-        observeDurationMs(
-          'context_engine_index_workspace_duration_seconds',
-          { result: metricsResult },
-          Date.now() - startTime,
-          { help: 'indexWorkspace end-to-end duration in seconds.' }
-        );
-      }
-    });
-  }
-
-  /**
    * Run workspace indexing in a background worker thread
    */
   async indexWorkspaceInBackground(): Promise<void> {
@@ -2779,11 +2368,7 @@ export class ContextServiceClient {
               lastError: message.errors?.[message.errors.length - 1],
             });
 
-            // Worker updates the persisted state file, but this instance holds an in-memory context.
-            // Reset and reload so subsequent searches use the fresh index.
-            this.resetLegacyProviderRuntime({ resetDiskHydration: false });
             this.clearCache();
-            await this.ensureLegacyProviderRuntime();
 
             await worker.terminate();
             resolve();
@@ -2846,253 +2431,6 @@ export class ContextServiceClient {
     return this.retrievalProvider.indexFiles(filePaths);
   }
 
-  private async indexFilesWithLegacyRuntime(filePaths: string[]): Promise<IndexResult> {
-    return this.enqueueIndexing(async () => {
-      const startTime = Date.now();
-
-      if (this.isOfflineMode()) {
-        const message = 'Incremental indexing is disabled while CONTEXT_ENGINE_OFFLINE_ONLY is enabled.';
-        console.error(message);
-        this.updateIndexStatus({ status: 'error', lastError: message });
-        throw new Error(message);
-      }
-
-      if (!filePaths || filePaths.length === 0) {
-        return { indexed: 0, skipped: 0, errors: ['No files provided'], duration: 0 };
-      }
-
-      const uniquePaths = Array.from(new Set(filePaths));
-      const useWorker =
-        process.env.CE_INDEX_USE_WORKER !== 'false' &&
-        // Avoid worker-based indexing in Jest unit tests (worker won't inherit mocks).
-        !process.env.JEST_WORKER_ID;
-      const threshold =
-        Number.parseInt(process.env.CE_INDEX_FILES_WORKER_THRESHOLD ?? '200', 10) || 200;
-
-      if (useWorker && uniquePaths.length >= threshold) {
-        this.updateIndexStatus({ status: 'indexing', lastError: undefined });
-        let result: IndexResult | null = null;
-        try {
-          result = await this.runIndexWorker(uniquePaths);
-        } catch (e) {
-          console.error('[indexFiles] Worker indexing unavailable; falling back to in-process indexing:', e);
-          result = null;
-        }
-
-        if (!result) {
-          // fall through to in-process path
-        } else {
-
-          if (result.indexed > 0) {
-            this.updateIndexStatus({
-              status: result.errors.length ? 'error' : 'idle',
-              lastIndexed: new Date().toISOString(),
-              fileCount: Math.max(this.indexStatus.fileCount, result.indexed),
-              lastError: result.errors.length ? result.errors[result.errors.length - 1] : undefined,
-            });
-          } else {
-            this.updateIndexStatus({
-              status: 'error',
-              lastError: result.errors[0] || 'Incremental indexing failed',
-            });
-          }
-
-          // Ensure the in-memory context reflects the worker-written state file.
-          this.resetLegacyProviderRuntime({ resetDiskHydration: false });
-          this.clearCache();
-          await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
-
-          return result;
-        }
-      }
-
-      this.updateIndexStatus({ status: 'indexing', lastError: undefined });
-      const context = await this.ensureLegacyProviderRuntime({ skipAutoIndex: true });
-      this.loadIgnorePatterns();
-
-      const errors: string[] = [];
-      let skipped = 0;
-      let unchangedSkippedCount = 0;
-      const successfulPaths: Set<string> = new Set();
-      const contentHashes: Map<string, string> = new Map();
-
-      const store = this.getIndexStateStore();
-      const skipUnchanged =
-      Boolean(store) && featureEnabled('skip_unchanged_indexing') && this.hasRestoredLegacyProviderRuntimeState();
-      const indexState: IndexStateFile | null =
-        skipUnchanged && store ? this.loadIndexStateForActiveProvider(store) : null;
-      const indexedAtIso = new Date().toISOString();
-
-      const normalizedPaths: string[] = [];
-      for (const rawPath of uniquePaths) {
-        // Normalize and ensure path stays within workspace
-        const relativePath = path.isAbsolute(rawPath)
-          ? path.relative(this.workspacePath, rawPath)
-          : rawPath;
-
-        if (!relativePath || relativePath.startsWith('..')) {
-          skipped++;
-          continue;
-        }
-
-        if (this.shouldIgnorePath(relativePath)) {
-          skipped++;
-          continue;
-        }
-
-        if (!this.shouldIndexFile(relativePath)) {
-          skipped++;
-          continue;
-        }
-
-        normalizedPaths.push(relativePath);
-      }
-
-      let successCount = 0;
-      const BATCH_SIZE = Number.parseInt(process.env.CE_INDEX_BATCH_SIZE ?? '10', 10) || 10;
-      for (let i = 0; i < normalizedPaths.length; i += BATCH_SIZE) {
-        const batchPaths = normalizedPaths.slice(i, i + BATCH_SIZE);
-        const isLastBatch = i + BATCH_SIZE >= normalizedPaths.length;
-
-        const contentsByPath = await Promise.all(
-          batchPaths.map(async (relativePath) => ({
-            relativePath,
-            contents: await this.readFileContentsAsync(relativePath),
-          }))
-        );
-
-        const batch: Array<{ path: string; contents: string }> = [];
-        for (const { relativePath, contents } of contentsByPath) {
-          if (contents === null) {
-            skipped++;
-            continue;
-          }
-
-          const hash = store ? this.hashContent(contents) : null;
-          if (hash) {
-            contentHashes.set(relativePath, hash);
-          }
-
-          if (skipUnchanged && indexState) {
-            const previous = indexState.files[relativePath]?.hash;
-            if (previous && previous === hash) {
-              unchangedSkippedCount++;
-              continue;
-            }
-          }
-
-          batch.push({ path: relativePath, contents });
-        }
-
-        if (batch.length === 0) {
-          continue;
-        }
-
-        try {
-          await context.addToIndex(batch, { waitForIndexing: isLastBatch });
-          successCount += batch.length;
-          for (const file of batch) {
-            successfulPaths.add(file.path);
-          }
-        } catch (error) {
-          errors.push(error instanceof Error ? error.message : String(error));
-          // Attempt per-file indexing
-          for (const file of batch) {
-            try {
-              await context.addToIndex([file], { waitForIndexing: false });
-              successCount++;
-              successfulPaths.add(file.path);
-            } catch (fileError) {
-              errors.push(`${file.path}: ${fileError instanceof Error ? fileError.message : String(fileError)}`);
-            }
-          }
-        }
-      }
-
-      if (successCount === 0 && unchangedSkippedCount > 0 && errors.length === 0) {
-        // Successful no-op (all requested files unchanged or otherwise skipped by optimization).
-        this.updateIndexStatus({
-          status: 'idle',
-          lastIndexed: new Date().toISOString(),
-        });
-        this.clearCache();
-        return {
-          indexed: 0,
-          skipped: skipped + unchangedSkippedCount,
-          errors: [],
-          duration: Date.now() - startTime,
-          unchangedSkipped: unchangedSkippedCount,
-        };
-      }
-
-      if (successCount === 0 && errors.length === 0) {
-        this.updateIndexStatus({
-          status: 'error',
-          lastError: 'No indexable file changes provided',
-        });
-        this.clearCache();
-        return {
-          indexed: 0,
-          skipped: skipped + unchangedSkippedCount,
-          errors: ['No indexable file changes provided'],
-          duration: Date.now() - startTime,
-          unchangedSkipped: unchangedSkippedCount,
-        };
-      }
-
-      if (store && successfulPaths.size > 0) {
-        const prior = this.loadIndexStateForActiveProvider(store);
-        const nextFiles: Record<string, { hash: string; indexed_at: string }> = { ...prior.files };
-
-        for (const p of successfulPaths) {
-          const hash = contentHashes.get(p);
-          if (!hash) continue;
-          nextFiles[p] = { hash, indexed_at: indexedAtIso };
-        }
-
-        store.save({
-          version: typeof prior.version === 'number' ? prior.version + 1 : 2,
-          provider_id: this.retrievalProviderId,
-          updated_at: new Date().toISOString(),
-          files: nextFiles,
-        });
-      }
-
-      if (successCount > 0) {
-        await this.persistLegacyProviderRuntimeState();
-        this.updateIndexStatus({
-          status: errors.length ? 'error' : 'idle',
-          lastIndexed: new Date().toISOString(),
-          fileCount: Math.max(this.indexStatus.fileCount, successCount),
-          lastError: errors[errors.length - 1],
-        });
-      } else {
-        if (unchangedSkippedCount > 0 && errors.length === 0) {
-          // Successful no-op (all requested files unchanged).
-          this.updateIndexStatus({
-            status: 'idle',
-            lastIndexed: new Date().toISOString(),
-          });
-        } else {
-          this.updateIndexStatus({
-            status: 'error',
-            lastError: errors[0] || 'Incremental indexing failed',
-          });
-        }
-      }
-
-      this.clearCache();
-
-      return {
-        indexed: successCount,
-        skipped: skipped + unchangedSkippedCount,
-        errors,
-        duration: Date.now() - startTime,
-        unchangedSkipped: unchangedSkippedCount,
-      };
-    });
-  }
-
   /**
    * Clear index state and caches
    */
@@ -3104,11 +2442,7 @@ export class ContextServiceClient {
     if (options?.localNative) {
       console.error('[clearIndex] Clearing local_native retrieval metadata.');
     }
-
-    // Reset legacy runtime instances
-    this.resetLegacyProviderRuntime({ skipAutoIndexOnce: true, resetDiskHydration: true });
-
-    this.legacyRuntimeManager.clearPersistedState();
+    this.indexStatusDiskHydrated = false;
 
     const fingerprintPath = path.join(this.workspacePath, INDEX_FINGERPRINT_FILE_NAME);
     if (fs.existsSync(fingerprintPath)) {
@@ -3127,6 +2461,16 @@ export class ContextServiceClient {
         console.error(`Deleted index state store file: ${stateStorePath}`);
       } catch (error) {
         console.error('Failed to delete index state store file:', error);
+      }
+    }
+
+    const stateFilePath = this.getStateFilePath();
+    if (fs.existsSync(stateFilePath)) {
+      try {
+        fs.unlinkSync(stateFilePath);
+        console.error(`Deleted retrieval state marker file: ${stateFilePath}`);
+      } catch (error) {
+        console.error('Failed to delete retrieval state marker file:', error);
       }
     }
 
@@ -3260,7 +2604,7 @@ export class ContextServiceClient {
     topK: number,
     options?: { bypassCache?: boolean; maxOutputLength?: number }
   ): Promise<SearchResult[]> {
-    return searchWithLegacySemanticRuntime(query, topK, options, {
+    return searchWithSemanticRuntime(query, topK, options, {
       searchAndAsk: (searchQuery, prompt) => this.searchAndAsk(searchQuery, prompt),
       keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
         this.keywordFallbackSearch(fallbackQuery, fallbackTopK),
@@ -3685,23 +3029,8 @@ export class ContextServiceClient {
     }));
   }
 
-  /** 
-   * Parse the formatted search results from DirectContext into SearchResult objects
-   * 
-   * The SDK returns results in this format:
-   * ```
-   * The following code sections were retrieved:
-   * Path: src/file.ts
-   * ...
-   *     1  code line 1
-   *     2  code line 2
-   * ...
-   * Path: src/other.ts
-   * ...
-   * ```
-   */
   private parseFormattedResults(formattedResults: string, topK: number): SearchResult[] {
-    return parseLegacyFormattedResults(formattedResults, topK);
+    return parseFormattedSemanticResults(formattedResults, topK);
   }
 
   // ==========================================================================

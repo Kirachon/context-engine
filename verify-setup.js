@@ -10,7 +10,6 @@
 import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -92,44 +91,15 @@ async function checkNpmVersion() {
   }
 }
 
-async function checkAuggieCLI() {
-  const result = await executeCommand('auggie', ['--version']);
-  if (result.code === 0) {
-    log(`Auggie CLI ${result.stdout.trim()} installed`, 'success');
+async function checkRetrievalConfig() {
+  const provider = process.env.CE_RETRIEVAL_PROVIDER;
+  if (!provider || provider.trim() === '' || provider.trim() === 'local_native') {
+    log('Retrieval provider configuration is local_native-compatible', 'success');
     passed++;
     return true;
-  } else {
-    log('Auggie CLI not found - run: npm install -g @augmentcode/auggie', 'error');
-    failed++;
-    return false;
   }
-}
 
-async function checkAuthentication() {
-  // Check environment variable
-  if (process.env.AUGMENT_API_TOKEN) {
-    log('AUGMENT_API_TOKEN environment variable set', 'success');
-    passed++;
-    return true;
-  }
-  
-  // Check session file
-  const sessionPath = path.join(os.homedir(), '.augment', 'session.json');
-  if (fs.existsSync(sessionPath)) {
-    try {
-      const session = JSON.parse(fs.readFileSync(sessionPath, 'utf-8'));
-      if (session.token) {
-        log('Auggie session file found', 'success');
-        passed++;
-        return true;
-      }
-    } catch (error) {
-      // Fall through
-    }
-  }
-  
-  log('No authentication found - run: auggie login', 'warning');
-  log('Or set AUGMENT_API_TOKEN environment variable', 'info');
+  log(`Unsupported CE_RETRIEVAL_PROVIDER value: ${provider}`, 'error');
   failed++;
   return false;
 }
@@ -191,8 +161,7 @@ async function main() {
   await checkNodeVersion();
   await checkNpmVersion();
   await checkTypeScript();
-  await checkAuggieCLI();
-  await checkAuthentication();
+  await checkRetrievalConfig();
   await checkDependencies();
   await checkBuild();
   
@@ -221,4 +190,3 @@ main().catch((error) => {
   console.error('Verification failed:', error);
   process.exit(1);
 });
-

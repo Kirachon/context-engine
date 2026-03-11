@@ -17,17 +17,11 @@ permissions:
 
 jobs:
   pr_gate:
-    if: github.event_name == 'pull_request' && (matrix.provider_lane == 'local_native' || secrets.AUGMENT_API_TOKEN != '')
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        provider_lane: [local_native, augment_legacy]
     env:
-      AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
-      AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
-      CE_RETRIEVAL_PROVIDER: ${{ matrix.provider_lane }}
-      BENCH_PROVIDER_LANE: ${{ matrix.provider_lane }}
+      CE_RETRIEVAL_PROVIDER: local_native
+      BENCH_PROVIDER_LANE: local_native
     steps:
       - uses: actions/checkout@v4
 
@@ -55,22 +49,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perf-gate-pr-artifacts-${{ matrix.provider_lane }}
+          name: perf-gate-pr-artifacts-local_native
           path: artifacts/bench/
           if-no-files-found: warn
 
   nightly_gate:
-    if: (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && (matrix.provider_lane == 'local_native' || secrets.AUGMENT_API_TOKEN != '')
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        provider_lane: [local_native, augment_legacy]
     env:
-      AUGMENT_API_TOKEN: ${{ secrets.AUGMENT_API_TOKEN }}
-      AUGMENT_API_URL: ${{ secrets.AUGMENT_API_URL }}
-      CE_RETRIEVAL_PROVIDER: ${{ matrix.provider_lane }}
-      BENCH_PROVIDER_LANE: ${{ matrix.provider_lane }}
+      CE_RETRIEVAL_PROVIDER: local_native
+      BENCH_PROVIDER_LANE: local_native
     steps:
       - uses: actions/checkout@v4
 
@@ -98,6 +86,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: perf-gate-nightly-artifacts-${{ matrix.provider_lane }}
+          name: perf-gate-nightly-artifacts-local_native
           path: artifacts/bench/
           if-no-files-found: warn

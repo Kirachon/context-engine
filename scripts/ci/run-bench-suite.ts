@@ -16,7 +16,7 @@ import { createHash } from 'crypto';
 
 type SuiteMode = 'pr' | 'nightly';
 type BenchMode = 'scan' | 'search' | 'retrieve';
-type RetrievalProvider = 'openai_session' | 'augment_legacy';
+type RetrievalProvider = 'local_native';
 
 interface SuiteArgs {
   mode: SuiteMode;
@@ -185,8 +185,6 @@ function resolveEnvFingerprint(): string {
     'RUNNER_ARCH',
     'CE_RETRIEVAL_PROVIDER',
     'CE_AI_PROVIDER',
-    'AUGMENT_API_URL',
-    'AUGMENT_API_TOKEN',
     'npm_config_user_agent',
   ];
   const canonical = keys
@@ -233,8 +231,8 @@ function assertProvenanceForSuite(
       `Benchmark mode mismatch for suite compare: baseline=${baselineProv.bench_mode} candidate=${candidateProv.bench_mode}.`
     );
   }
-  const baselineProvider = baselineProv.retrieval_provider ?? 'augment_legacy';
-  const candidateProvider = candidateProv.retrieval_provider ?? 'augment_legacy';
+  const baselineProvider = baselineProv.retrieval_provider ?? 'local_native';
+  const candidateProvider = candidateProv.retrieval_provider ?? 'local_native';
   if (baselineProvider !== candidateProvider) {
     throw new Error(
       `Retrieval provider mismatch for suite compare: baseline=${baselineProvider} candidate=${candidateProvider}.`
@@ -439,17 +437,17 @@ function resolveRetrievalProvider(): {
 } {
   const raw = process.env.CE_RETRIEVAL_PROVIDER?.trim();
   if (!raw) {
-    return { provider: 'openai_session', source: 'default', raw: null };
+    return { provider: 'local_native', source: 'default', raw: null };
   }
-  if (raw === 'openai_session' || raw === 'augment_legacy') {
+  if (raw === 'local_native') {
     return { provider: raw, source: 'CE_RETRIEVAL_PROVIDER', raw };
   }
 
   // eslint-disable-next-line no-console
   console.error(
-    `[run-bench-suite] Unsupported CE_RETRIEVAL_PROVIDER="${raw}". Falling back to openai_session.`
+    `[run-bench-suite] Unsupported CE_RETRIEVAL_PROVIDER="${raw}". Falling back to local_native.`
   );
-  return { provider: 'openai_session', source: 'default', raw };
+  return { provider: 'local_native', source: 'default', raw };
 }
 
 function resolveRunConfig(
@@ -457,10 +455,7 @@ function resolveRunConfig(
   workspace: string,
   retrievalProvider: RetrievalProvider
 ): RunConfig {
-  const modeOrder: BenchMode[] =
-    retrievalProvider === 'augment_legacy'
-      ? ['retrieve', 'search', 'scan']
-      : ['retrieve', 'search', 'scan'];
+  const modeOrder: BenchMode[] = ['retrieve', 'search', 'scan'];
   const errors: string[] = [];
 
   for (const benchMode of modeOrder) {
