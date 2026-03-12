@@ -832,6 +832,10 @@ const INDEXABLE_EXTENSIONS = new Set([
   // === API/Schema Definitions ===
   '.graphql', '.gql',
   '.proto',     // Protocol Buffers
+  '.thrift',    // Apache Thrift IDL
+  '.avsc',      // Avro schema
+  '.avdl',      // Avro IDL
+  '.capnp',     // Cap'n Proto schema
   '.openapi', '.swagger',
 
   // === Shell Scripts ===
@@ -842,6 +846,11 @@ const INDEXABLE_EXTENSIONS = new Set([
   '.dockerfile',
   '.tf', '.hcl',  // Terraform
   '.nix',         // Nix configuration
+  '.bicep',       // Azure Bicep templates
+  '.rego',        // Open Policy Agent
+  '.cue',         // CUE configuration language
+  '.jsonnet', '.libsonnet', // Jsonnet
+  '.http', '.rest', // API request collections
 
   // ============================================================================
   // NEW EXTENSIONS (44 additions - 2025-12-22)
@@ -861,6 +870,7 @@ const INDEXABLE_EXTENSIONS = new Set([
   // === Scripting Languages ===
   '.lua',                   // Lua (game dev, Neovim, embedded scripting)
   '.pl', '.pm', '.pod',     // Perl (system admin, text processing, legacy)
+  '.tcl',                   // Tcl scripting
 
   // === Modern Systems Languages ===
   '.zig',                   // Zig (modern C replacement, growing adoption)
@@ -875,6 +885,7 @@ const INDEXABLE_EXTENSIONS = new Set([
   '.ninja',                 // Ninja (fast build system)
   '.sbt',                   // Scala Build Tool
   '.podspec',               // CocoaPods (iOS dependency management)
+  '.sln',                   // Visual Studio solution
 
   // === Documentation Formats ===
   '.adoc', '.asciidoc',     // AsciiDoc (technical docs, books)
@@ -889,6 +900,14 @@ const INDEXABLE_EXTENSIONS = new Set([
   '.jsp',                   // JavaServer Pages
   '.erb',                   // Embedded Ruby (Rails views)
   '.twig',                  // Twig (PHP/Symfony templates)
+
+  // === Additional Enterprise/Scientific Languages ===
+  '.kql',                   // Kusto query language
+  '.sol',                   // Solidity
+  '.sv', '.vh', '.vhd', '.vhdl', // Hardware description languages
+  '.cob', '.cbl', '.cpy',   // COBOL
+  '.f', '.f90', '.f95', '.f03', '.f08', // Fortran
+  '.pas', '.pp',            // Pascal
 
   // === Build Files (by name, not extension - handled separately) ===
   // Makefile, Dockerfile, Jenkinsfile - handled in shouldIndexFile

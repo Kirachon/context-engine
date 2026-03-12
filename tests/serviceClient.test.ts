@@ -1333,6 +1333,40 @@ describe('ContextServiceClient', () => {
   });
 
   describe('Indexing', () => {
+    it('should discover newly supported multi-language extensions during workspace indexing', async () => {
+      const previousFlags = {
+        index_state_store: FEATURE_FLAGS.index_state_store,
+        skip_unchanged_indexing: FEATURE_FLAGS.skip_unchanged_indexing,
+      };
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-ext-'));
+      try {
+        FEATURE_FLAGS.index_state_store = false;
+        FEATURE_FLAGS.skip_unchanged_indexing = false;
+
+        const supportedExtensions = [
+          '.rego', '.cue', '.jsonnet', '.libsonnet', '.thrift', '.avsc', '.avdl', '.capnp',
+          '.bicep', '.kql', '.sol', '.tcl', '.sv', '.vhd', '.cbl', '.f90', '.pas', '.http',
+        ];
+
+        supportedExtensions.forEach((ext, idx) => {
+          fs.writeFileSync(path.join(tempDir, `sample_${idx}${ext}`), `content for ${ext}\n`, 'utf-8');
+        });
+        fs.writeFileSync(path.join(tempDir, 'skip_me.xyz'), 'not supported\n', 'utf-8');
+
+        const indexingClient = new ContextServiceClient(tempDir);
+        const result = await indexingClient.indexWorkspace();
+
+        expect(result.totalIndexable).toBe(supportedExtensions.length);
+        expect(result.indexed).toBe(supportedExtensions.length);
+        expect(result.errors).toEqual([]);
+        expect(indexingClient.getIndexStatus().fileCount).toBe(supportedExtensions.length);
+      } finally {
+        FEATURE_FLAGS.index_state_store = previousFlags.index_state_store;
+        FEATURE_FLAGS.skip_unchanged_indexing = previousFlags.skip_unchanged_indexing;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should retain lastError until a successful indexing cycle completes', () => {
       const statusClient = new ContextServiceClient(testWorkspace);
       const updateIndexStatus = (statusClient as any).updateIndexStatus.bind(statusClient) as
