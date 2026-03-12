@@ -230,6 +230,8 @@ Note: treat `tool_manifest` (and the tools' `inputSchema` returned by MCP) as th
 
 **Description**: LLM-powered review of a unified diff returning a `ReviewResult` (Codex-style). This is a different schema/pipeline than `review_diff`.
 
+**Timeout Behavior**: Uses `120000` ms by default. Set `CE_REVIEW_AI_TIMEOUT_MS` to change the default globally, or pass `llm_timeout_ms` per call.
+
 **Input Schema**:
 ```typescript
 {
@@ -241,6 +243,7 @@ Note: treat `tool_manifest` (and the tools' `inputSchema` returned by MCP) as th
   categories?: string;           // Comma-separated categories
   changed_lines_only?: boolean;  // Default: true
   custom_instructions?: string;
+  llm_timeout_ms?: number;       // Optional per-call AI timeout (1000-1800000)
   exclude_patterns?: string;     // Comma-separated globs
 }
 ```
@@ -253,13 +256,18 @@ Note: treat `tool_manifest` (and the tools' `inputSchema` returned by MCP) as th
 
 **Description**: Retrieve a git diff for a target (staged/unstaged/head/branch/commit) and then run `review_changes`.
 
+**Timeout Behavior**: Inherits the same timeout behavior as `review_changes` (`120000` ms default, env override via `CE_REVIEW_AI_TIMEOUT_MS`). You can also set `options.llm_timeout_ms` per call.
+
 **Input Schema**:
 ```typescript
 {
   target?: string;              // Default: 'staged'
   base?: string;                // For branch comparisons
   include_patterns?: string[];  // Optional file globs
-  options?: object;             // Same shape as ReviewOptions (see `ReviewResult` types)
+  options?: {
+    // Same shape as ReviewOptions (see `ReviewResult` types)
+    llm_timeout_ms?: number;    // Optional per-call AI timeout (1000-1800000)
+  };
 }
 ```
 
@@ -291,7 +299,7 @@ Note: treat `tool_manifest` (and the tools' `inputSchema` returned by MCP) as th
   target?: string;              // Default: 'staged'
   base?: string;
   include_patterns?: string[];
-  review_git_diff_options?: object; // Same shape as ReviewOptions
+  review_git_diff_options?: object; // Same shape as ReviewOptions, including llm_timeout_ms
 }
 ```
 

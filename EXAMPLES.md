@@ -889,6 +889,8 @@ Implement user authentication with JWT tokens
 
 ## Code Review Examples (v1.7.0)
 
+Timeout note: `review_changes` and `review_git_diff` use a default AI timeout of `120000` ms. Set `CE_REVIEW_AI_TIMEOUT_MS` to override globally, or set `llm_timeout_ms` per call.
+
 ### Example 1: Review Staged Changes Before Commit
 
 **User Query:**
@@ -1139,6 +1141,22 @@ Implement user authentication with JWT tokens
     "target": "staged",
     "options": {
       "exclude_patterns": "*.test.ts,*.spec.js,dist/*,build/*,*.generated.ts"
+    }
+  }
+}
+```
+
+### Example 7: `review_auto` with `review_git_diff_options.llm_timeout_ms`
+
+**Tool Call:**
+```json
+{
+  "tool": "review_auto",
+  "arguments": {
+    "target": "staged",
+    "review_git_diff_options": {
+      "llm_timeout_ms": 180000,
+      "max_findings": 10
     }
   }
 }
