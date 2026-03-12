@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_for": "auggie-parity-report-generator",
+  "generated_for": "legacy-capability-parity-report-generator",
   "pack_id": "local-native-parity-v1",
   "defaults": {
     "retrieval_parity_path": "docs/rollout-evidence/2026-03-04/retrieval-parity-report.json",
@@ -188,7 +188,8 @@
       "id": "parity.ops.no_legacy_scan_receipt_present",
       "kind": "command_exit_zero",
       "description": "Current no-legacy scan must pass.",
-      "command": "npm run -s ci:check:no-legacy-auggie"
+      "command": "npm run -s ci:check:no-legacy-provider"
     }
   ]
 }
+

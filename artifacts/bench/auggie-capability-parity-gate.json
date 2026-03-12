@@ -4,8 +4,8 @@
   "inputs": {
     "report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-parity-pr.json",
     "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-capability-matrix.json",
-    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\auggie-capability-parity-gate.json",
-    "history_dir": "D:\\GitProjects\\context-engine\\artifacts\\bench\\auggie-parity-history",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\legacy-capability-parity-gate.json",
+    "history_dir": "D:\\GitProjects\\context-engine\\artifacts\\bench\\legacy-capability-parity-history",
     "require_consecutive": 3
   },
   "min_overall_score": 90,
@@ -128,9 +128,9 @@
     "checked": 3,
     "status": "pass",
     "files": [
-      "D:\\GitProjects\\context-engine\\artifacts\\bench\\auggie-parity-history\\auggie-capability-parity-2026-03-11T15-10-23-765Z.json",
-      "D:\\GitProjects\\context-engine\\artifacts\\bench\\auggie-parity-history\\auggie-capability-parity-2026-03-11T15-06-47-221Z.json",
-      "D:\\GitProjects\\context-engine\\artifacts\\bench\\auggie-parity-history\\auggie-capability-parity-2026-03-11T15-05-03-812Z.json"
+      "D:\\GitProjects\\context-engine\\artifacts\\bench\\legacy-capability-parity-history\\legacy-capability-parity-2026-03-11T15-10-23-765Z.json",
+      "D:\\GitProjects\\context-engine\\artifacts\\bench\\legacy-capability-parity-history\\legacy-capability-parity-2026-03-11T15-06-47-221Z.json",
+      "D:\\GitProjects\\context-engine\\artifacts\\bench\\legacy-capability-parity-history\\legacy-capability-parity-2026-03-11T15-05-03-812Z.json"
     ]
   },
   "gate": {

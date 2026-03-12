@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Deterministic CI guard to block legacy Auggie references.
+ * Deterministic CI guard to block legacy provider references.
  *
  * Usage:
- *   node --import tsx scripts/ci/check-auggie-no-legacy-references.ts [--allowlist <path>] [--roots <csv>] [--strict]
+ *   node --import tsx scripts/ci/check-legacy-provider-references.ts [--allowlist <path>] [--roots <csv>] [--strict]
  *
  * Exit codes:
  * - 0: clean scan (no violations)
@@ -52,7 +52,7 @@ const BLOCKED_PATTERNS: Array<{ label: string; regex: RegExp }> = [
 function printUsage(code: number): never {
   // eslint-disable-next-line no-console
   console.log(
-    'Usage: node --import tsx scripts/ci/check-auggie-no-legacy-references.ts [--allowlist <path>] [--roots <csv>] [--strict]'
+    'Usage: node --import tsx scripts/ci/check-legacy-provider-references.ts [--allowlist <path>] [--roots <csv>] [--strict]'
   );
   process.exit(code);
 }
@@ -252,7 +252,7 @@ function main(): void {
 
     if (violations.length > 0) {
       // eslint-disable-next-line no-console
-      console.error('No-legacy Auggie reference check failed.');
+      console.error('No-legacy provider reference check failed.');
       for (const violation of violations) {
         // eslint-disable-next-line no-console
         console.error(`${violation.file}:${violation.line}:${violation.pattern}`);
@@ -265,7 +265,7 @@ function main(): void {
     }
 
     // eslint-disable-next-line no-console
-    console.log('No-legacy Auggie reference check passed.');
+    console.log('No-legacy provider reference check passed.');
     // eslint-disable-next-line no-console
     console.log(`Summary: scanned_files=${files.length} allowlisted_files=${allowlist.size} violations=0`);
     process.exit(0);

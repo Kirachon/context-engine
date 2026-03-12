@@ -1,6 +1,6 @@
 {
   "schema_version": "1.0.0",
-  "generated_for": "auggie-adoption-removal-finalized-plan",
+  "generated_for": "legacy-provider-adoption-removal-finalized-plan",
   "weights": {
     "retrieval_quality": 40,
     "tool_behavior": 20,
@@ -119,3 +119,4 @@
     "critical_required": 100
   }
 }
+

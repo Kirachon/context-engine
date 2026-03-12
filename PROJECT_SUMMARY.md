@@ -24,7 +24,7 @@ The active path is no longer dependent on Auggie SDK runtime behavior.
 ## Measured Results
 
 Evidence artifacts:
-- `artifacts/bench/auggie-capability-parity-gate.json`
+- `artifacts/bench/legacy-capability-parity-gate.json`
 - `artifacts/bench/retrieval-parity-pr.json`
 - `artifacts/bench/retrieval-quality-report.json`
 
@@ -48,3 +48,4 @@ Latest outcomes:
 - `ARCHITECTURE.md`
 - `docs/AUGGIE_ADOPTION_AND_REMOVAL_TRACKER.md`
 - `docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`
+

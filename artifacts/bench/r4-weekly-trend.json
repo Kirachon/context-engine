@@ -24,7 +24,7 @@
     {
       "id": "metric.strict_parity_score",
       "status": "PASS",
-      "source": "artifacts\\bench\\auggie-capability-parity-gate.json",
+      "source": "artifacts\\bench\\legacy-capability-parity-gate.json",
       "message": "overall_score=100"
     },
     {
@@ -64,7 +64,7 @@
     "retention_archive_note": "Archived under artifacts\\bench\\archive\\r4-weekly with rolling_12_weeks retention policy."
   },
   "inputs": {
-    "parity_artifact_path": "artifacts\\bench\\auggie-capability-parity-gate.json",
+    "parity_artifact_path": "artifacts\\bench\\legacy-capability-parity-gate.json",
     "quality_artifact_path": "artifacts\\bench\\retrieval-quality-report.json",
     "parity_artifact_sha256": "6faa0ab4a458140a46851a483e773327c92d825dbb4616b4bbdae05faf837f3c",
     "quality_artifact_sha256": "62812ce419ae102e26a2b440447e0b795e9b6036f8083157a128c718afdefa9b",
@@ -72,3 +72,4 @@
     "archive_dir": "artifacts\\bench\\archive\\r4-weekly"
   }
 }
+

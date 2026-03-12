@@ -2,7 +2,7 @@
 
 How to test the Context Engine MCP Server implementation.
 
-> Current runtime note: testing should be centered on the local-native provider path and the parity/no-legacy gates. Older Auggie CLI checks are historical only.
+> Current runtime note: testing should be centered on the local-native provider path and the parity/no-legacy gates. Older legacy-provider checks are historical only.
 
 ## Automated Testing
 
@@ -166,30 +166,24 @@ console.error('Tool called:', name);
 console.error('Arguments:', JSON.stringify(args, null, 2));
 ```
 
-### Test Auggie CLI Directly
+### Test Provider Session
 
 ```bash
-# Test authentication
-auggie --version
+# Verify provider CLI
+codex --version
 
-# Test indexing
-auggie index /path/to/project
-
-# Test search
-auggie search "authentication" --limit 5
+# Verify session if AI-assisted tools are needed
+codex login
 ```
 
 ## Common Issues
 
-### Issue: "No API token found"
+### Issue: "Provider unavailable"
 
 **Solution:**
 ```bash
-# Login via CLI
-auggie login
-
-# Or set environment variable
-export AUGMENT_API_TOKEN="your-token"
+# Ensure provider session is active
+codex login
 ```
 
 ### Issue: "No results found"
@@ -199,20 +193,14 @@ export AUGMENT_API_TOKEN="your-token"
 # Index the workspace first
 node dist/index.js --workspace /path/to/project --index
 
-# Or use auggie CLI
-auggie index /path/to/project
 ```
 
-### Issue: "Failed to execute auggie CLI"
+### Issue: "Provider command failed"
 
 **Solution:**
 ```bash
-# Verify auggie is installed
-which auggie  # macOS/Linux
-where auggie  # Windows
-
-# Reinstall if needed
-npm install -g @augmentcode/auggie
+# Verify codex is installed
+codex --version
 ```
 
 ### Issue: Tools not showing in Codex CLI (/mcp)
@@ -251,7 +239,7 @@ Test with repositories of different sizes:
 - [ ] get_file retrieves correct content
 - [ ] get_context_for_prompt provides useful context
 - [ ] Error handling works (invalid paths, bad queries)
-- [ ] Authentication works (both CLI and env vars)
+- [ ] Provider session works for AI-assisted tools
 - [ ] Works with Codex CLI
 - [ ] Logs are helpful for debugging
 

@@ -10,7 +10,7 @@
   "_comment_9": "2. Create directory: mkdir -Force $env:USERPROFILE\\.gemini",
   "_comment_10": "3. Paste into: C:\\Users\\preda\\.gemini\\settings.json",
   "_comment_11": "4. Replace 'YOUR-PROJECT-NAME' with your actual project folder name",
-  "_comment_12": "5. Ensure AUGMENT_API_TOKEN is set in your environment variables",
+  "_comment_12": "5. If you use AI-assisted flows, ensure your provider session is active (codex login)",
   "_comment_13": "6. Save and restart Gemini CLI",
   "_comment_14": "",
   "_comment_15": "============================================================================",
@@ -26,8 +26,6 @@
         "--watch"
       ],
       "env": {
-        "AUGMENT_API_TOKEN": "$AUGMENT_API_TOKEN",
-        "AUGMENT_API_URL": "https://d9.api.augmentcode.com/",
         "DEBUG": "true"
       },
       "timeout": 30000,
@@ -48,21 +46,21 @@
   "_comment_env": "============================================================================",
   "_comment_env_title": "ENVIRONMENT VARIABLES",
   "_comment_env_1": "",
-  "_comment_env_2": "The configuration uses environment variables:",
-  "_comment_env_3": "  - AUGMENT_API_TOKEN: Your Auggie API token",
-  "_comment_env_4": "  - AUGMENT_API_URL: API endpoint (https://d9.api.augmentcode.com/)",
+  "_comment_env_2": "The configuration can run without legacy token variables.",
+  "_comment_env_3": "For AI-assisted flows, use provider login:",
+  "_comment_env_4": "  codex login",
   "_comment_env_5": "",
-  "_comment_env_6": "Option 1: Use auggie login (recommended):",
-  "_comment_env_7": "  auggie login",
+  "_comment_env_6": "Option 1 (recommended): provider login",
+  "_comment_env_7": "  codex login",
   "_comment_env_8": "",
-  "_comment_env_9": "Option 2: Set in PowerShell (temporary):",
-  "_comment_env_10": "  $env:AUGMENT_API_TOKEN = \"your-token-here\"",
-  "_comment_env_11": "  $env:AUGMENT_API_URL = \"https://d9.api.augmentcode.com/\"",
+  "_comment_env_9": "Option 2: Keep DEBUG only unless you intentionally add custom env vars",
+  "_comment_env_10": "  $env:DEBUG = \"true\"",
+  "_comment_env_11": "  (optional)",
   "_comment_env_12": "",
-  "_comment_env_13": "Option 3: Set in System Environment Variables (permanent):",
-  "_comment_env_14": "  1. Search for 'Environment Variables' in Windows",
-  "_comment_env_15": "  2. Add AUGMENT_API_TOKEN with your token value",
-  "_comment_env_16": "  3. Add AUGMENT_API_URL with the API endpoint",
+  "_comment_env_13": "Option 3: Keep defaults and only tune Context Engine flags as needed",
+  "_comment_env_14": "  1. Add CE_* flags in MCP config if needed",
+  "_comment_env_15": "  2. Restart terminal/client",
+  "_comment_env_16": "  3. Re-run gemini mcp list",
 
   "_comment_flags": "============================================================================",
   "_comment_flags_title": "What Each Flag Does:",
@@ -120,9 +118,9 @@
   
   "_comment_optional": "============================================================================",
   "_comment_optional_title": "OPTIONAL: Environment Variables",
-  "_comment_optional_note": "Uncomment if not using 'auggie login':",
+  "_comment_optional_note": "Optional: add env only if your workflow requires it",
   "_comment_optional_example": "Add 'env' property to context-engine server config:",
-  "_comment_optional_code": "\"env\": { \"AUGMENT_API_TOKEN\": \"your-token-here\" }",
+  "_comment_optional_code": "\"env\": { \"DEBUG\": \"true\" }",
   
   "_comment_trust": "============================================================================",
   "_comment_trust_title": "OPTIONAL: Auto-approve Tools",
@@ -131,4 +129,3 @@
   
   "_comment_end": "============================================================================"
 }
-

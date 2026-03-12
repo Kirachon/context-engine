@@ -7,7 +7,7 @@ Before you begin, ensure you have:
 1. ✅ **Context Engine built** - Server at `D:\GitProjects\context-engine\dist\index.js`
 2. ✅ **Node.js 20+** installed
 3. ✅ **Gemini CLI** installed (see below if not)
-4. ✅ **Auggie SDK authenticated** - Run `auggie login` if you haven't already
+4. ✅ **Provider session ready (if needed for AI-assisted flows)** - Run `codex login`
 
 ---
 
@@ -57,8 +57,6 @@ code $env:USERPROFILE\.gemini\settings.json
         "--watch"
       ],
       "env": {
-        "AUGMENT_API_TOKEN": "$AUGMENT_API_TOKEN",
-        "AUGMENT_API_URL": "https://d9.api.augmentcode.com/",
         "DEBUG": "true"
       },
       "timeout": 30000,
@@ -76,26 +74,14 @@ code $env:USERPROFILE\.gemini\settings.json
 "D:\\Projects\\my-website",
 ```
 
-### **Step 3: Set Environment Variables**
+### **Step 3: Optional Provider Login**
 
-Make sure these environment variables are set:
+Most retrieval/indexing tools run locally and do not need legacy tokens.
 
-**Option 1: Use auggie login (Recommended)**
+If you use AI-assisted tools, log in once:
 ```bash
-auggie login
+codex login
 ```
-
-**Option 2: Set in PowerShell (Temporary)**
-```powershell
-$env:AUGMENT_API_TOKEN = "your-token-here"
-$env:AUGMENT_API_URL = "https://d9.api.augmentcode.com/"
-```
-
-**Option 3: Set in System Environment Variables (Permanent)**
-1. Search for "Environment Variables" in Windows
-2. Add `AUGMENT_API_TOKEN` with your token value
-3. Add `AUGMENT_API_URL` with `https://d9.api.augmentcode.com/`
-4. Restart your terminal
 
 ---
 
@@ -194,8 +180,7 @@ To index multiple projects, add more servers to `mcpServers`:
         "--watch"
       ],
       "env": {
-        "AUGMENT_API_TOKEN": "$AUGMENT_API_TOKEN",
-        "AUGMENT_API_URL": "https://d9.api.augmentcode.com/"
+        "DEBUG": "true"
       },
       "timeout": 30000,
       "description": "Context Engine for Frontend"
@@ -210,8 +195,7 @@ To index multiple projects, add more servers to `mcpServers`:
         "--watch"
       ],
       "env": {
-        "AUGMENT_API_TOKEN": "$AUGMENT_API_TOKEN",
-        "AUGMENT_API_URL": "https://d9.api.augmentcode.com/"
+        "DEBUG": "true"
       },
       "timeout": 30000,
       "description": "Context Engine for Backend"
@@ -271,18 +255,11 @@ To index multiple projects, add more servers to `mcpServers`:
 
 ### **Authentication Errors**
 
-**Error:** `Failed to authenticate with Auggie SDK`
+**Error:** `Provider unavailable` or AI-assisted prompt enhancement fails
 
 **Solution:**
 ```bash
-# Option 1: Use auggie login
-auggie login
-
-# Option 2: Verify environment variables
-echo $env:AUGMENT_API_TOKEN  # PowerShell
-echo $env:AUGMENT_API_URL    # PowerShell
-echo %AUGMENT_API_TOKEN%     # CMD
-echo %AUGMENT_API_URL%       # CMD
+codex login
 ```
 
 ### **No Search Results**
@@ -434,4 +411,3 @@ Your Context Engine MCP Server is now integrated with Gemini CLI! 🎉
 6. ✅ **Create plans** - Use the planning tools for complex tasks
 
 Happy coding! 🚀
-

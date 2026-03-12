@@ -4,6 +4,8 @@
 
 This document provides a comprehensive architecture plan for safely implementing the **Diff-first, Policy-driven Code Reviewer** as described in the code review specification, along with additional open-source enhancements. The plan preserves all 38 existing MCP tools, maintains compatibility with Codex, Claude, Cursor, and other MCP clients, and follows the established 5-layer architecture.
 
+> Historical context note: references to legacy-provider naming in this blueprint are archival and not the active runtime path.
+
 **Target Version**: v2.0.0  
 **Current Version**: v1.8.0  
 **Primary Enhancement**: Enterprise-grade Code Review System
@@ -53,13 +55,13 @@ This document provides a comprehensive architecture plan for safely implementing
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │ CLI/SDK Calls
 ┌───────────────────────────────────┴─────────────────────────────────────┐
-│ Layer 1: Core Context Engine (Auggie SDK)                                │
-│ - @augmentcode/auggie-sdk                                                │
+│ Layer 1: Core Context Engine (Local-Native Runtime)                      │
+│ - Retrieval provider boundary + local runtime modules                    │
 │ - Semantic search, embeddings, indexing                                  │
 └───────────────────────────────────┬─────────────────────────────────────┘
                                     │
 ┌───────────────────────────────────┴─────────────────────────────────────┐
-│ Layer 5: Storage Backend (Auggie internal + local persistence)           │
+│ Layer 5: Storage Backend (local persistence + artifacts)                 │
 │ - .context-engine/plans/ (plan persistence)                              │
 │ - .augment-context-state.json (index state)                              │
 │ - .memories/ (persistent memories)                                       │
@@ -1189,5 +1191,3 @@ This blueprint provides a comprehensive, low-risk path to implementing enterpris
 The implementation is designed to be completed in 8 weeks with clear milestones and rollback procedures at each phase.
 ```
 ```
-
-

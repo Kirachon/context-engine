@@ -65,7 +65,7 @@ Use `tool_manifest()` in the MCP server to inspect the current tool inventory di
 
 ### Key Characteristics
 
-- Local-first runtime with no Auggie SDK dependency in the active path
+- Local-first runtime with no legacy provider SDK dependency in the active path
 - Agent-agnostic MCP interface
 - Local-native retrieval provider as the active runtime
 - Persistent state and evidence artifacts for rollout-proof workflows
@@ -84,9 +84,9 @@ node dist/index.js --workspace .
 Optional validation commands:
 
 ```bash
-npm run ci:check:no-legacy-auggie
-npm run ci:check:auggie-capability-parity
-npm run ci:check:auggie-capability-parity:strict
+npm run ci:check:no-legacy-provider
+npm run ci:check:legacy-capability-parity
+npm run ci:check:legacy-capability-parity:strict
 ```
 
 ## Documentation Quick Links
@@ -102,5 +102,7 @@ npm run ci:check:auggie-capability-parity:strict
 ## Current Status
 
 - Active runtime is local-native only
-- Auggie-era references that remain are historical docs, tests, or migration guardrails
-- Removal and parity proof tracking lives in [docs/AUGGIE_ADOPTION_AND_REMOVAL_TRACKER.md](docs/AUGGIE_ADOPTION_AND_REMOVAL_TRACKER.md)
+- Legacy-provider references that remain are historical docs, tests, or migration guardrails
+- Removal and parity proof tracking lives in [docs/LEGACY_PROVIDER_ADOPTION_AND_REMOVAL_TRACKER.md](docs/LEGACY_PROVIDER_ADOPTION_AND_REMOVAL_TRACKER.md)
+
+

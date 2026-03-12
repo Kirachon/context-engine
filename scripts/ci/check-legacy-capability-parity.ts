@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Auggie capability parity checker.
+ * Legacy capability parity checker.
  *
  * Exit codes:
  * - 0: gate passed
@@ -94,14 +94,14 @@ interface OutputArtifact {
   };
 }
 
-const DEFAULT_MATRIX_PATH = path.join('config', 'ci', 'auggie-capability-matrix.json');
-const DEFAULT_OUT_PATH = path.join('artifacts', 'bench', 'auggie-capability-parity-gate.json');
+const DEFAULT_MATRIX_PATH = path.join('config', 'ci', 'legacy-capability-matrix.json');
+const DEFAULT_OUT_PATH = path.join('artifacts', 'bench', 'legacy-capability-parity-gate.json');
 
 function printHelpAndExit(code: number): never {
   // eslint-disable-next-line no-console
   console.log(`
 Usage:
-  node --import tsx scripts/ci/check-auggie-capability-parity.ts --report <path> [--matrix <path>] [--out <path>] [--require-consecutive <n> --history-dir <dir>]
+  node --import tsx scripts/ci/check-legacy-capability-parity.ts --report <path> [--matrix <path>] [--out <path>] [--require-consecutive <n> --history-dir <dir>]
 
 Options:
   --report <path>           Retrieval parity report JSON (required)
@@ -553,3 +553,4 @@ function main(): void {
 }
 
 main();
+

@@ -1,11 +1,12 @@
 # Temporary migration allowlist for active legacy references.
-# Goal: shrink this list to zero before final Auggie removal.
+# Goal: shrink this list to zero before final legacy provider removal.
 
 docs/**
 tests/retrieval/providers/env.test.ts
 tests/retrieval/providers/factory.test.ts
 tests/ci/checkRetrievalProviderBoundary.test.ts
-tests/ci/checkAuggieNoLegacyReferences.test.ts
+tests/ci/checkLegacyProviderReferences.test.ts
 scripts/ci/check-retrieval-config-precedence.ts
 scripts/ci/check-retrieval-provider-boundary.ts
-scripts/ci/check-auggie-no-legacy-references.ts
+scripts/ci/check-legacy-provider-references.ts
+

@@ -2,6 +2,8 @@
 
 All notable changes to the Context Engine MCP Server will be documented in this file.
 
+> Note: older entries may reference legacy-provider terminology and historical migration context. Current runtime defaults are local-native retrieval with no legacy provider dependency in active paths.
+
 ## [1.9.0] - 2025-12-26
 
 ### ✨ New Features

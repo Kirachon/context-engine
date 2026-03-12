@@ -16,7 +16,7 @@ This repository has completed the migration from Auggie-era runtime reliance to 
 - Strict parity score: **100.00**
 
 Primary evidence files:
-- `artifacts/bench/auggie-capability-parity-gate.json`
+- `artifacts/bench/legacy-capability-parity-gate.json`
 - `artifacts/bench/retrieval-parity-pr.json`
 - `artifacts/bench/retrieval-quality-report.json`
 
@@ -71,9 +71,11 @@ Quality report gate status: pass (`10/10` checks).
 
 - `README.md` for top-level usage and current status
 - `docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md` for staged rollout and outcomes
-- `docs/AUGGIE_ADOPTION_AND_REMOVAL_TRACKER.md` for migration tracking
+- `docs/LEGACY_PROVIDER_ADOPTION_AND_REMOVAL_TRACKER.md` for migration tracking
 
 ## Notes on Historical Mentions
 
 Some historical docs or changelog references may still mention Auggie context in a migration/comparison sense.
 Those references are historical guardrails and parity context, not active runtime dependency claims.
+
+

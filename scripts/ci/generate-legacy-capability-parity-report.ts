@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Auggie parity report generator.
+ * Legacy capability parity report generator.
  *
  * Produces a metric-level parity report from a checked-in fixture pack so the
  * existing capability gate can score journeys/domains/overall parity.
@@ -133,14 +133,14 @@ interface OutputArtifact {
   };
 }
 
-const DEFAULT_FIXTURE_PACK = path.join('config', 'ci', 'auggie-parity-fixture-pack.json');
-const DEFAULT_MATRIX_PATH = path.join('config', 'ci', 'auggie-capability-matrix.json');
+const DEFAULT_FIXTURE_PACK = path.join('config', 'ci', 'legacy-capability-parity-fixture-pack.json');
+const DEFAULT_MATRIX_PATH = path.join('config', 'ci', 'legacy-capability-matrix.json');
 const DEFAULT_OUT_PATH = path.join('artifacts', 'bench', 'retrieval-parity-pr.json');
 
 function printHelpAndExit(code: number): never {
   console.log(`
 Usage:
-  node --import tsx scripts/ci/generate-auggie-parity-report.ts [options]
+  node --import tsx scripts/ci/generate-legacy-capability-parity-report.ts [options]
 
 Options:
   --fixture-pack <path>      Fixture-pack JSON (default: ${DEFAULT_FIXTURE_PACK})
@@ -553,3 +553,4 @@ function main(): void {
 }
 
 main();
+

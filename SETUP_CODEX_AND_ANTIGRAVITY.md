@@ -7,7 +7,7 @@ This guide shows you **exactly** how to configure both Codex CLI and Antigravity
 ## 📋 Prerequisites
 
 1. ✅ Context Engine is built: `npm run build`
-2. ✅ You're authenticated: `auggie login`
+2. ✅ If you use AI-assisted tools, you're authenticated: `codex login`
 3. ✅ You know your workspace path (the project you want to index)
 
 ---
@@ -33,10 +33,10 @@ args = [
     "--watch"                                 # ← Auto-reindex on file changes
 ]
 
-# Optional: Environment variables (if not using auggie login)
+# Optional: Environment variables for Context Engine runtime flags
 [mcp_servers.context-engine.env]
-# AUGMENT_API_TOKEN = "your-token-here"
-# AUGMENT_API_URL = "https://api.augmentcode.com"
+# CE_REVIEW_AUTO_REQUIRE_EXPLICIT_SCOPE = "true"
+# CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE = "reject_with_retry"
 ```
 
 ### **Steps:**
@@ -188,7 +188,7 @@ After configuration, verify everything works:
 3. Ensure files aren't in `.gitignore` or `.contextignore`
 
 ### **Authentication errors:**
-Run `auggie login` or set environment variables in config
+Run `codex login`
 
 ---
 

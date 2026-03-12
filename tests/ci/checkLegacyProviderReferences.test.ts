@@ -11,7 +11,7 @@ function writeFile(filePath: string, content: string): void {
 
 function runCheck(cwd: string, args: string[] = []): { status: number; stdout: string; stderr: string } {
   const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const scriptPath = path.join(process.cwd(), 'scripts', 'ci', 'check-auggie-no-legacy-references.ts');
+  const scriptPath = path.join(process.cwd(), 'scripts', 'ci', 'check-legacy-provider-references.ts');
   const result = spawnSync(process.execPath, [tsxCli, scriptPath, ...args], {
     cwd,
     env: process.env,
@@ -26,14 +26,14 @@ function runCheck(cwd: string, args: string[] = []): { status: number; stdout: s
   };
 }
 
-describe('scripts/ci/check-auggie-no-legacy-references.ts', () => {
+describe('scripts/ci/check-legacy-provider-references.ts', () => {
   it('passes on a clean temp fixture', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-no-legacy-clean-'));
     writeFile(path.join(tmp, 'src', 'clean.ts'), 'export const clean = true;\n');
 
     const result = runCheck(tmp, ['--roots', 'src']);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('No-legacy Auggie reference check passed.');
+    expect(result.stdout).toContain('No-legacy provider reference check passed.');
     expect(result.stdout).toContain('violations=0');
 
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -45,7 +45,7 @@ describe('scripts/ci/check-auggie-no-legacy-references.ts', () => {
 
     const result = runCheck(tmp, ['--roots', 'src']);
     expect(result.status).toBe(1);
-    expect(result.stderr).toContain('No-legacy Auggie reference check failed.');
+    expect(result.stderr).toContain('No-legacy provider reference check failed.');
     expect(result.stderr).toContain('src/bad.ts:1:DirectContext');
 
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -58,7 +58,7 @@ describe('scripts/ci/check-auggie-no-legacy-references.ts', () => {
 
     const result = runCheck(tmp, ['--roots', 'src', '--allowlist', 'allowlist.txt']);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('No-legacy Auggie reference check passed.');
+    expect(result.stdout).toContain('No-legacy provider reference check passed.');
     expect(result.stdout).toContain('allowlisted_files=1');
 
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -71,7 +71,7 @@ describe('scripts/ci/check-auggie-no-legacy-references.ts', () => {
 
     const result = runCheck(tmp, ['--roots', 'docs', '--allowlist', 'allowlist.txt']);
     expect(result.status).toBe(0);
-    expect(result.stdout).toContain('No-legacy Auggie reference check passed.');
+    expect(result.stdout).toContain('No-legacy provider reference check passed.');
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

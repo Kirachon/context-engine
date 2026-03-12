@@ -12,7 +12,7 @@ When publishing benchmark results, include:
 - RAM
 - Storage type (SSD/HDD)
 - Node.js version
-- `AUGMENT_API_URL` (default vs custom)
+- Legacy provider URL override (default vs custom; archival)
 - Whether the workspace was already indexed (state present)
 
 ## Dataset definition
@@ -64,4 +64,3 @@ Store results as a small table in a PR description or a separate markdown note:
 - Baseline (commit SHA)
 - After change (commit SHA)
 - Δ% for key metrics (p50/p95, index elapsed, RSS if captured)
-

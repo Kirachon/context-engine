@@ -56,7 +56,7 @@ function baseArtifact(periodKey: string): Record<string, unknown> {
       retention_archive_note: 'retention note',
     },
     inputs: {
-      parity_artifact_path: 'artifacts/bench/auggie-capability-parity-gate.json',
+      parity_artifact_path: 'artifacts/bench/legacy-capability-parity-gate.json',
       quality_artifact_path: 'artifacts/bench/retrieval-quality-report.json',
       parity_artifact_sha256: 'a'.repeat(64),
       quality_artifact_sha256: 'b'.repeat(64),
@@ -116,3 +116,4 @@ describe('scripts/ci/check-weekly-retrieval-trend-report.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });
+

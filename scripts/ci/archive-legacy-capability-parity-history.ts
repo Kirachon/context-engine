@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Archive the latest Auggie capability parity gate artifact into history.
+ * Archive the latest Legacy capability parity gate artifact into history.
  *
  * Exit codes:
  * - 0: archived successfully
@@ -16,14 +16,14 @@ interface CliArgs {
   prefix: string;
 }
 
-const DEFAULT_ARTIFACT_PATH = path.join('artifacts', 'bench', 'auggie-capability-parity-gate.json');
-const DEFAULT_HISTORY_DIR = path.join('artifacts', 'bench', 'auggie-parity-history');
-const DEFAULT_PREFIX = 'auggie-capability-parity';
+const DEFAULT_ARTIFACT_PATH = path.join('artifacts', 'bench', 'legacy-capability-parity-gate.json');
+const DEFAULT_HISTORY_DIR = path.join('artifacts', 'bench', 'legacy-capability-parity-history');
+const DEFAULT_PREFIX = 'legacy-capability-parity';
 
 function printHelpAndExit(code: number): never {
   console.log(`
 Usage:
-  node --import tsx scripts/ci/archive-auggie-parity-history.ts [options]
+  node --import tsx scripts/ci/archive-legacy-capability-parity-history.ts [options]
 
 Options:
   --artifact <path>   Gate artifact to archive (default: ${DEFAULT_ARTIFACT_PATH})
@@ -102,3 +102,4 @@ function main(): void {
 }
 
 main();
+

@@ -221,7 +221,7 @@ export const codebaseRetrievalTool = {
   name: 'codebase_retrieval',
   description: `IMPORTANT: This is the PRIMARY tool for searching the codebase. Please consider as the FIRST CHOICE for any codebase searches.
 
-This MCP tool is Augment's context engine, the world's best codebase context engine. It:
+This MCP tool is the local-native context engine for semantic codebase search. It:
 1. Takes in a natural language description of the code you are looking for
 2. Uses a proprietary retrieval/embedding model suite that produces the highest-quality recall of relevant code snippets from across the codebase
 3. Maintains a real-time index of the codebase, so the results are always up-to-date and reflects the current state of the codebase

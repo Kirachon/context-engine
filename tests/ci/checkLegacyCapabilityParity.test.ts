@@ -11,7 +11,7 @@ function writeJson(filePath: string, value: unknown): void {
 
 function runChecker(args: string[]): { status: number; stdout: string; stderr: string } {
   const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const script = path.join(process.cwd(), 'scripts', 'ci', 'check-auggie-capability-parity.ts');
+  const script = path.join(process.cwd(), 'scripts', 'ci', 'check-legacy-capability-parity.ts');
   const res = spawnSync(process.execPath, [tsxCli, script, ...args], {
     cwd: process.cwd(),
     env: process.env,
@@ -32,9 +32,9 @@ function reportWithEvaluations(evaluations: Array<{ id: string; status: 'pass' |
   };
 }
 
-describe('scripts/ci/check-auggie-capability-parity.ts', () => {
+describe('scripts/ci/check-legacy-capability-parity.ts', () => {
   it('passes with synthetic report and matrix', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-capability-pass-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-pass-'));
     const reportPath = path.join(tmp, 'report.json');
     const matrixPath = path.join(tmp, 'matrix.json');
     const outPath = path.join(tmp, 'out.json');
@@ -69,7 +69,7 @@ describe('scripts/ci/check-auggie-capability-parity.ts', () => {
   });
 
   it('fails when a critical journey is below 100', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-capability-critical-fail-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-critical-fail-'));
     const reportPath = path.join(tmp, 'report.json');
     const matrixPath = path.join(tmp, 'matrix.json');
     const outPath = path.join(tmp, 'out.json');
@@ -103,7 +103,7 @@ describe('scripts/ci/check-auggie-capability-parity.ts', () => {
   });
 
   it('fails when overall score is below threshold', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-capability-overall-fail-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-overall-fail-'));
     const reportPath = path.join(tmp, 'report.json');
     const matrixPath = path.join(tmp, 'matrix.json');
     const outPath = path.join(tmp, 'out.json');
@@ -135,7 +135,7 @@ describe('scripts/ci/check-auggie-capability-parity.ts', () => {
   });
 
   it('ignores optional metric refs when status is skip or missing', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-capability-optional-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-optional-'));
     const reportPath = path.join(tmp, 'report.json');
     const matrixPath = path.join(tmp, 'matrix.json');
     const outPath = path.join(tmp, 'out.json');
@@ -167,7 +167,7 @@ describe('scripts/ci/check-auggie-capability-parity.ts', () => {
   });
 
   it('enforces consecutive history pass requirement', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-capability-history-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-history-'));
     const reportPath = path.join(tmp, 'report.json');
     const matrixPath = path.join(tmp, 'matrix.json');
     const outPath = path.join(tmp, 'out.json');
@@ -213,4 +213,6 @@ describe('scripts/ci/check-auggie-capability-parity.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });
+
+
 

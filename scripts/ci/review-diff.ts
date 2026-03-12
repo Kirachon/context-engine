@@ -15,6 +15,14 @@ function sh(cmd: string): string {
   return execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf-8');
 }
 
+function trySh(cmd: string): string | null {
+  try {
+    return sh(cmd);
+  } catch {
+    return null;
+  }
+}
+
 function fileExists(p: string): boolean {
   try {
     fs.accessSync(p, fs.constants.F_OK);
@@ -24,14 +32,34 @@ function fileExists(p: string): boolean {
   }
 }
 
+function isAllZeroSha(value: string | undefined): boolean {
+  if (!value) return false;
+  return /^0+$/.test(value.trim());
+}
+
+function resolveDiffRange(baseShaEnv: string | undefined, headShaEnv: string | undefined): { baseSha: string; headSha: string } {
+  const headSha = headShaEnv?.trim() || trySh('git rev-parse HEAD')?.trim() || '';
+  if (!headSha) {
+    throw new Error('Unable to resolve HEAD SHA for review diff.');
+  }
+
+  const baseFromEnv = baseShaEnv?.trim() || '';
+  if (baseFromEnv && !isAllZeroSha(baseFromEnv) && trySh(`git cat-file -e ${baseFromEnv}^{commit}`) !== null) {
+    return { baseSha: baseFromEnv, headSha };
+  }
+
+  const fallbackBase = trySh(`git rev-parse ${headSha}^`)?.trim();
+  if (fallbackBase) {
+    return { baseSha: fallbackBase, headSha };
+  }
+
+  // Initial-commit fallback: diff empty tree to HEAD.
+  return { baseSha: '4b825dc642cb6eb9a060e54bf8d69288fbee4904', headSha };
+}
+
 async function main(): Promise<void> {
   const workspace = process.cwd();
-  const baseSha = process.env.BASE_SHA;
-  const headSha = process.env.HEAD_SHA;
-
-  if (!baseSha || !headSha) {
-    throw new Error('BASE_SHA and HEAD_SHA must be set');
-  }
+  const { baseSha, headSha } = resolveDiffRange(process.env.BASE_SHA, process.env.HEAD_SHA);
 
   const diff = sh(`git diff --no-color --unified=3 ${baseSha} ${headSha}`);
   const changedFiles = sh(`git diff --name-only ${baseSha} ${headSha}`)

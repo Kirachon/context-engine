@@ -10,7 +10,7 @@ const ROOT = process.cwd();
 const RETRIEVAL_PROVIDER_RUNTIME_ROOT = path.join(ROOT, 'src', 'retrieval', 'providers');
 const SOURCE_FILE_PATTERN = /\.(ts|tsx|js|mjs|cjs)$/i;
 
-// No runtime file should retain Auggie ownership after the local_native migration.
+// No runtime file should retain legacy SDK ownership after the local_native migration.
 const LEGACY_RUNTIME_OWNER_ALLOWLIST = new Set<string>();
 
 const SDK_ALLOWLIST = new Set<string>(LEGACY_RUNTIME_OWNER_ALLOWLIST);

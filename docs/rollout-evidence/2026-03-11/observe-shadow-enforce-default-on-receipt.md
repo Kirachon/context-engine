@@ -21,26 +21,26 @@ Stage decision: `PASS (observe evidence captured)`
 ### 2) Shadow Stage
 Command:
 ```powershell
-npm run -s ci:check:auggie-capability-parity:strict
+npm run -s ci:check:legacy-capability-parity:strict
 ```
 Outcome:
 - `out=D:\GitProjects\context-engine\artifacts\bench\retrieval-parity-pr.json`
 - `gate_status=pass`
 - `evaluations=27`
-- `out=D:\GitProjects\context-engine\artifacts\bench\auggie-capability-parity-gate.json`
+- `out=D:\GitProjects\context-engine\artifacts\bench\legacy-capability-parity-gate.json`
 - `overall_score=100.00`
 - `gate_status=pass`
-- `archived=D:\GitProjects\context-engine\artifacts\bench\auggie-parity-history\auggie-capability-parity-2026-03-11T15-10-23-765Z.json`
+- `archived=D:\GitProjects\context-engine\artifacts\bench\legacy-capability-parity-history\legacy-capability-parity-2026-03-11T15-10-23-765Z.json`
 
 Stage decision: `PASS (shadow gate threshold met)`
 
 ### 3) Enforce Stage Readiness Checks
 Command:
 ```powershell
-npm run -s ci:check:no-legacy-auggie
+npm run -s ci:check:no-legacy-provider
 ```
 Outcome:
-- `No-legacy Auggie reference check passed.`
+- `No-legacy provider reference check passed.`
 - `Summary: scanned_files=325 allowlisted_files=8 violations=0`
 
 Command:
@@ -73,3 +73,4 @@ Approval decision:
 - Shadow: `PASS`
 - Enforce: `PASS`
 - Default-on: `Approved`
+

@@ -154,10 +154,10 @@ node --inspect dist/index.js --workspace .
 
 ## 📊 Architecture Layers
 
-### Layer 1: Auggie SDK
-- **Location**: `@augmentcode/auggie-sdk` package
+### Layer 1: Local-Native Retrieval Runtime
+- **Location**: `src/retrieval/`, `src/internal/retrieval/`, `src/mcp/serviceClient.ts`
 - **Purpose**: Core indexing and retrieval
-- **Interface**: DirectContext class
+- **Interface**: retrieval provider boundary + MCP tools
 
 ### Layer 2: Service Layer
 - **Location**: `src/mcp/serviceClient.ts`, `src/mcp/services/`
@@ -249,8 +249,8 @@ describe('MyService', () => {
 ## 🔧 Configuration
 
 ### Environment Variables
-- `AUGMENT_API_TOKEN` - API token (optional, use `auggie login`)
-- `AUGMENT_API_URL` - API URL (default: https://api.augmentcode.com)
+- `CE_RETRIEVAL_PROVIDER` - retrieval provider preference (`local_native`)
+- `CE_AI_PROVIDER` - AI provider for ask flows (`openai_session`)
 
 ### MCP Configuration
 See `codex_config.example.toml` for MCP client setup
@@ -274,4 +274,3 @@ See `codex_config.example.toml` for MCP client setup
 6. **Follow layer boundaries** - don't skip layers
 7. **Use service layer** for business logic
 8. **Keep tools thin** - delegate to services
-

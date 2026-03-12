@@ -1081,7 +1081,7 @@ export class ContextServiceClient {
       try {
         this.aiProvider = createAIProvider({
           providerId: this.aiProviderId,
-          getAugmentContext: async () => {
+          getProviderContext: async () => {
             throw new Error('OpenAI-only provider policy: legacy retrieval runtime path is disabled.');
           },
           maxRateLimitRetries: envInt('CE_AI_RATE_LIMIT_MAX_RETRIES', DEFAULT_RATE_LIMIT_MAX_RETRIES, {

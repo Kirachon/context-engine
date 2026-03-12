@@ -68,7 +68,7 @@ interface WeeklyTrendArtifact {
   };
 }
 
-const DEFAULT_PARITY_PATH = path.join('artifacts', 'bench', 'auggie-capability-parity-gate.json');
+const DEFAULT_PARITY_PATH = path.join('artifacts', 'bench', 'legacy-capability-parity-gate.json');
 const DEFAULT_QUALITY_PATH = path.join('artifacts', 'bench', 'retrieval-quality-report.json');
 const DEFAULT_OUT_PATH = path.join('artifacts', 'bench', 'r4-weekly-trend.json');
 const DEFAULT_ARCHIVE_DIR = path.join('artifacts', 'bench', 'archive', 'r4-weekly');
@@ -482,3 +482,4 @@ function run(): number {
 }
 
 process.exitCode = run();
+
