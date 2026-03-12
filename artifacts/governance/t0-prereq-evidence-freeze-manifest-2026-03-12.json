@@ -1,0 +1,165 @@
+{
+  "artifact_type": "t0_prereq_evidence_freeze_manifest",
+  "artifact_version": "1.0.0",
+  "plan_id": "context-engine-enhancement-r4-r10-plan",
+  "task_id": "T0",
+  "freeze_note": "Baselines in this manifest are frozen for the current R4-R10 execution and must be treated as immutable scoring references until T16 closeout.",
+  "frozen_for_execution": true,
+  "freeze_captured_at_utc": "2026-03-12T01:41:19.8535289Z",
+  "repo_snapshot": {
+    "branch": "feat/local-native-auggie-exit",
+    "commit_full": "95ede57bd2197818255aa4ecebb9930fd09cdef8",
+    "commit_short": "95ede57",
+    "commit_timestamp": "2026-03-12T09:22:47+08:00"
+  },
+  "source_of_truth": {
+    "decision_package": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md",
+    "plan_tracker": "context-engine-enhancement-r4-r10-plan.md"
+  },
+  "recommendation_state_baseline": [
+    {
+      "id": "R1",
+      "recommendation": "Add MCP single-instance/process-health guard script and runbook",
+      "owner": "Platform Eng",
+      "due_window": "0-30 days",
+      "dependencies": "none",
+      "success_metric": "duplicate active context-engine MCP processes: unknown -> 0 recurring incidents/month",
+      "validation": "scripted process check before release + weekly run",
+      "rollback_abort": "disable guard script and revert to manual process control",
+      "state_frozen_from": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md"
+    },
+    {
+      "id": "R2",
+      "recommendation": "Add CI smoke test for enhance_prompt contract (sections + typed transient error)",
+      "owner": "QA Lead",
+      "due_window": "0-30 days",
+      "dependencies": "R1 recommended",
+      "success_metric": "contract regression escapes: unknown -> 0 on main branch",
+      "validation": "CI stage with pass/fail gates",
+      "rollback_abort": "revert smoke gate requirement if flaky, keep unit tests",
+      "state_frozen_from": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md"
+    },
+    {
+      "id": "R3",
+      "recommendation": "Add docs-governance check to fail on stale enhance_prompt arguments/examples",
+      "owner": "DevEx",
+      "due_window": "0-30 days",
+      "dependencies": "none",
+      "success_metric": "docs/implementation drift findings per release: >0 -> 0",
+      "validation": "check script in CI + docs diff review",
+      "rollback_abort": "disable doc gate if false positives exceed threshold",
+      "state_frozen_from": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md"
+    },
+    {
+      "id": "R8",
+      "recommendation": "Add fallback-free enhancement runbook for transient upstream incidents",
+      "owner": "Support/DevEx",
+      "due_window": "0-30 days",
+      "dependencies": "R2",
+      "success_metric": "mean time to identify incident class: unknown -> <15 min",
+      "validation": "tabletop scenario + incident drill",
+      "rollback_abort": "revert to generic runbook if adoption low",
+      "state_frozen_from": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md"
+    }
+  ],
+  "benchmark_baseline_artifacts": [
+    {
+      "path": "artifacts/bench/auggie-capability-parity-gate.json",
+      "sha256": "6faa0ab4a458140a46851a483e773327c92d825dbb4616b4bbdae05faf837f3c",
+      "size_bytes": 3653,
+      "last_write_utc": "2026-03-11T15:10:25.0828837Z"
+    },
+    {
+      "path": "artifacts/bench/retrieval-quality-report.json",
+      "sha256": "62812ce419ae102e26a2b440447e0b795e9b6036f8083157a128c718afdefa9b",
+      "size_bytes": 2427,
+      "last_write_utc": "2026-03-11T15:09:24.5689362Z"
+    },
+    {
+      "path": "artifacts/bench/retrieval-quality-gate.json",
+      "sha256": "904e22268dcab90a064b8beba17d40b59715af77df8aee9e517371640f163f43",
+      "size_bytes": 439,
+      "last_write_utc": "2026-03-11T15:09:24.9431175Z"
+    },
+    {
+      "path": "artifacts/bench/retrieval-parity-pr.json",
+      "sha256": "9211c8419fa8dfce4f9e2e0653e229181592310ce470a369b36912953e6215c0",
+      "size_bytes": 15852,
+      "last_write_utc": "2026-03-11T15:10:23.4582237Z"
+    },
+    {
+      "path": "artifacts/bench/pr-baseline.json",
+      "sha256": "2d0c351d94f84282fce0d788b20afeb77e94e96aab867a6122bf001b09ab1e9b",
+      "size_bytes": 1215,
+      "last_write_utc": "2026-02-28T04:56:26.1974897Z"
+    },
+    {
+      "path": "artifacts/bench/nightly-baseline.json",
+      "sha256": "845408b24b70f255fb63ba18580e41b683fe5a905aefbb0f80c9f37c3c49172c",
+      "size_bytes": 1312,
+      "last_write_utc": "2026-02-28T01:56:50.1575191Z"
+    },
+    {
+      "path": "artifacts/bench/release-candidate-median.json",
+      "sha256": "c3f6384856fd1bc081ddf95f5803aea1dcce4ef2714a83e8df17d2a838b07590",
+      "size_bytes": 833,
+      "last_write_utc": "2026-02-28T01:37:18.0899204Z"
+    }
+  ],
+  "ci_gate_output_baseline_artifacts": [
+    {
+      "path": "artifacts/governance/pre-rollout-baseline-checklist.md",
+      "sha256": "fc077d283b97b3c89cc5f34684801b00fed6fa8e04ec94249dea52bb5f3d177b",
+      "size_bytes": 846,
+      "last_write_utc": "2026-02-28T06:51:32.2745281Z"
+    },
+    {
+      "path": "artifacts/governance/freeze-checklist.md",
+      "sha256": "f8010f63941e3d35c9cb08fb232a0683156c23bd0c2db10fe7bdb54ebcbad76a",
+      "size_bytes": 810,
+      "last_write_utc": "2026-02-28T06:51:32.2745281Z"
+    },
+    {
+      "path": "artifacts/governance/final-release-summary.md",
+      "sha256": "2090b99ff89aa5fa5b3d6d8f8f1386000ce262f44b5e670f0acef1c34cb130f6",
+      "size_bytes": 1240,
+      "last_write_utc": "2026-02-28T06:51:32.2755283Z"
+    },
+    {
+      "path": "artifacts/governance/rollout-evidence-log.md",
+      "sha256": "92f91e34fdfea223e189ee9ca373c3f5c9ba00f6a601c65af1aa36f401801def",
+      "size_bytes": 2025,
+      "last_write_utc": "2026-03-11T02:37:04.6569415Z"
+    },
+    {
+      "path": "artifacts/governance/ws21-rollback-drill-single-user.md",
+      "sha256": "0193ee3cfb515c5d81a96983d6ce11698d711465e2e7429f6ba584c767216ce5",
+      "size_bytes": 265,
+      "last_write_utc": "2026-02-28T06:52:39.2656355Z"
+    },
+    {
+      "path": "artifacts/ws20/stage-0-pre-rollout.yaml",
+      "sha256": "abb6b07cbcabccad6a4a0ea1086a6ac86c0b0f1f4d8863fd3e2460e89cc517fe",
+      "size_bytes": 262,
+      "last_write_utc": "2026-02-28T06:52:39.2621718Z"
+    },
+    {
+      "path": "artifacts/ws20/stage-1-canary.yaml",
+      "sha256": "eb6be37377124925fd00cd754bd09c93c8ef68bcdf2700032ddf9722c0c28569",
+      "size_bytes": 308,
+      "last_write_utc": "2026-02-28T06:52:39.2633680Z"
+    },
+    {
+      "path": "artifacts/ws20/stage-2-controlled-ramp.yaml",
+      "sha256": "17f5bf6c23f07bb0c95fa0c666776d508bd79771f3de62318cb817ac481f5047",
+      "size_bytes": 586,
+      "last_write_utc": "2026-02-28T06:52:39.2645361Z"
+    },
+    {
+      "path": "artifacts/ws20/stage-3-ga-hardening.yaml",
+      "sha256": "9ca4ccd9d766dd1679c711bd1aa7191c74c73d11150cc4eb8e831c1f4f30dd02",
+      "size_bytes": 238,
+      "last_write_utc": "2026-02-28T06:52:39.2645361Z"
+    }
+  ]
+}

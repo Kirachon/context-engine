@@ -1,7 +1,8 @@
-import { InternalSearchResult } from './types.js';
+import { InternalSearchResult, RetrievalRankingMode } from './types.js';
 
 export interface RerankOptions {
   originalQuery?: string;
+  mode?: RetrievalRankingMode;
 }
 
 function resultSignature(result: InternalSearchResult): string {
@@ -22,11 +23,53 @@ function parseStartLine(lines?: string): number {
   return Number.isNaN(value) ? Number.MAX_SAFE_INTEGER : value;
 }
 
+function tokenize(input: string): string[] {
+  return input
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/g)
+    .map(token => token.trim())
+    .filter(Boolean);
+}
+
+function buildPathTokenSet(path: string): Set<string> {
+  return new Set(
+    path
+      .toLowerCase()
+      .split(/[^a-z0-9_]+/g)
+      .map(token => token.trim())
+      .filter(Boolean)
+  );
+}
+
+function overlapScore(queryTokens: string[], pathTokens: Set<string>): number {
+  if (queryTokens.length === 0 || pathTokens.size === 0) {
+    return 0;
+  }
+  let overlap = 0;
+  for (const token of queryTokens) {
+    if (pathTokens.has(token)) {
+      overlap += 1;
+    }
+  }
+  return overlap / queryTokens.length;
+}
+
+function hasExactSymbolMatch(result: InternalSearchResult, queryTokens: string[]): boolean {
+  if (queryTokens.length === 0) {
+    return false;
+  }
+  const haystack = `${result.path} ${result.content}`.toLowerCase();
+  return queryTokens.some(token => token.length >= 3 && haystack.includes(token));
+}
+
 export function rerankResults(
   results: InternalSearchResult[],
   options: RerankOptions = {}
 ): InternalSearchResult[] {
+  const mode: RetrievalRankingMode = options.mode ?? 'v1';
   const stats = new Map<string, { count: number; hasOriginal: boolean }>();
+  const sourceStats = new Map<string, Set<InternalSearchResult['retrievalSource']>>();
+  const queryTokens = tokenize(options.originalQuery ?? '');
 
   for (const result of results) {
     const key = resultSignature(result);
@@ -36,15 +79,26 @@ export function rerankResults(
       entry.hasOriginal = true;
     }
     stats.set(key, entry);
+    const sourceSet = sourceStats.get(key) ?? new Set<InternalSearchResult['retrievalSource']>();
+    sourceSet.add(result.retrievalSource);
+    sourceStats.set(key, sourceSet);
   }
 
   const ranked = results.map((result, index) => {
     const baseScore = result.relevanceScore ?? result.score ?? 0;
-    const entry = stats.get(resultSignature(result)) ?? { count: 1, hasOriginal: false };
+    const signature = resultSignature(result);
+    const entry = stats.get(signature) ?? { count: 1, hasOriginal: false };
     const frequencyBonus = Math.log2(1 + entry.count) * 0.08;
     const originalBonus = entry.hasOriginal ? 0.05 : 0;
     const variantWeightBonus = (result.variantWeight - 0.5) * 0.05;
-    const combinedScore = baseScore + frequencyBonus + originalBonus + variantWeightBonus;
+    let combinedScore = baseScore + frequencyBonus + originalBonus + variantWeightBonus;
+
+    if (mode === 'v2') {
+      const pathOverlap = overlapScore(queryTokens, buildPathTokenSet(result.path));
+      const sourceConsensus = Math.max(0, (sourceStats.get(signature)?.size ?? 1) - 1);
+      const exactSymbolBonus = hasExactSymbolMatch(result, queryTokens) ? 0.04 : 0;
+      combinedScore += (pathOverlap * 0.08) + (sourceConsensus * 0.03) + exactSymbolBonus;
+    }
 
     return {
       result: {

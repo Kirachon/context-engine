@@ -24,10 +24,36 @@ With optional artifact paths (examples):
 node --import tsx scripts/ci/check-rollout-readiness.ts artifacts/pr-gates.json artifacts/nightly-gates.json artifacts/rollback-drill.log
 ```
 
+R8 fallback-free runbook/drill contract check (direct command):
+
+```bash
+node --import tsx scripts/ci/check-r8-fallback-free-runbook-drill.ts --drill-artifact docs/rollout-evidence/2026-03-12/r8-fallback-free-drill.json
+```
+
+R8 fallback-free runbook/drill contract check through readiness gate (optional path):
+
+```bash
+node --import tsx scripts/ci/check-rollout-readiness.ts --r8-drill-artifact docs/rollout-evidence/2026-03-12/r8-fallback-free-drill.json
+```
+
 Readiness quality signals for optional artifacts:
 - Artifact must include a `PASS` marker.
 - Artifact must not include a `FAIL` marker.
 - If artifact is JSON, it must include `status` and at least one of `checks`, `results`, `metrics`, or `summary`.
+
+Readiness gate note for R8:
+- When `--r8-drill-artifact` is provided, readiness additionally enforces contract presence, required drill/evidence fields, allowed incident class, and fail-follow-up requirements; any R8 validation failure blocks readiness.
+
+Timeout smoke gate (required for timeout-hardening rollout waves):
+
+```bash
+node --import tsx scripts/ci/review-auto-timeout-smoke.ts
+```
+
+Interpret `artifacts/review_auto_timeout_smoke.json`:
+- `status: "PASS"`: continue with readiness/stage gates.
+- `status: "FAIL"`: stop stage progression and execute runtime-first rollback order.
+- Missing artifact, unreadable JSON, or missing `status/checks/metrics`: treat as gate failure and execute rollback order before retry.
 
 Tool inventory parity check (recommended before release):
 
@@ -119,6 +145,7 @@ Rollback trigger conditions:
 - Any PR gate fail threshold breach.
 - Any nightly gate fail threshold breach.
 - Release fail condition (persistent nightly failures and unstable variance).
+- Timeout smoke artifact `artifacts/review_auto_timeout_smoke.json` is `FAIL`, missing, or structurally invalid.
 
 ## Freeze/Rollback Trigger Evidence Format
 

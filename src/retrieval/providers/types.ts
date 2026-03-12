@@ -1,6 +1,6 @@
 import type { IndexResult, IndexStatus, SearchResult } from '../../mcp/serviceClient.js';
 
-export type RetrievalProviderId = 'augment_legacy' | 'local_native';
+export type RetrievalProviderId = 'local_native';
 export type RetrievalProviderErrorCode =
   | 'provider_config_invalid'
   | 'provider_auth_missing'
@@ -49,19 +49,18 @@ export interface RetrievalProviderScopedCallbacks {
 }
 
 export interface RetrievalProviderCallbacks {
-  augmentLegacy: RetrievalProviderScopedCallbacks;
   localNative: RetrievalProviderScopedCallbacks;
 }
 
 export class RetrievalProviderError extends Error {
   readonly code: RetrievalProviderErrorCode;
-  readonly provider?: RetrievalProviderId;
+  readonly provider?: string;
   readonly envVar?: string;
 
   constructor(args: {
     code: RetrievalProviderErrorCode;
     message: string;
-    provider?: RetrievalProviderId;
+    provider?: string;
     envVar?: string;
     cause?: unknown;
   }) {

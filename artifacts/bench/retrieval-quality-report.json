@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-12T05:11:40.286Z",
+  "inputs": {
+    "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json"
+  },
+  "evaluations": [
+    {
+      "id": "quality.ndcg_at_10",
+      "status": "pass",
+      "value": 13.99999999999999,
+      "message": "PASS quality.ndcg_at_10: delta_pct=14.000 min=12"
+    },
+    {
+      "id": "quality.mrr_at_10",
+      "status": "pass",
+      "value": 12.499999999999996,
+      "message": "PASS quality.mrr_at_10: delta_pct=12.500 min=10"
+    },
+    {
+      "id": "quality.recall_at_50",
+      "status": "pass",
+      "value": 21.999999999999996,
+      "message": "PASS quality.recall_at_50: delta_pct=22.000 min=20"
+    },
+    {
+      "id": "latency.fast.p95_ms",
+      "status": "pass",
+      "value": 340,
+      "message": "PASS latency.fast.p95_ms: value=340 max=350"
+    },
+    {
+      "id": "latency.balanced.p95_ms",
+      "status": "pass",
+      "value": 680,
+      "message": "PASS latency.balanced.p95_ms: value=680 max=700"
+    },
+    {
+      "id": "latency.rich.p95_ms",
+      "status": "pass",
+      "value": 1180,
+      "message": "PASS latency.rich.p95_ms: value=1180 max=1200"
+    },
+    {
+      "id": "resource.rss_growth_pct",
+      "status": "pass",
+      "value": 22,
+      "message": "PASS resource.rss_growth_pct: value=22 max=25"
+    },
+    {
+      "id": "resource.dense_index_size_ratio",
+      "status": "pass",
+      "value": 2.4,
+      "message": "PASS resource.dense_index_size_ratio: value=2.4 max=2.5"
+    },
+    {
+      "id": "telemetry.dense_skipped_docs_rate_pct",
+      "status": "pass",
+      "value": 0,
+      "message": "PASS telemetry.dense_skipped_docs_rate_pct: value=0 max=10"
+    },
+    {
+      "id": "telemetry.dense_embed_batch_p95_ms",
+      "status": "pass",
+      "value": 45,
+      "message": "PASS telemetry.dense_embed_batch_p95_ms: value=45 max=120"
+    },
+    {
+      "id": "holdout.query_count_min",
+      "status": "pass",
+      "value": 5,
+      "message": "PASS holdout.query_count_min: value=5 min=1"
+    },
+    {
+      "id": "holdout.leakage_count_max",
+      "status": "pass",
+      "value": 0,
+      "message": "PASS holdout.leakage_count_max: value=0 max=0"
+    },
+    {
+      "id": "telemetry.reproducibility.dataset_hash_length_min",
+      "status": "pass",
+      "value": 64,
+      "message": "PASS telemetry.reproducibility.dataset_hash_length_min: value=64 min=64"
+    },
+    {
+      "id": "telemetry.reproducibility.config_keys_min",
+      "status": "pass",
+      "value": 6,
+      "message": "PASS telemetry.reproducibility.config_keys_min: value=6 min=1"
+    }
+  ],
+  "summary": {
+    "total": 14,
+    "pass": 14,
+    "fail": 0,
+    "skip": 0,
+    "pass_rate": 1
+  },
+  "gate_rules": {
+    "min_pass_rate": 1,
+    "required_ids": [
+      "quality.ndcg_at_10",
+      "quality.mrr_at_10",
+      "quality.recall_at_50",
+      "latency.fast.p95_ms",
+      "latency.balanced.p95_ms",
+      "latency.rich.p95_ms",
+      "holdout.query_count_min",
+      "holdout.leakage_count_max",
+      "telemetry.reproducibility.dataset_hash_length_min",
+      "telemetry.reproducibility.config_keys_min"
+    ]
+  },
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  },
+  "reproducibility_lock": {
+    "commit_sha": "2eb4ec594f1eb3f881af496406966b147730e859",
+    "dataset_id": "holdout_v1",
+    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716",
+    "fixture_pack_hash": "5ab5332de5155e29b756bf296be759171a3532308ce4b1d9b22b4d375e9819bd",
+    "config_snapshot": {
+      "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
+      "telemetry_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-telemetry.json",
+      "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
+      "CE_QA_DATASET_ID": null,
+      "CE_QA_DATASET_HASH": null
+    }
+  }
+}

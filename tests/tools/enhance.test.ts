@@ -26,6 +26,8 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
     delete process.env.CE_ENHANCE_PROMPT_USE_RETRIEVAL;
     delete process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT;
     delete process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS;
+    delete process.env.CE_ENHANCE_PROMPT_TIMEOUT_MS;
+    delete process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS;
     delete process.env.CE_ENHANCE_PROMPT_TOOL_VERSION;
     delete process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE;
   });
@@ -89,7 +91,25 @@ Here is an enhanced version of the original instruction that is more specific an
       );
       const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
       expect(timeoutMs).toBeGreaterThanOrEqual(1000);
-      expect(timeoutMs).toBeLessThanOrEqual(8000);
+      expect(timeoutMs).toBeLessThanOrEqual(120000);
+    });
+
+    it('should honor configured enhance timeout above 30 seconds', async () => {
+      process.env.CE_ENHANCE_PROMPT_TIMEOUT_MS = '60000';
+      const aiResponse = `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Configured timeout honored.</enhanced-prompt>
+
+### END RESPONSE ###`;
+      mockServiceClient.searchAndAsk.mockResolvedValue(aiResponse);
+
+      await handleEnhancePrompt({
+        prompt: 'validate timeout ceiling behavior',
+      }, mockServiceClient as any);
+
+      const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
+      expect(timeoutMs).toBeGreaterThan(30000);
+      expect(timeoutMs).toBeLessThanOrEqual(60000);
     });
   });
 
@@ -109,7 +129,8 @@ Here is an enhanced version of the original instruction that is more specific an
           prompt: 'improve test defaults',
         }, mockServiceClient as any);
 
-        expect(result).toBe('Default light mode enhancement.');
+        expect(result).toContain('## Objective');
+        expect(result).toContain('Default light mode enhancement.');
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
           'improve test defaults',
@@ -118,20 +139,18 @@ Here is an enhanced version of the original instruction that is more specific an
         );
         const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
         expect(timeoutMs).toBeGreaterThanOrEqual(1000);
-        expect(timeoutMs).toBeLessThanOrEqual(8000);
+        expect(timeoutMs).toBeLessThanOrEqual(120000);
       });
 
-      it('should use deterministic fallback when enhance mode is off', async () => {
+      it('should return explicit transient error when enhance mode is off and upstream times out', async () => {
         process.env.CE_ENHANCE_PROMPT_MODE = 'off';
+        process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '0';
         mockServiceClient.searchAndAsk.mockRejectedValue(new Error('request timeout while enhancing'));
 
-        const result = await handleEnhancePrompt({
+        await expect(handleEnhancePrompt({
           prompt: 'stabilize ci workflow',
-        }, mockServiceClient as any);
-
+        }, mockServiceClient as any)).rejects.toThrow(/\[TRANSIENT_UPSTREAM\]/);
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
-        expect(result).toContain('Improve and execute this request with clear scope and outputs: stabilize ci workflow');
-        expect(result).toContain('Requirements:');
       });
 
       it('should include retrieval context in rich mode path selection', async () => {
@@ -163,6 +182,61 @@ Here is an enhanced version of the original instruction that is more specific an
       });
     });
 
+    it('should retry transient timeout once before succeeding', async () => {
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '1';
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('Network timeout'))
+        .mockResolvedValueOnce(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Recovered after retry.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+      const result = await handleEnhancePrompt({
+        prompt: 'retry once please',
+      }, mockServiceClient as any);
+
+      expect(result).toContain('## Objective');
+      expect(result).toContain('Recovered after retry.');
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+    });
+
+    it('should retry with lean prompt context after transient failure', async () => {
+      process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '1';
+      process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE = '1';
+      mockServiceClient.semanticSearch = jest.fn(async () => [
+        {
+          path: 'src/auth/retry.ts',
+          content: 'export function retryPath() { return true; }',
+          relevanceScore: 0.91,
+        },
+      ]);
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('SEARCH_QUEUE_FULL: queue saturated'))
+        .mockResolvedValueOnce(
+          `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Lean retry succeeded.</enhanced-prompt>
+
+### END RESPONSE ###`
+        );
+
+      const result = await handleEnhancePrompt({
+        prompt: 'retry with lean prompt',
+      }, mockServiceClient as any);
+
+      expect(result).toContain('## Objective');
+      expect(result).toContain('Lean retry succeeded.');
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+      const firstPrompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
+      const secondPrompt = mockServiceClient.searchAndAsk.mock.calls[1][1];
+      expect(firstPrompt).toContain('Here is relevant code context that may help:');
+      expect(secondPrompt).not.toContain('Here is relevant code context that may help:');
+    });
+
     it('should use searchAndAsk for AI enhancement', async () => {
       const aiResponse = `### BEGIN RESPONSE ###
 Here is an enhanced version of the original instruction that is more specific and clear:
@@ -181,7 +255,7 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(result).toContain('JWT token validation');
     });
 
-    it('should parse enhanced prompt from AI response', async () => {
+    it('should parse enhanced prompt from AI response and return structured markdown', async () => {
       const enhancedText = 'Implement user authentication with JWT tokens and session management.';
       const aiResponse = `### BEGIN RESPONSE ###
 Here is an enhanced version of the original instruction that is more specific and clear:
@@ -195,7 +269,8 @@ Here is an enhanced version of the original instruction that is more specific an
         prompt: 'simple prompt',
       }, mockServiceClient as any);
 
-      expect(result).toBe(enhancedText);
+      expect(result).toContain('## Objective');
+      expect(result).toContain(enhancedText);
     });
 
     it('should handle multi-line enhanced prompts', async () => {
@@ -216,19 +291,17 @@ Here is an enhanced version of the original instruction that is more specific an
         prompt: 'test',
       }, mockServiceClient as any);
 
-      expect(result).toBe(multiLinePrompt);
+      expect(result).toContain('## Objective');
+      expect(result).toContain('Debug and fix the user authentication issue.');
     });
 
-    it('should handle response without expected XML tags gracefully', async () => {
+    it('should return validation error when response has no expected XML tags', async () => {
       const rawResponse = 'AI response without expected XML tags';
       mockServiceClient.searchAndAsk.mockResolvedValue(rawResponse);
 
-      const result = await handleEnhancePrompt({
+      await expect(handleEnhancePrompt({
         prompt: 'test',
-      }, mockServiceClient as any);
-
-      expect(result).toContain(rawResponse);
-      expect(result).toContain('response format was unexpected');
+      }, mockServiceClient as any)).rejects.toThrow(/\[VALIDATION_FAILED\]/);
     });
 
     it('should throw error when searchAndAsk returns empty response', async () => {
@@ -236,31 +309,44 @@ Here is an enhanced version of the original instruction that is more specific an
 
       await expect(handleEnhancePrompt({
         prompt: 'test',
-      }, mockServiceClient as any)).rejects.toThrow(/empty response/i);
+      }, mockServiceClient as any)).rejects.toThrow(/\[VALIDATION_FAILED\]/i);
     });
 
     it('should throw authentication error with helpful message', async () => {
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '2';
       mockServiceClient.searchAndAsk.mockRejectedValue(new Error('API key is required'));
 
       await expect(handleEnhancePrompt({
         prompt: 'test',
       }, mockServiceClient as any)).rejects.toThrow(/authentication/i);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
     });
 
-    it('should fallback deterministically on timeout errors', async () => {
+    it('should surface usage limit errors instead of falling back', async () => {
+      mockServiceClient.searchAndAsk.mockRejectedValue(
+        new Error('Codex session usage limit reached. Try again at Mar 12th, 2026 3:00 AM.')
+      );
+
+      await expect(handleEnhancePrompt({
+        prompt: 'quota blocked prompt',
+      }, mockServiceClient as any)).rejects.toThrow(/usage limit/i);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+    });
+
+    it('should return transient upstream error on timeout', async () => {
       mockServiceClient.searchAndAsk.mockRejectedValue(new Error('Network timeout'));
 
       await expect(handleEnhancePrompt({
         prompt: 'test',
-      }, mockServiceClient as any)).resolves.toContain('Improve and execute this request');
+      }, mockServiceClient as any)).rejects.toThrow(/\[TRANSIENT_UPSTREAM\]/);
     });
 
-    it('should fallback deterministically on queue pressure errors', async () => {
+    it('should return transient upstream error on queue pressure', async () => {
       mockServiceClient.searchAndAsk.mockRejectedValue(new Error('SEARCH_QUEUE_FULL: queue saturated'));
 
       await expect(handleEnhancePrompt({
         prompt: 'handle queue pressure',
-      }, mockServiceClient as any)).resolves.toContain('Improve and execute this request');
+      }, mockServiceClient as any)).rejects.toThrow(/\[TRANSIENT_UPSTREAM\]/);
     });
 
     it('should not fallback on provider configuration failures', async () => {
@@ -288,23 +374,43 @@ Here is an enhanced version of the original instruction that is more specific an
         mockServiceClient as any
       );
       const parsed = JSON.parse(raw);
-      expect(parsed.enhanced_prompt).toBe('Structured AI enhancement output.');
+      expect(parsed.schema_version).toBeDefined();
+      expect(parsed.template_version).toBeDefined();
+      expect(parsed.enhanced_prompt).toContain('## Objective');
+      expect(parsed.enhanced_prompt).toContain('Structured AI enhancement output.');
       expect(parsed.source).toBe('ai');
       expect(parsed.reason_code).toBe('ai_enhanced');
     });
 
-    it('returns structured JSON metadata when CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json and fallback is used', async () => {
+    it('returns structured JSON error envelope when CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json and transient failure occurs', async () => {
       process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
       mockServiceClient.searchAndAsk.mockRejectedValue(new Error('SEARCH_QUEUE_FULL: queue saturated'));
 
       const raw = await handleEnhancePrompt(
-        { prompt: 'fallback json please' },
+        { prompt: 'transient json please' },
         mockServiceClient as any
       );
       const parsed = JSON.parse(raw);
-      expect(parsed.source).toBe('fallback');
-      expect(parsed.reason_code).toBe('fallback_timeout_or_queue_or_transient');
-      expect(parsed.enhanced_prompt).toContain('Improve and execute this request');
+      expect(parsed.schema_version).toBeDefined();
+      expect(parsed.error_code).toBe('TRANSIENT_UPSTREAM');
+      expect(parsed.retryable).toBe(true);
+    });
+
+    it('returns retry_after_ms in JSON envelope when upstream provides retry hint', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '0';
+      mockServiceClient.searchAndAsk.mockRejectedValue(
+        new Error('SEARCH_QUEUE_FULL: queue saturated retry_after_ms=4200')
+      );
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'transient with retry hint' },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+      expect(parsed.error_code).toBe('TRANSIENT_UPSTREAM');
+      expect(parsed.retryable).toBe(true);
+      expect(parsed.retry_after_ms).toBe(4200);
     });
 
     describe('Snippet cache hardening', () => {
@@ -425,7 +531,7 @@ Here is an enhanced version of the original instruction that is more specific an
         process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
         await handleEnhancePrompt({ prompt: 'cache profile boundary prompt' }, mockServiceClient as any);
 
-        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
         expect(mockServiceClient.semanticSearch).toHaveBeenCalled();
       });
 

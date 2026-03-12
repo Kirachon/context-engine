@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0",
+  "register_type": "delivery",
+  "register_owner": "engineering-governance-owner",
+  "generated_at_utc": "2026-03-12T00:00:00Z",
+  "last_review_utc": "2026-03-12T00:00:00Z",
+  "next_review_utc": "2026-03-18T00:00:00Z",
+  "risks": [
+    {
+      "risk_id": "DR-001",
+      "title": "Cross-stream dependency sequencing delay",
+      "status": "open",
+      "likelihood": "medium",
+      "impact": "high",
+      "trigger": "T2, T4, T6, and T8 completion windows overlap with unresolved blockers.",
+      "mitigation": "Track dependencies in weekly board review and enforce WIP caps.",
+      "contingency": "Re-sequence downstream waves and publish revised delivery window.",
+      "owner": "delivery-program-owner",
+      "opened_at_utc": "2026-03-12T00:00:00Z",
+      "last_review_utc": "2026-03-12T00:00:00Z",
+      "next_review_utc": "2026-03-18T00:00:00Z",
+      "evidence_ref": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md",
+      "delivery_milestone": "0-30",
+      "dependency_refs": [
+        "R4",
+        "R6"
+      ]
+    }
+  ]
+}

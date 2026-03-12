@@ -86,9 +86,7 @@ Options:
   --help, -h               Show this help message
 
 Environment Variables:
-  CE_RETRIEVAL_PROVIDER    Retrieval provider preference: local_native (default) | augment_legacy
-  AUGMENT_API_TOKEN        Augment-provider token (only required for augment_legacy)
-  AUGMENT_API_URL          Augment-provider URL (default: https://api.augmentcode.com; only used for augment_legacy)
+  CE_RETRIEVAL_PROVIDER    Retrieval provider preference: local_native (default)
   CE_AI_PROVIDER           AI provider for ask calls: openai_session
   CE_OPENAI_SESSION_CMD    Command for session-based provider (default: codex)
 

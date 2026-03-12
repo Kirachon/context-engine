@@ -238,55 +238,75 @@ The `enhance_prompt` tool transforms simple prompts into detailed, structured pr
 - Context enrichment before sending prompts to other services
 - Generating detailed prompts from simple user queries
 
-**Example 1: Basic Usage with AI Mode (Default)**
+**Example 1: Basic Usage (Structured Markdown Output)**
 
 ```json
 {
   "name": "enhance_prompt",
   "arguments": {
-    "prompt": "How should we implement user authentication?",
-    "max_files": 5,
-    "use_ai": true
+    "prompt": "How should we implement user authentication?"
   }
 }
 ```
 
-This uses AI to intelligently select and summarize the most relevant code context, producing a well-structured prompt suitable for external LLMs.
+This returns structured markdown with required sections:
+- Objective
+- Critical Context
+- Assumptions
+- Constraints
+- Proposed Plan
+- Validation Checklist
+- Risks and Mitigations
+- Open Questions
+- Done Definition
 
-**Example 2: Template Mode**
+**Example 2: JSON Envelope Output**
 
 ```json
 {
   "name": "enhance_prompt",
   "arguments": {
-    "prompt": "Show me the database schema",
-    "max_files": 3,
-    "use_ai": false
+    "prompt": "Show me the database schema"
   }
 }
 ```
 
-Template mode returns raw code snippets in a structured format without AI summarization, useful when you want direct access to the code.
+Set environment variable:
 
-**Example 3: Custom max_files Parameter**
+```bash
+CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json
+```
+
+Success JSON shape:
 
 ```json
 {
-  "name": "enhance_prompt",
-  "arguments": {
-    "prompt": "Explain the payment processing workflow",
-    "max_files": 10
-  }
+  "schema_version": "2.0.0",
+  "template_version": "2.0.0",
+  "enhanced_prompt": "## Objective\\n- ...",
+  "source": "ai",
+  "reason_code": "ai_enhanced"
 }
 ```
 
-**Output Format Differences:**
-- **AI Mode (`use_ai: true`)**: Returns a narrative-style enhanced prompt with AI-generated summaries and context integration
-- **Template Mode (`use_ai: false`)**: Returns structured code snippets with metadata, suitable for programmatic processing
+**Example 3: Transient Failure JSON Envelope (No Fallback Template)**
 
-**When to Use Each Mode:**
-- Use **AI Mode** when sending prompts to external LLMs or when you need human-readable context
-- Use **Template Mode** when building automated pipelines or when you need raw code for further processing
+When upstream times out or queue pressure occurs, the tool no longer returns fallback template text.
+In JSON mode it returns:
+
+```json
+{
+  "schema_version": "2.0.0",
+  "error_code": "TRANSIENT_UPSTREAM",
+  "message": "AI enhancement is temporarily unavailable...",
+  "retryable": true
+}
+```
+
+**Important Notes:**
+- `enhance_prompt` only accepts `prompt` in its input arguments.
+- Structured markdown is the default text output.
+- No deterministic fallback template output path is used for transient failures.
 
 ### index_workspace Tool
 
@@ -869,6 +889,8 @@ Implement user authentication with JWT tokens
 
 ## Code Review Examples (v1.7.0)
 
+Timeout note: `review_changes` and `review_git_diff` use a default AI timeout of `120000` ms. Set `CE_REVIEW_AI_TIMEOUT_MS` to override globally, or set `llm_timeout_ms` per call.
+
 ### Example 1: Review Staged Changes Before Commit
 
 **User Query:**
@@ -1124,6 +1146,22 @@ Implement user authentication with JWT tokens
 }
 ```
 
+### Example 7: `review_auto` with `review_git_diff_options.llm_timeout_ms`
+
+**Tool Call:**
+```json
+{
+  "tool": "review_auto",
+  "arguments": {
+    "target": "staged",
+    "review_git_diff_options": {
+      "llm_timeout_ms": 180000,
+      "max_findings": 10
+    }
+  }
+}
+```
+
 ### Common Code Review Workflows
 
 #### 1. Pre-Commit Review
@@ -1162,4 +1200,3 @@ Implement user authentication with JWT tokens
 ---
 
 For more examples and use cases, see the [TESTING.md](TESTING.md) guide.
-

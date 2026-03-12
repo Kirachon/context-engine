@@ -5,6 +5,7 @@ type SpawnPlan = {
   exitCode?: number;
   stdout?: string;
   stderr?: string;
+  error?: NodeJS.ErrnoException;
   onSpawn?: (args: string[]) => void;
 };
 
@@ -44,6 +45,10 @@ describe('CodexSessionProvider wrapper args', () => {
         write: jest.fn(),
         end: jest.fn(() => {
           queueMicrotask(() => {
+            if (plan.error) {
+              processHandlers.error?.(plan.error as never);
+              return;
+            }
             if (plan.stdout) {
               for (const handler of stdoutHandlers) handler(plan.stdout);
             }
@@ -74,6 +79,29 @@ describe('CodexSessionProvider wrapper args', () => {
 
   afterEach(() => {
     process.env = { ...ORIGINAL_ENV };
+  });
+
+  it('prefers Windows .cmd defaults for readiness checks', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+
+    spawnPlans.push({ stdout: 'Logged in via ChatGPT' });
+
+    try {
+      jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+      const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+
+      const provider = new CodexSessionProvider();
+      await (provider as any).ensureSessionReady(process.cwd());
+
+      expect(spawnCalls).toHaveLength(1);
+      expect(spawnCalls[0]).toEqual({
+        command: 'cmd',
+        args: ['/d', '/s', '/c', 'codex.cmd', 'login', 'status'],
+      });
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
   });
 
   it('applies CE_OPENAI_SESSION_ARGS_JSON prefix to readiness login status', async () => {
@@ -213,5 +241,32 @@ describe('CodexSessionProvider wrapper args', () => {
     expect(spawnCalls[1]?.args.slice(0, 2)).toEqual(['exec', '--json']);
     expect(spawnCalls[1]?.args).not.toContain('--model');
     expect(spawnCalls[1]?.args).not.toContain('gpt-5-codex');
+  });
+
+  it('surfaces usage limit errors without marking them retryable', async () => {
+    process.env.CE_OPENAI_SESSION_CMD = 'codex.cmd';
+
+    spawnPlans.push({ stdout: 'Logged in via ChatGPT' });
+    spawnPlans.push({
+      exitCode: 1,
+      stdout: `{"type":"error","message":"You've hit your usage limit. Try again later."}`,
+      stderr: 'Warning: no last agent message; wrote empty content.',
+    });
+
+    jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+    const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+
+    const provider = new CodexSessionProvider();
+    await expect(
+      provider.call({
+        searchQuery: 'quota check',
+        prompt: 'quota check',
+        timeoutMs: 20_000,
+        workspacePath: process.cwd(),
+      })
+    ).rejects.toMatchObject({
+      message: expect.stringMatching(/usage limit/i),
+      retryable: false,
+    });
   });
 });

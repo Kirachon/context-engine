@@ -103,6 +103,21 @@ describe('semantic_search Tool', () => {
       );
     });
 
+    it('keeps backward-compatible defaults when mode/profile are omitted', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch({ query: 'compat', top_k: 7 }, mockServiceClient as any);
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'compat',
+        7,
+        expect.objectContaining({
+          bypassCache: false,
+          maxOutputLength: 14000,
+        })
+      );
+    });
+
     it('maps mode=deep to rich retrieval profile settings', async () => {
       mockServiceClient.semanticSearch.mockResolvedValue([]);
 
@@ -140,6 +155,21 @@ describe('semantic_search Tool', () => {
         'audit',
         5,
         expect.objectContaining({ bypassCache: false, maxOutputLength: 10000 })
+      );
+    });
+
+    it('uses a safe default timeout when bypass_cache=true and timeout_ms is omitted', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch(
+        { query: 'no-cache-check', top_k: 5, bypass_cache: true },
+        mockServiceClient as any
+      );
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'no-cache-check',
+        5,
+        expect.objectContaining({ bypassCache: true })
       );
     });
   });

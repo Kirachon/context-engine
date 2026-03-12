@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-03-12T02:51:12.909Z",
+  "status": "PASS",
+  "period": {
+    "key": "2026-W11",
+    "start_utc": "2026-03-09T00:00:00.000Z",
+    "end_utc_exclusive": "2026-03-16T00:00:00.000Z"
+  },
+  "summary": {
+    "headline": "R4 weekly retrieval trend (2026-W11)",
+    "pass_checks": 6,
+    "fail_checks": 0,
+    "retention_archive_note": "Archived under artifacts\\bench\\archive\\r4-weekly with rolling_12_weeks retention policy."
+  },
+  "metrics": {
+    "strict_parity_score": 100,
+    "quality_pass_rate": 1,
+    "ndcg_delta_pct": 13.99999999999999,
+    "mrr_delta_pct": 12.499999999999996,
+    "recall_delta_pct": 21.999999999999996
+  },
+  "checks": [
+    {
+      "id": "metric.strict_parity_score",
+      "status": "PASS",
+      "source": "artifacts\\bench\\auggie-capability-parity-gate.json",
+      "message": "overall_score=100"
+    },
+    {
+      "id": "metric.quality_pass_rate",
+      "status": "PASS",
+      "source": "artifacts\\bench\\retrieval-quality-report.json",
+      "message": "summary.pass_rate=1"
+    },
+    {
+      "id": "metric.ndcg_delta_pct",
+      "status": "PASS",
+      "source": "artifacts\\bench\\retrieval-quality-report.json",
+      "message": "quality.ndcg_at_10=13.99999999999999"
+    },
+    {
+      "id": "metric.mrr_delta_pct",
+      "status": "PASS",
+      "source": "artifacts\\bench\\retrieval-quality-report.json",
+      "message": "quality.mrr_at_10=12.499999999999996"
+    },
+    {
+      "id": "metric.recall_delta_pct",
+      "status": "PASS",
+      "source": "artifacts\\bench\\retrieval-quality-report.json",
+      "message": "quality.recall_at_50=21.999999999999996"
+    },
+    {
+      "id": "archive.duplicate_period",
+      "status": "PASS",
+      "source": "artifacts\\bench\\archive\\r4-weekly",
+      "message": "Period 2026-W11 duplicate scan passed"
+    }
+  ],
+  "retention": {
+    "policy": "rolling_12_weeks",
+    "retained_period_count": 1,
+    "retention_archive_note": "Archived under artifacts\\bench\\archive\\r4-weekly with rolling_12_weeks retention policy."
+  },
+  "inputs": {
+    "parity_artifact_path": "artifacts\\bench\\auggie-capability-parity-gate.json",
+    "quality_artifact_path": "artifacts\\bench\\retrieval-quality-report.json",
+    "parity_artifact_sha256": "6faa0ab4a458140a46851a483e773327c92d825dbb4616b4bbdae05faf837f3c",
+    "quality_artifact_sha256": "62812ce419ae102e26a2b440447e0b795e9b6036f8083157a128c718afdefa9b",
+    "out_path": "artifacts\\bench\\r4-weekly-trend.json",
+    "archive_dir": "artifacts\\bench\\archive\\r4-weekly"
+  }
+}

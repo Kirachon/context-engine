@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-12T04:59:11.216Z",
+  "inputs": {
+    "report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-gate.json"
+  },
+  "summary": {
+    "total": 14,
+    "pass": 14,
+    "fail": 0,
+    "skip": 0,
+    "pass_rate": 1
+  },
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  },
+  "reproducibility_lock": {
+    "commit_sha": "2eb4ec594f1eb3f881af496406966b147730e859",
+    "dataset_id": "holdout_v1",
+    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716",
+    "fixture_pack_hash": "5ab5332de5155e29b756bf296be759171a3532308ce4b1d9b22b4d375e9819bd",
+    "report_path": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json"
+  }
+}

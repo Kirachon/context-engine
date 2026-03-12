@@ -40,8 +40,8 @@ import { envMs } from '../../config/env.js';
 
 /** Tool version for metadata */
 const TOOL_VERSION = '1.0.0';
-const LEGACY_MODEL_USED = 'auggie-context-engine';
-const DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS = 60_000;
+const FALLBACK_MODEL_USED = 'local-native-context-engine';
+const DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS = 120_000;
 const MIN_CODE_REVIEW_AI_TIMEOUT_MS = 1_000;
 const MAX_CODE_REVIEW_AI_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -53,6 +53,7 @@ const DEFAULT_OPTIONS: Required<ReviewOptions> = {
   changed_lines_only: true,
   custom_instructions: '',
   exclude_patterns: [],
+  llm_timeout_ms: Number.NaN,
 };
 
 // ============================================================================
@@ -74,6 +75,7 @@ export class CodeReviewService {
       changed_lines_only: options?.changed_lines_only ?? DEFAULT_OPTIONS.changed_lines_only,
       custom_instructions: options?.custom_instructions ?? DEFAULT_OPTIONS.custom_instructions,
       exclude_patterns: options?.exclude_patterns ? [...options.exclude_patterns] : [...DEFAULT_OPTIONS.exclude_patterns],
+      llm_timeout_ms: options?.llm_timeout_ms ?? DEFAULT_OPTIONS.llm_timeout_ms,
     };
   }
 
@@ -87,10 +89,11 @@ export class CodeReviewService {
   async reviewChanges(input: ReviewChangesInput): Promise<ReviewResult> {
     const startTime = Date.now();
     const opts = this.resolveOptions(input.options);
-    const reviewTimeoutMs = envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS, {
+    const envReviewTimeoutMs = envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS, {
       min: MIN_CODE_REVIEW_AI_TIMEOUT_MS,
       max: MAX_CODE_REVIEW_AI_TIMEOUT_MS,
     });
+    const reviewTimeoutMs = this.resolveReviewTimeoutMs(input.options?.llm_timeout_ms, envReviewTimeoutMs);
 
     console.error(`[CodeReviewService] Starting code review...`);
 
@@ -176,6 +179,22 @@ export class CodeReviewService {
     }
   }
 
+  private resolveReviewTimeoutMs(
+    requestedTimeoutMs: number | undefined,
+    fallbackTimeoutMs: number
+  ): number {
+    if (requestedTimeoutMs === undefined) {
+      return fallbackTimeoutMs;
+    }
+    if (!Number.isFinite(requestedTimeoutMs)) {
+      return fallbackTimeoutMs;
+    }
+    return Math.max(
+      MIN_CODE_REVIEW_AI_TIMEOUT_MS,
+      Math.min(MAX_CODE_REVIEW_AI_TIMEOUT_MS, Math.floor(requestedTimeoutMs))
+    );
+  }
+
   // ==========================================================================
   // Diff Parsing
   // ==========================================================================
@@ -249,10 +268,10 @@ export class CodeReviewService {
       if (providerId && modelLabel) {
         return `${providerId}:${modelLabel}`;
       }
-      return modelLabel || providerId || LEGACY_MODEL_USED;
+      return modelLabel || providerId || FALLBACK_MODEL_USED;
     } catch {
       // Keep backward-compatible behavior for tests/mocks and failure cases.
-      return LEGACY_MODEL_USED;
+      return FALLBACK_MODEL_USED;
     }
   }
 

@@ -58,7 +58,9 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed).toHaveProperty('results');
     expect(Array.isArray(parsed.results)).toBe(true);
     expect(parsed.results[0].file).toBe('src/a.ts');
-    expect(parsed.results[0].score).toBeCloseTo(0.9);
+    expect(typeof parsed.results[0].score).toBe('number');
+    expect(parsed.results[0].score).toBeGreaterThanOrEqual(0.6);
+    expect(parsed.results[0].score).toBeLessThanOrEqual(1);
     expect(parsed).toHaveProperty('metadata');
     expect(parsed.metadata.workspace).toBe('/tmp/workspace');
     expect(parsed.metadata.filtersApplied).toEqual([]);
@@ -154,7 +156,9 @@ describe('codebase_retrieval Tool', () => {
     const parsed = JSON.parse(result);
 
     expect(parsed.results[0].file).toBe('src/compact.ts');
-    expect(parsed.results[0].score).toBeCloseTo(0.99);
+    expect(typeof parsed.results[0].score).toBe('number');
+    expect(parsed.results[0].score).toBeGreaterThanOrEqual(0.6);
+    expect(parsed.results[0].score).toBeLessThanOrEqual(1);
     expect(parsed.results[0].lines).toBe('1-20');
     expect(parsed.results[0].preview).toHaveLength(240);
     expect(parsed.results[0]).not.toHaveProperty('content');

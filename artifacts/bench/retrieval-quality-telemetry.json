@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-03-12T05:27:34.018Z",
+  "dense_refresh": {
+    "skipped_docs_rate_pct": 0,
+    "embed_batch_p95_ms": 45
+  },
+  "reproducibility_lock": {
+    "commit_sha": "2eb4ec594f1eb3f881af496406966b147730e859",
+    "dataset_id": "holdout_v1",
+    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716",
+    "dataset_hash_length": 64,
+    "dataset_source": "artifact",
+    "config_snapshot_hash": "5ab5332de5155e29b756bf296be759171a3532308ce4b1d9b22b4d375e9819bd",
+    "config_key_count": 6,
+    "config_snapshot": {
+      "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
+      "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
+      "CE_RETRIEVAL_PROFILE_DEFAULT": null,
+      "CE_TOOL_RESPONSE_CACHE": null,
+      "CE_INTERNAL_REQUEST_CACHE": null,
+      "CE_SKIP_UNCHANGED_INDEXING": null
+    }
+  }
+}

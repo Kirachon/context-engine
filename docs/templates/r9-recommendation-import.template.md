@@ -1,0 +1,9 @@
+# R9 Recommendation Import Template (Markdown)
+
+Purpose: markdown-table template for recommendation backlog ingestion using the same canonical schema as the CSV template.
+
+## Recommendations
+
+| recommendation_id | recommendation | domain | evidence | impact | urgency | confidence | effort | risk | score | owner | due_window | depends_on | success_metric | validation | rollback_abort |
+|---|---|---|---|---:|---:|---:|---:|---:|---:|---|---|---|---|---|---|
+| R9 | Add recommendation import template (CSV/MD) for backlog ingestion | DX | current manual translation burden | 3 | 3 | 4 | 2 | 1 | 18.00 | PMO/DevEx | 31-60 days | R6 | backlog import cycle time: unknown -> -30% | trial with one planning cycle | revert to markdown-only if tool friction high |

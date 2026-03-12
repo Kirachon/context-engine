@@ -2,6 +2,8 @@
 
 Common issues and solutions for the Context Engine MCP Server.
 
+> Current runtime note: the active retrieval/runtime path is now `local_native`. Any Auggie CLI guidance below should be treated as historical unless the section explicitly says it is archival.
+
 ## Installation Issues
 
 ### "Cannot find module '@modelcontextprotocol/sdk'"
@@ -13,16 +15,14 @@ Common issues and solutions for the Context Engine MCP Server.
 npm install
 ```
 
-### "auggie: command not found"
+### Legacy Auggie CLI references in older docs
 
-**Cause**: Auggie CLI not installed globally
+**Cause**: You are following an older document from the Auggie-era architecture.
 
 **Solution**:
 ```bash
-npm install -g @augmentcode/auggie
-
-# Verify installation
-auggie --version
+npm run verify
+npm run ci:check:no-legacy-auggie
 ```
 
 ### TypeScript compilation errors

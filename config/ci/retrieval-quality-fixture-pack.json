@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "generated_for": "local-native-search-quality-upgrade",
+  "holdout": {
+    "enabled": true,
+    "default_dataset_id": "holdout_v1",
+    "datasets": {
+      "train_v1": {
+        "description": "Reference training-like query set used only for leakage checks.",
+        "queries": [
+          "semantic search indexing workflow",
+          "context engine cache invalidation strategy",
+          "retrieval profile fast balanced rich",
+          "mcp tool call timeout handling",
+          "quality gate report generation"
+        ]
+      },
+      "holdout_v1": {
+        "description": "Deterministic holdout query set for benchmark/retrieval quality checks.",
+        "queries": [
+          "queue saturation reject mode behavior",
+          "benchmark reproducibility lock fields",
+          "json path threshold missing status fail",
+          "shadow canary abort threshold artifact",
+          "holdout dataset leakage guard check"
+        ]
+      }
+    },
+    "leakage_guard": {
+      "training_dataset_id": "train_v1",
+      "holdout_dataset_id": "holdout_v1",
+      "normalization": "trim_lower_whitespace_collapse"
+    }
+  },
+  "checks": [
+    {
+      "id": "quality.ndcg_at_10",
+      "kind": "delta_pct_min",
+      "baseline": 0.5,
+      "candidate": 0.57,
+      "min_delta_pct": 12
+    },
+    {
+      "id": "quality.mrr_at_10",
+      "kind": "delta_pct_min",
+      "baseline": 0.4,
+      "candidate": 0.45,
+      "min_delta_pct": 10
+    },
+    {
+      "id": "quality.recall_at_50",
+      "kind": "delta_pct_min",
+      "baseline": 0.5,
+      "candidate": 0.61,
+      "min_delta_pct": 20
+    },
+    {
+      "id": "latency.fast.p95_ms",
+      "kind": "threshold_max",
+      "value": 340,
+      "max": 350
+    },
+    {
+      "id": "latency.balanced.p95_ms",
+      "kind": "threshold_max",
+      "value": 680,
+      "max": 700
+    },
+    {
+      "id": "latency.rich.p95_ms",
+      "kind": "threshold_max",
+      "value": 1180,
+      "max": 1200
+    },
+    {
+      "id": "resource.rss_growth_pct",
+      "kind": "threshold_max",
+      "value": 22,
+      "max": 25
+    },
+    {
+      "id": "resource.dense_index_size_ratio",
+      "kind": "threshold_max",
+      "value": 2.4,
+      "max": 2.5
+    },
+    {
+      "id": "telemetry.dense_skipped_docs_rate_pct",
+      "kind": "json_path_threshold_max",
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "json_path": "dense_refresh.skipped_docs_rate_pct",
+      "max": 10,
+      "missing_status": "skip"
+    },
+    {
+      "id": "telemetry.dense_embed_batch_p95_ms",
+      "kind": "json_path_threshold_max",
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "json_path": "dense_refresh.embed_batch_p95_ms",
+      "max": 120,
+      "missing_status": "skip"
+    },
+    {
+      "id": "holdout.query_count_min",
+      "kind": "json_path_threshold_min",
+      "path": "artifacts/bench/retrieval-holdout-check.json",
+      "json_path": "summary.query_count",
+      "min": 1,
+      "missing_status": "fail"
+    },
+    {
+      "id": "holdout.leakage_count_max",
+      "kind": "json_path_threshold_max",
+      "path": "artifacts/bench/retrieval-holdout-check.json",
+      "json_path": "summary.leakage_count",
+      "max": 0,
+      "missing_status": "fail"
+    },
+    {
+      "id": "telemetry.reproducibility.dataset_hash_length_min",
+      "kind": "json_path_threshold_min",
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "json_path": "reproducibility_lock.dataset_hash_length",
+      "min": 64,
+      "missing_status": "fail"
+    },
+    {
+      "id": "telemetry.reproducibility.config_keys_min",
+      "kind": "json_path_threshold_min",
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "json_path": "reproducibility_lock.config_key_count",
+      "min": 1,
+      "missing_status": "fail"
+    }
+  ],
+  "gate_rules": {
+    "min_pass_rate": 1,
+    "required_ids": [
+      "quality.ndcg_at_10",
+      "quality.mrr_at_10",
+      "quality.recall_at_50",
+      "latency.fast.p95_ms",
+      "latency.balanced.p95_ms",
+      "latency.rich.p95_ms",
+      "holdout.query_count_min",
+      "holdout.leakage_count_max",
+      "telemetry.reproducibility.dataset_hash_length_min",
+      "telemetry.reproducibility.config_keys_min"
+    ]
+  }
+}

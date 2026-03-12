@@ -1,7 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { createRetrievalProvider, getRetrievalProviderRegistry } from '../../../src/retrieval/providers/factory.js';
 import { RetrievalProviderError } from '../../../src/retrieval/providers/types.js';
-import type { RetrievalProviderCallbacks } from '../../../src/retrieval/providers/types.js';
+import type {
+  RetrievalProviderCallbackContext,
+  RetrievalProviderCallbacks,
+} from '../../../src/retrieval/providers/types.js';
 
 const ORIGINAL_ENV = { ...process.env };
 
@@ -21,38 +24,36 @@ function createCallbackHarness() {
         _query: string,
         _topK: number,
         _options?: { bypassCache?: boolean; maxOutputLength?: number },
-        _context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }
+        _context?: RetrievalProviderCallbackContext
       ) => []
     ),
     indexWorkspace: jest.fn(
-      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) =>
+      async (_context?: RetrievalProviderCallbackContext) =>
         defaultIndexResult
     ),
     indexFiles: jest.fn(
       async (
         _filePaths: string[],
-        _context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }
+        _context?: RetrievalProviderCallbackContext
       ) => defaultIndexResult
     ),
     clearIndex: jest.fn(
-      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) => undefined
+      async (_context?: RetrievalProviderCallbackContext) => undefined
     ),
     getIndexStatus: jest.fn(
-      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) =>
+      async (_context?: RetrievalProviderCallbackContext) =>
         defaultIndexStatus
     ),
     health: jest.fn(
-      async (_context?: { providerId: 'augment_legacy' | 'local_native'; operation: string }) => ({ ok: true })
+      async (_context?: RetrievalProviderCallbackContext) => ({ ok: true })
     ),
   });
 
   const spies = {
-    augmentLegacy: createScopedSpies(),
     localNative: createScopedSpies(),
   };
 
   const callbacks: RetrievalProviderCallbacks = {
-    augmentLegacy: spies.augmentLegacy,
     localNative: spies.localNative,
   };
 
@@ -63,9 +64,6 @@ describe('retrieval provider factory', () => {
   beforeEach(() => {
     process.env = { ...ORIGINAL_ENV };
     delete process.env.CE_RETRIEVAL_PROVIDER;
-    delete process.env.CE_RETRIEVAL_FORCE_LEGACY;
-    delete process.env.AUGMENT_API_TOKEN;
-    delete process.env.AUGMENT_API_URL;
   });
 
   afterEach(() => {
@@ -85,27 +83,7 @@ describe('retrieval provider factory', () => {
     expect(provider.id).toBe('local_native');
   });
 
-  it('applies force-legacy override from env', () => {
-    process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
-    process.env.CE_RETRIEVAL_FORCE_LEGACY = 'true';
-    process.env.AUGMENT_API_TOKEN = 'test-token';
-    const { callbacks } = createCallbackHarness();
-    const provider = createRetrievalProvider({ callbacks });
-    expect(provider.id).toBe('augment_legacy');
-  });
-
-  it('respects explicit providerId override', () => {
-    process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
-    process.env.AUGMENT_API_TOKEN = 'test-token';
-    const { callbacks } = createCallbackHarness();
-    const provider = createRetrievalProvider({
-      providerId: 'augment_legacy',
-      callbacks,
-    });
-    expect(provider.id).toBe('augment_legacy');
-  });
-
-  it('fails fast with typed error when env explicitly selects augment_legacy without token', () => {
+  it('fails fast with typed error when env explicitly selects a removed provider id', () => {
     process.env.CE_RETRIEVAL_PROVIDER = 'augment_legacy';
     const { callbacks } = createCallbackHarness();
 
@@ -115,30 +93,15 @@ describe('retrieval provider factory', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(RetrievalProviderError);
       const typed = error as RetrievalProviderError;
-      expect(typed.code).toBe('provider_auth_missing');
-      expect(typed.provider).toBe('augment_legacy');
-      expect(typed.envVar).toBe('AUGMENT_API_TOKEN');
+      expect(typed.code).toBe('provider_config_invalid');
+      expect(typed.provider).toBeUndefined();
+      expect(typed.envVar).toBe('CE_RETRIEVAL_PROVIDER');
     }
   });
 
-  it('fails fast with typed error for explicit augment_legacy providerId override without token', () => {
-    const { callbacks } = createCallbackHarness();
-
-    try {
-      createRetrievalProvider({ providerId: 'augment_legacy', callbacks });
-      throw new Error('expected createRetrievalProvider to throw');
-    } catch (error) {
-      expect(error).toBeInstanceOf(RetrievalProviderError);
-      const typed = error as RetrievalProviderError;
-      expect(typed.code).toBe('provider_auth_missing');
-      expect(typed.provider).toBe('augment_legacy');
-      expect(typed.envVar).toBe('AUGMENT_API_TOKEN');
-    }
-  });
-
-  it('exposes both providers in registry', () => {
+  it('exposes only local_native in registry', () => {
     const registry = getRetrievalProviderRegistry();
-    expect(Object.keys(registry).sort()).toEqual(['augment_legacy', 'local_native']);
+    expect(Object.keys(registry).sort()).toEqual(['local_native']);
   });
 
   it('routes through local-native callback methods and preserves callback context', async () => {
@@ -179,12 +142,5 @@ describe('retrieval provider factory', () => {
       providerId: 'local_native',
       operation: 'health',
     });
-
-    expect(spies.augmentLegacy.search).not.toHaveBeenCalled();
-    expect(spies.augmentLegacy.indexWorkspace).not.toHaveBeenCalled();
-    expect(spies.augmentLegacy.indexFiles).not.toHaveBeenCalled();
-    expect(spies.augmentLegacy.clearIndex).not.toHaveBeenCalled();
-    expect(spies.augmentLegacy.getIndexStatus).not.toHaveBeenCalled();
-    expect(spies.augmentLegacy.health).not.toHaveBeenCalled();
   });
 });

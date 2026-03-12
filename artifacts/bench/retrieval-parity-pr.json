@@ -1,0 +1,402 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-11T15:10:23.456Z",
+  "inputs": {
+    "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-parity-fixture-pack.json",
+    "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-capability-matrix.json",
+    "retrieval_parity": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-parity-pr.json"
+  },
+  "evaluations": [
+    {
+      "id": "parity.search.relevance_score",
+      "status": "pass",
+      "message": "PASS parity.search.relevance_score: command exited with status 0"
+    },
+    {
+      "id": "parity.search.rank_stability",
+      "status": "pass",
+      "message": "PASS parity.search.rank_stability: command exited with status 0"
+    },
+    {
+      "id": "parity.search.result_consistency",
+      "status": "pass",
+      "message": "PASS parity.search.result_consistency: command exited with status 0"
+    },
+    {
+      "id": "parity.search.query_behavior_match",
+      "status": "pass",
+      "message": "PASS parity.search.query_behavior_match: command exited with status 0"
+    },
+    {
+      "id": "parity.search.filter_behavior_match",
+      "status": "pass",
+      "message": "PASS parity.search.filter_behavior_match: command exited with status 0"
+    },
+    {
+      "id": "parity.vector.ingest_success_rate",
+      "status": "pass",
+      "message": "PASS parity.vector.ingest_success_rate: command exited with status 0"
+    },
+    {
+      "id": "parity.vector.embedding_latency_p95",
+      "status": "pass",
+      "message": "PASS parity.vector.embedding_latency_p95: value=6.618269594509382 lte 20"
+    },
+    {
+      "id": "parity.vector.retrieval_accuracy",
+      "status": "pass",
+      "message": "PASS parity.vector.retrieval_accuracy: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.schema_match_rate",
+      "status": "pass",
+      "message": "PASS parity.tools.schema_match_rate: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.response_contract_match",
+      "status": "pass",
+      "message": "PASS parity.tools.response_contract_match: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.error_surface_match",
+      "status": "pass",
+      "message": "PASS parity.tools.error_surface_match: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.request_id_coverage",
+      "status": "pass",
+      "message": "PASS parity.tools.request_id_coverage: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.trace_completeness",
+      "status": "pass",
+      "message": "PASS parity.tools.trace_completeness: all required text patterns found"
+    },
+    {
+      "id": "parity.reliability.recovery_success_rate",
+      "status": "pass",
+      "message": "PASS parity.reliability.recovery_success_rate: command exited with status 0"
+    },
+    {
+      "id": "parity.reliability.retry_effectiveness",
+      "status": "pass",
+      "message": "PASS parity.reliability.retry_effectiveness: command exited with status 0"
+    },
+    {
+      "id": "parity.reliability.fallback_safety",
+      "status": "pass",
+      "message": "PASS parity.reliability.fallback_safety: command exited with status 0"
+    },
+    {
+      "id": "parity.reliability.shadow_delta_rate",
+      "status": "pass",
+      "message": "PASS parity.reliability.shadow_delta_rate: value=pass expected=pass"
+    },
+    {
+      "id": "parity.reliability.canary_alert_budget",
+      "status": "pass",
+      "message": "PASS parity.reliability.canary_alert_budget: all required text patterns found"
+    },
+    {
+      "id": "parity.reliability.soak_stability_index",
+      "status": "pass",
+      "message": "PASS parity.reliability.soak_stability_index: all required text patterns found"
+    },
+    {
+      "id": "parity.performance.query_latency_p95",
+      "status": "pass",
+      "message": "PASS parity.performance.query_latency_p95: value=82.86180000000002 lte 100"
+    },
+    {
+      "id": "parity.performance.throughput_qps",
+      "status": "pass",
+      "message": "PASS parity.performance.throughput_qps: value=5905.582733767872 gte 4000"
+    },
+    {
+      "id": "parity.performance.cpu_memory_budget",
+      "status": "pass",
+      "message": "PASS parity.performance.cpu_memory_budget: value=83.85537935005902 gte 50"
+    },
+    {
+      "id": "parity.ops.shadow_receipt_present",
+      "status": "pass",
+      "message": "PASS parity.ops.shadow_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json"
+    },
+    {
+      "id": "parity.ops.canary_receipt_present",
+      "status": "pass",
+      "message": "PASS parity.ops.canary_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage1-gate-output.log"
+    },
+    {
+      "id": "parity.ops.soak_receipt_present",
+      "status": "pass",
+      "message": "PASS parity.ops.soak_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage3-gate-output.log"
+    },
+    {
+      "id": "parity.ops.rollback_drill_receipt_present",
+      "status": "pass",
+      "message": "PASS parity.ops.rollback_drill_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws21-rollback-drill-log.md"
+    },
+    {
+      "id": "parity.ops.no_legacy_scan_receipt_present",
+      "status": "pass",
+      "message": "PASS parity.ops.no_legacy_scan_receipt_present: command exited with status 0"
+    }
+  ],
+  "metric_values": {
+    "parity.search.relevance_score": {
+      "note": "Search contract suite must stay green for core relevance behavior."
+    },
+    "parity.search.rank_stability": {
+      "note": "Provider-backed semantic search behavior must remain stable."
+    },
+    "parity.search.result_consistency": {
+      "note": "Service client search regression suite acts as the first consistency receipt."
+    },
+    "parity.search.query_behavior_match": {
+      "note": "Search tool behavior must match existing query expectations."
+    },
+    "parity.search.filter_behavior_match": {
+      "note": "Filter and fallback behavior must remain covered by serviceClient tests."
+    },
+    "parity.vector.ingest_success_rate": {
+      "note": "Index lifecycle coverage stands in for ingest success proof."
+    },
+    "parity.vector.embedding_latency_p95": {
+      "value": 6.618269594509382,
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json#metrics.bench.perf.p95_regression_pct.value"
+    },
+    "parity.vector.retrieval_accuracy": {
+      "note": "Search contract suite remains the first retrieval-accuracy guard."
+    },
+    "parity.tools.schema_match_rate": {
+      "note": "Core tool contract suites must stay green."
+    },
+    "parity.tools.response_contract_match": {
+      "note": "Tool response contract suites must stay green."
+    },
+    "parity.tools.error_surface_match": {
+      "note": "Provider and fallback error-surface tests must stay green."
+    },
+    "parity.tools.request_id_coverage": {
+      "note": "Approval workflow and plan-management request-id flows must stay green."
+    },
+    "parity.tools.trace_completeness": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\readiness-check-output.log"
+    },
+    "parity.reliability.recovery_success_rate": {
+      "note": "Timeout and zombie recovery suites are the first recovery receipts."
+    },
+    "parity.reliability.retry_effectiveness": {
+      "note": "Integration recovery suites double as retry-effectiveness evidence."
+    },
+    "parity.reliability.fallback_safety": {
+      "note": "Fallback and provider-error behavior must remain green."
+    },
+    "parity.reliability.shadow_delta_rate": {
+      "value": "pass",
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json#gate.status"
+    },
+    "parity.reliability.canary_alert_budget": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage2-gate-output.log"
+    },
+    "parity.reliability.soak_stability_index": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage3-gate-output.log"
+    },
+    "parity.performance.query_latency_p95": {
+      "value": 82.86180000000002,
+      "note": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json#payload.timing.p95_ms"
+    },
+    "parity.performance.throughput_qps": {
+      "value": 5905.582733767872,
+      "note": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json#payload.files_per_sec"
+    },
+    "parity.performance.cpu_memory_budget": {
+      "value": 83.85537935005902,
+      "note": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json#payload.mb_per_sec"
+    },
+    "parity.ops.shadow_receipt_present": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json"
+    },
+    "parity.ops.canary_receipt_present": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage1-gate-output.log"
+    },
+    "parity.ops.soak_receipt_present": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage3-gate-output.log"
+    },
+    "parity.ops.rollback_drill_receipt_present": {
+      "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws21-rollback-drill-log.md"
+    },
+    "parity.ops.no_legacy_scan_receipt_present": {
+      "note": "Current no-legacy scan must pass."
+    }
+  },
+  "case_results": [
+    {
+      "id": "parity.search.relevance_score",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.search.relevance_score: command exited with status 0"
+    },
+    {
+      "id": "parity.search.rank_stability",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.search.rank_stability: command exited with status 0"
+    },
+    {
+      "id": "parity.search.result_consistency",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.search.result_consistency: command exited with status 0"
+    },
+    {
+      "id": "parity.search.query_behavior_match",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.search.query_behavior_match: command exited with status 0"
+    },
+    {
+      "id": "parity.search.filter_behavior_match",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.search.filter_behavior_match: command exited with status 0"
+    },
+    {
+      "id": "parity.vector.ingest_success_rate",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.vector.ingest_success_rate: command exited with status 0"
+    },
+    {
+      "id": "parity.vector.embedding_latency_p95",
+      "kind": "json_path_compare",
+      "status": "pass",
+      "message": "PASS parity.vector.embedding_latency_p95: value=6.618269594509382 lte 20"
+    },
+    {
+      "id": "parity.vector.retrieval_accuracy",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.vector.retrieval_accuracy: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.schema_match_rate",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.tools.schema_match_rate: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.response_contract_match",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.tools.response_contract_match: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.error_surface_match",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.tools.error_surface_match: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.request_id_coverage",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.tools.request_id_coverage: command exited with status 0"
+    },
+    {
+      "id": "parity.tools.trace_completeness",
+      "kind": "text_contains",
+      "status": "pass",
+      "message": "PASS parity.tools.trace_completeness: all required text patterns found"
+    },
+    {
+      "id": "parity.reliability.recovery_success_rate",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.reliability.recovery_success_rate: command exited with status 0"
+    },
+    {
+      "id": "parity.reliability.retry_effectiveness",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.reliability.retry_effectiveness: command exited with status 0"
+    },
+    {
+      "id": "parity.reliability.fallback_safety",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.reliability.fallback_safety: command exited with status 0"
+    },
+    {
+      "id": "parity.reliability.shadow_delta_rate",
+      "kind": "json_path_equals",
+      "status": "pass",
+      "message": "PASS parity.reliability.shadow_delta_rate: value=pass expected=pass"
+    },
+    {
+      "id": "parity.reliability.canary_alert_budget",
+      "kind": "text_contains",
+      "status": "pass",
+      "message": "PASS parity.reliability.canary_alert_budget: all required text patterns found"
+    },
+    {
+      "id": "parity.reliability.soak_stability_index",
+      "kind": "text_contains",
+      "status": "pass",
+      "message": "PASS parity.reliability.soak_stability_index: all required text patterns found"
+    },
+    {
+      "id": "parity.performance.query_latency_p95",
+      "kind": "json_path_compare",
+      "status": "pass",
+      "message": "PASS parity.performance.query_latency_p95: value=82.86180000000002 lte 100"
+    },
+    {
+      "id": "parity.performance.throughput_qps",
+      "kind": "json_path_compare",
+      "status": "pass",
+      "message": "PASS parity.performance.throughput_qps: value=5905.582733767872 gte 4000"
+    },
+    {
+      "id": "parity.performance.cpu_memory_budget",
+      "kind": "json_path_compare",
+      "status": "pass",
+      "message": "PASS parity.performance.cpu_memory_budget: value=83.85537935005902 gte 50"
+    },
+    {
+      "id": "parity.ops.shadow_receipt_present",
+      "kind": "file_exists",
+      "status": "pass",
+      "message": "PASS parity.ops.shadow_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json"
+    },
+    {
+      "id": "parity.ops.canary_receipt_present",
+      "kind": "file_exists",
+      "status": "pass",
+      "message": "PASS parity.ops.canary_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage1-gate-output.log"
+    },
+    {
+      "id": "parity.ops.soak_receipt_present",
+      "kind": "file_exists",
+      "status": "pass",
+      "message": "PASS parity.ops.soak_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage3-gate-output.log"
+    },
+    {
+      "id": "parity.ops.rollback_drill_receipt_present",
+      "kind": "file_exists",
+      "status": "pass",
+      "message": "PASS parity.ops.rollback_drill_receipt_present: file exists at D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws21-rollback-drill-log.md"
+    },
+    {
+      "id": "parity.ops.no_legacy_scan_receipt_present",
+      "kind": "command_exit_zero",
+      "status": "pass",
+      "message": "PASS parity.ops.no_legacy_scan_receipt_present: command exited with status 0"
+    }
+  ],
+  "gate": {
+    "status": "pass"
+  }
+}

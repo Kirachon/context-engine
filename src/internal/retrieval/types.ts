@@ -1,6 +1,9 @@
 import { SearchResult } from '../../mcp/serviceClient.js';
 
 export type QuerySource = 'original' | 'expanded';
+export type RetrievalProfile = 'fast' | 'balanced' | 'rich';
+export type RetrievalRewriteMode = 'v1' | 'v2';
+export type RetrievalRankingMode = 'v1' | 'v2';
 
 export interface ExpandedQuery {
   query: string;
@@ -13,7 +16,24 @@ export interface InternalSearchResult extends SearchResult {
   queryVariant: string;
   variantIndex: number;
   variantWeight: number;
+  retrievalSource?: 'semantic' | 'lexical' | 'dense' | 'hybrid';
+  semanticScore?: number;
+  lexicalScore?: number;
+  denseScore?: number;
+  fusedScore?: number;
+  tieBreakPath?: string;
+  tieBreakLine?: number;
   combinedScore?: number;
+}
+
+export interface DenseSearchProvider {
+  id: string;
+  search: (query: string, topK: number) => Promise<SearchResult[]>;
+}
+
+export interface RetrievalReranker {
+  id: string;
+  rerank: (query: string, candidates: InternalSearchResult[], options?: { timeoutMs?: number }) => Promise<InternalSearchResult[]>;
 }
 
 export interface RetrievalOptions {
@@ -23,7 +43,20 @@ export interface RetrievalOptions {
   timeoutMs?: number;
   enableExpansion?: boolean;
   enableDedupe?: boolean;
+  enableLexical?: boolean;
+  enableDense?: boolean;
+  enableFusion?: boolean;
   enableRerank?: boolean;
+  rerankTopN?: number;
+  rerankTimeoutMs?: number;
+  reranker?: RetrievalReranker;
+  semanticWeight?: number;
+  lexicalWeight?: number;
+  denseWeight?: number;
+  profile?: RetrievalProfile;
+  rewriteMode?: RetrievalRewriteMode;
+  rankingMode?: RetrievalRankingMode;
+  denseProvider?: DenseSearchProvider;
   log?: boolean;
   /** When true, bypass all caches (internal + in-process + persistent). */
   bypassCache?: boolean;

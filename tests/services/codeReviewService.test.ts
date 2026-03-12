@@ -390,6 +390,7 @@ index 1234567..abcdefg 100644
         changed_lines_only: false,
         custom_instructions: '',
         exclude_patterns: [],
+        llm_timeout_ms: Number.NaN,
         ...overrides,
       };
     }
@@ -609,7 +610,7 @@ index 1234567..abcdefg 100644
       expect(result.metadata.model_used).toBe('openai_session:codex-session');
     });
 
-    it('falls back to legacy model_used when provider metadata is unavailable', async () => {
+    it('falls back to local-native model_used when provider metadata is unavailable', async () => {
       mockServiceClient.getActiveAIProviderId = jest.fn(() => {
         throw new Error('provider unavailable');
       });
@@ -624,7 +625,7 @@ index 1234567..abcdefg 100644
       );
 
       const result = await codeReviewService.reviewChanges({ diff: SIMPLE_DIFF });
-      expect(result.metadata.model_used).toBe('auggie-context-engine');
+      expect(result.metadata.model_used).toBe('local-native-context-engine');
     });
   });
 
@@ -648,6 +649,35 @@ index 1234567..abcdefg 100644
           'Review code changes for issues',
           expect.any(String),
           { timeoutMs: 65000 }
+        );
+      } finally {
+        if (previous === undefined) delete process.env.CE_REVIEW_AI_TIMEOUT_MS;
+        else process.env.CE_REVIEW_AI_TIMEOUT_MS = previous;
+      }
+    });
+
+    it('uses per-call llm_timeout_ms override when provided', async () => {
+      const previous = process.env.CE_REVIEW_AI_TIMEOUT_MS;
+      process.env.CE_REVIEW_AI_TIMEOUT_MS = '65000';
+
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'looks good',
+          overall_explanation: 'No issues',
+          overall_confidence_score: 0.95,
+        })
+      );
+
+      try {
+        await codeReviewService.reviewChanges({
+          diff: SIMPLE_DIFF,
+          options: { llm_timeout_ms: 120000 },
+        });
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
+          'Review code changes for issues',
+          expect.any(String),
+          { timeoutMs: 120000 }
         );
       } finally {
         if (previous === undefined) delete process.env.CE_REVIEW_AI_TIMEOUT_MS;

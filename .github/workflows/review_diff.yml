@@ -37,6 +37,9 @@ jobs:
       - name: Check retrieval dependency boundary guard
         run: npm run ci:check:retrieval-dependency-boundary
 
+      - name: Check no-legacy Auggie references
+        run: npm run ci:check:no-legacy-auggie
+
       - name: Check retrieval config precedence contract
         run: npm run ci:check:retrieval-config-precedence
 
@@ -95,6 +98,15 @@ jobs:
           else
             echo "WS20 stage gate: SKIP (no artifact at artifacts/ws20-stage-evidence.{yaml,yml,json,md})"
           fi
+
+      - name: Check review timeout contract
+        run: npm run -s ci:check:review-timeout-contract
+
+      - name: Run review auto timeout smoke
+        run: npm run -s ci:check:review-auto-timeout-smoke
+
+      - name: Check rollout readiness with review auto timeout smoke artifact
+        run: node --import tsx scripts/ci/check-rollout-readiness.ts artifacts/review_auto_timeout_smoke.json
 
       - name: Upload review artifacts
         if: always()

@@ -55,6 +55,13 @@ npm run bench -- --mode retrieve --workspace . --query "file watcher" --topk 10 
 npm run bench -- --mode retrieve --workspace . --query "file watcher" --topk 10 --iterations 25 --retrieve-mode deep
 ```
 
+Holdout dataset runs (for non-overfit quality checks):
+
+```bash
+npm run bench -- --mode retrieve --workspace . --dataset-id holdout_v1 --iterations 25 --retrieve-mode fast
+npm run bench -- --mode search --workspace . --dataset-id holdout_v1 --iterations 25
+```
+
 To measure worst-case behavior (no caches), use very small iteration counts:
 
 ```bash
@@ -152,6 +159,11 @@ These environment variables affect caching/telemetry:
 - `CE_PERSIST_SEARCH_CACHE_MAX_ENTRIES=500` (default)
 - `CE_PERSIST_CONTEXT_CACHE_MAX_ENTRIES=100` (default)
 
+Retrieval rollout feature flags (all default `false`):
+- `CE_RETRIEVAL_REWRITE_V2=true|false`
+- `CE_RETRIEVAL_RANKING_V2=true|false`
+- `CE_RETRIEVAL_REQUEST_MEMO_V2=true|false`
+
 ## CI benchmark suite scripts
 
 The CI wrappers below generate baseline + candidate artifacts and then call `scripts/ci/bench-compare.ts`.
@@ -170,6 +182,12 @@ Behavior:
 - Compares with PR thresholds:
   - `--max-regression-pct 12`
   - `--max-regression-abs 30`
+
+Optional holdout fixture guard before quality gate:
+
+```bash
+node --import tsx scripts/ci/check-retrieval-holdout-fixture.ts --fixture-pack config/ci/retrieval-quality-fixture-pack.json
+```
 
 ### Nightly mode
 

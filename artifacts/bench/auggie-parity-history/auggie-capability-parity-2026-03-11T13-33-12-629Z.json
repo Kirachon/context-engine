@@ -1,0 +1,130 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-11T13:33:12.629Z",
+  "inputs": {
+    "report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-parity-pr.json",
+    "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-capability-matrix.json",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\auggie-capability-parity-gate.json"
+  },
+  "min_overall_score": 90,
+  "critical_required_score": 100,
+  "domain_scores": [
+    {
+      "domain": "ops_evidence",
+      "score": 100,
+      "domain_weight": 10
+    },
+    {
+      "domain": "performance",
+      "score": 100,
+      "domain_weight": 10
+    },
+    {
+      "domain": "reliability_recovery",
+      "score": 100,
+      "domain_weight": 20
+    },
+    {
+      "domain": "retrieval_quality",
+      "score": 100,
+      "domain_weight": 40
+    },
+    {
+      "domain": "tool_behavior",
+      "score": 100,
+      "domain_weight": 20
+    }
+  ],
+  "journey_scores": [
+    {
+      "journey_id": "search-core-relevance",
+      "domain": "retrieval_quality",
+      "score": 100,
+      "pass_count": 3,
+      "considered_count": 3,
+      "weight": 20,
+      "critical": true
+    },
+    {
+      "journey_id": "search-behavior-contract",
+      "domain": "retrieval_quality",
+      "score": 100,
+      "pass_count": 2,
+      "considered_count": 2,
+      "weight": 20,
+      "critical": false
+    },
+    {
+      "journey_id": "vector-embedding-path",
+      "domain": "retrieval_quality",
+      "score": 100,
+      "pass_count": 3,
+      "considered_count": 3,
+      "weight": 20,
+      "critical": false
+    },
+    {
+      "journey_id": "tool-invoke-contracts",
+      "domain": "tool_behavior",
+      "score": 100,
+      "pass_count": 3,
+      "considered_count": 3,
+      "weight": 20,
+      "critical": true
+    },
+    {
+      "journey_id": "tool-observability-signals",
+      "domain": "tool_behavior",
+      "score": 100,
+      "pass_count": 2,
+      "considered_count": 2,
+      "weight": 20,
+      "critical": false
+    },
+    {
+      "journey_id": "recovery-after-provider-failure",
+      "domain": "reliability_recovery",
+      "score": 100,
+      "pass_count": 3,
+      "considered_count": 3,
+      "weight": 20,
+      "critical": true
+    },
+    {
+      "journey_id": "shadow-canary-soak-stability",
+      "domain": "reliability_recovery",
+      "score": 100,
+      "pass_count": 3,
+      "considered_count": 3,
+      "weight": 20,
+      "critical": false
+    },
+    {
+      "journey_id": "retrieval-performance-baseline",
+      "domain": "performance",
+      "score": 100,
+      "pass_count": 3,
+      "considered_count": 3,
+      "weight": 10,
+      "critical": false
+    },
+    {
+      "journey_id": "ops-proof-and-runbook-receipts",
+      "domain": "ops_evidence",
+      "score": 100,
+      "pass_count": 5,
+      "considered_count": 5,
+      "weight": 10,
+      "critical": false
+    }
+  ],
+  "overall_score": 100,
+  "critical_failures": [],
+  "history_check": {
+    "enabled": false
+  },
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  }
+}

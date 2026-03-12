@@ -2,6 +2,8 @@
 
 How to test the Context Engine MCP Server implementation.
 
+> Current runtime note: testing should be centered on the local-native provider path and the parity/no-legacy gates. Older Auggie CLI checks are historical only.
+
 ## Automated Testing
 
 ```bash

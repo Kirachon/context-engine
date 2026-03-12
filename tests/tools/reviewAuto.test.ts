@@ -245,6 +245,36 @@ index 1234567..abcdefg 100644
     expect(parsed.requested_by).toBe('config');
   });
 
+  it('passes llm_timeout_ms through review_git_diff options', async () => {
+    const tmp = createRepoWithStagedChange();
+    let capturedTimeoutMs: number | undefined;
+
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async (_q: string, _p: string, opts?: { timeoutMs?: number }) => {
+        capturedTimeoutMs = opts?.timeoutMs;
+        return JSON.stringify({
+          findings: [],
+          overall_correctness: 'looks good',
+          overall_explanation: 'Mocked output.',
+          overall_confidence_score: 0.8,
+        });
+      },
+    } as any;
+
+    await handleReviewAuto(
+      {
+        target: 'staged',
+        review_git_diff_options: {
+          llm_timeout_ms: 120000,
+        },
+      },
+      mockServiceClient
+    );
+
+    expect(capturedTimeoutMs).toBe(120000);
+  });
+
   it('blocks when auto-select routes to review_git_diff with empty staged scope', async () => {
     const tmp = createRepoWithNoStagedChange();
     const mockServiceClient = {
