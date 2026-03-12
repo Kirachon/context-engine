@@ -177,7 +177,7 @@ New users can now follow this clear path:
 1. Clone repository: `git clone https://github.com/Kirachon/context-engine.git`
 2. Install dependencies: `npm install`
 3. Build project: `npm run build`
-4. Authenticate: `auggie login`
+4. Authenticate your AI session if needed: `codex login`
 5. Test: `node dist/index.js --help`
 
 ### Integration (10 minutes)
@@ -226,8 +226,7 @@ The Context Engine MCP server is now **fully documented and deployment-ready**. 
 
 ---
 
-**Verified by**: AI Assistant (Augment Agent)  
+**Verified by**: AI Assistant  
 **Verification Date**: 2025-12-26  
 **Repository**: https://github.com/Kirachon/context-engine.git  
 **Latest Commit**: b213aac
-

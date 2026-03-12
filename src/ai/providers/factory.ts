@@ -13,7 +13,7 @@ export function resolveAIProviderId(): AIProviderId {
 
 export function createAIProvider(args: {
   providerId: AIProviderId;
-  getAugmentContext: () => Promise<unknown>;
+  getProviderContext: () => Promise<unknown>;
   maxRateLimitRetries: number;
   baseRateLimitBackoffMs: number;
   maxRateLimitBackoffMs: number;

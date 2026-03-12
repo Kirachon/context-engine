@@ -35,8 +35,6 @@ Copy this into the file (replace YOUR-PROJECT-NAME with your actual project):
         "--watch"
       ],
       "env": {
-        "AUGMENT_API_TOKEN": "$AUGMENT_API_TOKEN",
-        "AUGMENT_API_URL": "https://d9.api.augmentcode.com/",
         "DEBUG": "true"
       },
       "timeout": 30000,
@@ -47,21 +45,11 @@ Copy this into the file (replace YOUR-PROJECT-NAME with your actual project):
 }
 
 ================================================================================
-STEP 3: SET ENVIRONMENT VARIABLES
+STEP 3: OPTIONAL PROVIDER LOGIN
 ================================================================================
 
-Option 1 (Recommended): Use auggie login
-   auggie login
-
-Option 2: Set in PowerShell (temporary)
-   $env:AUGMENT_API_TOKEN = "your-token-here"
-   $env:AUGMENT_API_URL = "https://d9.api.augmentcode.com/"
-
-Option 3: Set in System Environment Variables (permanent)
-   1. Search for "Environment Variables" in Windows
-   2. Add AUGMENT_API_TOKEN with your token value
-   3. Add AUGMENT_API_URL with https://d9.api.augmentcode.com/
-   4. Restart your terminal
+If you use AI-assisted tools:
+   codex login
 
 ================================================================================
 STEP 4: VERIFY
@@ -144,9 +132,8 @@ No tools discovered?
    2. Check server logs for errors
 
 Authentication errors?
-   1. Run: auggie login
-   2. Or verify: echo $env:AUGMENT_API_TOKEN
-   3. Or verify: echo $env:AUGMENT_API_URL
+   1. Run: codex login
+   2. Retry your tool call
 
 ================================================================================
 NEED MORE HELP?
@@ -158,4 +145,3 @@ See the full documentation:
    - TROUBLESHOOTING.md (common issues and solutions)
 
 ================================================================================
-

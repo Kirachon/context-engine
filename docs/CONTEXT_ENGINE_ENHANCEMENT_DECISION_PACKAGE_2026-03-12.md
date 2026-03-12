@@ -1,7 +1,7 @@
 # Context-Engine Enhancement Decision Package
 
 Date: 2026-03-12
-Branch: feat/local-native-auggie-exit
+Branch: feat/local-native-legacy-provider-exit
 Commit: 6780cb3
 Decision target: Approve/defer/reject next enhancement backlog for the next 90 days.
 Decision owners: Engineering Lead (DRI), Product Lead (backup)
@@ -41,7 +41,7 @@ Execution baseline freeze (T0):
 - Until T16 closeout, scoring and status reconciliation must use the frozen references in that manifest to prevent drift.
 
 ## Evidence Summary
-- `artifacts/bench/auggie-capability-parity-gate.json` -> strict parity score 100, gate pass.
+- `artifacts/bench/legacy-capability-parity-gate.json` -> strict parity score 100, gate pass.
 - `artifacts/bench/retrieval-quality-report.json` -> pass rate 1.0; nDCG +14, MRR +12.5, Recall +22.
 - `tests/tools/enhance.test.ts` -> 38/38 pass (latest local run).
 - `src/internal/handlers/enhancement.ts` -> enhanced contract and typed transient errors are implemented.
@@ -189,3 +189,5 @@ Global verification:
 |---|---|---|---|---|
 | 2026-03-12 | Enhancement decision package v1 | Execution closeout complete, pending formal approver sign-off | Engineering Lead (pending) | R4-R10 artifacts/checkers implemented and T15 verification matrix passed without blocking failures |
 | 2026-03-12 | Optional sensitivity analysis dashboarding | Deferred | Engineering Lead (pending) | nice-to-have after core wave stabilization |
+
+

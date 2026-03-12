@@ -11,7 +11,7 @@ function writeJson(filePath: string, value: unknown): void {
 
 function runArchive(args: string[], cwd: string): { status: number; stdout: string; stderr: string } {
   const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const script = path.join(process.cwd(), 'scripts', 'ci', 'archive-auggie-parity-history.ts');
+  const script = path.join(process.cwd(), 'scripts', 'ci', 'archive-legacy-capability-parity-history.ts');
   const result = spawnSync(process.execPath, [tsxCli, script, ...args], {
     cwd,
     env: process.env,
@@ -25,9 +25,9 @@ function runArchive(args: string[], cwd: string): { status: number; stdout: stri
   };
 }
 
-describe('scripts/ci/archive-auggie-parity-history.ts', () => {
+describe('scripts/ci/archive-legacy-capability-parity-history.ts', () => {
   it('copies the current gate artifact into history using generated_at timestamp', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-parity-archive-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-parity-archive-'));
     const artifactPath = path.join(tmp, 'gate.json');
     const historyDir = path.join(tmp, 'history');
 
@@ -47,3 +47,5 @@ describe('scripts/ci/archive-auggie-parity-history.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });
+
+

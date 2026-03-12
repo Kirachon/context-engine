@@ -1,4 +1,4 @@
-# Auggie Adoption and Removal Execution Tracker
+# Legacy Provider Adoption and Removal Execution Tracker
 
 Last updated: 2026-03-11  
 Program owner: Context Engine team  
@@ -6,7 +6,7 @@ Execution status: In progress
 Plan version: Finalized v2
 
 ## Objective
-Execute a controlled adoption of practical Auggie-style capabilities into `local_native`, then remove legacy dependency/runtime paths with measurable parity and hard go/no-go gates.
+Execute a controlled adoption of practical legacy-provider-style capabilities into `local_native`, then remove legacy dependency/runtime paths with measurable parity and hard go/no-go gates.
 
 ## Next Wave Pointer
 - Active follow-up implementation plan: [`docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md)
@@ -24,7 +24,7 @@ Execute a controlled adoption of practical Auggie-style capabilities into `local
 - [ ] Confirm in-scope domains: search behavior, vector/embedding path, reliability patterns, tool integration, observability.
 - [ ] Confirm out-of-scope domains and legacy allowlist boundaries.
 - [ ] Freeze metrics source list and receipt paths for auditability.
-- [ ] Lock parity model to [`config/ci/auggie-capability-matrix.json`](/D:/GitProjects/context-engine/config/ci/auggie-capability-matrix.json).
+- [ ] Lock parity model to [`config/ci/legacy-capability-matrix.json`](/D:/GitProjects/context-engine/config/ci/legacy-capability-matrix.json).
 
 ### 0.2 Weighted Parity Matrix (Gate Input)
 | Domain | Weight |
@@ -133,31 +133,31 @@ Wave status: `Completed`
 
 Scope for this wave:
 - [x] Freeze the safe-cut order before deletion.
-- [x] Keep `local_native` semantic retrieval behavior working while removing Auggie ownership.
+- [x] Keep `local_native` semantic retrieval behavior working while removing legacy provider ownership.
 - [x] Extract reusable semantic formatting/search helpers out of legacy-named runtime ownership.
 - [x] Rewire [`src/mcp/serviceClient.ts`](/D:/GitProjects/context-engine/src/mcp/serviceClient.ts) to the non-legacy helper path.
-- [x] Remove legacy provider wrapper/runtime files that still imply active Auggie ownership.
-- [x] Remove `@augmentcode/auggie-sdk` from active package/runtime setup.
-- [x] Remove Auggie provider lanes from benchmark and workflow gates.
-- [x] Shrink [`config/ci/auggie-no-legacy-allowlist.txt`](/D:/GitProjects/context-engine/config/ci/auggie-no-legacy-allowlist.txt) to the remaining archival and compatibility-proof surfaces only.
+- [x] Remove legacy provider wrapper/runtime files that still imply active legacy provider ownership.
+- [x] Remove legacy SDK package/runtime dependency from active package/runtime setup.
+- [x] Remove legacy provider provider lanes from benchmark and workflow gates.
+- [x] Shrink [`config/ci/legacy-provider-no-legacy-allowlist.txt`](/D:/GitProjects/context-engine/config/ci/legacy-provider-no-legacy-allowlist.txt) to the remaining archival and compatibility-proof surfaces only.
 - [x] Re-run build, targeted tests, and no-legacy gates.
 
 Execution notes:
 - Safe-cut order: `extract helper -> rewire service client -> remove legacy wrapper/runtime -> clean scripts/workflows/package -> revalidate`.
 - Critical no-break contract for this wave: `semantic_search`, `codebase_retrieval`, `get_context_for_prompt`, and index-state hydration must still work under `local_native`.
-- Outcome: no live source/runtime path now requires `@augmentcode/auggie-sdk`; active provider code is `local_native`-only, and remaining mentions are archival docs plus audit/test tooling.
+- Outcome: no live source/runtime path now requires legacy SDK runtime ownership; active provider code is `local_native`-only, and remaining mentions are archival docs plus audit/test tooling.
 
 Evidence targets:
 - Search/runtime proof: `tests/serviceClient.test.ts`, `tests/retrieval/providers/*.test.ts`
 - Boundary proof: `npm run ci:check:retrieval-dependency-boundary`
-- No-legacy proof: `npm run ci:check:no-legacy-auggie`
+- No-legacy proof: `npm run ci:check:no-legacy-provider`
 - Build proof: `npm run build`
 
 Wave receipt:
 - Owner: `Codex / subagents`
 - Date: `2026-03-11`
 - Status: `Pass`
-- Evidence links: `tests/retrieval/providers/semanticRuntime.test.ts`, `tests/serviceClient.test.ts`, `npm run ci:check:retrieval-dependency-boundary`, `npm run ci:check:no-legacy-auggie`, `npm run build`
+- Evidence links: `tests/retrieval/providers/semanticRuntime.test.ts`, `tests/serviceClient.test.ts`, `npm run ci:check:retrieval-dependency-boundary`, `npm run ci:check:no-legacy-provider`, `npm run build`
 
 ### 3.4 Zero-Compatibility Sweep
 Wave owner: `Codex`
@@ -168,7 +168,7 @@ Scope for this wave:
 - [x] Remove the last active `augment_legacy` compatibility identifiers from provider source files.
 - [x] Tighten provider env/factory behavior so only `local_native` is accepted in active runtime code.
 - [x] Update tests and CI assertions to validate removed-provider rejection as invalid config.
-- [x] Shrink [`config/ci/auggie-no-legacy-allowlist.txt`](/D:/GitProjects/context-engine/config/ci/auggie-no-legacy-allowlist.txt) again so active provider files are no longer allowlisted.
+- [x] Shrink [`config/ci/legacy-provider-no-legacy-allowlist.txt`](/D:/GitProjects/context-engine/config/ci/legacy-provider-no-legacy-allowlist.txt) again so active provider files are no longer allowlisted.
 - [x] Re-run targeted tests, boundary gates, no-legacy scan, and build.
 
 Execution notes:
@@ -180,7 +180,7 @@ Wave receipt:
 - Owner: `Codex`
 - Date: `2026-03-11`
 - Status: `Pass`
-- Evidence links: `npm test -- --runInBand tests/retrieval/providers/env.test.ts tests/retrieval/providers/factory.test.ts tests/ci/checkRetrievalProviderBoundary.test.ts tests/serviceClient.test.ts`, `npm run ci:check:retrieval-config-precedence`, `npm run ci:check:retrieval-dependency-boundary`, `npm run ci:check:no-legacy-auggie`, `npm run build`
+- Evidence links: `npm test -- --runInBand tests/retrieval/providers/env.test.ts tests/retrieval/providers/factory.test.ts tests/ci/checkRetrievalProviderBoundary.test.ts tests/serviceClient.test.ts`, `npm run ci:check:retrieval-config-precedence`, `npm run ci:check:retrieval-dependency-boundary`, `npm run ci:check:no-legacy-provider`, `npm run build`
 
 Receipt fields:
 - Owner: `____________________`
@@ -208,27 +208,27 @@ Wave date: `2026-03-11`
 Wave status: `Completed`
 
 Scope for this wave:
-- [x] Add a checked-in parity fixture pack at [`config/ci/auggie-parity-fixture-pack.json`](/D:/GitProjects/context-engine/config/ci/auggie-parity-fixture-pack.json).
-- [x] Add a report generator at [`generate-auggie-parity-report.ts`](/D:/GitProjects/context-engine/scripts/ci/generate-auggie-parity-report.ts) that emits the checker-compatible `evaluations[]` report.
-- [x] Wire package scripts so parity evidence generation runs before the Auggie capability gate.
+- [x] Add a checked-in parity fixture pack at [`config/ci/legacy-capability-parity-fixture-pack.json`](/D:/GitProjects/context-engine/config/ci/legacy-capability-parity-fixture-pack.json).
+- [x] Add a report generator at [`generate-legacy-capability-parity-report.ts`](/D:/GitProjects/context-engine/scripts/ci/generate-legacy-capability-parity-report.ts) that emits the checker-compatible `evaluations[]` report.
+- [x] Wire package scripts so parity evidence generation runs before the legacy provider capability gate.
 - [x] Add generator-focused tests and an end-to-end checker handoff test.
 - [x] Produce the first real parity baseline artifact pair under `artifacts/bench/`.
 
 Execution notes:
 - Current baseline artifacts:
   - [`retrieval-parity-pr.json`](/D:/GitProjects/context-engine/artifacts/bench/retrieval-parity-pr.json)
-  - [`auggie-capability-parity-gate.json`](/D:/GitProjects/context-engine/artifacts/bench/auggie-capability-parity-gate.json)
+  - [`legacy-capability-parity-gate.json`](/D:/GitProjects/context-engine/artifacts/bench/legacy-capability-parity-gate.json)
 - Strengthened baseline score: `100.00`
 - Critical journeys: `100%` on `search-core-relevance`, `tool-invoke-contracts`, and `recovery-after-provider-failure`
 - Stability journey: `100%` on `shadow-canary-soak-stability`
-- History proof: latest `3` archived parity gate artifacts passed under [`artifacts/bench/auggie-parity-history`](/D:/GitProjects/context-engine/artifacts/bench/auggie-parity-history)
+- History proof: latest `3` archived parity gate artifacts passed under [`artifacts/bench/legacy-capability-parity-history`](/D:/GitProjects/context-engine/artifacts/bench/legacy-capability-parity-history)
 - Strict gate proof now uses `require_consecutive=3` and passes cleanly.
 
 Wave receipt:
 - Owner: `Codex`
 - Date: `2026-03-11`
 - Status: `Pass`
-- Evidence links: `npm test -- --runInBand tests/ci/generateAuggieParityReport.test.ts tests/ci/archiveAuggieParityHistory.test.ts tests/ci/checkAuggieCapabilityParity.test.ts`, `npm run -s ci:check:auggie-capability-parity`, `npm run -s ci:archive:auggie-parity-history`, `npm run -s ci:check:auggie-capability-parity:strict`, `npm run build`
+- Evidence links: `npm test -- --runInBand tests/ci/generateLegacyCapabilityParityReport.test.ts tests/ci/archiveLegacyCapabilityParityHistory.test.ts tests/ci/checkLegacyCapabilityParity.test.ts`, `npm run -s ci:check:legacy-capability-parity`, `npm run -s ci:archive:legacy-capability-parity-history`, `npm run -s ci:check:legacy-capability-parity:strict`, `npm run build`
 
 ### 4.4 Local-Native Search Quality Kickoff (Phase 0 + Phase 1)
 Wave owner: `Codex / multi-agent wave`
@@ -289,7 +289,7 @@ Wave receipt:
 - Owner: `Codex`
 - Date: `2026-03-11`
 - Status: `Pass`
-- Evidence links: `npm test -- --runInBand tests/ci/generateRetrievalQualityTelemetry.test.ts tests/ci/generateRetrievalQualityReport.test.ts tests/ci/checkRetrievalQualityGate.test.ts tests/internal/retrieval/retrieve.test.ts tests/internal/retrieval/denseIndex.test.ts`, `npm run -s ci:check:retrieval-quality-gate`, `npm run build`, `npm run -s ci:check:no-legacy-auggie`
+- Evidence links: `npm test -- --runInBand tests/ci/generateRetrievalQualityTelemetry.test.ts tests/ci/generateRetrievalQualityReport.test.ts tests/ci/checkRetrievalQualityGate.test.ts tests/internal/retrieval/retrieve.test.ts tests/internal/retrieval/denseIndex.test.ts`, `npm run -s ci:check:retrieval-quality-gate`, `npm run build`, `npm run -s ci:check:no-legacy-provider`
 
 Final sign-off:
 - Owner: `____________________`
@@ -307,3 +307,7 @@ Final sign-off:
 - [ ] Phase 3 removal sequence receipts
 - [ ] Phase 4 no-legacy scan receipt
 - [ ] Phase 4 final proof package receipt
+
+
+
+

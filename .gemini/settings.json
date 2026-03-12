@@ -10,8 +10,6 @@
         "--watch"
       ],
       "env": {
-        "AUGMENT_API_TOKEN": "$AUGMENT_API_TOKEN",
-        "AUGMENT_API_URL": "https://d9.api.augmentcode.com/",
         "DEBUG": "true"
       },
       "cwd": "D:\\GitProjects\\context-engine",

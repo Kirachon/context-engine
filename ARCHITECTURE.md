@@ -2,17 +2,17 @@
 
 Detailed architecture documentation for the Context Engine MCP Server.
 
-> Historical note: parts of this document still describe the earlier Auggie-based architecture. The current active runtime is `local_native`, and Auggie is no longer part of the live provider path.
+> Historical note: some older sections below are archival. The current active runtime is `local_native`, and legacy provider SDKs are not part of the live provider path.
 
 ## Overview
 
-This project implements a **local-first, agent-agnostic context engine** using the Model Context Protocol (MCP) as the interface layer and Auggie SDK as the core engine.
+This project implements a **local-first, agent-agnostic context engine** using the Model Context Protocol (MCP) as the interface layer and a local-native retrieval runtime as the core engine.
 
 ## 5-Layer Architecture
 
-### Layer 1: Core Context Engine (Auggie SDK)
+### Layer 1: Core Context Engine (Local-Native Runtime)
 
-**Location**: External dependency (`@augmentcode/auggie`)
+**Location**: `src/retrieval/`, `src/mcp/serviceClient.ts`, `src/internal/retrieval/`
 
 **Purpose**: The brain of the system. Handles all low-level context operations.
 
@@ -28,7 +28,7 @@ This project implements a **local-first, agent-agnostic context engine** using t
 - ❌ Know about prompts or agents
 - ❌ Generate LLM answers
 
-**Interface**: CLI commands (`auggie index`, `auggie search`)
+**Interface**: MCP tools and internal provider boundary (`index_workspace`, `semantic_search`, `codebase_retrieval`)
 
 ### Layer 2: Context Service Layer
 
@@ -270,7 +270,7 @@ internalPromptEnhancer(prompt, serviceClient): string
 
 ### Layer 5: Storage Backend
 
-**Location**: Auggie SDK internal
+**Location**: Local workspace state and runtime persistence files
 
 **Purpose**: Persist embeddings and metadata.
 
@@ -279,7 +279,7 @@ internalPromptEnhancer(prompt, serviceClient): string
 - Store file metadata
 - Support fast vector similarity search
 
-**Storage Options** (handled by Auggie):
+**Storage Options** (historical reference):
 - Qdrant (recommended)
 - SQLite (simple)
 - Hybrid (future)
@@ -512,7 +512,7 @@ Add methods to `ContextServiceClient` in `src/mcp/serviceClient.ts`:
 
 ```typescript
 async myServiceMethod(params): Promise<Result> {
-  // Call Auggie CLI or process data
+  // Call retrieval/runtime layer or process data
   // Apply Layer 2 logic (formatting, deduplication, etc.)
   return result;
 }
@@ -534,14 +534,14 @@ These can be added **without architectural changes**:
 
 ### Authentication
 
-- Uses Auggie CLI session or environment variables
+- Uses configured provider session/environment when AI-assisted flows are enabled
 - No credentials stored in code
 - Session file: `~/.augment/session.json`
 
 ### Data Privacy
 
 - All data stays local
-- No network calls except to Auggie API (for embeddings)
+- No legacy-provider network dependency in active local-native retrieval paths
 - No telemetry or tracking
 
 ### Input Validation
@@ -576,12 +576,12 @@ These can be added **without architectural changes**:
 
 - Server logs to stderr
 - Codex CLI: Check `~/.codex/config.toml` and use `codex mcp list`
-- Auggie CLI logs: Check auggie documentation
+- Provider logs: check the configured client/runtime documentation
 
 ### Debugging Tools
 
 - MCP Inspector for interactive testing
-- Direct CLI testing with auggie
+- Direct runtime testing with `node dist/index.js --workspace ... --index`
 - TypeScript source maps for stack traces
 
 ## Testing Strategy
@@ -592,4 +592,4 @@ See [TESTING.md](TESTING.md) for comprehensive testing guide.
 
 - [plan.md](plan.md) - Original architecture plan
 - [MCP Documentation](https://modelcontextprotocol.io/)
-- [Auggie SDK](https://docs.augmentcode.com/)
+- [Context Engine docs index](INDEX.md)

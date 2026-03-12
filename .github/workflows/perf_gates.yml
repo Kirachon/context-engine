@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           if [ "${{ github.event_name }}" = "schedule" ] && [ "$(date -u +%u)" = "1" ]; then
-            npm run -s ci:check:auggie-capability-parity
+            npm run -s ci:check:legacy-capability-parity
             npm run -s ci:generate:retrieval-quality-report
             npm run -s ci:generate:weekly-retrieval-trend-report
             npm run -s ci:check:weekly-retrieval-trend-report
@@ -101,3 +101,4 @@ jobs:
           name: perf-gate-nightly-artifacts-local_native
           path: artifacts/bench/
           if-no-files-found: warn
+

@@ -37,8 +37,8 @@ jobs:
       - name: Check retrieval dependency boundary guard
         run: npm run ci:check:retrieval-dependency-boundary
 
-      - name: Check no-legacy Auggie references
-        run: npm run ci:check:no-legacy-auggie
+      - name: Check no-legacy provider references
+        run: npm run ci:check:no-legacy-provider
 
       - name: Check retrieval config precedence contract
         run: npm run ci:check:retrieval-config-precedence

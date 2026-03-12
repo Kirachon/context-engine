@@ -64,7 +64,7 @@
   ],
   "benchmark_baseline_artifacts": [
     {
-      "path": "artifacts/bench/auggie-capability-parity-gate.json",
+      "path": "artifacts/bench/legacy-capability-parity-gate.json",
       "sha256": "6faa0ab4a458140a46851a483e773327c92d825dbb4616b4bbdae05faf837f3c",
       "size_bytes": 3653,
       "last_write_utc": "2026-03-11T15:10:25.0828837Z"
@@ -163,3 +163,4 @@
     }
   ]
 }
+

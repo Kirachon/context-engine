@@ -7,9 +7,9 @@ For consistent comparisons over time, also follow `docs/PERF_DATASET.md`.
 ## Quick Start
 
 Provider requirements summary:
-- `scan` mode: no `AUGMENT_API_TOKEN` required.
-- `index`, `search`, and `retrieve` default to `CE_RETRIEVAL_PROVIDER=openai_session` and do not require `AUGMENT_API_TOKEN`.
-- `AUGMENT_API_TOKEN` is only required when `CE_RETRIEVAL_PROVIDER=augment_legacy` is explicitly selected.
+- `scan` mode: no external provider token required.
+- `index`, `search`, and `retrieve` default to `CE_RETRIEVAL_PROVIDER=openai_session`.
+- Legacy provider token variables are archival-only and not part of the active default path.
 
 ### 1) Local scan (no provider token needed)
 

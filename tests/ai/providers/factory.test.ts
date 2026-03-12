@@ -21,8 +21,8 @@ describe('AI provider factory (openai_session only)', () => {
     expect(resolveAIProviderId()).toBe('openai_session');
   });
 
-  it('rejects augment when explicitly configured', () => {
-    process.env.CE_AI_PROVIDER = 'augment';
+  it('rejects non-openai providers when explicitly configured', () => {
+    process.env.CE_AI_PROVIDER = 'legacy_provider';
     expect(() => resolveAIProviderId()).toThrow(/must be openai_session/i);
   });
 
@@ -34,7 +34,7 @@ describe('AI provider factory (openai_session only)', () => {
   it('creates codex session provider for openai_session', () => {
     const provider = createAIProvider({
       providerId: 'openai_session',
-      getAugmentContext: async () => ({}) as any,
+      getProviderContext: async () => ({}) as any,
       maxRateLimitRetries: 1,
       baseRateLimitBackoffMs: 100,
       maxRateLimitBackoffMs: 1000,

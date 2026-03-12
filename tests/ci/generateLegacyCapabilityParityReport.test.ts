@@ -16,7 +16,7 @@ function writeText(filePath: string, value: string): void {
 
 function runGenerator(args: string[], cwd: string): { status: number; stdout: string; stderr: string } {
   const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const script = path.join(process.cwd(), 'scripts', 'ci', 'generate-auggie-parity-report.ts');
+  const script = path.join(process.cwd(), 'scripts', 'ci', 'generate-legacy-capability-parity-report.ts');
   const result = spawnSync(process.execPath, [tsxCli, script, ...args], {
     cwd,
     env: process.env,
@@ -32,7 +32,7 @@ function runGenerator(args: string[], cwd: string): { status: number; stdout: st
 
 function runChecker(args: string[], cwd: string): { status: number; stdout: string; stderr: string } {
   const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
-  const script = path.join(process.cwd(), 'scripts', 'ci', 'check-auggie-capability-parity.ts');
+  const script = path.join(process.cwd(), 'scripts', 'ci', 'check-legacy-capability-parity.ts');
   const result = spawnSync(process.execPath, [tsxCli, script, ...args], {
     cwd,
     env: process.env,
@@ -46,9 +46,9 @@ function runChecker(args: string[], cwd: string): { status: number; stdout: stri
   };
 }
 
-describe('scripts/ci/generate-auggie-parity-report.ts', () => {
+describe('scripts/ci/generate-legacy-capability-parity-report.ts', () => {
   it('generates a full report from fixture-pack evidence and passes the checker', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-parity-generator-pass-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-parity-generator-pass-'));
     const matrixPath = path.join(tmp, 'matrix.json');
     const fixturePath = path.join(tmp, 'fixture-pack.json');
     const outPath = path.join(tmp, 'report.json');
@@ -126,7 +126,7 @@ describe('scripts/ci/generate-auggie-parity-report.ts', () => {
   });
 
   it('fails with usage error when fixture pack misses matrix metric ids', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-parity-generator-missing-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-parity-generator-missing-'));
     const matrixPath = path.join(tmp, 'matrix.json');
     const fixturePath = path.join(tmp, 'fixture-pack.json');
     const outPath = path.join(tmp, 'report.json');
@@ -162,7 +162,7 @@ describe('scripts/ci/generate-auggie-parity-report.ts', () => {
   });
 
   it('marks missing retrieval metric as skip when allowed', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-parity-generator-skip-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-parity-generator-skip-'));
     const matrixPath = path.join(tmp, 'matrix.json');
     const fixturePath = path.join(tmp, 'fixture-pack.json');
     const outPath = path.join(tmp, 'report.json');
@@ -207,7 +207,7 @@ describe('scripts/ci/generate-auggie-parity-report.ts', () => {
   });
 
   it('passes json_path_equals checks when the expected gate status is present', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-auggie-parity-generator-json-equals-'));
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-parity-generator-json-equals-'));
     const matrixPath = path.join(tmp, 'matrix.json');
     const fixturePath = path.join(tmp, 'fixture-pack.json');
     const outPath = path.join(tmp, 'report.json');
@@ -252,3 +252,5 @@ describe('scripts/ci/generate-auggie-parity-report.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 });
+
+

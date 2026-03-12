@@ -111,15 +111,15 @@ The active retrieval runtime is local-native. Some AI-assisted workflows may sti
 ### 7. Validate Local Gates
 - [ ] No-legacy scan
   ```bash
-  npm run ci:check:no-legacy-auggie
+  npm run ci:check:no-legacy-provider
   ```
 - [ ] Parity evidence gate
   ```bash
-  npm run ci:check:auggie-capability-parity
+  npm run ci:check:legacy-capability-parity
   ```
 - [ ] Strict parity gate with history proof
   ```bash
-  npm run ci:check:auggie-capability-parity:strict
+  npm run ci:check:legacy-capability-parity:strict
   ```
 
 ## Troubleshooting Checklist
@@ -138,3 +138,4 @@ You are ready when:
 - MCP tools appear in Codex CLI
 - Example queries return sensible results
 - The no-legacy and parity gates pass when needed
+

@@ -451,7 +451,7 @@ Start broad, then narrow down:
 
 4. **Re-index after major changes**
    ```bash
-   auggie index /path/to/project
+   node dist/index.js --workspace /path/to/project --index
    ```
 
 ## Troubleshooting Examples

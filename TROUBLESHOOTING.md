@@ -2,7 +2,7 @@
 
 Common issues and solutions for the Context Engine MCP Server.
 
-> Current runtime note: the active retrieval/runtime path is now `local_native`. Any Auggie CLI guidance below should be treated as historical unless the section explicitly says it is archival.
+> Current runtime note: the active retrieval/runtime path is now `local_native`. Any legacy-provider guidance below should be treated as historical unless the section explicitly says it is archival.
 
 ## Installation Issues
 
@@ -15,14 +15,14 @@ Common issues and solutions for the Context Engine MCP Server.
 npm install
 ```
 
-### Legacy Auggie CLI references in older docs
+### Legacy provider references in older docs
 
-**Cause**: You are following an older document from the Auggie-era architecture.
+**Cause**: You are following an older document from the legacy-provider migration phase.
 
 **Solution**:
 ```bash
 npm run verify
-npm run ci:check:no-legacy-auggie
+npm run ci:check:no-legacy-provider
 ```
 
 ### TypeScript compilation errors
@@ -41,39 +41,13 @@ npm run build
 
 ## Authentication Issues
 
-### "No API token found"
+### "Provider unavailable" or "AI session missing"
 
-**Cause**: Not authenticated with Auggie
-
-**Solution Option 1** (Recommended):
-```bash
-auggie login
-```
-
-**Solution Option 2** (Environment variables):
-```bash
-export AUGMENT_API_TOKEN="your-token-here"
-export AUGMENT_API_URL="https://api.augmentcode.com"
-```
-
-**Solution Option 3** (Check session file):
-```bash
-# macOS/Linux
-cat ~/.augment/session.json
-
-# Windows
-type %USERPROFILE%\.augment\session.json
-```
-
-### "Authentication failed" or "Invalid token"
-
-**Cause**: Expired or invalid token
+**Cause**: The AI provider session is not active for AI-assisted tools.
 
 **Solution**:
 ```bash
-# Re-authenticate
-auggie logout
-auggie login
+codex login
 ```
 
 ## Server Issues
@@ -94,21 +68,17 @@ node dist/index.js --help
 node dist/index.js --workspace . 2>&1 | tee server.log
 ```
 
-### "Failed to execute auggie CLI"
+### "Provider command failed"
 
-**Cause**: Auggie not in PATH or wrong permissions
+**Cause**: The configured AI provider command is unavailable or session is expired.
 
 **Solution**:
 ```bash
-# Check if auggie is accessible
-which auggie  # macOS/Linux
-where auggie  # Windows
+# Verify Codex CLI
+codex --version
 
-# If not found, reinstall
-npm install -g @augmentcode/auggie
-
-# Check permissions (macOS/Linux)
-ls -la $(which auggie)
+# Re-authenticate if needed
+codex login
 ```
 
 ## Codex CLI Integration Issues
@@ -187,8 +157,6 @@ ls -la $(which auggie)
 # Index the workspace
 node dist/index.js --workspace /path/to/project --index
 
-# Or use auggie CLI directly
-auggie index /path/to/project
 ```
 
 ### Indexing is very slow
@@ -196,11 +164,11 @@ auggie index /path/to/project
 **Cause**: Large codebase or slow disk
 
 **Solutions**:
-- Use `.augmentignore` to exclude unnecessary files
+- Use `.contextignore` (or `.augment-ignore` compatibility file) to exclude unnecessary files
 - Exclude `node_modules`, `dist`, `build` directories
 - Use SSD instead of HDD
 
-**Create `.augmentignore`**:
+**Create `.contextignore`**:
 ```
 node_modules/
 dist/
@@ -398,14 +366,10 @@ console.error('DEBUG: Result:', result);
 # System info
 node --version
 npm --version
-auggie --version
+codex --version
 
 # Check installation
 npm list @modelcontextprotocol/sdk
-npm list @augmentcode/auggie
-
-# Test components
-auggie search "test" --limit 1
 node dist/index.js --help
 ```
 
@@ -424,7 +388,7 @@ This opens a web interface for interactive debugging.
 2. Review [ARCHITECTURE.md](ARCHITECTURE.md) for design details
 3. Check `~/.codex/config.toml` for syntax errors
 4. Test with MCP Inspector
-5. Verify Auggie CLI works independently
+5. Verify provider session is active (`codex login`)
 6. Run `codex mcp list` to check configuration
 
 ## Common Error Messages
@@ -433,7 +397,7 @@ This opens a web interface for interactive debugging.
 |-------|--------------|----------|
 | `ENOENT: no such file` | File path incorrect | Use absolute paths or check workspace |
 | `EACCES: permission denied` | File permissions | Check file/directory permissions |
-| `spawn auggie ENOENT` | Auggie not in PATH | Reinstall auggie globally |
+| `provider unavailable` | Provider command/session not ready | Run `codex login` and retry |
 | `Invalid TOML` | Config file syntax | Validate TOML syntax in config.toml |
 | `Connection refused` | Server not running | Start server first |
 | `Timeout` | Server too slow | Index workspace, reduce limits |
