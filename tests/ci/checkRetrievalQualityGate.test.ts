@@ -44,6 +44,12 @@ describe('scripts/ci/check-retrieval-quality-gate.ts', () => {
         status: 'pass',
         reasons: [],
       },
+      reproducibility_lock: {
+        commit_sha: 'abc123',
+        dataset_id: 'holdout_v1',
+        dataset_hash: 'x'.repeat(64),
+        fixture_pack_hash: 'y'.repeat(64),
+      },
     });
 
     const result = runChecker(['--report', reportPath, '--out', outPath]);
@@ -76,6 +82,12 @@ describe('scripts/ci/check-retrieval-quality-gate.ts', () => {
         status: 'fail',
         reasons: ['required metric not pass: quality.mrr_at_10 (fail)'],
       },
+      reproducibility_lock: {
+        commit_sha: 'abc123',
+        dataset_id: 'holdout_v1',
+        dataset_hash: 'x'.repeat(64),
+        fixture_pack_hash: 'y'.repeat(64),
+      },
     });
 
     const result = runChecker(['--report', reportPath, '--out', outPath]);
@@ -87,6 +99,75 @@ describe('scripts/ci/check-retrieval-quality-gate.ts', () => {
     expect(gate.status).toBe('fail');
     const reasons = gate.reasons as string[];
     expect(reasons.some((line) => line.includes('quality.recall_at_50'))).toBe(true);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('fails when report.gate.status is fail even without explicit reasons', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-gate-fail-status-only-'));
+    const reportPath = path.join(tmp, 'report.json');
+    const outPath = path.join(tmp, 'gate.json');
+
+    writeJson(reportPath, {
+      evaluations: [
+        { id: 'quality.ndcg_at_10', status: 'pass' },
+      ],
+      gate_rules: {
+        min_pass_rate: 0,
+        required_ids: [],
+      },
+      gate: {
+        status: 'fail',
+      },
+      reproducibility_lock: {
+        commit_sha: 'abc123',
+        dataset_id: 'holdout_v1',
+        dataset_hash: 'x'.repeat(64),
+        fixture_pack_hash: 'y'.repeat(64),
+      },
+    });
+
+    const result = runChecker(['--report', reportPath, '--out', outPath]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('status=fail');
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const gate = artifact.gate as Record<string, unknown>;
+    expect(gate.status).toBe('fail');
+    const reasons = gate.reasons as string[];
+    expect(reasons.some((line) => line.includes('report gate status is fail'))).toBe(true);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('fails when reproducibility lock fields are missing', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-gate-missing-repro-'));
+    const reportPath = path.join(tmp, 'report.json');
+    const outPath = path.join(tmp, 'gate.json');
+
+    writeJson(reportPath, {
+      evaluations: [{ id: 'quality.ndcg_at_10', status: 'pass' }],
+      gate_rules: { min_pass_rate: 0, required_ids: [] },
+      gate: { status: 'pass', reasons: [] },
+      reproducibility_lock: {
+        commit_sha: 'unknown',
+        dataset_id: '',
+        dataset_hash: 'unknown',
+        fixture_pack_hash: '',
+      },
+    });
+
+    const result = runChecker(['--report', reportPath, '--out', outPath]);
+    expect(result.status).toBe(1);
+    expect(result.stdout).toContain('status=fail');
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const gate = artifact.gate as Record<string, unknown>;
+    const reasons = gate.reasons as string[];
+    expect(reasons.some((line) => line.includes('reproducibility_lock.commit_sha'))).toBe(true);
+    expect(reasons.some((line) => line.includes('reproducibility_lock.dataset_id'))).toBe(true);
+    expect(reasons.some((line) => line.includes('reproducibility_lock.dataset_hash'))).toBe(true);
+    expect(reasons.some((line) => line.includes('reproducibility_lock.fixture_pack_hash'))).toBe(true);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -9,6 +9,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { createHash } from 'crypto';
+import { execSync } from 'child_process';
 
 type EvalStatus = 'pass' | 'fail' | 'skip';
 type Comparator =
@@ -21,6 +23,7 @@ type MissingStatus = 'skip' | 'fail';
 
 interface CliArgs {
   fixturePackPath: string;
+  holdoutArtifactPath: string;
   outPath: string;
 }
 
@@ -95,6 +98,7 @@ interface OutputArtifact {
   generated_at: string;
   inputs: {
     fixture_pack: string;
+    holdout_artifact: string;
     out: string;
   };
   evaluations: EvaluationResult[];
@@ -113,9 +117,17 @@ interface OutputArtifact {
     status: 'pass' | 'fail';
     reasons: string[];
   };
+  reproducibility_lock: {
+    commit_sha: string;
+    dataset_id: string;
+    dataset_hash: string;
+    fixture_pack_hash: string;
+    config_snapshot: Record<string, string | null>;
+  };
 }
 
 const DEFAULT_FIXTURE_PACK = path.join('config', 'ci', 'retrieval-quality-fixture-pack.json');
+const DEFAULT_HOLDOUT_ARTIFACT_PATH = path.join('artifacts', 'bench', 'retrieval-holdout-check.json');
 const DEFAULT_OUT_PATH = path.join('artifacts', 'bench', 'retrieval-quality-report.json');
 
 function printHelpAndExit(code: number): never {
@@ -126,6 +138,7 @@ Usage:
 
 Options:
   --fixture-pack <path>      Fixture-pack JSON (default: ${DEFAULT_FIXTURE_PACK})
+  --holdout-artifact <path>  Holdout check artifact path (default: ${DEFAULT_HOLDOUT_ARTIFACT_PATH})
   --out <path>               Output report path (default: ${DEFAULT_OUT_PATH})
 `);
   process.exit(code);
@@ -134,6 +147,7 @@ Options:
 function parseArgs(argv: string[]): CliArgs {
   const args: CliArgs = {
     fixturePackPath: DEFAULT_FIXTURE_PACK,
+    holdoutArtifactPath: DEFAULT_HOLDOUT_ARTIFACT_PATH,
     outPath: DEFAULT_OUT_PATH,
   };
 
@@ -153,6 +167,12 @@ function parseArgs(argv: string[]): CliArgs {
     if (arg === '--out') {
       if (!next) throw new Error('Missing value for --out');
       args.outPath = next;
+      i += 1;
+      continue;
+    }
+    if (arg === '--holdout-artifact') {
+      if (!next) throw new Error('Missing value for --holdout-artifact');
+      args.holdoutArtifactPath = next;
       i += 1;
       continue;
     }
@@ -402,11 +422,60 @@ function run(): number {
       }
     }
 
+    const fixtureResolved = path.resolve(args.fixturePackPath);
+    const fixtureRawText = fs.readFileSync(fixtureResolved, 'utf8');
+    const fixtureHash = createHash('sha256').update(fixtureRawText).digest('hex');
+    const commitSha =
+      process.env.GITHUB_SHA?.trim() ||
+      process.env.CI_COMMIT_SHA?.trim() ||
+      process.env.BUILD_SOURCEVERSION?.trim() ||
+      (() => {
+        try {
+          return execSync('git rev-parse HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString('utf8').trim();
+        } catch {
+          return 'unknown';
+        }
+      })();
+    const holdout = (fixtureObj as Record<string, unknown>).holdout as Record<string, unknown> | undefined;
+    const defaultDatasetId = typeof holdout?.default_dataset_id === 'string' ? holdout.default_dataset_id : 'unknown';
+    const holdoutCheckPath = path.resolve(args.holdoutArtifactPath);
+    let artifactDatasetId = '';
+    let artifactDatasetHash = '';
+    if (fs.existsSync(holdoutCheckPath)) {
+      try {
+        const holdoutParsed = JSON.parse(fs.readFileSync(holdoutCheckPath, 'utf8')) as Record<string, unknown>;
+        const summary = holdoutParsed.summary as Record<string, unknown> | undefined;
+        if (typeof summary?.dataset_id === 'string' && summary.dataset_id.length > 0) {
+          artifactDatasetId = summary.dataset_id;
+        }
+        if (typeof summary?.dataset_hash === 'string' && summary.dataset_hash.length > 0) {
+          artifactDatasetHash = summary.dataset_hash;
+        }
+      } catch {
+        // keep unknown
+      }
+    }
+    const envDatasetId = process.env.CE_QA_DATASET_ID?.trim() || '';
+    const envDatasetHash = process.env.CE_QA_DATASET_HASH?.trim() || '';
+    const useEnvDatasetPair = envDatasetId.length > 0 && envDatasetHash.length > 0;
+    const useArtifactDatasetPair = artifactDatasetId.length > 0 && artifactDatasetHash.length > 0;
+    const reproducibilityDatasetId = useEnvDatasetPair
+      ? envDatasetId
+      : useArtifactDatasetPair
+        ? artifactDatasetId
+        : defaultDatasetId;
+    const reproducibilityDatasetHash = useEnvDatasetPair
+      ? envDatasetHash
+      : useArtifactDatasetPair
+        ? artifactDatasetHash
+        : 'unknown';
+
     const output: OutputArtifact = {
       schema_version: 1,
       generated_at: new Date().toISOString(),
       inputs: {
-        fixture_pack: path.resolve(args.fixturePackPath),
+        fixture_pack: fixtureResolved,
+        holdout_artifact: holdoutCheckPath,
         out: path.resolve(args.outPath),
       },
       evaluations,
@@ -421,6 +490,19 @@ function run(): number {
       gate: {
         status: reasons.length === 0 ? 'pass' : 'fail',
         reasons,
+      },
+      reproducibility_lock: {
+        commit_sha: commitSha,
+        dataset_id: reproducibilityDatasetId,
+        dataset_hash: reproducibilityDatasetHash,
+        fixture_pack_hash: fixtureHash,
+        config_snapshot: {
+          fixture_pack: fixtureResolved,
+          telemetry_artifact: path.resolve('artifacts', 'bench', 'retrieval-quality-telemetry.json'),
+          holdout_artifact: holdoutCheckPath,
+          CE_QA_DATASET_ID: process.env.CE_QA_DATASET_ID ?? null,
+          CE_QA_DATASET_HASH: process.env.CE_QA_DATASET_HASH ?? null,
+        },
       },
     };
 

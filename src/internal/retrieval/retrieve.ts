@@ -63,6 +63,9 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     semanticWeight: Math.max(0, Math.min(1, options?.semanticWeight ?? 0.7)),
     lexicalWeight: Math.max(0, Math.min(1, options?.lexicalWeight ?? 0.3)),
     denseWeight: Math.max(0, Math.min(1, options?.denseWeight ?? 0)),
+    profile: options?.profile ?? 'balanced',
+    rewriteMode: options?.rewriteMode ?? (featureEnabled('retrieval_rewrite_v2') ? 'v2' : 'v1'),
+    rankingMode: options?.rankingMode ?? (featureEnabled('retrieval_ranking_v2') ? 'v2' : 'v1'),
     denseProvider: options?.denseProvider,
     log: options?.log ?? false,
     bypassCache: options?.bypassCache ?? false,
@@ -103,7 +106,7 @@ async function applyRerankStage(
       }
       rerankedHead = providerResult.slice(0, topN);
     } else {
-      rerankedHead = rerankResults(head, { originalQuery: query });
+      rerankedHead = rerankResults(head, { originalQuery: query, mode: settings.rankingMode });
     }
 
     observeDurationMs(
@@ -142,7 +145,10 @@ function buildExpandedQueries(query: string, options: NormalizedRetrievalOptions
     return [{ query, source: 'original', weight: 1, index: 0 }];
   }
 
-  const expanded = expandQuery(query, options.maxVariants);
+  const expanded = expandQuery(query, options.maxVariants, {
+    mode: options.rewriteMode,
+    profile: options.profile,
+  });
   if (expanded.length === 0) {
     return [{ query, source: 'original', weight: 1, index: 0 }];
   }

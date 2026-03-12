@@ -1,4 +1,4 @@
-import { ExpandedQuery } from './types.js';
+import { ExpandedQuery, RetrievalProfile, RetrievalRewriteMode } from './types.js';
 
 const STOPWORDS = new Set([
   'a',
@@ -54,11 +54,45 @@ function tokenize(input: string): string[] {
     .filter(Boolean);
 }
 
-export function expandQuery(query: string, maxVariants: number = 4): ExpandedQuery[] {
+type ExpandQueryOptions = {
+  mode?: RetrievalRewriteMode;
+  profile?: RetrievalProfile;
+};
+
+const PROFILE_VARIANT_CAP: Record<RetrievalProfile, number> = {
+  fast: 2,
+  balanced: 4,
+  rich: 6,
+};
+
+function isLikelyCodeLike(input: string): boolean {
+  if (/[`{}()[\];<>]/.test(input)) {
+    return true;
+  }
+  const slashOrPathHits = (input.match(/[\\/]/g) ?? []).length;
+  const camelHits = (input.match(/[a-z][A-Z]/g) ?? []).length;
+  return slashOrPathHits >= 2 || camelHits >= 2;
+}
+
+function isLikelySymbolToken(token: string): boolean {
+  return token.includes('_') || /[a-z][A-Z]/.test(token) || /\d/.test(token);
+}
+
+export function expandQuery(
+  query: string,
+  maxVariants: number = 4,
+  options: ExpandQueryOptions = {}
+): ExpandedQuery[] {
   const trimmed = query.trim();
   if (!trimmed) {
     return [];
   }
+
+  const mode: RetrievalRewriteMode = options.mode ?? 'v1';
+  const profile: RetrievalProfile = options.profile ?? 'balanced';
+  const effectiveMaxVariants = mode === 'v2'
+    ? Math.max(1, Math.min(maxVariants, PROFILE_VARIANT_CAP[profile]))
+    : maxVariants;
 
   const variants = new Map<string, ExpandedQuery>();
   const addVariant = (value: string, source: ExpandedQuery['source'], weight: number) => {
@@ -80,11 +114,15 @@ export function expandQuery(query: string, maxVariants: number = 4): ExpandedQue
 
   addVariant(trimmed, 'original', 1);
 
-  if (maxVariants <= 1) {
+  if (effectiveMaxVariants <= 1) {
     return Array.from(variants.values());
   }
 
   if (/[`]/.test(trimmed) || trimmed.length > 200) {
+    return Array.from(variants.values());
+  }
+
+  if (mode === 'v2' && isLikelyCodeLike(trimmed)) {
     return Array.from(variants.values());
   }
 
@@ -98,11 +136,20 @@ export function expandQuery(query: string, maxVariants: number = 4): ExpandedQue
     return Array.from(variants.values());
   }
 
-  addVariant(`where ${coreTokens.join(' ')} is handled`, 'expanded', 0.7);
-  addVariant(`implementation of ${coreTokens.join(' ')}`, 'expanded', 0.7);
+  if (mode === 'v1' || coreTokens.every(token => !isLikelySymbolToken(token))) {
+    addVariant(`where ${coreTokens.join(' ')} is handled`, 'expanded', 0.7);
+    addVariant(`implementation of ${coreTokens.join(' ')}`, 'expanded', 0.7);
+  }
 
+  const maxSynonymExpansions = mode === 'v2'
+    ? Math.max(1, Math.min(3, Math.floor(effectiveMaxVariants / 2)))
+    : Number.MAX_SAFE_INTEGER;
+  let synonymExpansions = 0;
   for (let i = 0; i < coreTokens.length; i += 1) {
     const token = coreTokens[i];
+    if (mode === 'v2' && isLikelySymbolToken(token)) {
+      continue;
+    }
     const replacements = SYNONYMS[token];
     if (!replacements) {
       continue;
@@ -111,11 +158,15 @@ export function expandQuery(query: string, maxVariants: number = 4): ExpandedQue
       const clone = [...coreTokens];
       clone[i] = replacement;
       addVariant(clone.join(' '), 'expanded', 0.6);
-      if (variants.size >= maxVariants) {
-        return Array.from(variants.values()).slice(0, maxVariants);
+      synonymExpansions += 1;
+      if (mode === 'v2' && synonymExpansions >= maxSynonymExpansions) {
+        return Array.from(variants.values()).slice(0, effectiveMaxVariants);
+      }
+      if (variants.size >= effectiveMaxVariants) {
+        return Array.from(variants.values()).slice(0, effectiveMaxVariants);
       }
     }
   }
 
-  return Array.from(variants.values()).slice(0, maxVariants);
+  return Array.from(variants.values()).slice(0, effectiveMaxVariants);
 }

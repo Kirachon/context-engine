@@ -1,6 +1,9 @@
 import { SearchResult } from '../../mcp/serviceClient.js';
 
 export type QuerySource = 'original' | 'expanded';
+export type RetrievalProfile = 'fast' | 'balanced' | 'rich';
+export type RetrievalRewriteMode = 'v1' | 'v2';
+export type RetrievalRankingMode = 'v1' | 'v2';
 
 export interface ExpandedQuery {
   query: string;
@@ -50,6 +53,9 @@ export interface RetrievalOptions {
   semanticWeight?: number;
   lexicalWeight?: number;
   denseWeight?: number;
+  profile?: RetrievalProfile;
+  rewriteMode?: RetrievalRewriteMode;
+  rankingMode?: RetrievalRankingMode;
   denseProvider?: DenseSearchProvider;
   log?: boolean;
   /** When true, bypass all caches (internal + in-process + persistent). */

@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
+import { createHash } from 'crypto';
 import { ContextServiceClient } from '../src/mcp/serviceClient.js';
 import { internalRetrieveCode } from '../src/internal/handlers/retrieval.js';
 
@@ -28,7 +29,24 @@ interface Args {
   cold: boolean;
   bypassCache: boolean;
   retrieveMode: RetrieveMode;
+  datasetId: string | null;
+  fixturePackPath: string;
   json: boolean;
+}
+
+interface HoldoutDataset {
+  description?: string;
+  queries: string[];
+}
+
+interface HoldoutConfig {
+  enabled?: boolean;
+  default_dataset_id?: string;
+  datasets?: Record<string, HoldoutDataset>;
+}
+
+interface FixturePack {
+  holdout?: HoldoutConfig;
 }
 
 function resolveRetrievalProvider(): {
@@ -63,6 +81,8 @@ function parseArgs(argv: string[]): Args {
     cold: false,
     bypassCache: false,
     retrieveMode: 'fast',
+    datasetId: null,
+    fixturePackPath: path.join('config', 'ci', 'retrieval-quality-fixture-pack.json'),
     json: false,
   };
 
@@ -100,6 +120,18 @@ function parseArgs(argv: string[]): Args {
 
     if (a === '--query' && next()) {
       args.query = next()!;
+      i++;
+      continue;
+    }
+
+    if (a === '--dataset-id' && next()) {
+      args.datasetId = next()!;
+      i++;
+      continue;
+    }
+
+    if (a === '--fixture-pack' && next()) {
+      args.fixturePackPath = next()!;
       i++;
       continue;
     }
@@ -158,6 +190,8 @@ Options:
   --workspace, -w <path>
   --iterations, -n <number>    (search/retrieve; default 10)
   --query <string>             (search/retrieve)
+  --dataset-id <id>            (search/retrieve: deterministic query-set selector from fixture pack)
+  --fixture-pack <path>        (search/retrieve: fixture pack with holdout datasets)
   --topk <number>              (search/retrieve; default 10)
   --read                        (scan: read file contents too)
   --cold                        (search/retrieve: new client per iteration)
@@ -185,6 +219,61 @@ function summarizeMs(samplesMs: number[]) {
     p99_ms: percentile(sorted, 99),
     min_ms: sorted[0] ?? 0,
     max_ms: sorted[sorted.length - 1] ?? 0,
+  };
+}
+
+function normalizeForHash(value: string): string {
+  return value.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function getDeterministicQueries(args: Args): {
+  source: 'single_query' | 'fixture_dataset';
+  dataset_id: string | null;
+  dataset_hash: string | null;
+  queries: string[];
+} {
+  if (!args.datasetId && args.query.trim().length > 0) {
+    return {
+      source: 'single_query',
+      dataset_id: null,
+      dataset_hash: null,
+      queries: [args.query],
+    };
+  }
+
+  const fixturePath = path.resolve(args.fixturePackPath);
+  if (!fs.existsSync(fixturePath)) {
+    throw new Error(`Fixture pack not found for dataset mode: ${fixturePath}`);
+  }
+  const parsed = JSON.parse(fs.readFileSync(fixturePath, 'utf8')) as FixturePack;
+  const holdout = parsed.holdout;
+  const datasets = holdout?.datasets ?? {};
+  const datasetId = args.datasetId ?? holdout?.default_dataset_id;
+  if (!datasetId) {
+    throw new Error(
+      `No dataset selected. Provide --dataset-id or set holdout.default_dataset_id in ${fixturePath}`
+    );
+  }
+  const dataset = datasets[datasetId];
+  if (!dataset || !Array.isArray(dataset.queries) || dataset.queries.length === 0) {
+    throw new Error(`Dataset "${datasetId}" missing or empty in ${fixturePath}`);
+  }
+
+  const queries = dataset.queries.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0);
+  if (queries.length === 0) {
+    throw new Error(`Dataset "${datasetId}" has no usable queries in ${fixturePath}`);
+  }
+
+  const datasetHash = sha256Hex(JSON.stringify(queries.map(normalizeForHash)));
+  return {
+    source: 'fixture_dataset',
+    dataset_id: datasetId,
+    dataset_hash: datasetHash,
+    queries,
   };
 }
 
@@ -275,7 +364,7 @@ async function benchIndex(workspace: string, provider: RetrievalProvider) {
 
 async function benchSearch(
   workspace: string,
-  query: string,
+  queries: string[],
   topK: number,
   iterations: number,
   provider: RetrievalProvider
@@ -290,6 +379,7 @@ async function benchSearch(
     cold = true;
 
     const started = performance.now();
+    const query = queries[i % queries.length]!;
     const results = await client.semanticSearch(query, topK);
     const elapsedMs = performance.now() - started;
     samples.push(elapsedMs);
@@ -299,7 +389,9 @@ async function benchSearch(
   return {
     mode: 'search' as const,
     workspace,
-    query,
+    query_source: queries.length === 1 ? 'single_query' : 'dataset_cycle',
+    query_count: queries.length,
+    query: queries[0]!,
     topK,
     iterations,
     cold,
@@ -310,7 +402,7 @@ async function benchSearch(
 
 async function benchRetrieve(
   workspace: string,
-  query: string,
+  queries: string[],
   topK: number,
   iterations: number,
   retrieveMode: RetrieveMode,
@@ -344,7 +436,7 @@ async function benchRetrieve(
           enableExpansion: false,
         };
 
-  const runOnce = async (client: ContextServiceClient) => {
+  const runOnce = async (client: ContextServiceClient, query: string) => {
     const started = performance.now();
     const result = await internalRetrieveCode(query, client, retrievalOptions);
     const elapsedMs = performance.now() - started;
@@ -355,22 +447,28 @@ async function benchRetrieve(
 
   if (!cold) {
     const client = new ContextServiceClient(workspace);
-    await runOnce(client); // warm
+    for (const query of queries) {
+      await runOnce(client, query);
+    }
     samples.length = 0;
     for (let i = 0; i < iterations; i++) {
-      await runOnce(client);
+      const query = queries[i % queries.length]!;
+      await runOnce(client, query);
     }
   } else {
     for (let i = 0; i < iterations; i++) {
       const client = new ContextServiceClient(workspace);
-      await runOnce(client);
+      const query = queries[i % queries.length]!;
+      await runOnce(client, query);
     }
   }
 
   return {
     mode: 'retrieve' as const,
     workspace,
-    query,
+    query_source: queries.length === 1 ? 'single_query' : 'dataset_cycle',
+    query_count: queries.length,
+    query: queries[0]!,
     topK,
     iterations,
     cold,
@@ -406,6 +504,15 @@ async function main(): Promise<void> {
   };
 
   let payload: unknown;
+  const deterministicQueries =
+    args.mode === 'search' || args.mode === 'retrieve'
+      ? getDeterministicQueries(args)
+      : {
+          source: 'single_query' as const,
+          dataset_id: null,
+          dataset_hash: null,
+          queries: [args.query],
+        };
   if (args.mode === 'scan') {
     payload = await scanWorkspace(args.workspace, args.readFiles);
   } else if (args.mode === 'index') {
@@ -413,7 +520,7 @@ async function main(): Promise<void> {
   } else if (args.mode === 'retrieve') {
     payload = await benchRetrieve(
       args.workspace,
-      args.query,
+      deterministicQueries.queries,
       args.topK,
       args.iterations,
       args.retrieveMode,
@@ -423,16 +530,19 @@ async function main(): Promise<void> {
     );
   } else {
     if (!args.cold) {
-      // Warm-cache mode: single client, first call warms, the rest measure hot cache.
+      // Warm-cache mode: single client; warm every query once before timed samples.
       const client = new ContextServiceClient(args.workspace);
       ensureProviderRequirements(retrievalProvider.provider, 'search');
-      await client.semanticSearch(args.query, args.topK);
+      for (const query of deterministicQueries.queries) {
+        await client.semanticSearch(query, args.topK);
+      }
 
       const samples: number[] = [];
       let lastCount = 0;
       for (let i = 0; i < args.iterations; i++) {
+        const query = deterministicQueries.queries[i % deterministicQueries.queries.length]!;
         const started = performance.now();
-        const results = await client.semanticSearch(args.query, args.topK);
+        const results = await client.semanticSearch(query, args.topK);
         const elapsedMs = performance.now() - started;
         samples.push(elapsedMs);
         lastCount = results.length;
@@ -441,7 +551,9 @@ async function main(): Promise<void> {
       payload = {
         mode: 'search' as const,
         workspace: args.workspace,
-        query: args.query,
+        query_source: deterministicQueries.queries.length === 1 ? 'single_query' : 'dataset_cycle',
+        query_count: deterministicQueries.queries.length,
+        query: deterministicQueries.queries[0]!,
         topK: args.topK,
         iterations: args.iterations,
         cold: false,
@@ -451,7 +563,7 @@ async function main(): Promise<void> {
     } else {
       payload = await benchSearch(
         args.workspace,
-        args.query,
+        deterministicQueries.queries,
         args.topK,
         args.iterations,
         retrievalProvider.provider
@@ -461,6 +573,13 @@ async function main(): Promise<void> {
 
   const totalMs = performance.now() - started;
   const out = { meta, total_ms: totalMs, payload };
+  (out.meta as Record<string, unknown>).dataset = {
+    source: deterministicQueries.source,
+    dataset_id: deterministicQueries.dataset_id,
+    dataset_hash: deterministicQueries.dataset_hash,
+    query_count: deterministicQueries.queries.length,
+    fixture_pack: path.resolve(args.fixturePackPath),
+  };
 
   if (args.json) {
     // eslint-disable-next-line no-console

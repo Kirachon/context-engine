@@ -1,4 +1,6 @@
 import { retrieve } from '../../../src/internal/retrieval/retrieve.js';
+import { internalRetrieveCode } from '../../../src/internal/handlers/retrieval.js';
+import { setInternalCache } from '../../../src/internal/handlers/performance.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -8,6 +10,7 @@ describe('retrieve internal pipeline', () => {
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    setInternalCache(undefined);
   });
 
   it('preserves semantic-only behavior when lexical/fusion are off', async () => {
@@ -209,5 +212,166 @@ describe('retrieve internal pipeline', () => {
     });
 
     expect(results.map((item) => item.path)).toEqual(['src/t1.ts', 'src/t2.ts']);
+  });
+
+  it('supports rankingMode=v2 deterministic prioritization for exact symbol matches', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/auth/loginHelper.ts', content: 'export function helper() {}', relevanceScore: 0.8, lines: '1-2' },
+        { path: 'src/auth/loginService.ts', content: 'export function loginService() {}', relevanceScore: 0.8, lines: '1-2' },
+        { path: 'src/auth/auth.ts', content: 'export function auth() {}', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const results = await retrieve('loginService', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      rankingMode: 'v2' as any,
+      topK: 5,
+    });
+
+    expect(results[0]?.path).toContain('loginService.ts');
+    expect(results.map((item) => item.path).length).toBe(3);
+  });
+
+  it('keeps rewrite v2 guardrails for code-like queries and profile-aware variant caps', async () => {
+    const codeLikeClient = {
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    await retrieve('src/auth/loginService.ts', codeLikeClient, {
+      enableExpansion: true,
+      enableLexical: false,
+      enableFusion: false,
+      rewriteMode: 'v2',
+      profile: 'rich',
+      topK: 5,
+    });
+
+    expect(codeLikeClient.semanticSearch).toHaveBeenCalledTimes(1);
+    expect(codeLikeClient.semanticSearch).toHaveBeenNthCalledWith(1, 'src/auth/loginService.ts', 5);
+
+    const fastProfileClient = {
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+    const richProfileClient = {
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const query = 'auth login service flow';
+    await retrieve(query, fastProfileClient, {
+      enableExpansion: true,
+      enableLexical: false,
+      enableFusion: false,
+      rewriteMode: 'v2',
+      profile: 'fast',
+      topK: 5,
+      maxVariants: 6,
+    });
+    await retrieve(query, richProfileClient, {
+      enableExpansion: true,
+      enableLexical: false,
+      enableFusion: false,
+      rewriteMode: 'v2',
+      profile: 'rich',
+      topK: 5,
+      maxVariants: 6,
+    });
+
+    expect(fastProfileClient.semanticSearch).toHaveBeenCalledTimes(2);
+    expect(richProfileClient.semanticSearch.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it('keeps rankingMode=v2 ordering deterministic across identical runs', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/zeta.ts', content: 'export const zetaToken = 1;', relevanceScore: 0.8, lines: '1-1' },
+        { path: 'src/alpha.ts', content: 'export const alpha = 1;', relevanceScore: 0.8, lines: '1-1' },
+        { path: 'src/beta.ts', content: 'export const beta = 1;', relevanceScore: 0.8, lines: '1-1' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const options = {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      rankingMode: 'v2' as any,
+      topK: 5,
+    };
+
+    const runA = await retrieve('zeta token', serviceClient, options);
+    const runB = await retrieve('zeta token', serviceClient, options);
+
+    expect(runA.map((item) => item.path)).toEqual(runB.map((item) => item.path));
+  });
+
+  it('memoizes with stable v2 cache keys across option ordering', async () => {
+    const backing = new Map<string, unknown>();
+    const cache = {
+      get: jest.fn((key: string) => backing.get(key)),
+      set: jest.fn((key: string, value: unknown) => backing.set(key, value)),
+    };
+    setInternalCache(cache as any);
+
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/memo.ts', content: 'memo', relevanceScore: 0.9, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const first = await internalRetrieveCode(
+      'memo query',
+      serviceClient,
+      { topK: 3, enableExpansion: false, rewriteMode: 'v2' as any } as any
+    );
+    const second = await internalRetrieveCode(
+      'memo query',
+      serviceClient,
+      { rewriteMode: 'v2' as any, enableExpansion: false, topK: 3 } as any
+    );
+
+    expect(first.results.map((r) => r.path)).toEqual(second.results.map((r) => r.path));
+    expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
+    expect(cache.set).toHaveBeenCalled();
+    const firstSetKey = String((cache.set as jest.Mock).mock.calls[0]?.[0] ?? '');
+    expect(firstSetKey).toContain('retrieve:v2:');
+  });
+
+  it('skips internal memoization when bypassCache=true for request safety', async () => {
+    const backing = new Map<string, unknown>();
+    const cache = {
+      get: jest.fn((key: string) => backing.get(key)),
+      set: jest.fn((key: string, value: unknown) => backing.set(key, value)),
+    };
+    setInternalCache(cache as any);
+
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/no-cache.ts', content: 'fresh', relevanceScore: 0.9, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const request = {
+      bypassCache: true,
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+    } as any;
+    await internalRetrieveCode('fresh query', serviceClient, request);
+    await internalRetrieveCode('fresh query', serviceClient, request);
+
+    expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(2);
+    expect(cache.get).not.toHaveBeenCalled();
+    expect(cache.set).not.toHaveBeenCalled();
   });
 });

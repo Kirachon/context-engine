@@ -133,4 +133,62 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('marks missing json_path values as skip when missing_status is omitted', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-missing-skip-'));
+    const fixturePath = path.join(tmp, 'fixture.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    writeJson(fixturePath, {
+      checks: [
+        {
+          id: 'telemetry.missing',
+          kind: 'json_path_threshold_min',
+          path: path.join(tmp, 'does-not-exist.json'),
+          json_path: 'dense_refresh.hit_rate',
+          min: 0.8,
+        },
+      ],
+      gate_rules: {
+        min_pass_rate: 0,
+        required_ids: [],
+      },
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--out', outPath]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('gate_status=pass');
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const evaluations = artifact.evaluations as Array<Record<string, unknown>>;
+    expect(evaluations[0]?.status).toBe('skip');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('marks delta_pct_min as skip when baseline is zero', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-delta-skip-'));
+    const fixturePath = path.join(tmp, 'fixture.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    writeJson(fixturePath, {
+      checks: [
+        { id: 'quality.ndcg_at_10', kind: 'delta_pct_min', baseline: 0, candidate: 0.1, min_delta_pct: 5 },
+      ],
+      gate_rules: {
+        min_pass_rate: 0,
+        required_ids: [],
+      },
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--out', outPath]);
+    expect(result.status).toBe(0);
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    const evaluations = artifact.evaluations as Array<Record<string, unknown>>;
+    expect(evaluations[0]?.status).toBe('skip');
+    expect(String(evaluations[0]?.message ?? '')).toMatch(/baseline must be > 0/i);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

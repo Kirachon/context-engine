@@ -17,6 +17,7 @@ Fail the PR if any condition is true:
 - Error rate increase > +0.5pp.
 - Retrieval quality overlap < 0.85.
 - `unique_files@k` drop > 10%.
+- Holdout quality checks fail required IDs (`nDCG@10`, `MRR@10`, `Recall@50`).
 
 ## Nightly Gates (must pass)
 
@@ -24,6 +25,7 @@ Fail the nightly run if any condition is true:
 - Any PR gate condition fails.
 - Deep retrieval p95 regression > +20%.
 - Cache hit rate drop > 10pp.
+- Shadow/canary artifact indicates abort threshold breach.
 
 ## Release Gates (must pass)
 
@@ -43,3 +45,8 @@ For each gate run, record:
 - Gate verdict: PASS or FAIL.
 - Triggered fail conditions (if any).
 - Next action: proceed, hold, or rollback.
+
+Additional required fields for retrieval speed/quality promotions:
+- dataset id + dataset hash
+- commit SHA + environment fingerprint
+- feature-flag state snapshot

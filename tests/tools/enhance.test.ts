@@ -26,6 +26,7 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
     delete process.env.CE_ENHANCE_PROMPT_USE_RETRIEVAL;
     delete process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT;
     delete process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS;
+    delete process.env.CE_ENHANCE_PROMPT_TIMEOUT_MS;
     delete process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS;
     delete process.env.CE_ENHANCE_PROMPT_TOOL_VERSION;
     delete process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE;
@@ -90,7 +91,25 @@ Here is an enhanced version of the original instruction that is more specific an
       );
       const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
       expect(timeoutMs).toBeGreaterThanOrEqual(1000);
-      expect(timeoutMs).toBeLessThanOrEqual(20000);
+      expect(timeoutMs).toBeLessThanOrEqual(120000);
+    });
+
+    it('should honor configured enhance timeout above 30 seconds', async () => {
+      process.env.CE_ENHANCE_PROMPT_TIMEOUT_MS = '60000';
+      const aiResponse = `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Configured timeout honored.</enhanced-prompt>
+
+### END RESPONSE ###`;
+      mockServiceClient.searchAndAsk.mockResolvedValue(aiResponse);
+
+      await handleEnhancePrompt({
+        prompt: 'validate timeout ceiling behavior',
+      }, mockServiceClient as any);
+
+      const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
+      expect(timeoutMs).toBeGreaterThan(30000);
+      expect(timeoutMs).toBeLessThanOrEqual(60000);
     });
   });
 
@@ -120,7 +139,7 @@ Here is an enhanced version of the original instruction that is more specific an
         );
         const timeoutMs = mockServiceClient.searchAndAsk.mock.calls[0][2]?.timeoutMs;
         expect(timeoutMs).toBeGreaterThanOrEqual(1000);
-        expect(timeoutMs).toBeLessThanOrEqual(20000);
+        expect(timeoutMs).toBeLessThanOrEqual(120000);
       });
 
       it('should return explicit transient error when enhance mode is off and upstream times out', async () => {
@@ -375,6 +394,23 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(parsed.schema_version).toBeDefined();
       expect(parsed.error_code).toBe('TRANSIENT_UPSTREAM');
       expect(parsed.retryable).toBe(true);
+    });
+
+    it('returns retry_after_ms in JSON envelope when upstream provides retry hint', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS = '0';
+      mockServiceClient.searchAndAsk.mockRejectedValue(
+        new Error('SEARCH_QUEUE_FULL: queue saturated retry_after_ms=4200')
+      );
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'transient with retry hint' },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+      expect(parsed.error_code).toBe('TRANSIENT_UPSTREAM');
+      expect(parsed.retryable).toBe(true);
+      expect(parsed.retry_after_ms).toBe(4200);
     });
 
     describe('Snippet cache hardening', () => {

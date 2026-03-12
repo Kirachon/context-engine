@@ -17,6 +17,7 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
+import { featureEnabled } from '../../config/features.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateBoolean,
@@ -181,6 +182,9 @@ export async function handleSemanticSearch(
     topK: top_k,
     perQueryTopK: Math.min(50, top_k * profileSettings.perQueryMultiplier),
     maxVariants: profileSettings.maxVariants,
+    profile: effectiveProfile,
+    rewriteMode: featureEnabled('retrieval_rewrite_v2') ? 'v2' as const : 'v1' as const,
+    rankingMode: featureEnabled('retrieval_ranking_v2') ? 'v2' as const : 'v1' as const,
     timeoutMs: effectiveTimeoutMs,
     bypassCache: bypass_cache,
     maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,

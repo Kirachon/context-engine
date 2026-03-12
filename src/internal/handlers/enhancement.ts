@@ -4,9 +4,11 @@ import { isRetrievalPipelineEnabled, retrieve } from '../retrieval/retrieve.js';
 import { internalContextSnippet } from './context.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
 
-const DEFAULT_ENHANCE_TIMEOUT_MS = 20_000;
+const DEFAULT_ENHANCE_TIMEOUT_MS = 120_000;
 const DEFAULT_RETRIEVAL_TIMEOUT_MS = 1_500;
-const DEFAULT_ENHANCE_RETRY_ATTEMPTS = 1;
+const DEFAULT_ENHANCE_RETRY_ATTEMPTS = 2;
+const DEFAULT_ENHANCE_RETRY_BACKOFF_MS = 750;
+const MAX_ENHANCE_RETRY_BACKOFF_MS = 5_000;
 const DEFAULT_ENHANCE_PROMPT_MODE: EnhancePromptMode = 'light';
 const DEFAULT_SNIPPET_CACHE_TTL_MS = 10 * 60 * 1000;
 const CONTEXT_CACHE_KEY_VERSION = 'v2';
@@ -240,6 +242,28 @@ function isAuthOrConfigError(errorMessage: string): boolean {
   return /api key|authentication|unauthorized|forbidden|login|openai session|provider.+(missing|not configured|invalid)|configuration|misconfig|CE_AI_|usage limit|quota|more access now|try again at/i.test(
     errorMessage
   );
+}
+
+function extractRetryAfterMs(errorMessage: string): number | undefined {
+  const match = errorMessage.match(/retry_after_ms\s*=\s*(\d+)/i);
+  if (!match?.[1]) return undefined;
+  const parsed = Number.parseInt(match[1], 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
+  return parsed;
+}
+
+function computeRetryBackoffMs(attempt: number, errorMessage: string): number {
+  const hinted = extractRetryAfterMs(errorMessage);
+  if (typeof hinted === 'number') {
+    return Math.max(250, Math.min(MAX_ENHANCE_RETRY_BACKOFF_MS, hinted));
+  }
+  const exponential = DEFAULT_ENHANCE_RETRY_BACKOFF_MS * Math.pow(2, attempt);
+  return Math.max(250, Math.min(MAX_ENHANCE_RETRY_BACKOFF_MS, exponential));
+}
+
+async function sleepMs(durationMs: number): Promise<void> {
+  if (durationMs <= 0) return;
+  await new Promise((resolve) => setTimeout(resolve, durationMs));
 }
 
 function parseStructuredHeadersIgnoringCodeFences(content: string): string[] {
@@ -478,7 +502,7 @@ export async function internalPromptEnhancerDetailed(
     process.env.CE_ENHANCE_PROMPT_TIMEOUT_MS,
     DEFAULT_ENHANCE_TIMEOUT_MS,
     1_000,
-    30_000
+    120_000
   );
   const retrievalBudgetMs = normalizeTimeout(
     process.env.CE_ENHANCE_RETRIEVAL_TIMEOUT_MS,
@@ -488,6 +512,7 @@ export async function internalPromptEnhancerDetailed(
   );
   const budget = createBudgetManager(totalBudgetMs, retrievalBudgetMs);
   const retryAttempts = normalizeEnhanceRetryAttempts(process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS);
+  let lastTransientRetryAfterMs: number | undefined;
 
   const baseEnhancementPrompt = buildAIEnhancementPrompt(prompt);
   let enhancementPrompt = baseEnhancementPrompt;
@@ -608,12 +633,16 @@ export async function internalPromptEnhancerDetailed(
         // Retry with a lean prompt to reduce model/context pressure.
         attemptPrompt = baseEnhancementPrompt;
         lastTransientError = error;
+        const plannedBackoffMs = computeRetryBackoffMs(attempt, errorMessage);
+        const backoffMs = Math.min(plannedBackoffMs, Math.max(0, budget.remainingMs() - 100));
+        lastTransientRetryAfterMs = backoffMs > 0 ? backoffMs : extractRetryAfterMs(errorMessage);
         incCounter(
           'context_engine_enhance_prompt_retry_total',
           { mode, reason: 'timeout_or_queue_or_transient' },
           1,
           'Enhance prompt transient retries before fallback.'
         );
+        await sleepMs(backoffMs);
       }
     }
     if (!response && lastTransientError) {
@@ -775,6 +804,7 @@ export async function internalPromptEnhancerDetailed(
 
     if (isFallbackEligibleError(errorMessage)) {
       console.error('[AI Enhancement] Returning transient upstream error (no fallback template output)');
+      const retryAfterMs = extractRetryAfterMs(errorMessage) ?? lastTransientRetryAfterMs;
       incCounter(
         'context_engine_enhance_prompt_transient_error_total',
         { mode, reason: 'timeout_or_queue_or_transient' },
@@ -790,7 +820,8 @@ export async function internalPromptEnhancerDetailed(
       throw new EnhancePromptError(
         'TRANSIENT_UPSTREAM',
         'AI enhancement is temporarily unavailable (timeout, queue pressure, or transient upstream issue). Please retry shortly.',
-        true
+        true,
+        retryAfterMs
       );
     }
 
