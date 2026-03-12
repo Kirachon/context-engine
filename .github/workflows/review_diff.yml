@@ -99,6 +99,15 @@ jobs:
             echo "WS20 stage gate: SKIP (no artifact at artifacts/ws20-stage-evidence.{yaml,yml,json,md})"
           fi
 
+      - name: Check review timeout contract
+        run: npm run -s ci:check:review-timeout-contract
+
+      - name: Run review auto timeout smoke
+        run: npm run -s ci:check:review-auto-timeout-smoke
+
+      - name: Check rollout readiness with review auto timeout smoke artifact
+        run: node --import tsx scripts/ci/check-rollout-readiness.ts artifacts/review_auto_timeout_smoke.json
+
       - name: Upload review artifacts
         if: always()
         uses: actions/upload-artifact@v4

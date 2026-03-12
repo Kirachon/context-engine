@@ -27,6 +27,7 @@ Scope: timeout-hardening wave safety posture and release-gate checklist.
 - Stop immediately if owned-path constraints conflict with active edits in the same file.
 - Stop advancement to rollout stage changes when any required gate below returns non-zero.
 - Stop and freeze progression if readiness artifacts include `FAIL` markers or missing required fields (`status` + one of `checks/results/metrics/summary`).
+- Stop and trigger runtime-first rollback if `artifacts/review_auto_timeout_smoke.json` is `FAIL`, missing, unreadable, or missing required fields (`status`, `checks`, `metrics`).
 
 ## rollback_stub
 Use runtime-first rollback order from [`docs/ROLLOUT_RUNBOOK.md`](/D:/GitProjects/context-engine/docs/ROLLOUT_RUNBOOK.md):
@@ -39,11 +40,13 @@ Use runtime-first rollback order from [`docs/ROLLOUT_RUNBOOK.md`](/D:/GitProject
 ## quality_gate_list
 Exact checks for this wave (run from repo root):
 1. `npm run -s ci:check:review-timeout-contract`
-2. `npm test -- tests/integration/timeoutResilience.test.ts`
-3. `npx tsc --noEmit`
-4. `npm run -s ci:check:ws21-rollback-drill`
-5. `npm run -s ci:check:governance-artifacts`
-6. `node --import tsx scripts/ci/check-rollout-readiness.ts`
+2. `node --import tsx scripts/ci/review-auto-timeout-smoke.ts`
+3. Confirm `artifacts/review_auto_timeout_smoke.json` reports `status: "PASS"` with `checks` and `metrics` present.
+4. `npm test -- tests/integration/timeoutResilience.test.ts`
+5. `npx tsc --noEmit`
+6. `npm run -s ci:check:ws21-rollback-drill`
+7. `npm run -s ci:check:governance-artifacts`
+8. `node --import tsx scripts/ci/check-rollout-readiness.ts`
 
 Optional reinforcement checks when benchmark artifacts are present:
 1. `node --import tsx scripts/ci/ws19-slo-gate.ts --family review --artifact artifacts/review_diff_result.json`
