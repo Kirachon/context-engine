@@ -1,0 +1,32 @@
+{
+  "drill_id": "R8-20260312-001",
+  "contract_version": "1.0.0",
+  "executed_at_utc": "2026-03-12T10:30:00Z",
+  "owner": "support-devex",
+  "scenario_name": "transient_upstream_timeout_recovery",
+  "incident_class": "TRANSIENT_UPSTREAM",
+  "decision_path_trace": [
+    "Checked AUTH signals first: none found.",
+    "Checked QUOTA signals next: none found.",
+    "Checked CONFIG signals next: none found.",
+    "Selected TRANSIENT_UPSTREAM based on retryable timeout signals."
+  ],
+  "evidence": {
+    "command_path": "npm run -s ci:check:review-auto-timeout-smoke && node --import tsx scripts/ci/check-r8-fallback-free-runbook-drill.ts --drill-artifact artifacts/governance/r8-fallback-free-drill-sample.json",
+    "error_signal_excerpt": "EnhancePromptError code=TRANSIENT_UPSTREAM timeout/retryable",
+    "classification_justification": "Signals were retryable and none of the higher-precedence classes matched.",
+    "validation_command": "node --import tsx scripts/ci/check-rollout-readiness.ts artifacts/review_auto_timeout_smoke.json --r8-drill-artifact artifacts/governance/r8-fallback-free-drill-sample.json",
+    "validation_result": "PASS",
+    "artifact_refs": [
+      "docs/R8_FALLBACK_FREE_INCIDENT_RUNBOOK_CONTRACT.md",
+      "artifacts/review_auto_timeout_smoke.json",
+      "artifacts/governance/r8-fallback-free-drill-sample.json"
+    ],
+    "started_at_utc": "2026-03-12T10:20:00Z",
+    "ended_at_utc": "2026-03-12T10:30:00Z",
+    "blocker_status": "none"
+  },
+  "outcome": "PASS",
+  "duration_minutes": 10,
+  "follow_up_actions": []
+}

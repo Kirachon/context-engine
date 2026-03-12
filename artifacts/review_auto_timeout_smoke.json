@@ -1,0 +1,26 @@
+{
+  "status": "PASS",
+  "summary": "review_auto timeout smoke passed.",
+  "checks": [
+    {
+      "id": "selected_review_git_diff_path",
+      "status": "PASS",
+      "detail": "selected_tool=review_git_diff"
+    },
+    {
+      "id": "observed_timeout_matches_request",
+      "status": "PASS",
+      "detail": "requested=120000 observed=120000"
+    },
+    {
+      "id": "review_payload_is_present",
+      "status": "PASS",
+      "detail": "Expected review_auto output.review.findings array."
+    }
+  ],
+  "metrics": {
+    "duration_ms": 6325,
+    "requested_timeout_ms": 120000,
+    "observed_timeout_ms": 120000
+  }
+}

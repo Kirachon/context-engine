@@ -1,0 +1,71 @@
+{
+  "schema_version": "1.0.0",
+  "board_id": "r6-execution-board",
+  "generated_at": "2026-03-12T00:00:00Z",
+  "owners": [
+    {
+      "owner_id": "owner-a",
+      "display_name": "Owner A",
+      "capacity_points": {
+        "D30": 8,
+        "D60": 8,
+        "D90": 8
+      }
+    },
+    {
+      "owner_id": "owner-b",
+      "display_name": "Owner B",
+      "capacity_points": {
+        "D30": 5,
+        "D60": 5,
+        "D90": 5
+      }
+    }
+  ],
+  "wip_caps": {
+    "global_in_progress_max": 2,
+    "per_owner_in_progress_max": 2,
+    "per_horizon_in_progress_max": {
+      "D30": 1,
+      "D60": 1,
+      "D90": 1
+    }
+  },
+  "items": [
+    {
+      "item_id": "T5",
+      "title": "R6 execution board model design",
+      "horizon": "D30",
+      "owner_id": "owner-a",
+      "state": "done",
+      "estimate_points": 3,
+      "depends_on": [],
+      "dependency_state": "satisfied"
+    },
+    {
+      "item_id": "T6",
+      "title": "R6 board validator implementation",
+      "horizon": "D60",
+      "owner_id": "owner-b",
+      "state": "in_progress",
+      "estimate_points": 3,
+      "depends_on": [
+        "T5"
+      ],
+      "dependency_state": "satisfied"
+    },
+    {
+      "item_id": "T7",
+      "title": "R7 risk register split design",
+      "horizon": "D90",
+      "owner_id": "owner-a",
+      "state": "planned",
+      "estimate_points": 2,
+      "depends_on": [
+        "T6"
+      ],
+      "dependency_state": "waiting"
+    }
+  ],
+  "overrides": []
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "register_type": "runtime",
+  "register_owner": "reliability-operations-owner",
+  "generated_at_utc": "2026-03-12T03:23:08Z",
+  "last_review_utc": "2026-03-12T03:23:08Z",
+  "next_review_utc": "2026-03-18T03:23:08Z",
+  "risks": [
+    {
+      "risk_id": "RR-001",
+      "title": "Queue saturation under multi-check load",
+      "status": "watch",
+      "likelihood": "medium",
+      "impact": "critical",
+      "trigger": "Request queue depth exceeds configured limit for sustained windows.",
+      "mitigation": "Apply bounded queue controls and monitor retry-after compliance.",
+      "contingency": "Throttle non-critical checks and switch to degraded but bounded mode.",
+      "owner": "runtime-oncall-owner",
+      "opened_at_utc": "2026-03-12T00:00:00Z",
+      "last_review_utc": "2026-03-12T03:23:08Z",
+      "next_review_utc": "2026-03-18T03:23:08Z",
+      "evidence_ref": "docs/R8_FALLBACK_FREE_INCIDENT_RUNBOOK_CONTRACT.md",
+      "runtime_surface": "mcp-review-pipeline",
+      "detect_signal": "queue_reject_rate > 0 for 5m"
+    }
+  ]
+}

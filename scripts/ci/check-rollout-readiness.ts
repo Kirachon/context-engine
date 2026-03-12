@@ -11,6 +11,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { checkR8FallbackFreeRunbookDrill } from './check-r8-fallback-free-runbook-drill.ts';
 
 const REQUIRED_PATHS = [
   'docs/CONTRACT_FREEZE.md',
@@ -18,9 +19,50 @@ const REQUIRED_PATHS = [
   'docs/FLAG_REGISTRY.md',
   'docs/ROLLOUT_RUNBOOK.md',
 ];
+const DEFAULT_R8_CONTRACT_PATH = 'docs/R8_FALLBACK_FREE_INCIDENT_RUNBOOK_CONTRACT.md';
+
+interface ParsedArgs {
+  optionalArtifacts: string[];
+  r8DrillArtifactPath: string | null;
+  r8ContractPath: string;
+}
 
 function normalizeInputPaths(argv: string[]): string[] {
   return argv.map((entry) => entry.trim()).filter(Boolean);
+}
+
+function parseArgs(argv: string[]): ParsedArgs {
+  const optionalArtifacts: string[] = [];
+  let r8DrillArtifactPath: string | null = null;
+  let r8ContractPath = DEFAULT_R8_CONTRACT_PATH;
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const arg = argv[i];
+    const next = argv[i + 1];
+    if (arg === '--r8-drill-artifact') {
+      if (!next) {
+        throw new Error('Missing value for --r8-drill-artifact');
+      }
+      r8DrillArtifactPath = next.trim();
+      i += 1;
+      continue;
+    }
+    if (arg === '--r8-contract') {
+      if (!next) {
+        throw new Error('Missing value for --r8-contract');
+      }
+      r8ContractPath = next.trim();
+      i += 1;
+      continue;
+    }
+    optionalArtifacts.push(arg);
+  }
+
+  return {
+    optionalArtifacts: normalizeInputPaths(optionalArtifacts),
+    r8DrillArtifactPath,
+    r8ContractPath,
+  };
 }
 
 function fileExists(targetPath: string): boolean {
@@ -115,11 +157,25 @@ function validateArtifactSignals(artifactPath: string): ArtifactSignalResult {
 }
 
 function main(): void {
-  const optionalArtifacts = normalizeInputPaths(process.argv.slice(2));
+  const parsedArgs = parseArgs(process.argv.slice(2));
+  const optionalArtifacts = parsedArgs.optionalArtifacts;
   const requiredMissing = REQUIRED_PATHS.filter((target) => !fileExists(target));
   const optionalMissing = optionalArtifacts.filter((target) => !fileExists(target));
   const presentArtifacts = optionalArtifacts.filter((target) => fileExists(target));
   const signalResults = presentArtifacts.map((target) => validateArtifactSignals(target));
+  const r8Failures: string[] = [];
+  let r8Status: 'SKIP' | 'PASS' | 'FAIL' = 'SKIP';
+
+  if (parsedArgs.r8DrillArtifactPath) {
+    const r8Result = checkR8FallbackFreeRunbookDrill({
+      contractPath: parsedArgs.r8ContractPath,
+      drillArtifactPath: parsedArgs.r8DrillArtifactPath,
+    });
+    r8Status = r8Result.status;
+    if (r8Result.status === 'FAIL') {
+      r8Failures.push(...r8Result.errors.map((error) => `R8: ${error}`));
+    }
+  }
 
   const qualityFailures = signalResults.flatMap((result) => {
     const failures: string[] = [];
@@ -147,6 +203,7 @@ function main(): void {
   printSection('Missing required files:', requiredMissing);
   printSection('Missing optional artifacts:', optionalMissing);
   printSection('Artifact quality failures:', qualityFailures);
+  printSection('R8 runbook/drill failures:', r8Failures);
 
   if (signalResults.length > 0) {
     // eslint-disable-next-line no-console
@@ -163,8 +220,21 @@ function main(): void {
     }
   }
 
+  if (parsedArgs.r8DrillArtifactPath) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `R8 runbook/drill check: ${r8Status} (artifact=${parsedArgs.r8DrillArtifactPath}, contract=${parsedArgs.r8ContractPath})`
+    );
+  } else {
+    // eslint-disable-next-line no-console
+    console.log('R8 runbook/drill check: SKIP (no --r8-drill-artifact provided)');
+  }
+
   const hasFailure =
-    requiredMissing.length > 0 || optionalMissing.length > 0 || qualityFailures.length > 0;
+    requiredMissing.length > 0 ||
+    optionalMissing.length > 0 ||
+    qualityFailures.length > 0 ||
+    r8Failures.length > 0;
   if (hasFailure) {
     // eslint-disable-next-line no-console
     console.error('Readiness check failed.');
