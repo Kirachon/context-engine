@@ -109,6 +109,12 @@ This tool combines git diff retrieval with AI-powered code review. It automatica
             type: 'string',
             description: 'Additional instructions for the reviewer',
           },
+          llm_timeout_ms: {
+            type: 'number',
+            description: 'Optional AI timeout override in milliseconds for this review call (1000-1800000).',
+            minimum: 1000,
+            maximum: 1800000,
+          },
           exclude_patterns: {
             type: 'array',
             items: { type: 'string' },

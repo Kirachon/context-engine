@@ -32,7 +32,9 @@ function Get-ContextEngineProcesses {
         $cmdRaw = [string]$proc.CommandLine
         $cmdNorm = Get-NormalizedPath -Path $cmdRaw
 
-        $hasDistIndex = $cmdNorm -match '(?i)(^|\s|")dist[\\/]+index\.js(\s|"|$)'
+        # Match both relative (dist/index.js) and absolute paths (...\dist\index.js)
+        # so normal Windows absolute command lines are detected reliably.
+        $hasDistIndex = $cmdNorm -match '(?i)(^|[\s"\\/])dist[\\/]+index\.js(\s|"|$)'
         $hasRepoRoot = $cmdNorm.Contains($repoRootNorm)
 
         if ($hasDistIndex -and $hasRepoRoot) {

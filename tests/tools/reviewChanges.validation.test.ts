@@ -57,6 +57,15 @@ describe('review_changes validation paths', () => {
     ).rejects.toThrow(/expected an object map of file path to content/i);
   });
 
+  it('rejects llm_timeout_ms below allowed range', async () => {
+    await expect(
+      handleReviewChanges(
+        { diff: 'diff --git a/a.ts b/a.ts', llm_timeout_ms: 500 },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/invalid \"llm_timeout_ms\"/i);
+  });
+
   it('blocks malformed non-empty diff input with no reviewable scope', async () => {
     await expect(
       handleReviewChanges(

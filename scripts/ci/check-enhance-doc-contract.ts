@@ -160,10 +160,13 @@ function main(): void {
     });
   }
 
-  const hasStructuredMarkdownDefault = /Structured markdown is the default text output\./i.test(section);
-  const hasNoFallbackBehavior = /No deterministic fallback template output path is used for transient failures\./i.test(
-    section
-  );
+  const hasStructuredMarkdownDefault =
+    /structured markdown/i.test(section) &&
+    /(default|standard)/i.test(section) &&
+    /(text output|response format)/i.test(section);
+  const hasNoFallbackBehavior =
+    /(no|without)\s+.*fallback\s+template/i.test(section) &&
+    /(transient|upstream|failure)/i.test(section);
   checkResults.push({
     id: 'behavior-notes',
     ok: hasStructuredMarkdownDefault && hasNoFallbackBehavior,

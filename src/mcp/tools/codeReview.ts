@@ -24,6 +24,7 @@ import {
 import {
   parseJsonString,
   validateMaxLength,
+  validateFiniteNumberInRange,
   validateOptionalString,
   validateOneOf,
 } from '../tooling/validation.js';
@@ -52,6 +53,8 @@ export interface ReviewChangesArgs {
   custom_instructions?: string;
   /** File patterns to exclude (comma-separated glob patterns) */
   exclude_patterns?: string;
+  /** Optional AI timeout override in milliseconds for this review call */
+  llm_timeout_ms?: number;
 }
 
 const MAX_DIFF_LENGTH = 1_000_000;
@@ -140,6 +143,13 @@ export async function handleReviewChanges(
       excludePatterns = args.exclude_patterns.split(',').map(p => p.trim());
     }
 
+    validateFiniteNumberInRange(
+      args.llm_timeout_ms,
+      1_000,
+      30 * 60 * 1000,
+      'Invalid \"llm_timeout_ms\": must be a finite number between 1000 and 1800000'
+    );
+
     // Build review options
     const options: ReviewOptions = {
       confidence_threshold: args.confidence_threshold,
@@ -148,6 +158,7 @@ export async function handleReviewChanges(
       changed_lines_only: args.changed_lines_only,
       custom_instructions: args.custom_instructions?.trim(),
       exclude_patterns: excludePatterns,
+      llm_timeout_ms: args.llm_timeout_ms,
     };
 
     // Build review input
@@ -260,6 +271,12 @@ overall_confidence_score, changes_summary, and metadata.
       custom_instructions: {
         type: 'string',
         description: 'Custom instructions for the reviewer (e.g., "Focus on React best practices")',
+      },
+      llm_timeout_ms: {
+        type: 'number',
+        description: 'Optional AI timeout override in milliseconds for this review call (1000-1800000).',
+        minimum: 1000,
+        maximum: 1800000,
       },
       exclude_patterns: {
         type: 'string',

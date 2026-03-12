@@ -210,6 +210,9 @@ export interface ReviewOptions {
 
   /** File patterns to exclude from review (glob patterns) */
   exclude_patterns?: string[];
+
+  /** Optional AI timeout override in milliseconds for this review call */
+  llm_timeout_ms?: number;
 }
 
 /**
