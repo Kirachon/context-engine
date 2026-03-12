@@ -106,15 +106,45 @@ codex mcp add context-engine -- node /absolute/path/to/context-engine/dist/index
    ]
    ```
 
-## Step 5B: Configure Other MCP Clients (Antigravity, Claude Desktop, Cursor)
+## Step 5B: Configure Other MCP Clients (Claude Code, Antigravity, Claude Desktop, Cursor)
 
 If you're using a different MCP client instead of (or in addition to) Codex CLI, follow the instructions below for your specific client.
+For a compact side-by-side version, see [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md).
 
 > **Note:** All MCP clients use the same server command format:
 > ```
 > node /absolute/path/to/context-engine/dist/index.js --workspace /path/to/your/project
 > ```
 > The transport type is **stdio** (standard input/output), not HTTP.
+
+---
+
+### Claude Code
+
+Claude Code supports MCP servers and can be configured through its MCP management commands.
+
+#### Setup Steps
+
+1. **Add the MCP server:**
+
+   ```bash
+   claude mcp add context-engine -- node /absolute/path/to/context-engine/dist/index.js --workspace /path/to/your/project
+   ```
+
+   **Windows example (PowerShell):**
+   ```powershell
+   claude mcp add context-engine -- node "D:\GitProjects\context-engine\dist\index.js" --workspace "D:\GitProjects\your-project"
+   ```
+
+2. **Verify it is registered:**
+
+   ```bash
+   claude mcp list
+   ```
+
+3. **Restart Claude Code** if it is already running.
+
+> If your installed Claude Code version has different MCP command syntax, run `claude mcp --help` and use the equivalent `add`/`list` commands.
 
 ---
 
@@ -191,12 +221,14 @@ Antigravity uses a JSON configuration file for MCP servers.
 
 1. Open Antigravity
 2. Check the MCP servers panel or settings
-3. Verify `context-engine` appears with its tools (38 tools available), including:
+3. Verify `context-engine` appears with its tools (42 tools available), including:
    - `get_context_for_prompt`
    - `semantic_search`
    - `create_plan`
    - `reactive_review_pr`
    - `add_memory`
+   - `review_diff`
+   - `run_static_analysis`
 
 ---
 
@@ -370,7 +402,7 @@ For any MCP client not listed above, use this general pattern:
 3. **Key requirements:**
    - Use **absolute paths** (not relative)
    - Transport: **stdio** (not HTTP)
-   - The server exposes **38 tools** across Context, Planning, Memory, and Review categories.
+   - The server exposes **42 tools** across Context, Planning, Memory, Review, and validation categories.
 
 4. **Restart your MCP client** after configuration changes
 
@@ -389,7 +421,7 @@ codex
 
 1. Launch Codex CLI: `codex`
 2. In the TUI, type `/mcp` to see connected MCP servers
-3. You should see `context-engine` listed with **38 tools** available across 6 categories (Core, Memory, Planning, Plan Management, Review, Reactive).
+3. You should see `context-engine` listed with **42 tools** available across retrieval, planning, memory, review, and validation categories.
 
 ## Step 8: Try It Out!
 

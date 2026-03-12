@@ -18,6 +18,27 @@ const ENHANCED_PROMPT_PLACEHOLDER = 'enhanced prompt goes here';
 const DEFAULT_CONTEXT_TOP_K = 3;
 const DEFAULT_CONTEXT_MAX_FILES = 3;
 const DEFAULT_CONTEXT_MAX_CHARS = 1200;
+const ENHANCE_PROMPT_TEMPLATE_VERSION = '2.0.0';
+
+const REQUIRED_STRUCTURED_SECTIONS = [
+  'Objective',
+  'Critical Context',
+  'Assumptions',
+  'Constraints',
+  'Proposed Plan',
+  'Validation Checklist',
+  'Risks and Mitigations',
+  'Open Questions',
+  'Done Definition',
+] as const;
+
+const CORE_REQUIREMENT_LINES = [
+  'Define the exact goal and expected outcome.',
+  'Identify affected files/components before changes.',
+  'Implement minimal, safe changes first.',
+  'Validate with concrete checks (tests/build/runtime).',
+  'Report what changed, risks, and follow-up actions.',
+] as const;
 
 type EnhancePromptMode = 'off' | 'light' | 'rich';
 
@@ -34,6 +55,16 @@ type ContextSnippetCacheEntry = {
 };
 
 const contextSnippetCache = new Map<string, ContextSnippetCacheEntry>();
+
+type StructuredValidationResult = {
+  valid: boolean;
+  reason:
+    | 'missing_section'
+    | 'section_order'
+    | 'empty_section'
+    | 'duplicate_section'
+    | 'no_structured_headers';
+};
 
 function normalizeTimeout(raw: string | undefined, fallback: number, min: number, max: number): number {
   const parsed = raw ? Number(raw) : NaN;
@@ -211,17 +242,130 @@ function isAuthOrConfigError(errorMessage: string): boolean {
   );
 }
 
-function buildFastFallbackEnhancement(originalPrompt: string): string {
-  const normalized = originalPrompt.trim();
+function parseStructuredHeadersIgnoringCodeFences(content: string): string[] {
+  const lines = content.split(/\r?\n/);
+  const headers: string[] = [];
+  let inFence = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('```')) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+
+    const match = trimmed.match(/^##\s+(.+?)\s*$/);
+    if (match?.[1]) {
+      headers.push(match[1].trim());
+    }
+  }
+
+  return headers;
+}
+
+function validateStructuredEnhancedPrompt(content: string): StructuredValidationResult {
+  const headers = parseStructuredHeadersIgnoringCodeFences(content);
+  if (headers.length === 0) {
+    return { valid: false, reason: 'no_structured_headers' };
+  }
+
+  const seen = new Set<string>();
+  for (const header of headers) {
+    if (seen.has(header)) {
+      return { valid: false, reason: 'duplicate_section' };
+    }
+    seen.add(header);
+  }
+
+  for (const required of REQUIRED_STRUCTURED_SECTIONS) {
+    if (!seen.has(required)) {
+      return { valid: false, reason: 'missing_section' };
+    }
+  }
+
+  const requiredIndexes = REQUIRED_STRUCTURED_SECTIONS.map((section) => headers.indexOf(section));
+  for (let i = 1; i < requiredIndexes.length; i++) {
+    if (requiredIndexes[i] <= requiredIndexes[i - 1]) {
+      return { valid: false, reason: 'section_order' };
+    }
+  }
+
+  // Required sections must have non-empty bodies.
+  for (const section of REQUIRED_STRUCTURED_SECTIONS) {
+    const headerRegex = new RegExp(`^##\\s+${section.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*$`, 'm');
+    const headerMatch = content.match(headerRegex);
+    if (!headerMatch || headerMatch.index === undefined) {
+      return { valid: false, reason: 'missing_section' };
+    }
+    const start = (headerMatch.index ?? 0) + headerMatch[0].length;
+    const remainder = content.slice(start);
+    const nextHeaderMatch = remainder.match(/\n##\s+/);
+    const body = (nextHeaderMatch ? remainder.slice(0, nextHeaderMatch.index) : remainder).trim();
+    if (!body) {
+      return { valid: false, reason: 'empty_section' };
+    }
+  }
+
+  return { valid: true, reason: 'no_structured_headers' };
+}
+
+function buildRepairEnhancementPrompt(originalPrompt: string, malformedEnhancedPrompt: string): string {
   return [
-    `Improve and execute this request with clear scope and outputs: ${normalized}`,
+    "Reformat the enhanced prompt to strict sectioned markdown.",
+    "Do not change core intent. Only fix structure, ordering, and missing/empty sections.",
+    "",
+    "Return exactly this section order with non-empty bullet content:",
+    ...REQUIRED_STRUCTURED_SECTIONS.map((section) => `- ${section}`),
+    "",
+    "Also ensure these requirement points are explicitly covered in the section content:",
+    ...CORE_REQUIREMENT_LINES.map((line, index) => `${index + 1}. ${line}`),
+    "",
+    "Use this exact output envelope:",
+    "### BEGIN RESPONSE ###",
+    "Here is an enhanced version of the original instruction that is more specific and clear:",
+    "<enhanced-prompt>...</enhanced-prompt>",
+    "### END RESPONSE ###",
+    "",
+    "Original instruction:",
+    originalPrompt,
+    "",
+    "Current malformed enhanced prompt:",
+    malformedEnhancedPrompt,
+  ].join('\n');
+}
+
+function buildStructuredPromptFromText(originalPrompt: string, candidateText: string): string {
+  const trimmed = candidateText.trim();
+  const objective = trimmed.split(/\r?\n/)[0]?.trim() || originalPrompt.trim();
+  const criticalContext = trimmed.length > 240 ? `${trimmed.slice(0, 240)}...` : trimmed;
+  return [
+    '## Objective',
+    `- ${objective}`,
     '',
-    'Requirements:',
-    '1. Define the exact goal and expected outcome.',
-    '2. Identify affected files/components before changes.',
-    '3. Implement minimal, safe changes first.',
-    '4. Validate with concrete checks (tests/build/runtime).',
-    '5. Report what changed, risks, and follow-up actions.',
+    '## Critical Context',
+    `- ${criticalContext}`,
+    '',
+    '## Assumptions',
+    '- Existing architecture and dependencies remain unchanged unless explicitly required.',
+    '',
+    '## Constraints',
+    '- Keep changes minimal and safe.',
+    '',
+    '## Proposed Plan',
+    `- ${trimmed || originalPrompt.trim()}`,
+    '',
+    '## Validation Checklist',
+    ...CORE_REQUIREMENT_LINES.map((line) => `- ${line}`),
+    '',
+    '## Risks and Mitigations',
+    '- Risk: hidden regressions. Mitigation: targeted tests and explicit verification.',
+    '',
+    '## Open Questions',
+    '- None identified.',
+    '',
+    '## Done Definition',
+    '- Output is structured, actionable, and validated.',
   ].join('\n');
 }
 
@@ -239,6 +383,11 @@ export function buildAIEnhancementPrompt(originalPrompt: string, contextBlock?: 
     "Rewrite and enhance this instruction to make it clearer, more specific, " +
     "less ambiguous, and correct any mistakes. " +
     "If there is code in triple backticks (```) consider whether it is a code sample and should remain unchanged. " +
+    "The enhanced prompt must be structured markdown with exact section headers in this order:\n" +
+    `${REQUIRED_STRUCTURED_SECTIONS.map((section) => `- ${section}`).join('\n')}\n` +
+    "Within the section content, explicitly cover these requirement points:\n" +
+    `${CORE_REQUIREMENT_LINES.map((line, index) => `${index + 1}. ${line}`).join('\n')}\n` +
+    "Each section must have non-empty bullet points. " +
     "Reply with the following format:\n\n" +
     "### BEGIN RESPONSE ###\n" +
     "Here is an enhanced version of the original instruction that is more specific and clear:\n" +
@@ -278,11 +427,30 @@ export function parseEnhancedPrompt(response: string): string | null {
 
 export interface PromptEnhancementResult {
   enhancedPrompt: string;
-  source: 'ai' | 'fallback' | 'raw_response';
+  source: 'ai';
+  templateVersion: string;
   reasonCode:
     | 'ai_enhanced'
-    | 'fallback_timeout_or_queue_or_transient'
-    | 'unexpected_response_format';
+    | 'ai_enhanced_repaired';
+}
+
+export type EnhancePromptErrorCode =
+  | 'TRANSIENT_UPSTREAM'
+  | 'VALIDATION_FAILED'
+  | 'REPAIR_FAILED'
+  | 'AUTH'
+  | 'QUOTA';
+
+export class EnhancePromptError extends Error {
+  constructor(
+    public readonly code: EnhancePromptErrorCode,
+    message: string,
+    public readonly retryable: boolean,
+    public readonly retryAfterMs?: number
+  ) {
+    super(message);
+    this.name = 'EnhancePromptError';
+  }
 }
 
 export async function internalPromptEnhancer(
@@ -452,25 +620,97 @@ export async function internalPromptEnhancerDetailed(
       throw lastTransientError;
     }
 
-    // Parse the enhanced prompt from the response
-    const enhanced = parseEnhancedPrompt(response);
+    const performValidation = (candidate: string): StructuredValidationResult =>
+      validateStructuredEnhancedPrompt(candidate);
 
+    // Parse and validate enhanced prompt.
+    let enhanced = parseEnhancedPrompt(response);
     if (!enhanced) {
-      // If parsing fails, return the raw response with a note
-      console.error('[AI Enhancement] Failed to parse enhanced prompt from response, returning raw response');
-      console.error(`[AI Enhancement] Response preview: ${response.substring(0, 200)}...`);
+      throw new EnhancePromptError(
+        'VALIDATION_FAILED',
+        'Enhanced prompt response format is invalid. Please retry.',
+        true
+      );
+    }
 
-      // Try to extract any useful content from the response
-      // If the response doesn't contain the expected tags, it might still be useful
-      if (response && response.length > 0) {
-        return {
-          enhancedPrompt: `${response}\n\n---\n_Note: AI enhancement completed but response format was unexpected._`,
-          source: 'raw_response',
-          reasonCode: 'unexpected_response_format',
-        };
+    if (parseStructuredHeadersIgnoringCodeFences(enhanced).length === 0) {
+      enhanced = buildStructuredPromptFromText(prompt, enhanced);
+    }
+
+    let validation = performValidation(enhanced);
+    if (!validation.valid) {
+      incCounter(
+        'context_engine_enhance_prompt_validation_failed_total',
+        { mode, reason: validation.reason },
+        1,
+        'Enhance prompt validation failures before repair.'
+      );
+      const repairTimeoutMs = Math.max(500, Math.floor(budget.stageBudgetMs('enhancement') * 0.3));
+      if (repairTimeoutMs <= 0) {
+        throw new EnhancePromptError(
+          'REPAIR_FAILED',
+          'Enhanced prompt is not in the required structure and repair budget is exhausted. Please retry.',
+          true
+        );
       }
 
-      throw new Error('AI enhancement returned empty response');
+      incCounter(
+        'context_engine_enhance_prompt_repair_attempted_total',
+        { mode },
+        1,
+        'Enhance prompt repair attempts.'
+      );
+
+      const repairResponse = await withTimeout(
+        serviceClient.searchAndAsk(prompt, buildRepairEnhancementPrompt(prompt, enhanced), {
+          timeoutMs: repairTimeoutMs,
+        }),
+        repairTimeoutMs,
+        'Enhancement repair'
+      );
+      const repaired = parseEnhancedPrompt(repairResponse);
+      if (!repaired) {
+        incCounter(
+          'context_engine_enhance_prompt_repair_failed_total',
+          { mode, reason: 'parse_failed' },
+          1,
+          'Enhance prompt repair failures.'
+        );
+        throw new EnhancePromptError(
+          'REPAIR_FAILED',
+          'Enhanced prompt repair failed due to invalid format. Please retry.',
+          true
+        );
+      }
+
+      validation = performValidation(repaired);
+      if (!validation.valid) {
+        incCounter(
+          'context_engine_enhance_prompt_repair_failed_total',
+          { mode, reason: validation.reason },
+          1,
+          'Enhance prompt repair failures.'
+        );
+        throw new EnhancePromptError(
+          'REPAIR_FAILED',
+          'Enhanced prompt repair failed to satisfy required sections. Please retry.',
+          true
+        );
+      }
+
+      enhanced = repaired;
+      incCounter(
+        'context_engine_enhance_prompt_repair_succeeded_total',
+        { mode },
+        1,
+        'Enhance prompt repair successes.'
+      );
+      return {
+        enhancedPrompt: enhanced,
+        source: 'ai',
+        templateVersion: ENHANCE_PROMPT_TEMPLATE_VERSION,
+        reasonCode: 'ai_enhanced_repaired',
+      };
     }
 
     console.error(`[AI Enhancement] Successfully enhanced prompt (${enhanced.length} chars)`);
@@ -489,9 +729,13 @@ export async function internalPromptEnhancerDetailed(
     return {
       enhancedPrompt: enhanced,
       source: 'ai',
+      templateVersion: ENHANCE_PROMPT_TEMPLATE_VERSION,
       reasonCode: 'ai_enhanced',
     };
   } catch (error) {
+    if (error instanceof EnhancePromptError) {
+      throw error;
+    }
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error(`[AI Enhancement] Error: ${errorMessage}`);
 
@@ -502,8 +746,10 @@ export async function internalPromptEnhancerDetailed(
         Date.now() - totalStartMs,
         { help: 'Enhance prompt end-to-end duration in seconds.' }
       );
-      throw new Error(
-        'AI enhancement is blocked because the Codex session has hit its usage limit. Wait for the quota window to reset, then retry.'
+      throw new EnhancePromptError(
+        'QUOTA',
+        'AI enhancement is blocked because the Codex session has hit its usage limit. Wait for the quota window to reset, then retry.',
+        false
       );
     }
 
@@ -520,30 +766,32 @@ export async function internalPromptEnhancerDetailed(
         Date.now() - totalStartMs,
         { help: 'Enhance prompt end-to-end duration in seconds.' }
       );
-      throw new Error(
-        'AI enhancement requires authentication and valid provider configuration. Please ensure your OpenAI session is authenticated and configured.'
+      throw new EnhancePromptError(
+        'AUTH',
+        'AI enhancement requires authentication and valid provider configuration. Please ensure your OpenAI session is authenticated and configured.',
+        false
       );
     }
 
     if (isFallbackEligibleError(errorMessage)) {
-      console.error('[AI Enhancement] Fast fallback used due to timeout/queue pressure');
+      console.error('[AI Enhancement] Returning transient upstream error (no fallback template output)');
       incCounter(
-        'context_engine_enhance_prompt_fallback_total',
+        'context_engine_enhance_prompt_transient_error_total',
         { mode, reason: 'timeout_or_queue_or_transient' },
         1,
-        'Enhance prompt deterministic fallback count by reason.'
+        'Enhance prompt transient upstream errors.'
       );
       observeDurationMs(
         'context_engine_enhance_prompt_duration_seconds',
-        { mode, result: 'fallback' },
+        { mode, result: 'transient_error' },
         Date.now() - totalStartMs,
         { help: 'Enhance prompt end-to-end duration in seconds.' }
       );
-      return {
-        enhancedPrompt: buildFastFallbackEnhancement(prompt),
-        source: 'fallback',
-        reasonCode: 'fallback_timeout_or_queue_or_transient',
-      };
+      throw new EnhancePromptError(
+        'TRANSIENT_UPSTREAM',
+        'AI enhancement is temporarily unavailable (timeout, queue pressure, or transient upstream issue). Please retry shortly.',
+        true
+      );
     }
 
     observeDurationMs(

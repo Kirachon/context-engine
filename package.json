@@ -41,6 +41,10 @@
     "ci:generate:retrieval-quality-telemetry": "node --import tsx scripts/ci/generate-retrieval-quality-telemetry.ts --out artifacts/bench/retrieval-quality-telemetry.json",
     "ci:generate:retrieval-quality-report": "npm run -s ci:generate:retrieval-quality-telemetry && node --import tsx scripts/ci/generate-retrieval-quality-report.ts --fixture-pack config/ci/retrieval-quality-fixture-pack.json --out artifacts/bench/retrieval-quality-report.json",
     "ci:check:retrieval-quality-gate": "npm run -s ci:generate:retrieval-quality-report && node --import tsx scripts/ci/check-retrieval-quality-gate.ts --report artifacts/bench/retrieval-quality-report.json --out artifacts/bench/retrieval-quality-gate.json"
+    ,
+    "ci:check:enhance-prompt-contract": "node --import tsx scripts/ci/check-enhance-prompt-contract.ts",
+    "ci:check:enhance-doc-contract": "node --import tsx scripts/ci/check-enhance-doc-contract.ts",
+    "ops:check:process-health": "powershell -ExecutionPolicy Bypass -File .\\scripts\\ops\\check-context-engine-process-health.ps1"
   },
   "keywords": [
     "mcp",

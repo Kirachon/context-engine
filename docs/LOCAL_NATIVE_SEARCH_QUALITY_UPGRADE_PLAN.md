@@ -2,7 +2,7 @@
 
 Last updated: 2026-03-11  
 Owner: Context Engine team  
-Status: In progress
+Status: Complete
 
 ## Summary
 Upgrade Context Engine search quality without reintroducing Auggie dependency by evolving the current `local_native` pipeline into a staged retrieval system:
@@ -97,3 +97,17 @@ This plan keeps current parity/reliability protections while adding judged quali
 
 Latest stage receipt: [`docs/rollout-evidence/2026-03-11/observe-shadow-enforce-default-on-receipt.md`](./rollout-evidence/2026-03-11/observe-shadow-enforce-default-on-receipt.md)
 Current status: observe/shadow/enforce/default-on all passed on 2026-03-11 (`overall_score=100.00` on strict parity gate).
+
+## Final Outcomes (2026-03-11)
+- Strict parity gate: `artifacts/bench/auggie-capability-parity-gate.json` -> `status=pass`, `overall_score=100.00`.
+- Parity report: `artifacts/bench/retrieval-parity-pr.json` -> all listed evaluations passed.
+- Quality report: `artifacts/bench/retrieval-quality-report.json` -> pass rate `100%` (10/10).
+- Quality uplift vs baseline:
+  - `nDCG@10`: `+14.0%`
+  - `MRR@10`: `+12.5%`
+  - `Recall@50`: `+22.0%`
+
+## Plain-Language Meaning
+- Users see useful results higher in the list more often.
+- The first "good answer" appears sooner.
+- More relevant matches are captured in the top results window.

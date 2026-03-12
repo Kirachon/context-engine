@@ -10,6 +10,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
    - Installation steps
    - Authentication setup
    - Codex CLI configuration
+   - Claude Code / Antigravity client setup
    - First queries
 
 2. **[README.md](README.md)** - Project overview
@@ -28,6 +29,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 ### For Users
 
 - **[QUICKSTART.md](QUICKSTART.md)** - Fast setup guide
+- **[docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)** - Client-by-client setup (Codex, Claude Code, Antigravity, Claude Desktop, Cursor)
 - **[README.md](README.md)** - Complete user guide
 - **[docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)** - Full Windows deployment manual
 - **[EXAMPLES.md](EXAMPLES.md)** - Real-world usage examples
@@ -54,8 +56,9 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 #### Configure Codex CLI
 → [QUICKSTART.md](QUICKSTART.md) - Step 5
 
-#### Configure Other MCP Clients (Antigravity, Claude Desktop, Cursor)
+#### Configure Other MCP Clients (Claude Code, Antigravity, Claude Desktop, Cursor)
 → [QUICKSTART.md](QUICKSTART.md) - Step 5B
+→ [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) - Full client guide
 
 #### Understand the Architecture
 → [ARCHITECTURE.md](ARCHITECTURE.md) - Full details
@@ -83,6 +86,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 |------|---------|----------|
 | [README.md](README.md) | Project overview and usage | Everyone |
 | [QUICKSTART.md](QUICKSTART.md) | 5-minute setup guide | New users |
+| [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) | MCP client setup by platform/client | New users |
 | [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md) | Full Windows deployment manual | Windows users |
 | [EXAMPLES.md](EXAMPLES.md) | Real-world usage examples | Users |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Detailed architecture | Developers |
@@ -137,7 +141,7 @@ npm run build
 npm run verify
 
 # 4. Authenticate
-auggie login
+codex login
 
 # 5. Test
 node dist/index.js --help
@@ -163,8 +167,8 @@ npm run verify
 # Check MCP configuration
 codex mcp list
 
-# Test auggie directly
-auggie search "test" --limit 1
+# Test server directly
+node dist/index.js --workspace . --index
 ```
 
 ## 🎓 Learning Path
@@ -190,7 +194,6 @@ auggie search "test" --limit 1
 ## 🔗 External Resources
 
 - **MCP Protocol**: https://modelcontextprotocol.io/
-- **Auggie SDK**: https://docs.augmentcode.com/
 - **MCP Inspector**: https://github.com/modelcontextprotocol/inspector
 - **Codex CLI**: https://github.com/openai/codex
 
@@ -214,8 +217,8 @@ auggie search "test" --limit 1
 
 Before asking for help, verify:
 - [ ] Node.js 18+ installed (`node --version`)
-- [ ] Auggie CLI installed (`auggie --version`)
-- [ ] Authenticated (`auggie login` or env vars set)
+- [ ] MCP client installed (for example `codex` or `claude`)
+- [ ] Authenticated where needed (for example `codex login`)
 - [ ] Dependencies installed (`npm install`)
 - [ ] Project built (`npm run build`)
 - [ ] Setup verified (`npm run verify`)

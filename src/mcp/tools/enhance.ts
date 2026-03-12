@@ -23,6 +23,7 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalPromptEnhancerDetailed } from '../../internal/handlers/enhancement.js';
+import { EnhancePromptError } from '../../internal/handlers/enhancement.js';
 import { validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
 
 export interface EnhancePromptArgs {
@@ -32,6 +33,7 @@ export interface EnhancePromptArgs {
 
 const MAX_PROMPT_LENGTH = 10000;
 const ENHANCE_RESPONSE_FORMATS = new Set(['text', 'json']);
+const ENHANCE_RESPONSE_SCHEMA_VERSION = '2.0.0';
 
 // ============================================================================
 // AI-Powered Enhancement (using searchAndAsk)
@@ -64,26 +66,48 @@ export async function handleEnhancePrompt(
 
   // Always use AI-powered enhancement
   console.error('[enhance_prompt] Using AI-powered enhancement mode');
-  const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient);
   const responseFormat = process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT?.trim().toLowerCase() ?? 'text';
+  const normalizedResponseFormat = ENHANCE_RESPONSE_FORMATS.has(responseFormat) ? responseFormat : 'text';
 
-  if (!ENHANCE_RESPONSE_FORMATS.has(responseFormat)) {
+  try {
+    const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient);
+    if (normalizedResponseFormat === 'json') {
+      return JSON.stringify(
+        {
+          schema_version: ENHANCE_RESPONSE_SCHEMA_VERSION,
+          template_version: enhancement.templateVersion,
+          enhanced_prompt: enhancement.enhancedPrompt,
+          source: enhancement.source,
+          reason_code: enhancement.reasonCode,
+        },
+        null,
+        2
+      );
+    }
+
     return enhancement.enhancedPrompt;
-  }
+  } catch (error) {
+    if (error instanceof EnhancePromptError) {
+      if (normalizedResponseFormat === 'json') {
+        return JSON.stringify(
+          {
+            schema_version: ENHANCE_RESPONSE_SCHEMA_VERSION,
+            error_code: error.code,
+            message: error.message,
+            retryable: error.retryable,
+            ...(typeof error.retryAfterMs === 'number' ? { retry_after_ms: error.retryAfterMs } : {}),
+          },
+          null,
+          2
+        );
+      }
 
-  if (responseFormat === 'json') {
-    return JSON.stringify(
-      {
-        enhanced_prompt: enhancement.enhancedPrompt,
-        source: enhancement.source,
-        reason_code: enhancement.reasonCode,
-      },
-      null,
-      2
-    );
-  }
+      const retryHint = error.retryable ? ' Retry after a short delay.' : '';
+      throw new Error(`[${error.code}] ${error.message}${retryHint}`);
+    }
 
-  return enhancement.enhancedPrompt;
+    throw error;
+  }
 }
 
 /**
@@ -95,8 +119,9 @@ export const enhancePromptTool = {
 
 This tool follows the Prompt Enhancer pattern:
 - Uses the searchAndAsk AI pipeline for intelligent prompt rewriting
-- Produces natural language enhancement with codebase context
+- Produces structured markdown enhancement with codebase context
 - Requires network access and an authenticated OpenAI session
+- Returns explicit typed errors on transient/auth/quota failures (no fallback template output path)
 
 Example:
   Input:  { prompt: "fix the login bug" }
@@ -104,7 +129,7 @@ Example:
            Specifically, investigate the login function in src/auth/login.ts
            which handles JWT token validation and session management..."
 
-The tool automatically searches for relevant code context and uses AI to rewrite your prompt with specific file references and actionable details.`,
+The tool automatically searches for relevant code context and uses AI to rewrite your prompt with specific file references and actionable details.`, 
   inputSchema: {
     type: 'object',
     properties: {

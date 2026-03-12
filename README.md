@@ -92,6 +92,7 @@ npm run ci:check:auggie-capability-parity:strict
 ## Documentation Quick Links
 
 - Setup: [QUICKSTART.md](QUICKSTART.md)
+- MCP Clients: [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)
 - Getting Started: [GET_STARTED.md](GET_STARTED.md)
 - Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 - Testing: [TESTING.md](TESTING.md)
