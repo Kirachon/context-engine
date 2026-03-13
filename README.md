@@ -97,6 +97,7 @@ npm run ci:check:legacy-capability-parity:strict
 - Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
 - Testing: [TESTING.md](TESTING.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
+- Memory Operations: [docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md)
 - All Docs: [INDEX.md](INDEX.md)
 
 ## Current Status

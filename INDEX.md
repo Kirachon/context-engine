@@ -32,6 +32,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 - **[docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)** - Client-by-client setup (Codex, Claude Code, Antigravity, Claude Desktop, Cursor)
 - **[README.md](README.md)** - Complete user guide
 - **[docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)** - Full Windows deployment manual
+- **[docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md)** - Memory quality, cleanup, and release health checks
 - **[EXAMPLES.md](EXAMPLES.md)** - Real-world usage examples
 - **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
 - **[TESTING.md](TESTING.md)** - How to test the server
@@ -88,6 +89,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 | [QUICKSTART.md](QUICKSTART.md) | 5-minute setup guide | New users |
 | [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) | MCP client setup by platform/client | New users |
 | [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md) | Full Windows deployment manual | Windows users |
+| [docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md) | Memory governance and maintenance | Operators & Maintainers |
 | [EXAMPLES.md](EXAMPLES.md) | Real-world usage examples | Users |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Detailed architecture | Developers |
 | [TESTING.md](TESTING.md) | Testing strategies | Users & Developers |
