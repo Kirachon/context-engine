@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-03-13T10:30:22.520Z",
+  "inputs": {
+    "quality_report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json",
+    "telemetry": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-telemetry.json",
+    "holdout": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-shadow-canary-gate.json"
+  },
+  "thresholds": {
+    "max_skipped_docs_rate_pct": 20,
+    "max_embed_batch_p95_ms": 250
+  },
+  "observed": {
+    "skipped_docs_rate_pct": 0,
+    "embed_batch_p95_ms": 45
+  },
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  },
+  "reproducibility_lock": {
+    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
+    "dataset_id": "holdout_v1",
+    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716"
+  }
+}

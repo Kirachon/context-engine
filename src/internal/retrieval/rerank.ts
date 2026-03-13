@@ -62,6 +62,21 @@ function hasExactSymbolMatch(result: InternalSearchResult, queryTokens: string[]
   return queryTokens.some(token => token.length >= 3 && haystack.includes(token));
 }
 
+function pathDepth(path: string): number {
+  const segments = path.split(/[\\/]+/g).filter(Boolean);
+  return segments.length;
+}
+
+function exactPathTailMatch(path: string, queryTokens: string[]): boolean {
+  if (queryTokens.length === 0) return false;
+  const normalizedPath = path.toLowerCase();
+  return queryTokens.some((token) => token.length >= 3 && normalizedPath.endsWith(`${token}.ts`))
+    || queryTokens.some((token) => token.length >= 3 && normalizedPath.endsWith(`${token}.js`))
+    || queryTokens.some((token) => token.length >= 3 && normalizedPath.endsWith(`${token}.py`))
+    || queryTokens.some((token) => token.length >= 3 && normalizedPath.includes(`/${token}/`))
+    || queryTokens.some((token) => token.length >= 3 && normalizedPath.includes(`\\${token}\\`));
+}
+
 export function rerankResults(
   results: InternalSearchResult[],
   options: RerankOptions = {}
@@ -93,11 +108,20 @@ export function rerankResults(
     const variantWeightBonus = (result.variantWeight - 0.5) * 0.05;
     let combinedScore = baseScore + frequencyBonus + originalBonus + variantWeightBonus;
 
-    if (mode === 'v2') {
+    if (mode === 'v2' || mode === 'v3') {
       const pathOverlap = overlapScore(queryTokens, buildPathTokenSet(result.path));
       const sourceConsensus = Math.max(0, (sourceStats.get(signature)?.size ?? 1) - 1);
       const exactSymbolBonus = hasExactSymbolMatch(result, queryTokens) ? 0.04 : 0;
       combinedScore += (pathOverlap * 0.08) + (sourceConsensus * 0.03) + exactSymbolBonus;
+    }
+
+    if (mode === 'v3') {
+      const sourceConsensus = Math.max(0, (sourceStats.get(signature)?.size ?? 1) - 1);
+      const lineStart = parseStartLine(result.lines);
+      const lineProximityBonus = Number.isFinite(lineStart) && lineStart < 120 ? 0.03 : 0;
+      const pathSpecificityBonus = exactPathTailMatch(result.path, queryTokens) ? 0.05 : 0;
+      const depthPenalty = Math.max(0, pathDepth(result.path) - 8) * 0.0025;
+      combinedScore += (sourceConsensus * 0.015) + lineProximityBonus + pathSpecificityBonus - depthPenalty;
     }
 
     return {

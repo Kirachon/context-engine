@@ -11,6 +11,10 @@ Runtime and rollout control flags used by operators.
 | `CE_ROLLOUT_CANARY_PERCENT` | integer | `5` | Release owner | Percent of traffic in canary or controlled ramp. |
 | `CE_ROLLOUT_ENFORCE_GATES` | boolean | `true` | Release owner | Blocks stage progression when KPI gates fail. |
 | `CE_ROLLOUT_BASELINE_ID` | string | empty | Perf owner | Baseline dataset/run identifier used for gate comparisons. |
+| `CE_RETRIEVAL_HYBRID_V1` | boolean | `false` | Search owner | Enables hybrid retrieval planning signals (semantic + keyword + symbol-aware). |
+| `CE_RETRIEVAL_RANKING_V3` | boolean | `false` | Search owner | Enables stronger ranking signal set (v3) behind staged rollout. |
+| `CE_CONTEXT_PACKS_V2` | boolean | `false` | Search owner | Enables richer context-pack output sections (why selected + dependency map). |
+| `CE_RETRIEVAL_QUALITY_GUARD_V1` | boolean | `false` | Search owner | Enables quality-guard state reporting and blend/revert fallback controls. |
 
 ## Existing performance and telemetry flags (reference)
 

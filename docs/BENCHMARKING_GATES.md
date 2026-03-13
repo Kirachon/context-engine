@@ -8,6 +8,9 @@ Baseline rules:
 - Compare candidate vs approved baseline for the same query set and environment class.
 - Latency deltas use percent change from baseline.
 - Error rate deltas use percentage points (pp), not percent.
+- User-visible retrieval-upgrade KPI contract (release stream):
+  - `nDCG@10 >= +8%`, `MRR@10 >= +6%`, `Recall@50 >= +10%` vs approved baseline.
+  - `p50 <= -20%`, `p95 <= -25%` vs approved baseline on large-dataset runs.
 
 ## PR Gates (must pass)
 

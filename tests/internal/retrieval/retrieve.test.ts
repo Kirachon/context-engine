@@ -1,15 +1,18 @@
 import { retrieve } from '../../../src/internal/retrieval/retrieve.js';
 import { internalRetrieveCode } from '../../../src/internal/handlers/retrieval.js';
 import { setInternalCache } from '../../../src/internal/handlers/performance.js';
+import { FEATURE_FLAGS } from '../../../src/config/features.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 
 describe('retrieve internal pipeline', () => {
   const originalEnv = { ...process.env };
+  const originalQualityGuard = FEATURE_FLAGS.retrieval_quality_guard_v1;
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = originalQualityGuard;
     setInternalCache(undefined);
   });
 
@@ -237,6 +240,29 @@ describe('retrieve internal pipeline', () => {
     expect(results.map((item) => item.path).length).toBe(3);
   });
 
+  it('supports rankingMode=v3 with stronger path-tail prioritization', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/core/auth/loginService.ts', content: 'export function loginService() {}', relevanceScore: 0.8, lines: '1-2' },
+        { path: 'src/core/auth/login.ts', content: 'export function login() {}', relevanceScore: 0.8, lines: '200-210' },
+        { path: 'src/core/auth/helpers.ts', content: 'export function helper() {}', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const results = await retrieve('loginService', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      rankingMode: 'v3' as any,
+      topK: 5,
+    });
+
+    expect(results[0]?.path).toContain('loginService.ts');
+    expect(results.map((item) => item.path).length).toBe(3);
+  });
+
   it('keeps rewrite v2 guardrails for code-like queries and profile-aware variant caps', async () => {
     const codeLikeClient = {
       semanticSearch: jest.fn(async () => []),
@@ -373,5 +399,32 @@ describe('retrieve internal pipeline', () => {
     expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(2);
     expect(cache.get).not.toHaveBeenCalled();
     expect(cache.set).not.toHaveBeenCalled();
+  });
+
+  it('activates quality guard blend fallback when top scores are weak', async () => {
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
+
+    const serviceClient = {
+      semanticSearch: jest
+        .fn()
+        .mockResolvedValueOnce([])
+        .mockResolvedValueOnce([
+          { path: 'src/fallback.ts', content: 'fallback result', relevanceScore: 0.91, lines: '1-2', matchType: 'semantic' },
+        ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const response = await internalRetrieveCode('weak query', serviceClient, {
+      topK: 3,
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      rankingMode: 'v3' as any,
+    });
+
+    expect(response.qualityGuardState).toBe('enabled');
+    expect(response.fallbackState).toBe('active');
+    expect(response.results.some((item) => item.path === 'src/fallback.ts')).toBe(true);
   });
 });

@@ -65,7 +65,13 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     denseWeight: Math.max(0, Math.min(1, options?.denseWeight ?? 0)),
     profile: options?.profile ?? 'balanced',
     rewriteMode: options?.rewriteMode ?? (featureEnabled('retrieval_rewrite_v2') ? 'v2' : 'v1'),
-    rankingMode: options?.rankingMode ?? (featureEnabled('retrieval_ranking_v2') ? 'v2' : 'v1'),
+    rankingMode: options?.rankingMode ?? (
+      featureEnabled('retrieval_ranking_v3')
+        ? 'v3'
+        : featureEnabled('retrieval_ranking_v2')
+          ? 'v2'
+          : 'v1'
+    ),
     denseProvider: options?.denseProvider,
     log: options?.log ?? false,
     bypassCache: options?.bypassCache ?? false,
@@ -202,68 +208,77 @@ export async function retrieve(
   }).localKeywordSearch;
 
   for (const variant of expandedQueries) {
-    try {
-      const results = await withTimeout(
-        semanticSearch(variant.query, settings.perQueryTopK),
-        settings.timeoutMs,
-        []
-      );
-
-      for (const result of results) {
-        const semanticScore = result.relevanceScore ?? result.score ?? 0;
-        semanticCandidates.push({
-          ...result,
-          retrievalSource: 'semantic',
-          semanticScore,
-          combinedScore: semanticScore,
-          queryVariant: variant.query,
-          variantIndex: variant.index,
-          variantWeight: variant.weight,
-        });
-      }
-    } catch (error) {
+    const semanticPromise = withTimeout(
+      semanticSearch(variant.query, settings.perQueryTopK),
+      settings.timeoutMs,
+      []
+    ).catch((error) => {
       if (settings.log) {
         console.error(`[retrieve] Failed variant \"${variant.query}\":`, error);
       }
-    }
+      return [] as SearchResult[];
+    });
 
-    if (settings.enableLexical && typeof localKeywordSearch === 'function') {
-      try {
-        const lexicalResults = await withTimeout(
+    const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
+      ? withTimeout(
           localKeywordSearch(variant.query, settings.perQueryTopK),
           settings.timeoutMs,
           []
-        );
-        lexicalCandidates.push(...scoreLexicalCandidates(lexicalResults, {
-          query,
-          queryVariant: variant.query,
-          variantIndex: variant.index,
-          variantWeight: variant.weight,
-        }));
-      } catch (error) {
-        if (settings.log) {
-          console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
-        }
-      }
-    }
+        ).catch((error) => {
+          if (settings.log) {
+            console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
+          }
+          return [] as SearchResult[];
+        })
+      : Promise.resolve([] as SearchResult[]);
 
-    if (settings.enableDense && denseProvider) {
-      try {
-        const denseResults = await withTimeout(
+    const densePromise = settings.enableDense && denseProvider
+      ? withTimeout(
           denseProvider.search(variant.query, settings.perQueryTopK),
           settings.timeoutMs,
           []
-        );
-        denseCandidates.push(...scoreDenseCandidates(denseResults, {
-          queryVariant: variant.query,
-          variantIndex: variant.index,
-          variantWeight: variant.weight,
-        }));
-      } catch (error) {
-        if (settings.log) {
-          console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
-        }
-      }
+        ).catch((error) => {
+          if (settings.log) {
+            console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
+          }
+          return [] as SearchResult[];
+        })
+      : Promise.resolve([] as SearchResult[]);
+
+    const [semanticResults, lexicalResults, denseResults] = await Promise.all([
+      semanticPromise,
+      lexicalPromise,
+      densePromise,
+    ]);
+
+    for (const result of semanticResults) {
+      const semanticScore = result.relevanceScore ?? result.score ?? 0;
+      semanticCandidates.push({
+        ...result,
+        retrievalSource: 'semantic',
+        semanticScore,
+        combinedScore: semanticScore,
+        queryVariant: variant.query,
+        variantIndex: variant.index,
+        variantWeight: variant.weight,
+      });
+    }
+
+    if (lexicalResults.length > 0) {
+      lexicalCandidates.push(...scoreLexicalCandidates(lexicalResults, {
+        query,
+        queryVariant: variant.query,
+        variantIndex: variant.index,
+        variantWeight: variant.weight,
+      }));
+    }
+
+    if (denseResults.length > 0) {
+      denseCandidates.push(...scoreDenseCandidates(denseResults, {
+        queryVariant: variant.query,
+        variantIndex: variant.index,
+        variantWeight: variant.weight,
+      }));
     }
   }
 

@@ -2,50 +2,58 @@
   "meta": {
     "node": "v24.5.0",
     "platform": "win32 x64",
-    "pid": 17824,
-    "started_at": "2026-02-28T04:56:23.507Z",
-    "env": {
-      "AUGMENT_API_TOKEN_set": false
+    "pid": 23376,
+    "started_at": "2026-03-13T10:38:45.767Z",
+    "retrieval_provider": "local_native",
+    "retrieval_provider_source": "default",
+    "env": {},
+    "dataset": {
+      "source": "single_query",
+      "dataset_id": null,
+      "dataset_hash": null,
+      "query_count": 1,
+      "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json"
     }
   },
-  "total_ms": 66.57909999999993,
+  "total_ms": 195.59400000000005,
   "payload": {
     "mode": "scan",
     "workspace": "D:\\GitProjects\\context-engine",
     "readFiles": true,
-    "fileCount": 377,
-    "totalBytes": 5613186,
-    "readBytes": 5613186,
-    "elapsed_ms": 65.87,
-    "files_per_sec": 5723.394565052376,
-    "mb_per_sec": 81.2684275301523,
+    "fileCount": 549,
+    "totalBytes": 6505830,
+    "readBytes": 6505830,
+    "elapsed_ms": 195.3918,
+    "files_per_sec": 2809.739200928596,
+    "mb_per_sec": 31.75385547349108,
     "timing": {
       "count": 5,
-      "avg_ms": 69.88372000000001,
-      "p50_ms": 69.1798,
-      "p95_ms": 77.71820000000002,
-      "p99_ms": 77.71820000000002,
-      "min_ms": 60.36019999999996,
-      "max_ms": 77.71820000000002
+      "avg_ms": 214.89291999999995,
+      "p50_ms": 215.37720000000002,
+      "p95_ms": 231.11719999999997,
+      "p99_ms": 231.11719999999997,
+      "min_ms": 195.3918,
+      "max_ms": 231.11719999999997
     }
   },
   "provenance": {
-    "commit_sha": "415d17bcfc7b7ae3b4c73479e8c0e643affe2e44",
+    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
     "bench_mode": "scan",
+    "retrieval_provider": "local_native",
     "dataset_id": "workspace:context-engine",
     "node_version": "v24.5.0",
-    "env_fingerprint": "e3799b8908671551"
+    "env_fingerprint": "b06e34c30aa6f240"
   },
   "suite": {
     "role": "baseline",
     "bench_mode": "scan",
     "aggregated_from_runs": 5,
     "p95_samples_ms": [
-      65.87,
-      60.36019999999996,
-      77.71820000000002,
-      69.1798,
-      76.29040000000003
+      195.3918,
+      215.37720000000002,
+      227.192,
+      231.11719999999997,
+      205.38639999999998
     ]
   }
 }

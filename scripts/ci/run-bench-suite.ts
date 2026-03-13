@@ -54,6 +54,11 @@ interface RunConfig {
   aggregateCount: number;
 }
 
+interface RunScriptOptions {
+  allowFailure?: boolean;
+  timeoutMs?: number;
+}
+
 function parseArgs(argv: string[]): SuiteArgs {
   const args: SuiteArgs = {
     mode: 'pr',
@@ -126,11 +131,31 @@ function summarizeMs(samples: number[]): Record<string, number> {
   };
 }
 
-function runNodeTsScript(scriptPath: string, args: string[], allowFailure = false) {
+function parseTimeoutMs(raw: string | undefined, fallbackMs: number, minMs: number, maxMs: number): number {
+  const value = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(value)) return fallbackMs;
+  return Math.max(minMs, Math.min(maxMs, value));
+}
+
+function runNodeTsScript(scriptPath: string, args: string[], options: RunScriptOptions = {}) {
+  const { allowFailure = false, timeoutMs } = options;
   const result = spawnSync(process.execPath, ['--import', 'tsx', scriptPath, ...args], {
     encoding: 'utf8',
     env: process.env,
+    timeout: timeoutMs,
   });
+
+  const timedOut = Boolean((result as { error?: NodeJS.ErrnoException }).error?.code === 'ETIMEDOUT');
+  if (timedOut) {
+    const timeoutMessage = `Command timed out after ${timeoutMs ?? 0}ms (${scriptPath}).`;
+    if (!allowFailure) {
+      throw new Error(timeoutMessage);
+    }
+    return {
+      ...result,
+      stderr: `${result.stderr ?? ''}${result.stderr ? '\n' : ''}${timeoutMessage}`,
+    };
+  }
 
   if (result.status !== 0 && !allowFailure) {
     const err = (result.stderr || result.stdout || '').trim();
@@ -254,7 +279,8 @@ function assertProvenanceForSuite(
 }
 
 function runBenchOnce(benchArgs: string[]): BenchOutput {
-  const result = runNodeTsScript(path.join('scripts', 'bench.ts'), benchArgs);
+  const timeoutMs = parseTimeoutMs(process.env.BENCH_SUITE_RUN_TIMEOUT_MS, 180_000, 5_000, 900_000);
+  const result = runNodeTsScript(path.join('scripts', 'bench.ts'), benchArgs, { timeoutMs });
   const raw = (result.stdout || '').trim();
   if (!raw) {
     throw new Error('Benchmark command produced empty output.');
@@ -457,10 +483,15 @@ function resolveRunConfig(
 ): RunConfig {
   const modeOrder: BenchMode[] = ['retrieve', 'search', 'scan'];
   const errors: string[] = [];
+  const probeTimeoutMs = parseTimeoutMs(process.env.BENCH_SUITE_PROBE_TIMEOUT_MS, 30_000, 2_000, 120_000);
 
   for (const benchMode of modeOrder) {
     const config = makeRunConfig(mode, benchMode, workspace);
-    const probe = runNodeTsScript(path.join('scripts', 'bench.ts'), config.candidateArgs, true);
+    const probe = runNodeTsScript(
+      path.join('scripts', 'bench.ts'),
+      config.candidateArgs,
+      { allowFailure: true, timeoutMs: probeTimeoutMs }
+    );
     if (probe.status === 0) {
       return config;
     }
@@ -496,7 +527,11 @@ function runCompare(
     '--max-regression-abs', String(thresholds.maxRegressionAbs),
   ];
 
-  const result = runNodeTsScript(path.join('scripts', 'ci', 'bench-compare.ts'), args, true);
+  const timeoutMs = parseTimeoutMs(process.env.BENCH_SUITE_COMPARE_TIMEOUT_MS, 60_000, 2_000, 180_000);
+  const result = runNodeTsScript(path.join('scripts', 'ci', 'bench-compare.ts'), args, {
+    allowFailure: true,
+    timeoutMs,
+  });
   if (result.stdout) {
     process.stdout.write(result.stdout);
   }

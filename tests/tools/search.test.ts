@@ -244,6 +244,9 @@ describe('semantic_search Tool', () => {
 
       expect(result).toContain('# 🔍 Search Results');
       expect(result).toContain('**Found:**');
+      expect(result).toContain('**Query Mode:**');
+      expect(result).toContain('**Hybrid Components:**');
+      expect(result).toContain('**Fallback State:**');
     });
 
     it('should group results by file', async () => {
@@ -304,6 +307,7 @@ describe('semantic_search Tool', () => {
       expect(result).toContain('filters_applied=exclude:artifacts');
       expect(result).toContain('filtered_paths_count=4');
       expect(result).toContain('second_pass_used=true');
+      expect(result).toContain('**Fallback State:** inactive');
     });
 
     it('should support legacy diagnostics getter with camelCase fields', async () => {

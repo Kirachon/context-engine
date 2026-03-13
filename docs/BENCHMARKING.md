@@ -4,6 +4,11 @@ This repo includes an opt-in benchmark harness to quantify performance changes w
 
 For consistent comparisons over time, also follow `docs/PERF_DATASET.md`.
 
+Release-stream KPI contract for the user-visible retrieval upgrade:
+- Relevance: `nDCG@10 >= +8%`, `MRR@10 >= +6%`, `Recall@50 >= +10%` vs approved baseline.
+- Latency on large dataset: `p50 <= -20%`, `p95 <= -25%` vs approved baseline.
+- Reliability: no error-rate regression and fallback-state checks must pass.
+
 ## Quick Start
 
 Provider requirements summary:
@@ -163,6 +168,10 @@ Retrieval rollout feature flags (all default `false`):
 - `CE_RETRIEVAL_REWRITE_V2=true|false`
 - `CE_RETRIEVAL_RANKING_V2=true|false`
 - `CE_RETRIEVAL_REQUEST_MEMO_V2=true|false`
+- `CE_RETRIEVAL_HYBRID_V1=true|false`
+- `CE_RETRIEVAL_RANKING_V3=true|false`
+- `CE_CONTEXT_PACKS_V2=true|false`
+- `CE_RETRIEVAL_QUALITY_GUARD_V1=true|false`
 
 ## CI benchmark suite scripts
 

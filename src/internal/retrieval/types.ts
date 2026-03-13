@@ -3,7 +3,7 @@ import { SearchResult } from '../../mcp/serviceClient.js';
 export type QuerySource = 'original' | 'expanded';
 export type RetrievalProfile = 'fast' | 'balanced' | 'rich';
 export type RetrievalRewriteMode = 'v1' | 'v2';
-export type RetrievalRankingMode = 'v1' | 'v2';
+export type RetrievalRankingMode = 'v1' | 'v2' | 'v3';
 
 export interface ExpandedQuery {
   query: string;

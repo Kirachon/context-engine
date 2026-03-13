@@ -7,12 +7,15 @@
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { handleGetContext, GetContextArgs, getContextTool } from '../../src/mcp/tools/context.js';
 import { ContextServiceClient, ContextBundle, FileContext } from '../../src/mcp/serviceClient.js';
+import { FEATURE_FLAGS } from '../../src/config/features.js';
 
 describe('get_context_for_prompt Tool', () => {
   let mockServiceClient: any;
+  const originalContextPacksV2 = FEATURE_FLAGS.context_packs_v2;
 
   beforeEach(() => {
     jest.clearAllMocks();
+    FEATURE_FLAGS.context_packs_v2 = originalContextPacksV2;
     mockServiceClient = {
       getFile: jest.fn(),
       semanticSearch: jest.fn(),
@@ -183,6 +186,22 @@ describe('get_context_for_prompt Tool', () => {
 
       expect(result).toContain('```typescript');
       expect(result).toContain('```');
+    });
+
+    it('should render context-pack v2 sections with real newlines when flag is enabled', async () => {
+      FEATURE_FLAGS.context_packs_v2 = true;
+      const mockBundle = createMockContextBundle();
+      mockBundle.files[0]!.selectionRationale = 'Chosen for top relevance';
+      mockBundle.dependencyMap = {
+        'src/test.ts': ['src/helper.ts'],
+      };
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+
+      expect(result).toContain('## ✅ Why These Files');
+      expect(result).toContain('## 🧭 Dependency Map');
+      expect(result).not.toContain('\\\\n');
     });
 
     it('should show empty state message when no results', async () => {

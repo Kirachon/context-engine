@@ -66,6 +66,10 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata.filtersApplied).toEqual([]);
     expect(parsed.metadata.filteredPathsCount).toBe(0);
     expect(parsed.metadata.secondPassUsed).toBe(false);
+    expect(parsed.metadata).toHaveProperty('query_mode');
+    expect(parsed.metadata).toHaveProperty('hybrid_components');
+    expect(parsed.metadata).toHaveProperty('quality_guard_state');
+    expect(parsed.metadata).toHaveProperty('fallback_state');
   });
 
   it('respects top_k parameter and delegates to semanticSearch', async () => {
@@ -199,6 +203,7 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata.filtersApplied).toEqual(['exclude:artifacts', 'exclude:docs']);
     expect(parsed.metadata.filteredPathsCount).toBe(9);
     expect(parsed.metadata.secondPassUsed).toBe(true);
+    expect(parsed.metadata.fallback_state).toBe('active');
   });
 
   it('supports legacy fallback diagnostics getter with camelCase fields', async () => {

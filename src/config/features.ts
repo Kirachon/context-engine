@@ -17,8 +17,16 @@ export interface FeatureFlags {
   retrieval_rewrite_v2: boolean;
   /** Enable retrieval ranking signal v2 behavior when selected by tools/options. */
   retrieval_ranking_v2: boolean;
+  /** Enable retrieval ranking signal v3 behavior when selected by tools/options. */
+  retrieval_ranking_v3: boolean;
   /** Enable request-level retrieval memoization v2 cache keying path. */
   retrieval_request_memo_v2: boolean;
+  /** Enable hybrid retrieval planner upgrades (semantic + keyword + symbol aware). */
+  retrieval_hybrid_v1: boolean;
+  /** Enable context pack v2 formatting and metadata. */
+  context_packs_v2: boolean;
+  /** Enable retrieval quality guard metadata and fallback policy state reporting. */
+  retrieval_quality_guard_v1: boolean;
 }
 
 export function getFeatureFlagsFromEnv(): FeatureFlags {
@@ -31,7 +39,11 @@ export function getFeatureFlagsFromEnv(): FeatureFlags {
    http_metrics: envBool('CE_HTTP_METRICS', false),
    retrieval_rewrite_v2: envBool('CE_RETRIEVAL_REWRITE_V2', false),
    retrieval_ranking_v2: envBool('CE_RETRIEVAL_RANKING_V2', false),
+   retrieval_ranking_v3: envBool('CE_RETRIEVAL_RANKING_V3', false),
    retrieval_request_memo_v2: envBool('CE_RETRIEVAL_REQUEST_MEMO_V2', false),
+   retrieval_hybrid_v1: envBool('CE_RETRIEVAL_HYBRID_V1', false),
+   context_packs_v2: envBool('CE_CONTEXT_PACKS_V2', false),
+   retrieval_quality_guard_v1: envBool('CE_RETRIEVAL_QUALITY_GUARD_V1', false),
  };
 }
 

@@ -189,6 +189,7 @@ describe('ContextServiceClient', () => {
       );
 
       const localClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(localClient, 'not-json-provider-response');
       const searchWithProviderRuntimeSpy = jest.spyOn(localClient as any, 'searchWithProviderRuntime');
       const keywordFallbackSpy = jest.spyOn(localClient as any, 'keywordFallbackSearch');
       const searchAndAskSpy = jest.spyOn(localClient as any, 'searchAndAsk');

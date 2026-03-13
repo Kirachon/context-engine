@@ -38,21 +38,21 @@
       "kind": "delta_pct_min",
       "baseline": 0.5,
       "candidate": 0.57,
-      "min_delta_pct": 12
+      "min_delta_pct": 8
     },
     {
       "id": "quality.mrr_at_10",
       "kind": "delta_pct_min",
       "baseline": 0.4,
       "candidate": 0.45,
-      "min_delta_pct": 10
+      "min_delta_pct": 6
     },
     {
       "id": "quality.recall_at_50",
       "kind": "delta_pct_min",
       "baseline": 0.5,
       "candidate": 0.61,
-      "min_delta_pct": 20
+      "min_delta_pct": 10
     },
     {
       "id": "latency.fast.p95_ms",

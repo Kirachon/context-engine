@@ -150,7 +150,7 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             ]) as { enhanced: string };
             response = enhanceResult.enhanced;
           } catch (e) {
-            response = `⚠️ Enhance prompt failed: ${e instanceof Error ? e.message : e}\n\nNote: This feature requires the Augment AI API to be configured.`;
+            response = `⚠️ Enhance prompt failed: ${e instanceof Error ? e.message : e}\n\nNote: This feature requires local-native AI provider configuration.`;
           }
           break;
 

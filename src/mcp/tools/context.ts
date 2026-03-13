@@ -20,6 +20,7 @@
 import { ContextServiceClient, ContextOptions } from '../serviceClient.js';
 import { internalContextBundle } from '../../internal/handlers/context.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
+import { featureEnabled } from '../../config/features.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateBoolean,
@@ -202,6 +203,27 @@ export async function handleGetContext(
       output += `| ${i + 1} | \`${file.path}\` | ${relevance} | ${summary} |\n`;
     }
     output += '\n';
+  }
+
+  if (featureEnabled('context_packs_v2') && contextBundle.files.length > 0) {
+    output += `## ✅ Why These Files\n\n`;
+    for (const file of contextBundle.files) {
+      const rationale = file.selectionRationale ?? `Selected for relevance ${file.relevance.toFixed(2)}`;
+      output += `- \`${file.path}\`: ${rationale}\n`;
+    }
+    output += '\n';
+  }
+
+  if (featureEnabled('context_packs_v2') && contextBundle.dependencyMap) {
+    const edges = Object.entries(contextBundle.dependencyMap)
+      .filter(([, related]) => related.length > 0);
+    if (edges.length > 0) {
+      output += `## 🧭 Dependency Map\n\n`;
+      for (const [filePath, related] of edges) {
+        output += `- \`${filePath}\` -> ${related.map((item) => `\`${item}\``).join(', ')}\n`;
+      }
+      output += '\n';
+    }
   }
 
   // =========================================================================

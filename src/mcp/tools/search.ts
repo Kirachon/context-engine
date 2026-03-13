@@ -46,6 +46,20 @@ type FallbackDiagnostics = {
   secondPassUsed?: boolean;
 };
 
+type RetrievalSignalSummary = {
+  queryMode: 'semantic' | 'keyword' | 'hybrid';
+  hybridComponents: Array<'semantic' | 'keyword' | 'dense'>;
+  qualityGuardState: 'enabled' | 'disabled';
+  fallbackState: 'active' | 'inactive';
+};
+
+type InternalRetrievalSignalMetadata = {
+  queryMode?: 'semantic' | 'keyword' | 'hybrid';
+  hybridComponents?: Array<'semantic' | 'keyword' | 'dense'>;
+  qualityGuardState?: 'enabled' | 'disabled';
+  fallbackState?: 'active' | 'inactive';
+};
+
 type RawFallbackDiagnostics = {
   filters_applied?: string[];
   filtered_paths_count?: number;
@@ -86,6 +100,46 @@ function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDi
   }
 
   return null;
+}
+
+function summarizeRetrievalSignals(
+  results: Array<{ matchType?: string; retrievalSource?: string }>,
+  _fallbackDiagnostics: FallbackDiagnostics | null,
+  metadata?: InternalRetrievalSignalMetadata
+): RetrievalSignalSummary {
+  const components = new Set<'semantic' | 'keyword' | 'dense'>();
+
+  for (const result of results) {
+    const source = (result.retrievalSource ?? result.matchType ?? '').toLowerCase();
+    if (source === 'hybrid') {
+      components.add('semantic');
+      components.add('keyword');
+      continue;
+    }
+    if (source === 'semantic') components.add('semantic');
+    if (source === 'keyword' || source === 'lexical') components.add('keyword');
+    if (source === 'dense') components.add('dense');
+  }
+
+  if (components.size === 0) {
+    components.add('semantic');
+  }
+
+  const computedQueryMode: RetrievalSignalSummary['queryMode'] =
+    components.has('semantic') && (components.has('keyword') || components.has('dense'))
+      ? 'hybrid'
+      : components.has('keyword')
+        ? 'keyword'
+        : 'semantic';
+
+  const metadataFallbackActive = metadata?.fallbackState === 'active';
+
+  return {
+    queryMode: metadata?.queryMode ?? computedQueryMode,
+    hybridComponents: metadata?.hybridComponents ?? Array.from(components.values()),
+    qualityGuardState: metadata?.qualityGuardState ?? (featureEnabled('retrieval_quality_guard_v1') ? 'enabled' : 'disabled'),
+    fallbackState: metadataFallbackActive ? 'active' : 'inactive',
+  };
 }
 
 /**
@@ -184,7 +238,11 @@ export async function handleSemanticSearch(
     maxVariants: profileSettings.maxVariants,
     profile: effectiveProfile,
     rewriteMode: featureEnabled('retrieval_rewrite_v2') ? 'v2' as const : 'v1' as const,
-    rankingMode: featureEnabled('retrieval_ranking_v2') ? 'v2' as const : 'v1' as const,
+    rankingMode: featureEnabled('retrieval_ranking_v3')
+      ? 'v3' as const
+      : featureEnabled('retrieval_ranking_v2')
+        ? 'v2' as const
+        : 'v1' as const,
     timeoutMs: effectiveTimeoutMs,
     bypassCache: bypass_cache,
     maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,
@@ -197,6 +255,11 @@ export async function handleSemanticSearch(
   const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);
   const results = retrieval.results;
   const fallbackDiagnostics = getFallbackDiagnostics(serviceClient);
+  const signalSummary = summarizeRetrievalSignals(
+    results as Array<{ matchType?: string; retrievalSource?: string }>,
+    fallbackDiagnostics,
+    retrieval
+  );
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status, { prefix: '⚠️ ' });
 
@@ -217,6 +280,10 @@ export async function handleSemanticSearch(
   let output = `# 🔍 Search Results\n\n`;
   output += `**Query:** "${validQuery}"\n`;
   output += `**Found:** ${results.length} matching snippets\n\n`;
+  output += `**Query Mode:** ${signalSummary.queryMode}\n`;
+  output += `**Hybrid Components:** ${signalSummary.hybridComponents.join(', ')}\n`;
+  output += `**Quality Guard:** ${signalSummary.qualityGuardState}\n`;
+  output += `**Fallback State:** ${signalSummary.fallbackState}\n\n`;
   if (freshnessWarning) {
     output += `${freshnessWarning}\n\n`;
   }
@@ -276,7 +343,7 @@ export async function handleSemanticSearch(
       return {
         filePath,
         score: best.relevanceScore,
-        matchType: best.matchType ?? 'semantic',
+        matchType: best.matchType ?? (best as unknown as { retrievalSource?: string }).retrievalSource ?? 'semantic',
         retrievedAt: best.retrievedAt,
       };
     })

@@ -10,6 +10,26 @@ Prerequisites:
 - WS20 go/no-go thresholds config is present at `config/rollout-go-no-go-thresholds.json`.
 - WS21 rollback drill runbook artifact is prepared at `docs/WS21_ROLLBACK_DRILL_TEMPLATE.md`.
 
+## Retrieval-upgrade safety envelope
+
+Enable this release stream progressively with these flags:
+- `CE_RETRIEVAL_HYBRID_V1`
+- `CE_RETRIEVAL_RANKING_V3`
+- `CE_CONTEXT_PACKS_V2`
+- `CE_RETRIEVAL_QUALITY_GUARD_V1`
+
+Recommended stage policy:
+- Dark launch: enable only `CE_RETRIEVAL_QUALITY_GUARD_V1`.
+- Canary: enable `CE_RETRIEVAL_HYBRID_V1` + `CE_RETRIEVAL_RANKING_V3` for low traffic slice.
+- Controlled ramp: enable `CE_CONTEXT_PACKS_V2` once quality and latency gates pass in canary.
+- GA hardening: all four flags enabled with gate enforcement still on.
+
+Rollback matrix:
+- Relevance regression detected: disable `CE_RETRIEVAL_RANKING_V3`, keep quality guard on.
+- Latency regression detected: disable `CE_RETRIEVAL_HYBRID_V1` first, then `CE_CONTEXT_PACKS_V2` if needed.
+- Output-noise regression in prompt context: disable `CE_CONTEXT_PACKS_V2`.
+- Any severe instability: set `CE_ROLLOUT_KILL_SWITCH=true` and move to `dark_launch`.
+
 ## Readiness check (required before stage changes)
 
 Run this command from repo root:

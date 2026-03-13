@@ -8,6 +8,7 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
+import { featureEnabled } from '../../config/features.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateFiniteNumberInRange,
@@ -52,6 +53,10 @@ export interface CodebaseRetrievalOutput {
     secondPassUsed: boolean;
     responseVersion?: 'v2';
     providerResolution?: string;
+    query_mode?: 'semantic' | 'keyword' | 'hybrid';
+    hybrid_components?: Array<'semantic' | 'keyword' | 'dense'>;
+    quality_guard_state?: 'enabled' | 'disabled';
+    fallback_state?: 'active' | 'inactive';
   };
 }
 
@@ -77,6 +82,20 @@ type RetrievalProfileSettings = {
   maxVariants: number;
   maxOutputLengthPerResult: number;
   enableExpansion: boolean;
+};
+
+type RetrievalSignalSummary = {
+  queryMode: 'semantic' | 'keyword' | 'hybrid';
+  hybridComponents: Array<'semantic' | 'keyword' | 'dense'>;
+  qualityGuardState: 'enabled' | 'disabled';
+  fallbackState: 'active' | 'inactive';
+};
+
+type InternalRetrievalSignalMetadata = {
+  queryMode?: 'semantic' | 'keyword' | 'hybrid';
+  hybridComponents?: Array<'semantic' | 'keyword' | 'dense'>;
+  qualityGuardState?: 'enabled' | 'disabled';
+  fallbackState?: 'active' | 'inactive';
 };
 
 const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> = {
@@ -124,6 +143,47 @@ function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDi
   };
 }
 
+function summarizeRetrievalSignals(
+  results: Array<{ matchType?: string; retrievalSource?: string }>,
+  fallbackDiagnostics: FallbackDiagnostics | null,
+  metadata?: InternalRetrievalSignalMetadata
+): RetrievalSignalSummary {
+  const components = new Set<'semantic' | 'keyword' | 'dense'>();
+
+  for (const result of results) {
+    const source = (result.retrievalSource ?? result.matchType ?? '').toLowerCase();
+    if (source === 'hybrid') {
+      components.add('semantic');
+      components.add('keyword');
+      continue;
+    }
+    if (source === 'semantic') components.add('semantic');
+    if (source === 'keyword' || source === 'lexical') components.add('keyword');
+    if (source === 'dense') components.add('dense');
+  }
+
+  if (components.size === 0) {
+    components.add('semantic');
+  }
+
+  const computedQueryMode: RetrievalSignalSummary['queryMode'] =
+    components.has('semantic') && (components.has('keyword') || components.has('dense'))
+      ? 'hybrid'
+      : components.has('keyword')
+        ? 'keyword'
+        : 'semantic';
+
+  const diagnosticsFallbackActive = (fallbackDiagnostics?.filtersApplied?.length ?? 0) > 0;
+  const metadataFallbackActive = metadata?.fallbackState === 'active';
+
+  return {
+    queryMode: metadata?.queryMode ?? computedQueryMode,
+    hybridComponents: metadata?.hybridComponents ?? Array.from(components.values()),
+    qualityGuardState: metadata?.qualityGuardState ?? (featureEnabled('retrieval_quality_guard_v1') ? 'enabled' : 'disabled'),
+    fallbackState: metadataFallbackActive || diagnosticsFallbackActive ? 'active' : 'inactive',
+  };
+}
+
 export async function handleCodebaseRetrieval(
   args: CodebaseRetrievalArgs,
   serviceClient: ContextServiceClient
@@ -155,12 +215,29 @@ export async function handleCodebaseRetrieval(
         maxVariants: RETRIEVAL_PROFILE_MAP[profile].maxVariants,
         maxOutputLength: top_k * RETRIEVAL_PROFILE_MAP[profile].maxOutputLengthPerResult,
         enableExpansion: RETRIEVAL_PROFILE_MAP[profile].enableExpansion,
+        rankingMode: featureEnabled('retrieval_ranking_v3')
+          ? 'v3' as const
+          : featureEnabled('retrieval_ranking_v2')
+            ? 'v2' as const
+            : 'v1' as const,
       }
-    : { topK: top_k };
+    : {
+        topK: top_k,
+        rankingMode: featureEnabled('retrieval_ranking_v3')
+          ? 'v3' as const
+          : featureEnabled('retrieval_ranking_v2')
+            ? 'v2' as const
+            : 'v1' as const,
+      };
 
   const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, retrievalOptions);
   const searchResults = retrieval.results;
   const fallbackDiagnostics = getFallbackDiagnostics(serviceClient);
+  const signalSummary = summarizeRetrievalSignals(
+    searchResults as Array<{ matchType?: string; retrievalSource?: string }>,
+    fallbackDiagnostics,
+    retrieval
+  );
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status);
 
@@ -211,6 +288,10 @@ export async function handleCodebaseRetrieval(
       secondPassUsed: fallbackDiagnostics?.secondPassUsed ?? false,
       responseVersion: useV2 ? 'v2' : undefined,
       providerResolution,
+      query_mode: signalSummary.queryMode,
+      hybrid_components: signalSummary.hybridComponents,
+      quality_guard_state: signalSummary.qualityGuardState,
+      fallback_state: signalSummary.fallbackState,
     },
   };
 

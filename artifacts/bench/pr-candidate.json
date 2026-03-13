@@ -2,50 +2,58 @@
   "meta": {
     "node": "v24.5.0",
     "platform": "win32 x64",
-    "pid": 24032,
-    "started_at": "2026-02-28T04:56:20.380Z",
-    "env": {
-      "AUGMENT_API_TOKEN_set": false
+    "pid": 32884,
+    "started_at": "2026-03-13T10:38:42.841Z",
+    "retrieval_provider": "local_native",
+    "retrieval_provider_source": "default",
+    "env": {},
+    "dataset": {
+      "source": "single_query",
+      "dataset_id": null,
+      "dataset_hash": null,
+      "query_count": 1,
+      "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json"
     }
   },
-  "total_ms": 64.5349000000001,
+  "total_ms": 223.8505,
   "payload": {
     "mode": "scan",
     "workspace": "D:\\GitProjects\\context-engine",
     "readFiles": true,
-    "fileCount": 377,
-    "totalBytes": 5613186,
-    "readBytes": 5613186,
-    "elapsed_ms": 63.83789999999999,
-    "files_per_sec": 5905.582733767872,
-    "mb_per_sec": 83.85537935005902,
+    "fileCount": 549,
+    "totalBytes": 6505830,
+    "readBytes": 6505830,
+    "elapsed_ms": 223.6456,
+    "files_per_sec": 2454.7766645084903,
+    "mb_per_sec": 27.74229843066563,
     "timing": {
       "count": 5,
-      "avg_ms": 71.53561999999998,
-      "p50_ms": 70.62549999999993,
-      "p95_ms": 82.86180000000002,
-      "p99_ms": 82.86180000000002,
-      "min_ms": 63.83789999999999,
-      "max_ms": 82.86180000000002
+      "avg_ms": 199.1366,
+      "p50_ms": 204.0589,
+      "p95_ms": 223.6456,
+      "p99_ms": 223.6456,
+      "min_ms": 168.8227,
+      "max_ms": 223.6456
     }
   },
   "provenance": {
-    "commit_sha": "415d17bcfc7b7ae3b4c73479e8c0e643affe2e44",
+    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
     "bench_mode": "scan",
+    "retrieval_provider": "local_native",
     "dataset_id": "workspace:context-engine",
     "node_version": "v24.5.0",
-    "env_fingerprint": "e3799b8908671551"
+    "env_fingerprint": "b06e34c30aa6f240"
   },
   "suite": {
     "role": "candidate",
     "bench_mode": "scan",
     "aggregated_from_runs": 5,
     "p95_samples_ms": [
-      63.83789999999999,
-      69.30330000000004,
-      71.04959999999994,
-      70.62549999999993,
-      82.86180000000002
+      223.6456,
+      168.8227,
+      204.0589,
+      220.2813,
+      178.8745
     ]
   }
 }

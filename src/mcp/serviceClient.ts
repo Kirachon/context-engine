@@ -115,6 +115,8 @@ export interface FileContext {
   snippets: SnippetInfo[];
   /** Related files that might be needed for full context */
   relatedFiles?: string[];
+  /** Short reason this file was selected into the context pack. */
+  selectionRationale?: string;
 }
 
 /** A memory entry retrieved from .memories/ directory */
@@ -136,6 +138,8 @@ export interface ContextBundle {
   files: FileContext[];
   /** Key insights and hints for the LLM */
   hints: string[];
+  /** Dependency map between selected files and related file suggestions. */
+  dependencyMap?: Record<string, string[]>;
   /** Relevant memories from .memories/ directory */
   memories?: MemoryEntry[];
   /** Metadata about the context bundle */
@@ -336,6 +340,7 @@ class SearchQueue {
     timeoutMs: number;
     settled: boolean;
     timer: NodeJS.Timeout;
+    removeAbortListener?: () => void;
   }> = [];
   private running = false;
   private maxQueueSize: number;
@@ -410,6 +415,7 @@ class SearchQueue {
         timeoutMs: number;
         settled: boolean;
         timer: NodeJS.Timeout;
+        removeAbortListener?: () => void;
       } = {
         execute: fn,
         resolve,
@@ -426,14 +432,19 @@ class SearchQueue {
           );
         }, timeoutMs),
       };
-      const onAbort = () => {
+      const settleWithError = (error: Error): void => {
         if (item.settled) return;
         item.settled = true;
         clearTimeout(item.timer);
-        item.reject(new Error('searchAndAsk request cancelled while waiting in queue.'));
+        item.removeAbortListener?.();
+        item.reject(error);
+      };
+      const onAbort = () => {
+        settleWithError(new Error('searchAndAsk request cancelled while waiting in queue.'));
       };
       if (signal) {
         signal.addEventListener('abort', onAbort, { once: true });
+        item.removeAbortListener = () => signal.removeEventListener('abort', onAbort);
       }
       this.queue.push(item);
       this.processQueue();
@@ -468,6 +479,7 @@ class SearchQueue {
       if (!item.settled) {
         item.settled = true;
         clearTimeout(item.timer);
+        item.removeAbortListener?.();
         item.resolve(result);
       }
     } catch (error) {
@@ -476,6 +488,7 @@ class SearchQueue {
       if (!item.settled) {
         item.settled = true;
         clearTimeout(item.timer);
+        item.removeAbortListener?.();
         item.reject(error instanceof Error ? error : new Error(String(error)));
       }
     } finally {
@@ -517,6 +530,7 @@ class SearchQueue {
       if (!item.settled) {
         item.settled = true;
         clearTimeout(item.timer);
+        item.removeAbortListener?.();
         item.reject(new Error('Queue cleared'));
       }
     }
@@ -3504,6 +3518,8 @@ export class ContextServiceClient {
         tokenCount: fileTokens,
         snippets,
         relatedFiles: relatedFiles?.length ? relatedFiles : undefined,
+        selectionRationale: `Top relevance ${(fileRelevance.get(filePath) || 0).toFixed(2)} with ${snippets.length} snippet(s)` +
+          (summary ? `; ${summary}` : ''),
       };
     };
 
@@ -3564,6 +3580,13 @@ export class ContextServiceClient {
       query,
       files,
       hints,
+      dependencyMap: includeRelated
+        ? Object.fromEntries(
+            files
+              .filter((file) => (file.relatedFiles?.length ?? 0) > 0)
+              .map((file) => [file.path, file.relatedFiles ?? []])
+          )
+        : undefined,
       memories: memories.length > 0 ? memories : undefined,
       metadata: {
         totalFiles: files.length,

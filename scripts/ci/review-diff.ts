@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 import { reviewDiff } from '../../src/reviewer/reviewDiff.js';
@@ -11,13 +11,13 @@ function envBool(name: string, fallback: boolean): boolean {
   return v !== 'false' && v !== '0' && v !== '';
 }
 
-function sh(cmd: string): string {
-  return execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf-8');
+function git(args: string[]): string {
+  return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf-8');
 }
 
-function trySh(cmd: string): string | null {
+function tryGit(args: string[]): string | null {
   try {
-    return sh(cmd);
+    return git(args);
   } catch {
     return null;
   }
@@ -38,17 +38,17 @@ function isAllZeroSha(value: string | undefined): boolean {
 }
 
 function resolveDiffRange(baseShaEnv: string | undefined, headShaEnv: string | undefined): { baseSha: string; headSha: string } {
-  const headSha = headShaEnv?.trim() || trySh('git rev-parse HEAD')?.trim() || '';
+  const headSha = headShaEnv?.trim() || tryGit(['rev-parse', 'HEAD'])?.trim() || '';
   if (!headSha) {
     throw new Error('Unable to resolve HEAD SHA for review diff.');
   }
 
   const baseFromEnv = baseShaEnv?.trim() || '';
-  if (baseFromEnv && !isAllZeroSha(baseFromEnv) && trySh(`git cat-file -e ${baseFromEnv}^{commit}`) !== null) {
+  if (baseFromEnv && !isAllZeroSha(baseFromEnv) && tryGit(['cat-file', '-e', `${baseFromEnv}^{commit}`]) !== null) {
     return { baseSha: baseFromEnv, headSha };
   }
 
-  const fallbackBase = trySh(`git rev-parse ${headSha}^`)?.trim();
+  const fallbackBase = tryGit(['rev-parse', `${headSha}^`])?.trim();
   if (fallbackBase) {
     return { baseSha: fallbackBase, headSha };
   }
@@ -61,8 +61,8 @@ async function main(): Promise<void> {
   const workspace = process.cwd();
   const { baseSha, headSha } = resolveDiffRange(process.env.BASE_SHA, process.env.HEAD_SHA);
 
-  const diff = sh(`git diff --no-color --unified=3 ${baseSha} ${headSha}`);
-  const changedFiles = sh(`git diff --name-only ${baseSha} ${headSha}`)
+  const diff = git(['diff', '--no-color', '--unified=3', baseSha, headSha]);
+  const changedFiles = git(['diff', '--name-only', baseSha, headSha])
     .split(/\r?\n/)
     .map(s => s.trim())
     .filter(Boolean);
