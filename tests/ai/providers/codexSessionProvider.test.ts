@@ -269,4 +269,71 @@ describe('CodexSessionProvider wrapper args', () => {
       retryable: false,
     });
   });
+
+  it('falls through to exec when readiness check times out', async () => {
+    process.env.CE_OPENAI_SESSION_CMD = 'codex.cmd';
+
+    spawnPlans.push({
+      stdout: '{"ok":true}',
+      onSpawn: (args) => {
+        const outputIdx = args.indexOf('--output-last-message');
+        if (outputIdx >= 0 && args[outputIdx + 1]) {
+          fs.writeFileSync(args[outputIdx + 1], 'exec despite readiness timeout', 'utf-8');
+        }
+      },
+    });
+
+    jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+    const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+    const { AIProviderError } = await import('../../../src/ai/providers/types.js');
+
+    const provider = new CodexSessionProvider();
+    jest.spyOn(provider as any, 'ensureSessionReady').mockRejectedValue(
+      new AIProviderError({
+        code: 'provider_timeout',
+        provider: 'openai_session',
+        message: 'Codex login status check timed out after 10000ms.',
+        retryable: true,
+      })
+    );
+
+    const response = await provider.call({
+      searchQuery: 'readiness timeout fallback',
+      prompt: 'readiness timeout fallback',
+      timeoutMs: 20_000,
+      workspacePath: process.cwd(),
+    });
+
+    expect(response.text).toBe('exec despite readiness timeout');
+    expect(spawnCalls).toHaveLength(1);
+    expect(spawnCalls[0]?.args).toContain('exec');
+  });
+
+  it('does not swallow non-readiness failures from ensureSessionReady', async () => {
+    process.env.CE_OPENAI_SESSION_CMD = 'codex.cmd';
+
+    jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+    const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+    const { AIProviderError } = await import('../../../src/ai/providers/types.js');
+
+    const provider = new CodexSessionProvider();
+    jest.spyOn(provider as any, 'ensureSessionReady').mockRejectedValue(
+      new AIProviderError({
+        code: 'provider_unavailable',
+        provider: 'openai_session',
+        message: 'provider unavailable',
+        retryable: true,
+      })
+    );
+
+    await expect(
+      provider.call({
+        searchQuery: 'should fail',
+        prompt: 'should fail',
+        timeoutMs: 20_000,
+        workspacePath: process.cwd(),
+      })
+    ).rejects.toMatchObject({ code: 'provider_unavailable' });
+    expect(spawnCalls).toHaveLength(0);
+  });
 });

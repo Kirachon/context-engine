@@ -371,8 +371,12 @@ export class CodexSessionProvider implements AIProvider {
       await this.ensureSessionReady(request.workspacePath);
     } catch (error) {
       // Some environments report inconsistent `login status` results.
-      // Defer auth verdict to the actual `exec` call when readiness says unauthenticated.
-      if (!(error instanceof AIProviderError && error.code === 'provider_auth')) {
+      // Defer auth verdict to the actual `exec` call when readiness checks are inconclusive.
+      // `login status` may timeout under shell/process pressure even though `exec` still works.
+      if (
+        !(error instanceof AIProviderError
+          && (error.code === 'provider_auth' || error.code === 'provider_timeout'))
+      ) {
         throw error;
       }
     }
