@@ -1,4 +1,5 @@
 import { SearchResult } from '../../mcp/serviceClient.js';
+import type { RetrievalFlowContext } from './flow.js';
 
 export type QuerySource = 'original' | 'expanded';
 export type RetrievalProfile = 'fast' | 'balanced' | 'rich';
@@ -62,4 +63,8 @@ export interface RetrievalOptions {
   bypassCache?: boolean;
   /** Optional override for the SDK search output length. */
   maxOutputLength?: number;
+  /** Optional abort signal for cancellation-aware retrieval flows. */
+  signal?: AbortSignal;
+  /** Optional shared flow context for cancellation and stage metadata. */
+  flow?: RetrievalFlowContext;
 }

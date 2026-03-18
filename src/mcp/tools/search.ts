@@ -67,6 +67,15 @@ type ResultTraceCandidate = {
   variantIndex?: number;
 };
 
+type ResultTraceStage = 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense';
+
+type ResultTraceEnvelope = {
+  source_stage: ResultTraceStage;
+  match_type: ResultTraceStage;
+  query_variant?: string;
+  variant_index?: number;
+};
+
 type RawFallbackDiagnostics = {
   filters_applied?: string[];
   filtered_paths_count?: number;
@@ -160,23 +169,47 @@ function formatRelevance(score: number | undefined): string {
   return '📌';
 }
 
-function formatResultTrace(result: ResultTraceCandidate): string {
-  const sourceStage = (result.retrievalSource ?? result.matchType ?? 'semantic').toLowerCase();
-  const normalizedStage =
-    sourceStage === 'keyword' ||
+function normalizeTraceStage(rawStage: string | undefined): ResultTraceStage {
+  const sourceStage = (rawStage ?? 'semantic').toLowerCase();
+  return sourceStage === 'keyword' ||
     sourceStage === 'hybrid' ||
     sourceStage === 'lexical' ||
     sourceStage === 'dense'
-      ? sourceStage
-      : 'semantic';
-  const parts = [`stage=${normalizedStage}`];
+    ? sourceStage
+    : 'semantic';
+}
+
+function buildResultTraceEnvelope(result: ResultTraceCandidate): ResultTraceEnvelope {
+  const stage = normalizeTraceStage(result.retrievalSource ?? result.matchType);
+  const envelope: ResultTraceEnvelope = {
+    source_stage: stage,
+    match_type: stage,
+  };
+
   if (result.queryVariant && result.queryVariant.trim().length > 0) {
-    parts.push(`variant=\"${result.queryVariant}\"`);
+    envelope.query_variant = result.queryVariant.trim();
   }
   if (typeof result.variantIndex === 'number' && Number.isFinite(result.variantIndex)) {
-    parts.push(`variant_index=${result.variantIndex}`);
+    envelope.variant_index = result.variantIndex;
   }
-  return parts.join(', ');
+
+  return envelope;
+}
+
+function formatResultTrace(result: ResultTraceCandidate): string {
+  const trace = buildResultTraceEnvelope(result);
+  const parts = [
+    `source_stage=${trace.source_stage}`,
+    `match_type=${trace.match_type}`,
+  ];
+  if (trace.query_variant) {
+    const escaped = trace.query_variant.replace(/"/g, '\\"');
+    parts.push(`query_variant="${escaped}"`);
+  }
+  if (typeof trace.variant_index === 'number' && Number.isFinite(trace.variant_index)) {
+    parts.push(`variant_index=${trace.variant_index}`);
+  }
+  return parts.join('; ');
 }
 
 type RetrievalProfile = 'fast' | 'balanced' | 'rich';

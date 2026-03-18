@@ -38,6 +38,11 @@ import {
   parseFormattedResults as parseFormattedSemanticResults,
   searchWithSemanticRuntime,
 } from '../retrieval/providers/semanticRuntime.js';
+import {
+  buildConnectorFingerprint,
+  createConnectorRegistry,
+  formatConnectorHint,
+} from '../internal/connectors/registry.js';
 import { isOperationalDocsQuery } from '../retrieval/providers/queryHeuristics.js';
 import type {
   RetrievalProviderCallbackContext,
@@ -1036,6 +1041,7 @@ export class ContextServiceClient {
   private readonly aiProviderId: AIProviderId;
   private readonly retrievalProviderId: RetrievalProviderId;
   private readonly retrievalProvider: RetrievalProvider;
+  private readonly connectorRegistry = createConnectorRegistry();
   private aiProvider: AIProvider | null = null;
   private lastSearchDiagnostics: SearchDiagnostics | null = null;
 
@@ -3398,8 +3404,10 @@ export class ContextServiceClient {
       ? `${this.currentCommitHash.substring(0, 12)}:`
       : '';
     const indexFingerprint = this.getIndexFingerprint();
+    const connectorSignals = await this.connectorRegistry.collectSignals(this.workspacePath);
+    const connectorFingerprint = buildConnectorFingerprint(connectorSignals);
     const persistentCacheKey = (indexFingerprint !== 'no-state' && indexFingerprint !== 'unknown')
-      ? `${indexFingerprint}:${commitPrefix}context:${query}:${JSON.stringify(normalizedCacheOptions)}`
+      ? `${indexFingerprint}:${connectorFingerprint}:${commitPrefix}context:${query}:${JSON.stringify(normalizedCacheOptions)}`
       : null;
 
     if (!bypassCache) {
@@ -3589,6 +3597,12 @@ export class ContextServiceClient {
     if (memories.length > 0) {
       const categories = [...new Set(memories.map(m => m.category))];
       hints.push(`Memories: ${memories.length} relevant entries from ${categories.join(', ')}`);
+    }
+
+    if (connectorSignals.length > 0) {
+      for (const signal of connectorSignals) {
+        hints.push(formatConnectorHint(signal));
+      }
     }
 
     // Build context summary

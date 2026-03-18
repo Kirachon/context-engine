@@ -9,10 +9,16 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { reviewDiff, type ReviewDiffInput } from '../../reviewer/reviewDiff.js';
 import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
 import { envMs } from '../../config/env.js';
+import {
+  createRetrievalFlowContext,
+  finalizeRetrievalFlow,
+  noteRetrievalStage,
+} from '../../internal/retrieval/flow.js';
 
 const DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS = 60_000;
 const MIN_REVIEW_DIFF_LLM_TIMEOUT_MS = 1_000;
 const MAX_REVIEW_DIFF_LLM_TIMEOUT_MS = 30 * 60 * 1000;
+const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
 export interface ReviewDiffArgs {
   diff: string;
@@ -44,48 +50,96 @@ export interface ReviewDiffArgs {
   };
 }
 
+function noteReviewFlowStage(flow: ReturnType<typeof createRetrievalFlowContext>, stage: string): void {
+  noteRetrievalStage(flow, `review:${stage}`);
+}
+
 export async function handleReviewDiff(
   args: ReviewDiffArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const diff = normalizeRequiredDiffInput(
-    args.diff,
-    'Missing or invalid "diff" argument. Provide a unified diff string.'
-  );
-  assertNonEmptyDiffScope(diff, args.changed_files);
+  const flow = createRetrievalFlowContext('review_diff', {
+    metadata: {
+      tool: 'review_diff',
+      changed_files_count: args.changed_files?.length ?? 0,
+      enable_llm: args.options?.enable_llm ?? false,
+      enable_static_analysis: args.options?.enable_static_analysis ?? false,
+    },
+  });
+  noteReviewFlowStage(flow, 'start');
 
-  const runtime: ReviewDiffInput['runtime'] = {
-    readFile: (filePath: string) => serviceClient.getFile(filePath),
-  };
-  if (args.options?.enable_llm) {
-    const reviewDiffLlmTimeoutMs = envMs(
-      'CE_REVIEW_DIFF_LLM_TIMEOUT_MS',
-      envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS, {
-        min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
-        max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
-      }),
-      {
-        min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
-        max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
-      }
+  let completedSuccessfully = false;
+  try {
+    const diff = normalizeRequiredDiffInput(
+      args.diff,
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
     );
-    runtime.llm = {
-      call: (searchQuery: string, prompt: string) => serviceClient.searchAndAsk(searchQuery, prompt, {
-        timeoutMs: reviewDiffLlmTimeoutMs,
-      }),
+    noteReviewFlowStage(flow, 'diff_normalized');
+    assertNonEmptyDiffScope(diff, args.changed_files);
+    noteReviewFlowStage(flow, 'scope_validated');
+
+    const runtime: ReviewDiffInput['runtime'] = {
+      readFile: (filePath: string) => serviceClient.getFile(filePath),
     };
+    if (args.options?.enable_llm) {
+      const reviewDiffLlmTimeoutMs = envMs(
+        'CE_REVIEW_DIFF_LLM_TIMEOUT_MS',
+        envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS, {
+          min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
+          max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
+        }),
+        {
+          min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
+          max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
+        }
+      );
+      noteReviewFlowStage(flow, 'llm:enabled');
+      runtime.llm = {
+        call: async (searchQuery: string, prompt: string) => {
+          noteReviewFlowStage(flow, 'llm:request');
+          try {
+            const response = await serviceClient.searchAndAsk(searchQuery, prompt, {
+              timeoutMs: reviewDiffLlmTimeoutMs,
+            });
+            noteReviewFlowStage(flow, 'llm:response');
+            return response;
+          } catch (error) {
+            noteReviewFlowStage(flow, 'llm:error');
+            throw error;
+          }
+        },
+      };
+    } else {
+      noteReviewFlowStage(flow, 'llm:disabled');
+    }
+
+    const input: ReviewDiffInput = {
+      diff,
+      changed_files: args.changed_files,
+      workspace_path: serviceClient.getWorkspacePath(),
+      options: args.options,
+      runtime,
+    };
+
+    noteReviewFlowStage(flow, 'review:invoke');
+    const result = await reviewDiff(input);
+    noteReviewFlowStage(flow, 'review:complete');
+    noteReviewFlowStage(flow, 'complete:success');
+    completedSuccessfully = true;
+    return JSON.stringify(result, null, 2);
+  } catch (error) {
+    noteReviewFlowStage(flow, 'complete:error');
+    throw error;
+  } finally {
+    const summary = finalizeRetrievalFlow(flow, {
+      outcome: completedSuccessfully ? 'success' : 'error',
+    });
+    if (process.env[FLOW_DEBUG_ENV] === '1') {
+      console.error(
+        `[review_diff] Flow ${completedSuccessfully ? 'success' : 'error'} (${summary.elapsedMs}ms): ${summary.stages.join(' > ')}`
+      );
+    }
   }
-
-  const input: ReviewDiffInput = {
-    diff,
-    changed_files: args.changed_files,
-    workspace_path: serviceClient.getWorkspacePath(),
-    options: args.options,
-    runtime,
-  };
-
-  const result = await reviewDiff(input);
-  return JSON.stringify(result, null, 2);
 }
 
 export const reviewDiffTool = {

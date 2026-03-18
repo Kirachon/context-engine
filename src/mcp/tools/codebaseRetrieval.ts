@@ -111,6 +111,15 @@ type TraceCandidate = {
   variantIndex?: number;
 };
 
+type TraceStage = 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense';
+
+type TraceEnvelope = {
+  source_stage: TraceStage;
+  match_type: TraceStage;
+  query_variant?: string;
+  variant_index?: number;
+};
+
 const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> = {
   fast: {
     perQueryMultiplier: 1,
@@ -197,6 +206,33 @@ function summarizeRetrievalSignals(
   };
 }
 
+function normalizeTraceStage(rawStage: string | undefined): TraceStage {
+  const sourceStage = (rawStage ?? 'semantic').toLowerCase();
+  return sourceStage === 'keyword' ||
+    sourceStage === 'hybrid' ||
+    sourceStage === 'lexical' ||
+    sourceStage === 'dense'
+    ? sourceStage
+    : 'semantic';
+}
+
+function buildTraceEnvelope(traceCandidate: TraceCandidate): TraceEnvelope {
+  const stage = normalizeTraceStage(traceCandidate.retrievalSource ?? traceCandidate.matchType);
+  const trace: TraceEnvelope = {
+    source_stage: stage,
+    match_type: stage,
+  };
+
+  if (traceCandidate.queryVariant && traceCandidate.queryVariant.trim().length > 0) {
+    trace.query_variant = traceCandidate.queryVariant.trim();
+  }
+  if (typeof traceCandidate.variantIndex === 'number' && Number.isFinite(traceCandidate.variantIndex)) {
+    trace.variant_index = traceCandidate.variantIndex;
+  }
+
+  return trace;
+}
+
 export async function handleCodebaseRetrieval(
   args: CodebaseRetrievalArgs,
   serviceClient: ContextServiceClient
@@ -250,14 +286,6 @@ export async function handleCodebaseRetrieval(
 
   const results: CodebaseRetrievalResult[] = searchResults.map((r) => {
     const traceCandidate = r as unknown as TraceCandidate;
-    const sourceStage = (traceCandidate.retrievalSource ?? traceCandidate.matchType ?? 'semantic').toLowerCase();
-    const normalizedStage: 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense' =
-      sourceStage === 'keyword' ||
-      sourceStage === 'hybrid' ||
-      sourceStage === 'lexical' ||
-      sourceStage === 'dense'
-        ? sourceStage
-        : 'semantic';
     const snippet = useCompactPreview
       ? { preview: r.content.slice(0, 240) }
       : { content: r.content };
@@ -267,12 +295,7 @@ export async function handleCodebaseRetrieval(
       score: r.relevanceScore || 0,
       lines: r.lines,
       reason: `Semantic match for: "${normalizedQuery}"`,
-      trace: {
-        match_type: normalizedStage,
-        source_stage: normalizedStage,
-        query_variant: traceCandidate.queryVariant,
-        variant_index: traceCandidate.variantIndex,
-      },
+      trace: buildTraceEnvelope(traceCandidate),
     };
   });
 

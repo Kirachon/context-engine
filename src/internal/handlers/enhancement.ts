@@ -1,6 +1,11 @@
 import type { ContextServiceClient } from '../../mcp/serviceClient.js';
 import { createHash } from 'crypto';
 import { isRetrievalPipelineEnabled, retrieve } from '../retrieval/retrieve.js';
+import {
+  createRetrievalFlowContext,
+  finalizeRetrievalFlow,
+  noteRetrievalStage,
+} from '../retrieval/flow.js';
 import { internalContextSnippet } from './context.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
 import { isOperationalDocsQuery } from '../../retrieval/providers/queryHeuristics.js';
@@ -22,6 +27,7 @@ const DEFAULT_CONTEXT_TOP_K = 3;
 const DEFAULT_CONTEXT_MAX_FILES = 3;
 const DEFAULT_CONTEXT_MAX_CHARS = 1200;
 const ENHANCE_PROMPT_TEMPLATE_VERSION = '2.0.0';
+const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
 const REQUIRED_STRUCTURED_SECTIONS = [
   'Objective',
@@ -394,6 +400,21 @@ function buildStructuredPromptFromText(originalPrompt: string, candidateText: st
   ].join('\n');
 }
 
+function noteEnhancementFlowStage(flow: ReturnType<typeof createRetrievalFlowContext>, stage: string): void {
+  noteRetrievalStage(flow, `enhancement:${stage}`);
+}
+
+function logEnhancementFlowSummary(
+  flow: ReturnType<typeof createRetrievalFlowContext>,
+  outcome: string
+): void {
+  if (process.env[FLOW_DEBUG_ENV] !== '1') return;
+  const summary = finalizeRetrievalFlow(flow, { outcome });
+  console.error(
+    `[AI Enhancement] Flow ${outcome} (${summary.elapsedMs}ms): ${summary.stages.join(' > ')}`
+  );
+}
+
 /**
  * Enhancement prompt template following the official prompt enhancer example
  * from enhance-handler.ts in the prompt-enhancer-server
@@ -491,8 +512,15 @@ export async function internalPromptEnhancerDetailed(
   serviceClient: ContextServiceClient
 ): Promise<PromptEnhancementResult> {
   const totalStartMs = Date.now();
+  const flow = createRetrievalFlowContext('enhance_prompt', {
+    metadata: {
+      mode: readEnhancePromptMode(),
+      tool: 'enhance_prompt',
+    },
+  });
+  noteEnhancementFlowStage(flow, 'start');
   console.error(`[AI Enhancement] Enhancing prompt: "${prompt.substring(0, 100)}..."`);
-  const mode = readEnhancePromptMode();
+  const mode = flow.metadata.mode as EnhancePromptMode;
   incCounter(
     'context_engine_enhance_prompt_total',
     { mode },
@@ -518,6 +546,7 @@ export async function internalPromptEnhancerDetailed(
   const baseEnhancementPrompt = buildAIEnhancementPrompt(prompt);
   let enhancementPrompt = baseEnhancementPrompt;
   const retrievalEnabled = mode !== 'off' && (mode === 'light' || isRetrievalPipelineEnabled());
+  noteEnhancementFlowStage(flow, retrievalEnabled ? 'retrieval:enabled' : 'retrieval:disabled');
 
   if (retrievalEnabled) {
     const retrievalStartMs = Date.now();
@@ -535,6 +564,7 @@ export async function internalPromptEnhancerDetailed(
     const cachedContextSnippet = getCachedContextSnippet(cacheKey);
     const hasCachedSnippet = cachedContextSnippet !== undefined;
     const retrievalStageTimeoutMs = budget.stageBudgetMs('retrieval', retrievalBudgetMs);
+    noteEnhancementFlowStage(flow, hasCachedSnippet ? 'retrieval:cache_hit' : 'retrieval:cache_miss');
 
     try {
       let contextSnippet = hasCachedSnippet ? cachedContextSnippet ?? null : null;
@@ -551,6 +581,7 @@ export async function internalPromptEnhancerDetailed(
           }).localKeywordSearch;
 
           if (typeof localSearch === 'function') {
+            noteEnhancementFlowStage(flow, 'retrieval:local_docs_search');
             let localResults: Array<{
               path: string;
               content: string;
@@ -578,6 +609,7 @@ export async function internalPromptEnhancerDetailed(
           }
 
           if (!contextSnippet && mode !== 'light') {
+            noteEnhancementFlowStage(flow, 'retrieval:semantic_search');
             const retrievalResults = await retrieve(prompt, serviceClient, {
               topK: DEFAULT_CONTEXT_TOP_K,
               perQueryTopK: DEFAULT_CONTEXT_TOP_K,
@@ -612,6 +644,7 @@ export async function internalPromptEnhancerDetailed(
       if (contextSnippet) {
         enhancementPrompt = buildAIEnhancementPrompt(prompt, contextSnippet);
       }
+      noteEnhancementFlowStage(flow, 'retrieval:complete');
       observeDurationMs(
         'context_engine_enhance_prompt_retrieval_duration_seconds',
         { mode, result: 'success' },
@@ -643,6 +676,7 @@ export async function internalPromptEnhancerDetailed(
       }
 
       try {
+        noteEnhancementFlowStage(flow, `model:attempt:${attempt + 1}`);
         response = await serviceClient.searchAndAsk(prompt, attemptPrompt, {
           timeoutMs: stageTimeoutMs,
         });
@@ -662,6 +696,7 @@ export async function internalPromptEnhancerDetailed(
         }
 
         // Retry with a lean prompt to reduce model/context pressure.
+        noteEnhancementFlowStage(flow, `model:retry:${attempt + 1}`);
         attemptPrompt = baseEnhancementPrompt;
         lastTransientError = error;
         const plannedBackoffMs = computeRetryBackoffMs(attempt, errorMessage);
@@ -686,6 +721,7 @@ export async function internalPromptEnhancerDetailed(
     // Parse and validate enhanced prompt.
     let enhanced = parseEnhancedPrompt(response);
     if (!enhanced) {
+      noteEnhancementFlowStage(flow, 'model:validation_failed:no_tag');
       throw new EnhancePromptError(
         'VALIDATION_FAILED',
         'Enhanced prompt response format is invalid. Please retry.',
@@ -699,6 +735,7 @@ export async function internalPromptEnhancerDetailed(
 
     let validation = performValidation(enhanced);
     if (!validation.valid) {
+      noteEnhancementFlowStage(flow, `model:validation_failed:${validation.reason}`);
       incCounter(
         'context_engine_enhance_prompt_validation_failed_total',
         { mode, reason: validation.reason },
@@ -720,6 +757,7 @@ export async function internalPromptEnhancerDetailed(
         1,
         'Enhance prompt repair attempts.'
       );
+      noteEnhancementFlowStage(flow, 'repair:attempt');
 
       const repairResponse = await withTimeout(
         serviceClient.searchAndAsk(prompt, buildRepairEnhancementPrompt(prompt, enhanced), {
@@ -730,6 +768,7 @@ export async function internalPromptEnhancerDetailed(
       );
       const repaired = parseEnhancedPrompt(repairResponse);
       if (!repaired) {
+        noteEnhancementFlowStage(flow, 'repair:parse_failed');
         incCounter(
           'context_engine_enhance_prompt_repair_failed_total',
           { mode, reason: 'parse_failed' },
@@ -745,6 +784,7 @@ export async function internalPromptEnhancerDetailed(
 
       validation = performValidation(repaired);
       if (!validation.valid) {
+        noteEnhancementFlowStage(flow, `repair:validation_failed:${validation.reason}`);
         incCounter(
           'context_engine_enhance_prompt_repair_failed_total',
           { mode, reason: validation.reason },
@@ -759,12 +799,15 @@ export async function internalPromptEnhancerDetailed(
       }
 
       enhanced = repaired;
+      noteEnhancementFlowStage(flow, 'repair:success');
+      noteEnhancementFlowStage(flow, 'complete:success');
       incCounter(
         'context_engine_enhance_prompt_repair_succeeded_total',
         { mode },
         1,
         'Enhance prompt repair successes.'
       );
+      logEnhancementFlowSummary(flow, 'repaired');
       return {
         enhancedPrompt: enhanced,
         source: 'ai',
@@ -786,6 +829,8 @@ export async function internalPromptEnhancerDetailed(
       Date.now() - totalStartMs,
       { help: 'Enhance prompt end-to-end duration in seconds.' }
     );
+    noteEnhancementFlowStage(flow, 'complete:success');
+    logEnhancementFlowSummary(flow, 'success');
     return {
       enhancedPrompt: enhanced,
       source: 'ai',
@@ -793,6 +838,8 @@ export async function internalPromptEnhancerDetailed(
       reasonCode: 'ai_enhanced',
     };
   } catch (error) {
+    noteEnhancementFlowStage(flow, 'complete:error');
+    logEnhancementFlowSummary(flow, 'error');
     if (error instanceof EnhancePromptError) {
       throw error;
     }

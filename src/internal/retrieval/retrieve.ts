@@ -8,6 +8,13 @@ import { scoreDenseCandidates } from './dense.js';
 import { createWorkspaceDenseRetriever } from './denseIndex.js';
 import { createHashEmbeddingProvider } from './embeddingProvider.js';
 import { fuseCandidates } from './fusion.js';
+import {
+  assertRetrievalFlowActive,
+  createRetrievalFlowContext,
+  finalizeRetrievalFlow,
+  noteRetrievalStage,
+  type RetrievalFlowContext,
+} from './flow.js';
 import { scoreLexicalCandidates } from './lexical.js';
 import { rerankResults } from './rerank.js';
 import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.js';
@@ -15,7 +22,7 @@ import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.j
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disable', 'disabled']);
 
 type NormalizedRetrievalOptions =
-  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider' | 'reranker'> & {
+  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider' | 'reranker' | 'signal' | 'flow'> & {
     bypassCache: boolean;
     maxOutputLength?: number;
     denseProvider?: RetrievalOptions['denseProvider'];
@@ -82,9 +89,11 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
 async function applyRerankStage(
   query: string,
   candidates: InternalSearchResult[],
-  settings: NormalizedRetrievalOptions
+  settings: NormalizedRetrievalOptions,
+  flow: RetrievalFlowContext
 ): Promise<InternalSearchResult[]> {
   if (!settings.enableRerank || candidates.length <= 1) {
+    noteRetrievalStage(flow, 'rerank:skipped');
     return candidates;
   }
 
@@ -92,6 +101,7 @@ async function applyRerankStage(
   const head = candidates.slice(0, topN);
   const tail = candidates.slice(topN);
   const stageStart = Date.now();
+  noteRetrievalStage(flow, 'rerank:started');
 
   try {
     let rerankedHead: InternalSearchResult[];
@@ -121,6 +131,7 @@ async function applyRerankStage(
       Date.now() - stageStart,
       { help: 'Retrieval rerank stage duration in seconds.' }
     );
+    noteRetrievalStage(flow, 'rerank:completed');
     return [...rerankedHead, ...tail];
   } catch {
     incCounter(
@@ -129,6 +140,7 @@ async function applyRerankStage(
       1,
       'Rerank fail-open fallbacks.'
     );
+    noteRetrievalStage(flow, 'rerank:fail_open');
     return candidates;
   }
 }
@@ -191,6 +203,17 @@ export async function retrieve(
   options?: RetrievalOptions
 ): Promise<SearchResult[]> {
   const settings = normalizeOptions(options);
+  const flow = options?.flow ?? createRetrievalFlowContext(query, {
+    signal: options?.signal,
+    metadata: {
+      topK: settings.topK,
+      profile: settings.profile,
+      rewriteMode: settings.rewriteMode,
+      rankingMode: settings.rankingMode,
+    },
+  });
+  noteRetrievalStage(flow, 'start');
+  assertRetrievalFlowActive(flow, 'start');
   const semanticSearchOptions =
     settings.bypassCache || settings.maxOutputLength !== undefined
       ? { bypassCache: settings.bypassCache, maxOutputLength: settings.maxOutputLength }
@@ -201,10 +224,14 @@ export async function retrieve(
       : serviceClient.semanticSearch(q, k);
 
   if (!isRetrievalPipelineEnabled()) {
+    noteRetrievalStage(flow, 'legacy_semantic_path');
+    noteRetrievalStage(flow, 'complete');
     return semanticSearch(query, settings.topK);
   }
 
   const expandedQueries = buildExpandedQueries(query, settings);
+  noteRetrievalStage(flow, `expanded_queries:${expandedQueries.length}`);
+  assertRetrievalFlowActive(flow, 'expanded_queries');
   const semanticCandidates: InternalSearchResult[] = [];
   const lexicalCandidates: InternalSearchResult[] = [];
   const denseCandidates: InternalSearchResult[] = [];
@@ -215,6 +242,7 @@ export async function retrieve(
 
   const perVariantResults = await Promise.all(
     expandedQueries.map(async (variant) => {
+      assertRetrievalFlowActive(flow, `variant:${variant.index}`);
       const semanticPromise = withTimeout(
         semanticSearch(variant.query, settings.perQueryTopK),
         settings.timeoutMs,
@@ -249,19 +277,22 @@ export async function retrieve(
               console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
             }
             return [] as SearchResult[];
-          })
+        })
         : Promise.resolve([] as SearchResult[]);
 
+      noteRetrievalStage(flow, `variant:${variant.index}:started`);
       const [semanticResults, lexicalResults, denseResults] = await Promise.all([
         semanticPromise,
         lexicalPromise,
         densePromise,
       ]);
+      noteRetrievalStage(flow, `variant:${variant.index}:completed`);
 
       return { variant, semanticResults, lexicalResults, denseResults };
     })
   );
 
+  noteRetrievalStage(flow, 'collected_variants');
   for (const { variant, semanticResults, lexicalResults, denseResults } of perVariantResults) {
 
     for (const result of semanticResults) {
@@ -296,12 +327,14 @@ export async function retrieve(
   }
 
   if (semanticCandidates.length === 0 && lexicalCandidates.length === 0 && denseCandidates.length === 0) {
+    noteRetrievalStage(flow, 'complete');
     return [];
   }
 
   let processed: InternalSearchResult[] = [...semanticCandidates, ...lexicalCandidates, ...denseCandidates];
 
   if (settings.enableDedupe) {
+    noteRetrievalStage(flow, 'dedupe');
     // Keep cross-source signals for fusion by deduping inside each source first.
     const dedupedSemantic = dedupeResults(
       processed.filter((candidate) => candidate.retrievalSource === 'semantic' || candidate.retrievalSource === 'hybrid')
@@ -316,6 +349,7 @@ export async function retrieve(
   }
 
   if (settings.enableFusion) {
+    noteRetrievalStage(flow, 'fusion');
     processed = fuseCandidates(processed, {
       semanticWeight: settings.semanticWeight,
       lexicalWeight: settings.lexicalWeight,
@@ -323,7 +357,8 @@ export async function retrieve(
     });
   }
 
-  processed = await applyRerankStage(query, processed, settings);
+  processed = await applyRerankStage(query, processed, settings, flow);
+  noteRetrievalStage(flow, 'complete');
 
   return processed.slice(0, settings.topK);
 }

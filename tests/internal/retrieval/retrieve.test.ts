@@ -433,6 +433,16 @@ describe('retrieve internal pipeline', () => {
     );
 
     expect(first.results.map((r) => r.path)).toEqual(second.results.map((r) => r.path));
+    expect(first.flow?.stages).toContain('handler:complete');
+    expect(first.flow?.metadata).toMatchObject({
+      cacheHit: false,
+      qualityGuardEnabled: false,
+    });
+    expect(second.flow?.stages).toContain('cache_hit');
+    expect(second.flow?.metadata).toMatchObject({
+      cacheHit: true,
+      cacheKeyVersion: 'v2',
+    });
     expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
     expect(cache.set).toHaveBeenCalled();
     const firstSetKey = String((cache.set as jest.Mock).mock.calls[0]?.[0] ?? '');
@@ -493,5 +503,28 @@ describe('retrieve internal pipeline', () => {
     expect(response.qualityGuardState).toBe('enabled');
     expect(response.fallbackState).toBe('active');
     expect(response.results.some((item) => item.path === 'src/fallback.ts')).toBe(true);
+    expect(response.flow?.stages).toEqual(expect.arrayContaining(['start', 'expanded_queries:1', 'handler:complete']));
+  });
+
+  it('honors cancellation before retrieval work starts', async () => {
+    const controller = new AbortController();
+    controller.abort();
+
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    await expect(
+      retrieve('cancel me', serviceClient, {
+        signal: controller.signal,
+        enableExpansion: false,
+        enableLexical: false,
+        enableFusion: false,
+        topK: 5,
+      } as any)
+    ).rejects.toThrow(/aborted/i);
+
+    expect(serviceClient.semanticSearch).not.toHaveBeenCalled();
   });
 });

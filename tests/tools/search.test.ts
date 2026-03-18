@@ -274,7 +274,30 @@ describe('semantic_search Tool', () => {
 
       expect(result).toContain('```');
       expect(result).toContain('function test()');
-      expect(result).toContain('Trace: stage=semantic');
+      expect(result).toContain('Trace: source_stage=semantic; match_type=semantic');
+    });
+
+    it('should include query variant and variant index in trace output when present', async () => {
+      const mockResults: SearchResult[] = [
+        {
+          path: 'src/test.ts',
+          content: 'function test() { return true; }',
+          score: 0.9,
+          lines: '1-1',
+          relevanceScore: 0.9,
+          matchType: 'semantic',
+          retrievedAt: '2024-01-01T00:00:00.000Z',
+          queryVariant: 'test query',
+          variantIndex: 2,
+        } as any,
+      ];
+      mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleSemanticSearch({ query: 'test' }, mockServiceClient as any);
+
+      expect(result).toContain('Trace: source_stage=semantic; match_type=semantic');
+      expect(result).toContain('query_variant="test"');
+      expect(result).toContain('variant_index=0');
     });
 
     it('should include retrieval audit table when results exist', async () => {

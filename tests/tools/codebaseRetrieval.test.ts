@@ -201,7 +201,7 @@ describe('codebase_retrieval Tool', () => {
 
   it('adds reason text for each result', async () => {
     const mockResults: SearchResult[] = [
-      { path: 'src/b.ts', content: 'code b', relevanceScore: 0.5 },
+      { path: 'src/b.ts', content: 'code b', relevanceScore: 0.5 } as any,
     ];
     mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
@@ -213,6 +213,8 @@ describe('codebase_retrieval Tool', () => {
       expect.objectContaining({
         match_type: 'semantic',
         source_stage: 'semantic',
+        query_variant: 'reason',
+        variant_index: 0,
       })
     );
   });

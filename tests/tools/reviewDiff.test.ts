@@ -45,6 +45,7 @@ index 1234567..abcdefg 100644
     expect(result).toHaveProperty('hotspots');
     expect(result).toHaveProperty('findings');
     expect(Array.isArray(result.findings)).toBe(true);
+    expect(result).not.toHaveProperty('flow');
     expect(result.stats.files_changed).toBe(1);
     expect(result.stats).toHaveProperty('timings_ms');
     expect(typeof result.stats.timings_ms.preflight).toBe('number');

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at_utc": "2026-03-18T11:13:12.189Z",
+  "generated_at_utc": "2026-03-18T11:53:45.035Z",
   "workspace": "D:\\GitProjects\\context-engine",
   "config": {
     "query": "auth login service flow",
@@ -9,11 +9,11 @@
     "timeout_ms": 5000
   },
   "metrics": {
-    "p50_ms": 32313,
-    "p95_ms": 32314,
-    "avg_ms": 32313.5,
-    "min_ms": 32313,
-    "max_ms": 32314,
+    "p50_ms": 31894,
+    "p95_ms": 32321,
+    "avg_ms": 32107.5,
+    "min_ms": 31894,
+    "max_ms": 32321,
     "timeout_rate_proxy": 1,
     "keyword_fallback_rate": 1
   },
@@ -21,14 +21,14 @@
     {
       "iteration": 1,
       "query": "auth login service flow",
-      "elapsed_ms": 32313,
+      "elapsed_ms": 32321,
       "result_count": 10,
       "top_match_type": "keyword"
     },
     {
       "iteration": 2,
       "query": "auth login service flow",
-      "elapsed_ms": 32314,
+      "elapsed_ms": 31894,
       "result_count": 10,
       "top_match_type": "keyword"
     }

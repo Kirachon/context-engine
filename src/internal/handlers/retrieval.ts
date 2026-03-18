@@ -1,6 +1,7 @@
 import type { ContextServiceClient } from '../../mcp/serviceClient.js';
 import { featureEnabled } from '../../config/features.js';
 import { retrieve } from '../retrieval/retrieve.js';
+import { createRetrievalFlowContext, finalizeRetrievalFlow, noteRetrievalStage } from '../retrieval/flow.js';
 import type { InternalRetrieveOptions, InternalRetrieveResult } from './types.js';
 import { getInternalCache } from './performance.js';
 
@@ -34,6 +35,11 @@ function buildRetrieveCacheKey(
       ? (serviceClient as { getWorkspacePath: () => string }).getWorkspacePath()
       : 'unknown-workspace';
   return `retrieve:${RETRIEVE_CACHE_KEY_VERSION}:${workspaceScope}:${query}:${JSON.stringify(stableOptions)}`;
+}
+
+function stripFlowMetadata(result: InternalRetrieveResult): InternalRetrieveResult {
+  const { flow: _flow, ...cacheable } = result;
+  return cacheable;
 }
 
 type RetrievalSignals = {
@@ -112,7 +118,18 @@ export async function internalRetrieveCode(
 
   const resolveResultWithOptionalFallback = async (): Promise<InternalRetrieveResult> => {
     const start = Date.now();
-    let results = await retrieve(query, serviceClient, options);
+    const flow = createRetrievalFlowContext(query, {
+      signal: options?.signal,
+      metadata: {
+        cacheHit: false,
+        qualityGuardEnabled,
+        topK: options?.topK ?? 10,
+      },
+    });
+    let results = await retrieve(query, serviceClient, {
+      ...options,
+      flow,
+    });
     let fallbackState: InternalRetrieveResult['fallbackState'] = 'inactive';
 
     if (qualityGuardEnabled && shouldTriggerQualityGuardFallback(results)) {
@@ -131,6 +148,7 @@ export async function internalRetrieveCode(
     }
 
     const signals = summarizeSignals(results as Array<{ matchType?: string; retrievalSource?: string }>);
+    noteRetrievalStage(flow, 'handler:complete');
     return {
       query,
       elapsedMs: Date.now() - start,
@@ -139,6 +157,12 @@ export async function internalRetrieveCode(
       hybridComponents: signals.hybridComponents,
       qualityGuardState: qualityGuardEnabled ? 'enabled' : 'disabled',
       fallbackState,
+      flow: finalizeRetrievalFlow(flow, {
+        cacheHit: false,
+        qualityGuardEnabled,
+        fallbackState,
+        queryMode: signals.queryMode,
+      }),
     };
   };
 
@@ -150,10 +174,26 @@ export async function internalRetrieveCode(
   const cacheKey = buildRetrieveCacheKey(query, serviceClient, options);
   const cached = cache.get<InternalRetrieveResult>(cacheKey);
   if (cached) {
-    return cached;
+    const cacheFlow = createRetrievalFlowContext(query, {
+      signal: options?.signal,
+      metadata: {
+        cacheHit: true,
+        cacheKeyVersion: RETRIEVE_CACHE_KEY_VERSION,
+        qualityGuardEnabled,
+      },
+    });
+    noteRetrievalStage(cacheFlow, 'cache_hit');
+    noteRetrievalStage(cacheFlow, 'complete');
+    return {
+      ...cached,
+      flow: finalizeRetrievalFlow(cacheFlow, {
+        cacheHit: true,
+        cacheKeyVersion: RETRIEVE_CACHE_KEY_VERSION,
+      }),
+    };
   }
 
   const output = await resolveResultWithOptionalFallback();
-  cache.set(cacheKey, output);
+  cache.set(cacheKey, stripFlowMetadata(output));
   return output;
 }

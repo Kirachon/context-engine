@@ -1278,6 +1278,28 @@ describe('ContextServiceClient', () => {
       expect(bundle.metadata.totalFiles).toBeGreaterThan(0);
     });
 
+    it('should include a git metadata connector hint in context bundles', async () => {
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/connector.ts',
+          content: 'connector content',
+          relevanceScore: 0.93,
+          lines: '1-4',
+        },
+      ]);
+
+      const bundle = await client.getContextForPrompt('connector hint test', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeMemories: false,
+        includeRelated: false,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).toHaveBeenCalledTimes(1);
+      expect(bundle.hints.some((hint) => hint.startsWith('Git metadata:'))).toBe(true);
+    });
+
     it('should fall back to semantic search when local keyword search is empty', async () => {
       const localSearchSpy = jest.spyOn(client as any, 'localKeywordSearch').mockResolvedValue([]);
       const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([

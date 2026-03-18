@@ -456,6 +456,7 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(parsed.enhanced_prompt).toContain('Structured AI enhancement output.');
       expect(parsed.source).toBe('ai');
       expect(parsed.reason_code).toBe('ai_enhanced');
+      expect(parsed).not.toHaveProperty('flow');
     });
 
     it('returns structured JSON error envelope when CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json and transient failure occurs', async () => {
