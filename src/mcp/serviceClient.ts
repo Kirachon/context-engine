@@ -1057,6 +1057,7 @@ export class ContextServiceClient {
     cachedAt: number;
     files: string[];
   } | null = null;
+  private fallbackDiscoverFilesInFlight: Promise<string[]> | null = null;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
@@ -1133,24 +1134,48 @@ export class ContextServiceClient {
     return this.workspacePath;
   }
 
-  private async getCachedFallbackFiles(): Promise<string[]> {
+  private async getCachedFallbackFiles(options?: { bypassCache?: boolean }): Promise<string[]> {
+    const bypassCache = options?.bypassCache === true;
     const cacheKey = this.getFallbackDiscoverFilesCacheKey();
     const now = Date.now();
     const cached = this.fallbackDiscoverFilesCache;
     if (
-      cached
+      !bypassCache
+      && this.fallbackDiscoverFilesInFlight
+    ) {
+      return this.fallbackDiscoverFilesInFlight;
+    }
+    if (
+      !bypassCache
+      && cached
       && cached.cacheKey === cacheKey
       && (now - cached.cachedAt) <= FALLBACK_DISCOVER_FILES_CACHE_TTL_MS
     ) {
       return cached.files;
     }
 
-    const files = await this.discoverFiles(this.workspacePath);
-    this.fallbackDiscoverFilesCache = {
-      cacheKey,
-      cachedAt: now,
-      files,
-    };
+    const fetchFiles = this.discoverFiles(this.workspacePath);
+    if (!bypassCache) {
+      this.fallbackDiscoverFilesInFlight = fetchFiles;
+    }
+
+    let files: string[];
+    try {
+      files = await fetchFiles;
+    } finally {
+      if (!bypassCache) {
+        this.fallbackDiscoverFilesInFlight = null;
+      }
+    }
+
+    if (!bypassCache) {
+      this.fallbackDiscoverFilesCache = {
+        cacheKey,
+        cachedAt: Date.now(),
+        files,
+      };
+    }
+
     return files;
   }
 
@@ -1830,6 +1855,7 @@ export class ContextServiceClient {
     this.cacheHits = 0;
     this.cacheMisses = 0;
     this.fallbackDiscoverFilesCache = null;
+    this.fallbackDiscoverFilesInFlight = null;
   }
 
   private isPersistentCacheEnabled(): boolean {
@@ -2671,7 +2697,7 @@ export class ContextServiceClient {
         { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
       );
       try {
-        return await this.keywordFallbackSearch(query, topK);
+        return await this.keywordFallbackSearch(query, topK, { bypassCache });
       } catch {
         return [];
       }
@@ -2910,7 +2936,11 @@ export class ContextServiceClient {
    * Fallback retrieval path when semantic formatting changes and no structured snippets can be parsed.
    * This performs a bounded keyword scan across indexable files to preserve tool usability.
    */
-  private async keywordFallbackSearch(query: string, topK: number): Promise<SearchResult[]> {
+  private async keywordFallbackSearch(
+    query: string,
+    topK: number,
+    options?: { bypassCache?: boolean }
+  ): Promise<SearchResult[]> {
     const rawQuery = query.trim();
     const includeArtifacts = /\binclude:artifacts\b/i.test(rawQuery);
     const includeDocs = /\binclude:docs\b/i.test(rawQuery);
@@ -2950,7 +2980,7 @@ export class ContextServiceClient {
     const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
     const pureCodeIntent = codeIntent && !opsEvidenceIntent;
 
-    const files = await this.getCachedFallbackFiles();
+    const files = await this.getCachedFallbackFiles(options);
     if (files.length === 0) return [];
     const filtersApplied: string[] = [];
     if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');

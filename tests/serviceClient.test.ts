@@ -420,7 +420,7 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
-    it('reuses fallback file discovery across repeated semantic search calls', async () => {
+    it('reuses fallback file discovery when bypassCache is false', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-fallback-cache-'));
       fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
       fs.writeFileSync(
@@ -430,21 +430,52 @@ describe('ContextServiceClient', () => {
       );
 
       const fallbackClient = new ContextServiceClient(tempDir);
-      const providerCall = configureOpenAISemanticProvider(fallbackClient, new Error('API error'));
       const discoverFilesSpy = jest.spyOn(fallbackClient as any, 'discoverFiles');
 
-      const firstResults = await fallbackClient.semanticSearch('fallbackCacheProbe', 5, { bypassCache: true });
-      const secondResults = await fallbackClient.semanticSearch('fallbackCacheProbe', 5, { bypassCache: true });
+      const firstResults = await (fallbackClient as any).keywordFallbackSearch('fallbackCacheProbe', 5, {
+        bypassCache: false,
+      });
+      const secondResults = await (fallbackClient as any).keywordFallbackSearch('fallbackCacheProbe', 5, {
+        bypassCache: false,
+      });
       const rootDiscoveryCalls = discoverFilesSpy.mock.calls.filter(
         ([dirPath, relativeTo]) => dirPath === tempDir && relativeTo === undefined
       );
 
-      expect(providerCall).toHaveBeenCalledTimes(2);
       expect(rootDiscoveryCalls).toHaveLength(1);
       expect(firstResults.length).toBeGreaterThan(0);
       expect(secondResults.length).toBeGreaterThan(0);
       expect(firstResults[0].path).toContain('src/cache.ts');
       expect(secondResults[0].path).toContain('src/cache.ts');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('does not reuse fallback file discovery when bypassCache is true', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-fallback-bypass-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'cache.ts'),
+        'export const fallbackBypassProbe = true;',
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const discoverFilesSpy = jest.spyOn(fallbackClient as any, 'discoverFiles');
+
+      const firstResults = await (fallbackClient as any).keywordFallbackSearch('fallbackBypassProbe', 5, {
+        bypassCache: true,
+      });
+      const secondResults = await (fallbackClient as any).keywordFallbackSearch('fallbackBypassProbe', 5, {
+        bypassCache: true,
+      });
+      const rootDiscoveryCalls = discoverFilesSpy.mock.calls.filter(
+        ([dirPath, relativeTo]) => dirPath === tempDir && relativeTo === undefined
+      );
+
+      expect(rootDiscoveryCalls).toHaveLength(2);
+      expect(firstResults.length).toBeGreaterThan(0);
+      expect(secondResults.length).toBeGreaterThan(0);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
