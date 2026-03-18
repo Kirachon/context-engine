@@ -273,6 +273,64 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(result).toContain('JWT token validation');
     });
 
+    it('should prefer local docs search first for operational prompts in rich mode', async () => {
+      process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+      mockServiceClient.localKeywordSearch = jest.fn(async () => [
+        {
+          path: 'docs/QUICKSTART.md',
+          content: 'Quickstart instructions for Codex.',
+          relevanceScore: 0.95,
+        },
+      ]);
+      mockServiceClient.semanticSearch = jest.fn(async () => [
+        {
+          path: 'src/fallback.ts',
+          content: 'fallback result',
+          relevanceScore: 0.5,
+        },
+      ]);
+      mockServiceClient.searchAndAsk.mockResolvedValue(`### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Use the quickstart docs first for installation guidance.</enhanced-prompt>
+
+### END RESPONSE ###`);
+
+      const result = await handleEnhancePrompt({
+        prompt: 'how do I install this mcp on codex via the quickstart docs',
+      }, mockServiceClient as any);
+
+      expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.semanticSearch).not.toHaveBeenCalled();
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result).toContain('quickstart docs first');
+    });
+
+    it('should fall back to richer retrieval when local docs search is empty', async () => {
+      process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+      mockServiceClient.localKeywordSearch = jest.fn(async () => []);
+      mockServiceClient.semanticSearch = jest.fn(async () => [
+        {
+          path: 'src/mcp/serviceClient.ts',
+          content: 'ContextServiceClient builds context packs.',
+          relevanceScore: 0.88,
+        },
+      ]);
+      mockServiceClient.searchAndAsk.mockResolvedValue(`### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Fallback retrieval produced a richer answer.</enhanced-prompt>
+
+### END RESPONSE ###`);
+
+      const result = await handleEnhancePrompt({
+        prompt: 'how do I install this mcp on codex when the quickstart docs are missing',
+      }, mockServiceClient as any);
+
+      expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result).toContain('richer answer');
+    });
+
     it('should parse enhanced prompt from AI response and return structured markdown', async () => {
       const enhancedText = 'Implement user authentication with JWT tokens and session management.';
       const aiResponse = `### BEGIN RESPONSE ###

@@ -3,6 +3,7 @@ import { createHash } from 'crypto';
 import { isRetrievalPipelineEnabled, retrieve } from '../retrieval/retrieve.js';
 import { internalContextSnippet } from './context.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
+import { isOperationalDocsQuery } from '../../retrieval/providers/queryHeuristics.js';
 
 const DEFAULT_ENHANCE_TIMEOUT_MS = 120_000;
 const DEFAULT_RETRIEVAL_TIMEOUT_MS = 1_500;
@@ -539,7 +540,8 @@ export async function internalPromptEnhancerDetailed(
       let contextSnippet = hasCachedSnippet ? cachedContextSnippet ?? null : null;
 
       if (!hasCachedSnippet && retrievalStageTimeoutMs > 0) {
-        if (mode === 'light') {
+        const preferLocalDocsSearch = mode === 'light' || isOperationalDocsQuery(prompt);
+        if (preferLocalDocsSearch) {
           const localSearch = (serviceClient as unknown as {
             localKeywordSearch?: (query: string, topK: number) => Promise<Array<{
               path: string;
@@ -549,13 +551,42 @@ export async function internalPromptEnhancerDetailed(
           }).localKeywordSearch;
 
           if (typeof localSearch === 'function') {
-            const localResults = await withTimeout(
-              localSearch.call(serviceClient, prompt, DEFAULT_CONTEXT_TOP_K),
-              retrievalStageTimeoutMs,
-              'Local keyword retrieval'
-            );
+            let localResults: Array<{
+              path: string;
+              content: string;
+              relevanceScore?: number;
+            }> = [];
+            try {
+              localResults = await withTimeout(
+                localSearch.call(serviceClient, prompt, DEFAULT_CONTEXT_TOP_K),
+                retrievalStageTimeoutMs,
+                'Local keyword retrieval'
+              );
+            } catch (localError) {
+              if (mode !== 'light') {
+                localResults = [];
+              } else {
+                throw localError;
+              }
+            }
+
             contextSnippet = internalContextSnippet(
               localResults,
+              DEFAULT_CONTEXT_MAX_FILES,
+              DEFAULT_CONTEXT_MAX_CHARS
+            );
+          }
+
+          if (!contextSnippet && mode !== 'light') {
+            const retrievalResults = await retrieve(prompt, serviceClient, {
+              topK: DEFAULT_CONTEXT_TOP_K,
+              perQueryTopK: DEFAULT_CONTEXT_TOP_K,
+              maxVariants: 1,
+              enableExpansion: false,
+              timeoutMs: retrievalStageTimeoutMs,
+            });
+            contextSnippet = internalContextSnippet(
+              retrievalResults,
               DEFAULT_CONTEXT_MAX_FILES,
               DEFAULT_CONTEXT_MAX_CHARS
             );

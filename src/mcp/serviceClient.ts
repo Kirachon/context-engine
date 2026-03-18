@@ -38,6 +38,7 @@ import {
   parseFormattedResults as parseFormattedSemanticResults,
   searchWithSemanticRuntime,
 } from '../retrieval/providers/semanticRuntime.js';
+import { isOperationalDocsQuery } from '../retrieval/providers/queryHeuristics.js';
 import type {
   RetrievalProviderCallbackContext,
   RetrievalProvider,
@@ -3414,9 +3415,16 @@ export class ContextServiceClient {
         ? this.semanticSearch(q, k, { bypassCache: true })
         : this.semanticSearch(q, k);
 
-    // Perform semantic search and memory retrieval in parallel
+    const useLocalKeywordSearchFirst = isOperationalDocsQuery(query);
+    const searchResultsPromise = useLocalKeywordSearchFirst
+      ? this.localKeywordSearch(query, maxFiles * 3)
+          .then(results => (results.length > 0 ? results : semanticSearch(query, maxFiles * 3)))
+          .catch(() => semanticSearch(query, maxFiles * 3))
+      : semanticSearch(query, maxFiles * 3);
+
+    // Perform search and memory retrieval in parallel
     const [searchResults, memories] = await Promise.all([
-      semanticSearch(query, maxFiles * 3),
+      searchResultsPromise,
       includeMemories ? this.getRelevantMemories(query, 5) : Promise.resolve([]),
     ]);
 

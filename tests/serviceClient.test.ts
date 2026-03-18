@@ -1249,6 +1249,57 @@ describe('ContextServiceClient', () => {
     });
   });
 
+  describe('Context For Prompt retrieval fast path', () => {
+    it('should prefer local keyword search first for operational docs queries', async () => {
+      const localSearchSpy = jest.spyOn(client as any, 'localKeywordSearch').mockResolvedValue([
+        {
+          path: 'docs/MCP_CLIENT_SETUP.md',
+          content: 'Install the MCP client with Codex using the setup guide.',
+          relevanceScore: 0.96,
+        },
+      ]);
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/fallback.ts',
+          content: 'fallback result',
+          relevanceScore: 0.5,
+        },
+      ]);
+
+      const bundle = await client.getContextForPrompt('how do I install this mcp on codex', {
+        maxFiles: 2,
+        tokenBudget: 1200,
+        includeMemories: false,
+      });
+
+      expect(localSearchSpy).toHaveBeenCalledTimes(1);
+      expect(semanticSearchSpy).not.toHaveBeenCalled();
+      expect(bundle.files[0]?.path).toBe('docs/MCP_CLIENT_SETUP.md');
+      expect(bundle.metadata.totalFiles).toBeGreaterThan(0);
+    });
+
+    it('should fall back to semantic search when local keyword search is empty', async () => {
+      const localSearchSpy = jest.spyOn(client as any, 'localKeywordSearch').mockResolvedValue([]);
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/fallback.ts',
+          content: 'fallback result',
+          relevanceScore: 0.91,
+        },
+      ]);
+
+      const bundle = await client.getContextForPrompt('how do I install this mcp on codex', {
+        maxFiles: 2,
+        tokenBudget: 1200,
+        includeMemories: false,
+      });
+
+      expect(localSearchSpy).toHaveBeenCalledTimes(1);
+      expect(semanticSearchSpy).toHaveBeenCalledTimes(1);
+      expect(bundle.files[0]?.path).toBe('src/fallback.ts');
+    });
+  });
+
   describe('Index Workspace', () => {
     it('should index files via local_native fallback by default', async () => {
       const result = await client.indexWorkspace();
