@@ -157,6 +157,32 @@ describe('retrieve internal pipeline', () => {
     expect(results.map((item) => item.path)).toEqual(['src/b.ts', 'src/a.ts', 'src/c.ts']);
   });
 
+  it('clears timeout timers after a fast retrieval resolves', async () => {
+    jest.useFakeTimers();
+    try {
+      const serviceClient = {
+        semanticSearch: jest.fn(async () => [
+          { path: 'src/fast.ts', content: 'fast', relevanceScore: 0.9, lines: '1-2' },
+        ]),
+        localKeywordSearch: jest.fn(async () => []),
+      } as any;
+
+      const results = await retrieve('fast query', serviceClient, {
+        enableExpansion: false,
+        enableLexical: false,
+        enableFusion: false,
+        timeoutMs: 50,
+        topK: 5,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('fails open when reranker throws', async () => {
     const serviceClient = {
       semanticSearch: jest.fn(async () => [

@@ -153,13 +153,25 @@ Here is an enhanced version of the original instruction that is more specific an
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
       });
 
-      it('should include retrieval context in rich mode path selection', async () => {
+      it('should prefer the highest-relevance files when building rich context', async () => {
         process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
         mockServiceClient.semanticSearch.mockResolvedValue([
           {
-            path: 'src/auth/login.ts',
-            content: 'export async function login() { return true; }',
-            relevanceScore: 0.95,
+            path: 'src/auth/low.ts',
+            content: 'export function lowPriorityDraft() { return "draft"; }',
+            relevanceScore: 0.35,
+            matchType: 'keyword',
+          },
+          {
+            path: 'src/auth/high.ts',
+            content: 'export function highPriorityFlow() { return "high"; }',
+            relevanceScore: 0.96,
+            matchType: 'keyword',
+          },
+          {
+            path: 'src/auth/low.ts',
+            content: 'export function lowPriorityDraft() { return "revised"; }',
+            relevanceScore: 0.91,
             matchType: 'keyword',
           },
         ]);
@@ -178,7 +190,13 @@ Here is an enhanced version of the original instruction that is more specific an
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
         const promptText = mockServiceClient.searchAndAsk.mock.calls[0][1];
         expect(promptText).toContain('Here is relevant code context that may help:');
-        expect(promptText).toContain('File: src/auth/login.ts');
+        expect(promptText).toContain('File: src/auth/high.ts');
+        expect(promptText).toContain('File: src/auth/low.ts');
+        expect(promptText.indexOf('File: src/auth/high.ts')).toBeLessThan(
+          promptText.indexOf('File: src/auth/low.ts')
+        );
+        expect(promptText).toContain('revised');
+        expect(promptText).not.toContain('draft');
       });
     });
 

@@ -68,6 +68,7 @@ Use `tool_manifest()` in the MCP server to inspect the current tool inventory di
 - Local-first runtime with no legacy provider SDK dependency in the active path
 - Agent-agnostic MCP interface
 - Local-native retrieval provider as the active runtime
+- Thin `context-engine-mcp` launcher for convenience; it starts the same server and does not add features
 - Persistent state and evidence artifacts for rollout-proof workflows
 - Planning, review, and validation workflows built into the server
 - Optional benchmarking, parity, and governance gates for safer changes

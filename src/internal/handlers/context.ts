@@ -46,15 +46,29 @@ export function internalContextSnippet(
     }
   }
 
-  const entries = Array.from(fileMap.entries()).slice(0, maxFiles);
+  const entries = Array.from(fileMap.entries())
+    .sort(([pathA, resultA], [pathB, resultB]) => {
+      const scoreA = resultA.relevanceScore ?? 0;
+      const scoreB = resultB.relevanceScore ?? 0;
+      if (scoreB !== scoreA) {
+        return scoreB - scoreA;
+      }
+      return pathA.localeCompare(pathB);
+    })
+    .slice(0, maxFiles);
   const lines: string[] = [];
   let remaining = maxChars;
 
   for (const [filePath, result] of entries) {
     const header = `File: ${filePath}\n`;
-    const snippet = result.content.length > 300
-      ? `${result.content.slice(0, 300)}...`
-      : result.content;
+    const normalizedContent = result.content
+      .replace(/\r\n/g, '\n')
+      .replace(/[ \t]+\n/g, '\n')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    const snippet = normalizedContent.length > 300
+      ? `${normalizedContent.slice(0, 300)}...`
+      : normalizedContent;
     const entry = `${header}${snippet}\n`;
 
     if (entry.length > remaining) {

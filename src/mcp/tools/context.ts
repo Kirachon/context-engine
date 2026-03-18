@@ -137,6 +137,13 @@ export async function handleGetContext(
     prefix: '⚠️ ',
     subject: 'Context',
   });
+  const sortedFiles = [...contextBundle.files].sort((a, b) => {
+    const scoreDiff = b.relevance - a.relevance;
+    if (scoreDiff !== 0) {
+      return scoreDiff;
+    }
+    return a.path.localeCompare(b.path);
+  });
 
   // Format enhanced context bundle for agent consumption
   let output = '';
@@ -192,12 +199,12 @@ export async function handleGetContext(
   // =========================================================================
   // File Overview (quick reference)
   // =========================================================================
-  if (contextBundle.files.length > 0) {
+  if (sortedFiles.length > 0) {
     output += `## 📁 Files Overview\n\n`;
     output += `| # | File | Relevance | Summary |\n`;
     output += `|---|------|-----------|----------|\n`;
-    for (let i = 0; i < contextBundle.files.length; i++) {
-      const file = contextBundle.files[i];
+    for (let i = 0; i < sortedFiles.length; i++) {
+      const file = sortedFiles[i];
       const relevance = formatRelevance(file.relevance);
       const summary = file.summary.substring(0, 50) + (file.summary.length > 50 ? '...' : '');
       output += `| ${i + 1} | \`${file.path}\` | ${relevance} | ${summary} |\n`;
@@ -205,9 +212,9 @@ export async function handleGetContext(
     output += '\n';
   }
 
-  if (featureEnabled('context_packs_v2') && contextBundle.files.length > 0) {
+  if (featureEnabled('context_packs_v2') && sortedFiles.length > 0) {
     output += `## ✅ Why These Files\n\n`;
-    for (const file of contextBundle.files) {
+    for (const file of sortedFiles) {
       const rationale = file.selectionRationale ?? `Selected for relevance ${file.relevance.toFixed(2)}`;
       output += `- \`${file.path}\`: ${rationale}\n`;
     }
@@ -231,15 +238,15 @@ export async function handleGetContext(
   // =========================================================================
   output += `## 📝 Detailed Code Context\n\n`;
 
-  if (contextBundle.files.length === 0) {
+  if (sortedFiles.length === 0) {
     output += `_No relevant code found for this query. Try:\n`;
     output += `- Using different keywords\n`;
     output += `- Being more specific about what you're looking for\n`;
     output += `- Ensuring the codebase is indexed_\n\n`;
   }
 
-  for (let fileIndex = 0; fileIndex < contextBundle.files.length; fileIndex++) {
-    const file = contextBundle.files[fileIndex];
+  for (let fileIndex = 0; fileIndex < sortedFiles.length; fileIndex++) {
+    const file = sortedFiles[fileIndex];
     const language = getLanguageForExtension(file.extension);
 
     // File header with summary
@@ -283,7 +290,7 @@ export async function handleGetContext(
     }
 
     // Separator between files
-    if (fileIndex < contextBundle.files.length - 1) {
+    if (fileIndex < sortedFiles.length - 1) {
       output += `---\n\n`;
     }
   }

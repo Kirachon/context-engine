@@ -188,6 +188,36 @@ describe('get_context_for_prompt Tool', () => {
       expect(result).toContain('```');
     });
 
+    it('should render higher-relevance files first in overview and detailed context', async () => {
+      FEATURE_FLAGS.context_packs_v2 = true;
+      const mockBundle: ContextBundle = {
+        summary: 'Ordered context bundle',
+        query: 'sort by relevance',
+        files: [
+          createFileContext('src/low.ts', 0.22, 'Low priority helper', 'low priority draft'),
+          createFileContext('src/high.ts', 0.96, 'High priority core', 'high priority path'),
+          createFileContext('src/mid.ts', 0.61, 'Mid priority support', 'mid priority support'),
+        ],
+        hints: ['Files should be ranked by relevance'],
+        metadata: {
+          totalFiles: 3,
+          totalSnippets: 3,
+          totalTokens: 300,
+          tokenBudget: 8000,
+          truncated: false,
+          searchTimeMs: 42,
+        },
+      };
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: 'sort by relevance' }, mockServiceClient as any);
+
+      expect(result.indexOf('| 1 | `src/high.ts` |')).toBeLessThan(result.indexOf('| 2 | `src/mid.ts` |'));
+      expect(result.indexOf('### 1. `src/high.ts`')).toBeLessThan(result.indexOf('### 2. `src/mid.ts`'));
+      expect(result).toContain('## ✅ Why These Files');
+      expect(result.indexOf('- `src/high.ts`:')).toBeLessThan(result.indexOf('- `src/mid.ts`:'));
+    });
+
     it('should render context-pack v2 sections with real newlines when flag is enabled', async () => {
       FEATURE_FLAGS.context_packs_v2 = true;
       const mockBundle = createMockContextBundle();
@@ -281,5 +311,29 @@ function createMockContextBundle(): ContextBundle {
       truncated: false,
       searchTimeMs: 120,
     },
+  };
+}
+
+function createFileContext(
+  path: string,
+  relevance: number,
+  summary: string,
+  snippetText: string
+): FileContext {
+  return {
+    path,
+    extension: '.ts',
+    summary,
+    relevance,
+    tokenCount: 100,
+    snippets: [
+      {
+        text: snippetText,
+        lines: '1-5',
+        relevance,
+        tokenCount: 20,
+        codeType: 'function',
+      },
+    ],
   };
 }

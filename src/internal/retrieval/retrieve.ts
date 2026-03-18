@@ -138,12 +138,18 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
     return promise;
   }
 
-  return Promise.race([
-    promise,
-    new Promise<T>(resolve => {
-      setTimeout(() => resolve(fallback), timeoutMs);
-    }),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => resolve(fallback), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
 }
 
 function buildExpandedQueries(query: string, options: NormalizedRetrievalOptions): ExpandedQuery[] {

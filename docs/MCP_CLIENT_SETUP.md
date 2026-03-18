@@ -34,6 +34,15 @@ node /absolute/path/to/context-engine/dist/index.js --workspace /path/to/your/pr
 
 Transport is `stdio` (not HTTP).
 
+## About the CLI Wrapper
+
+The `context-engine-mcp` wrapper is just a small starter that launches the same server for you.
+
+Use the wrapper when you want a shorter command or an easier install path.
+Use `node /absolute/path/to/context-engine/dist/index.js --workspace /path/to/your/project` directly when your client already supports a custom command and you want the simplest setup.
+
+The wrapper does not add new features, change search results, or replace the server itself. It is only for convenience.
+
 ## Codex CLI
 
 Add server:
