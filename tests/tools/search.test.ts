@@ -274,6 +274,7 @@ describe('semantic_search Tool', () => {
 
       expect(result).toContain('```');
       expect(result).toContain('function test()');
+      expect(result).toContain('Trace: stage=semantic');
     });
 
     it('should include retrieval audit table when results exist', async () => {

@@ -60,6 +60,13 @@ type InternalRetrievalSignalMetadata = {
   fallbackState?: 'active' | 'inactive';
 };
 
+type ResultTraceCandidate = {
+  matchType?: string;
+  retrievalSource?: string;
+  queryVariant?: string;
+  variantIndex?: number;
+};
+
 type RawFallbackDiagnostics = {
   filters_applied?: string[];
   filtered_paths_count?: number;
@@ -151,6 +158,25 @@ function formatRelevance(score: number | undefined): string {
   if (score >= 0.6) return '✅';
   if (score >= 0.4) return '📊';
   return '📌';
+}
+
+function formatResultTrace(result: ResultTraceCandidate): string {
+  const sourceStage = (result.retrievalSource ?? result.matchType ?? 'semantic').toLowerCase();
+  const normalizedStage =
+    sourceStage === 'keyword' ||
+    sourceStage === 'hybrid' ||
+    sourceStage === 'lexical' ||
+    sourceStage === 'dense'
+      ? sourceStage
+      : 'semantic';
+  const parts = [`stage=${normalizedStage}`];
+  if (result.queryVariant && result.queryVariant.trim().length > 0) {
+    parts.push(`variant=\"${result.queryVariant}\"`);
+  }
+  if (typeof result.variantIndex === 'number' && Number.isFinite(result.variantIndex)) {
+    parts.push(`variant_index=${result.variantIndex}`);
+  }
+  return parts.join(', ');
 }
 
 type RetrievalProfile = 'fast' | 'balanced' | 'rich';
@@ -320,6 +346,7 @@ export async function handleSemanticSearch(
         output += ` (${(result.relevanceScore * 100).toFixed(0)}% match)`;
       }
       output += `\n\n`;
+      output += `Trace: ${formatResultTrace(result as unknown as ResultTraceCandidate)}\n\n`;
 
       // Show a preview of the content
       const preview = result.content.length > 300

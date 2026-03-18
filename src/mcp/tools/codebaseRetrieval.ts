@@ -32,6 +32,12 @@ export interface CodebaseRetrievalResult {
   score: number;
   lines?: string;
   reason: string;
+  trace?: {
+    match_type: 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense';
+    source_stage: 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense';
+    query_variant?: string;
+    variant_index?: number;
+  };
 }
 
 export interface CodebaseRetrievalOutput {
@@ -96,6 +102,13 @@ type InternalRetrievalSignalMetadata = {
   hybridComponents?: Array<'semantic' | 'keyword' | 'dense'>;
   qualityGuardState?: 'enabled' | 'disabled';
   fallbackState?: 'active' | 'inactive';
+};
+
+type TraceCandidate = {
+  matchType?: string;
+  retrievalSource?: string;
+  queryVariant?: string;
+  variantIndex?: number;
 };
 
 const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> = {
@@ -236,6 +249,15 @@ export async function handleCodebaseRetrieval(
   const freshnessWarning = getIndexFreshnessWarning(status);
 
   const results: CodebaseRetrievalResult[] = searchResults.map((r) => {
+    const traceCandidate = r as unknown as TraceCandidate;
+    const sourceStage = (traceCandidate.retrievalSource ?? traceCandidate.matchType ?? 'semantic').toLowerCase();
+    const normalizedStage: 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense' =
+      sourceStage === 'keyword' ||
+      sourceStage === 'hybrid' ||
+      sourceStage === 'lexical' ||
+      sourceStage === 'dense'
+        ? sourceStage
+        : 'semantic';
     const snippet = useCompactPreview
       ? { preview: r.content.slice(0, 240) }
       : { content: r.content };
@@ -245,6 +267,12 @@ export async function handleCodebaseRetrieval(
       score: r.relevanceScore || 0,
       lines: r.lines,
       reason: `Semantic match for: "${normalizedQuery}"`,
+      trace: {
+        match_type: normalizedStage,
+        source_stage: normalizedStage,
+        query_variant: traceCandidate.queryVariant,
+        variant_index: traceCandidate.variantIndex,
+      },
     };
   });
 

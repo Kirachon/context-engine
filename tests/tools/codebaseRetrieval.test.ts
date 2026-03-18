@@ -61,6 +61,8 @@ describe('codebase_retrieval Tool', () => {
     expect(typeof parsed.results[0].score).toBe('number');
     expect(parsed.results[0].score).toBeGreaterThanOrEqual(0.6);
     expect(parsed.results[0].score).toBeLessThanOrEqual(1);
+    expect(parsed.results[0]).toHaveProperty('trace');
+    expect(parsed.results[0].trace).toHaveProperty('source_stage');
     expect(parsed).toHaveProperty('metadata');
     expect(parsed.metadata.workspace).toBe('/tmp/workspace');
     expect(parsed.metadata.filtersApplied).toEqual([]);
@@ -207,6 +209,12 @@ describe('codebase_retrieval Tool', () => {
     const parsed = JSON.parse(result);
 
     expect(parsed.results[0].reason).toMatch(/Semantic match/);
+    expect(parsed.results[0].trace).toEqual(
+      expect.objectContaining({
+        match_type: 'semantic',
+        source_stage: 'semantic',
+      })
+    );
   });
 
   it('includes fallback diagnostics metadata when provided by service client', async () => {

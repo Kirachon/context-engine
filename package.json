@@ -54,6 +54,7 @@
     "ci:check:enhancement-error-taxonomy-report": "npm run -s ci:generate:enhancement-error-taxonomy-report && node --import tsx scripts/ci/check-enhancement-error-taxonomy-report.ts --report artifacts/bench/enhancement-error-taxonomy-report.json",
     "ci:generate:weekly-retrieval-trend-report": "node --import tsx scripts/ci/generate-weekly-retrieval-trend-report.ts --parity artifacts/bench/legacy-capability-parity-gate.json --quality artifacts/bench/retrieval-quality-report.json --out artifacts/bench/r4-weekly-trend.json --archive-dir artifacts/bench/archive/r4-weekly --retention-weeks 12",
     "ci:check:weekly-retrieval-trend-report": "node --import tsx scripts/ci/check-weekly-retrieval-trend-report.ts --artifact artifacts/bench/r4-weekly-trend.json --archive-dir artifacts/bench/archive/r4-weekly",
+    "ci:generate:semantic-latency-report": "node --import tsx scripts/ci/generate-semantic-latency-report.ts --out artifacts/bench/semantic-latency-report.json",
     "ci:check:enhance-prompt-contract": "node --import tsx scripts/ci/check-enhance-prompt-contract.ts",
     "ci:check:enhance-doc-contract": "node --import tsx scripts/ci/check-enhance-doc-contract.ts",
     "ci:check:r6-execution-board": "node --import tsx scripts/ci/check-r6-execution-board.ts",
