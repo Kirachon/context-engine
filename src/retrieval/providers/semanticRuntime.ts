@@ -10,6 +10,18 @@ export interface SemanticSearchRuntimeDependencies {
   keywordFallbackSearch: (query: string, topK: number) => Promise<SearchResult[]>;
 }
 
+function isOperationalDocsQuery(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  const docsIntent = /\b(how to|how do i|how do we|install|installation|setup|configure|configuration|quickstart|get started|getting started|client setup|add server|codex mcp|mcp add|mcp install|windows|linux|mac)\b/i;
+  const codeIntent = /\b(function|class|interface|factory|provider|handler|module|implementation|code|test|benchmark|ranking|symbol|rerank|query|search)\b/i;
+
+  return docsIntent.test(normalized) && !codeIntent.test(normalized);
+}
+
 export async function searchWithSemanticRuntime(
   query: string,
   topK: number,
@@ -24,6 +36,16 @@ export async function searchWithSemanticRuntime(
     .filter(Boolean);
   const hasStrongIdentifierToken = queryTokens.some((token) => token.length >= 12);
   const isSingleTokenQuery = queryTokens.length === 1;
+
+  // Fast path: operational and setup-style questions usually do not need the
+  // expensive provider round-trip when a local keyword search already finds
+  // good docs or setup instructions.
+  if (isOperationalDocsQuery(normalizedQuery)) {
+    const keywordResults = await dependencies.keywordFallbackSearch(query, topK);
+    if (keywordResults.length > 0) {
+      return keywordResults;
+    }
+  }
 
   const prompt = buildSemanticSearchPrompt(query, topK, options);
   const rawResponse = await dependencies.searchAndAsk(query, prompt);

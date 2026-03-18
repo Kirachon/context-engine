@@ -127,4 +127,32 @@ describe('semanticRuntime helpers', () => {
     });
     expect(keywordFallbackSearch).not.toHaveBeenCalled();
   });
+
+  it('uses keyword fallback first for setup and install style queries', async () => {
+    const fallbackResults: SearchResult[] = [
+      {
+        path: 'docs/MCP_CLIENT_SETUP.md',
+        content: 'install the mcp',
+        matchType: 'keyword',
+        relevanceScore: 0.98,
+        retrievedAt: new Date().toISOString(),
+      },
+    ];
+    const searchAndAsk = jest.fn(async () => JSON.stringify([
+      { path: 'src/slow.ts', content: 'slow', relevanceScore: 0.1, matchType: 'semantic' },
+    ]));
+    const keywordFallbackSearch = jest.fn(async () => fallbackResults);
+
+    const results = await searchWithSemanticRuntime(
+      'how do I install this mcp on codex',
+      5,
+      undefined,
+      { searchAndAsk, keywordFallbackSearch }
+    );
+
+    expect(keywordFallbackSearch).toHaveBeenCalledTimes(1);
+    expect(keywordFallbackSearch.mock.calls[0]).toEqual(['how do I install this mcp on codex', 5]);
+    expect(searchAndAsk).not.toHaveBeenCalled();
+    expect(results).toBe(fallbackResults);
+  });
 });
