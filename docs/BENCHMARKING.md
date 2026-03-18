@@ -185,12 +185,27 @@ npm run bench:ci:pr
 
 Behavior:
 - Writes `artifacts/bench/pr-baseline.json` and `artifacts/bench/pr-candidate.json`.
-- Prefers mode probes in this order: `retrieve`, `search`, then `scan`.
-- Honors `CE_RETRIEVAL_PROVIDER` when set; falls back safely to the first runnable mode.
+- KPI mode-lock: probes `retrieve`, then `search` by default; `scan` is excluded so low-signal scan fallback cannot pass the PR KPI gate.
+- Optional local diagnostic override: set `BENCH_SUITE_ALLOW_SCAN_FALLBACK=true` to re-enable `scan` probe fallback for PR runs.
+- Probe checks now require runnable JSON output with a comparable latency metric (not only exit code `0`).
+- Probe failure diagnostics include the configured probe timeout value.
+- Honors `CE_RETRIEVAL_PROVIDER` when set and picks the first runnable mode allowed by policy.
 - Includes `provenance.retrieval_provider` in suite artifacts for traceability.
 - Compares with PR thresholds:
   - `--max-regression-pct 12`
   - `--max-regression-abs 30`
+
+Related env knobs:
+- `BENCH_SUITE_ALLOW_SCAN_FALLBACK=true|false` (PR default: `false`)
+- `BENCH_SUITE_PROBE_TIMEOUT_MS` (probe timeout budget included in error diagnostics)
+- `BENCH_SUITE_PR_ITERATIONS=<n>` (optional local override; default `30`)
+- `BENCH_SUITE_NIGHTLY_ITERATIONS=<n>` (optional override; default `80`)
+
+Optional strict mode-lock gate (fails if baseline/candidate bench mode is not `retrieve` or `search`):
+
+```bash
+npm run ci:check:bench-mode-lock
+```
 
 Optional holdout fixture guard before quality gate:
 

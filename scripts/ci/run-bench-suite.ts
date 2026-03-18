@@ -13,6 +13,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
+import { fileURLToPath } from 'url';
+import { buildProbeFailureMessage, resolveModeProbeOrder } from '../../src/ci/benchSuiteModePolicy';
 
 type SuiteMode = 'pr' | 'nightly';
 type BenchMode = 'scan' | 'search' | 'retrieve';
@@ -58,6 +60,14 @@ interface RunScriptOptions {
   allowFailure?: boolean;
   timeoutMs?: number;
 }
+
+type ProbeResult = {
+  status: number | null;
+  stdout: string;
+  stderr: string;
+};
+
+type ProbeRunner = (benchArgs: string[], timeoutMs: number) => ProbeResult;
 
 function parseArgs(argv: string[]): SuiteArgs {
   const args: SuiteArgs = {
@@ -137,6 +147,12 @@ function parseTimeoutMs(raw: string | undefined, fallbackMs: number, minMs: numb
   return Math.max(minMs, Math.min(maxMs, value));
 }
 
+function parseIterations(raw: string | undefined, fallback: number): number {
+  const value = Number.parseInt(raw ?? '', 10);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.max(1, Math.min(200, value));
+}
+
 function runNodeTsScript(scriptPath: string, args: string[], options: RunScriptOptions = {}) {
   const { allowFailure = false, timeoutMs } = options;
   const result = spawnSync(process.execPath, ['--import', 'tsx', scriptPath, ...args], {
@@ -162,6 +178,18 @@ function runNodeTsScript(scriptPath: string, args: string[], options: RunScriptO
     throw new Error(`Command failed (${scriptPath}): ${err}`);
   }
   return result;
+}
+
+function runBenchProbe(benchArgs: string[], timeoutMs: number): ProbeResult {
+  const probe = runNodeTsScript(path.join('scripts', 'bench.ts'), benchArgs, {
+    allowFailure: true,
+    timeoutMs,
+  });
+  return {
+    status: probe.status,
+    stdout: probe.stdout ?? '',
+    stderr: probe.stderr ?? '',
+  };
 }
 
 function runGit(args: string[]): string | undefined {
@@ -384,6 +412,8 @@ function aggregateRuns(
 function makeRunConfig(mode: SuiteMode, benchMode: BenchMode, workspace: string): RunConfig {
   const isNightly = mode === 'nightly';
   const query = 'search queue';
+  const prIterations = parseIterations(process.env.BENCH_SUITE_PR_ITERATIONS, 30);
+  const nightlyIterations = parseIterations(process.env.BENCH_SUITE_NIGHTLY_ITERATIONS, 80);
 
   if (benchMode === 'scan') {
     return {
@@ -400,7 +430,7 @@ function makeRunConfig(mode: SuiteMode, benchMode: BenchMode, workspace: string)
   }
 
   if (benchMode === 'search') {
-    const iterations = isNightly ? '80' : '30';
+    const iterations = String(isNightly ? nightlyIterations : prIterations);
     return {
       benchMode,
       metricPath: 'payload.timing.p95_ms',
@@ -427,7 +457,7 @@ function makeRunConfig(mode: SuiteMode, benchMode: BenchMode, workspace: string)
     };
   }
 
-  const iterations = isNightly ? '80' : '30';
+  const iterations = String(isNightly ? nightlyIterations : prIterations);
   return {
     benchMode,
     metricPath: 'payload.timing.p95_ms',
@@ -456,6 +486,20 @@ function makeRunConfig(mode: SuiteMode, benchMode: BenchMode, workspace: string)
   };
 }
 
+function probeOutputHasComparableMetric(rawStdout: string): string | null {
+  const raw = rawStdout.trim();
+  if (!raw) {
+    return 'empty JSON output';
+  }
+  try {
+    const parsed = JSON.parse(raw) as BenchOutput;
+    normalizeForCompare(parsed);
+    return null;
+  } catch (error) {
+    return `invalid benchmark JSON output (${error instanceof Error ? error.message : String(error)})`;
+  }
+}
+
 function resolveRetrievalProvider(): {
   provider: RetrievalProvider;
   source: 'CE_RETRIEVAL_PROVIDER' | 'default';
@@ -476,30 +520,49 @@ function resolveRetrievalProvider(): {
   return { provider: 'local_native', source: 'default', raw };
 }
 
-function resolveRunConfig(
+export function resolveRunConfig(
   mode: SuiteMode,
   workspace: string,
-  retrievalProvider: RetrievalProvider
+  retrievalProvider: RetrievalProvider,
+  options: {
+    probeRunner?: ProbeRunner;
+    probeTimeoutMs?: number;
+  } = {}
 ): RunConfig {
-  const modeOrder: BenchMode[] = ['retrieve', 'search', 'scan'];
+  const modeOrder = resolveModeProbeOrder(mode, process.env);
   const errors: string[] = [];
-  const probeTimeoutMs = parseTimeoutMs(process.env.BENCH_SUITE_PROBE_TIMEOUT_MS, 30_000, 2_000, 120_000);
+  const probeRunner = options.probeRunner ?? runBenchProbe;
+  const probeTimeoutMs = options.probeTimeoutMs ?? parseTimeoutMs(process.env.BENCH_SUITE_PROBE_TIMEOUT_MS, 30_000, 2_000, 120_000);
 
   for (const benchMode of modeOrder) {
     const config = makeRunConfig(mode, benchMode, workspace);
-    const probe = runNodeTsScript(
-      path.join('scripts', 'bench.ts'),
-      config.candidateArgs,
-      { allowFailure: true, timeoutMs: probeTimeoutMs }
-    );
+    const probe = probeRunner(config.candidateArgs, probeTimeoutMs);
     if (probe.status === 0) {
-      return config;
+      const outputIssue = probeOutputHasComparableMetric(probe.stdout);
+      if (!outputIssue) {
+        return config;
+      }
+      errors.push(`${benchMode}: probe succeeded but ${outputIssue}`);
+      continue;
     }
     const err = (probe.stderr || probe.stdout || '').trim();
     errors.push(`${benchMode}: ${err || 'unknown error'}`);
   }
+  throw new Error(buildProbeFailureMessage(mode, probeTimeoutMs, errors, process.env));
+}
 
-  throw new Error(`Unable to run benchmark in any supported mode. ${errors.join(' | ')}`);
+function isMainEntry(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  return path.resolve(entry) === fileURLToPath(import.meta.url);
+}
+
+if (isMainEntry()) {
+  main().catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  });
 }
 
 function withWorkspaceArgs(args: string[], workspace: string): string[] {
@@ -611,8 +674,3 @@ async function main(): Promise<void> {
   runCompare(baselinePath, candidatePath, runConfig.metricPath, runConfig.thresholds);
 }
 
-main().catch((error) => {
-  // eslint-disable-next-line no-console
-  console.error(error instanceof Error ? error.message : String(error));
-  process.exit(1);
-});
