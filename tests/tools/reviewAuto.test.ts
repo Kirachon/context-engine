@@ -45,6 +45,25 @@ function createRepoWithNoStagedChange(): string {
   return tmp;
 }
 
+function createRepoWithMultiAreaStagedChange(): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-auto-multi-'));
+
+  sh('git', ['init'], tmp);
+  sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+  sh('git', ['config', 'user.name', 'CI'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+  writeFile(path.join(tmp, 'tests/a.test.ts'), ['describe("a", () => {});', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+  sh('git', ['commit', '-m', 'base'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', 'export const b = 2;', ''].join('\n'));
+  writeFile(path.join(tmp, 'tests/a.test.ts'), ['describe("a", () => {});', 'describe("b", () => {});', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+
+  return tmp;
+}
+
 function normalizeReviewAuto(result: any): any {
   const normalized = JSON.parse(JSON.stringify(result));
 
@@ -273,6 +292,46 @@ index 1234567..abcdefg 100644
     );
 
     expect(capturedTimeoutMs).toBe(120000);
+  });
+
+  it('runs chunked parallel review_git_diff when enabled and changed file count exceeds threshold', async () => {
+    const tmp = createRepoWithMultiAreaStagedChange();
+    process.env.CE_REVIEW_AUTO_CHUNKED_PARALLEL = 'true';
+    process.env.CE_REVIEW_AUTO_CHUNK_MIN_FILES = '1';
+    process.env.CE_REVIEW_AUTO_PARALLEL_WORKERS = '2';
+
+    try {
+      const mockServiceClient = {
+        getWorkspacePath: () => tmp,
+        searchAndAsk: async () =>
+          JSON.stringify({
+            findings: [],
+            overall_correctness: 'patch is correct',
+            overall_explanation: 'Mocked chunk output.',
+            overall_confidence_score: 0.9,
+          }),
+      } as any;
+
+      const resultStr = await handleReviewAuto(
+        {
+          target: 'staged',
+          review_git_diff_options: { changed_lines_only: true },
+        },
+        mockServiceClient
+      );
+
+      const parsed = JSON.parse(resultStr);
+      expect(parsed.selected_tool).toBe('review_git_diff');
+      expect(parsed.chunked_execution).toBeDefined();
+      expect(parsed.chunked_execution.enabled).toBe(true);
+      expect(parsed.chunked_execution.chunk_count).toBeGreaterThanOrEqual(2);
+      expect(parsed.chunked_execution.completed_chunks).toBeGreaterThanOrEqual(2);
+      expect(parsed.output.git_info.command).toContain('chunked_parallel_review');
+    } finally {
+      delete process.env.CE_REVIEW_AUTO_CHUNKED_PARALLEL;
+      delete process.env.CE_REVIEW_AUTO_CHUNK_MIN_FILES;
+      delete process.env.CE_REVIEW_AUTO_PARALLEL_WORKERS;
+    }
   });
 
   it('blocks when auto-select routes to review_git_diff with empty staged scope', async () => {

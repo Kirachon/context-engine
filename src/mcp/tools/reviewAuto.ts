@@ -15,6 +15,8 @@ import { handleReviewGitDiff, type ReviewGitDiffArgs } from './gitReview.js';
 import { handleReviewDiff, type ReviewDiffArgs } from './reviewDiff.js';
 import type { ReviewGitDiffOutput } from './gitReview.js';
 import { normalizeOptionalDiffInput, parseRequiredDiffInput } from '../tooling/diffInput.js';
+import { getGitDiff } from '../utils/gitUtils.js';
+import { envInt } from '../../config/env.js';
 
 export type ReviewAutoSelectedTool = 'review_diff' | 'review_git_diff';
 
@@ -68,6 +70,243 @@ export interface ReviewAutoResult {
   output: EnterpriseReviewResult | ReviewGitDiffOutput;
   skipped_steps?: ReviewAutoSkippedStep[];
   requested_by?: 'default' | 'config' | 'user';
+  chunked_execution?: {
+    enabled: boolean;
+    chunk_count: number;
+    completed_chunks: number;
+    skipped_chunks: number;
+    parallel_workers: number;
+    fallback_used: boolean;
+  };
+}
+
+const REVIEW_AUTO_CHUNKED_PARALLEL_ENV = 'CE_REVIEW_AUTO_CHUNKED_PARALLEL';
+
+type ReviewCorrectness = ReviewGitDiffOutput['review']['overall_correctness'];
+
+interface ChunkExecutionResult {
+  output: ReviewGitDiffOutput;
+  chunkCount: number;
+  completedChunks: number;
+  skippedChunks: number;
+  fallbackUsed: boolean;
+}
+
+function isChunkedParallelEnabled(): boolean {
+  return process.env[REVIEW_AUTO_CHUNKED_PARALLEL_ENV] === 'true';
+}
+
+function getReviewAutoChunkMinFiles(): number {
+  return envInt('CE_REVIEW_AUTO_CHUNK_MIN_FILES', 10, { min: 1, max: 500 });
+}
+
+function getReviewAutoParallelWorkers(): number {
+  return envInt('CE_REVIEW_AUTO_PARALLEL_WORKERS', 2, { min: 1, max: 4 });
+}
+
+function looksLikeCommitHash(target: string): boolean {
+  return /^[a-f0-9]{7,40}$/i.test(target);
+}
+
+function classifyPathBucket(filePath: string): 'src' | 'tests' | 'ops' | 'other' {
+  const normalized = filePath.replace(/\\/g, '/').toLowerCase();
+  if (normalized.startsWith('src/')) return 'src';
+  if (normalized.startsWith('tests/')) return 'tests';
+  if (
+    normalized.startsWith('scripts/')
+    || normalized.startsWith('.github/')
+    || normalized.startsWith('docs/')
+    || normalized.endsWith('.md')
+  ) {
+    return 'ops';
+  }
+  return 'other';
+}
+
+function buildChunkPatternsFromFiles(files: string[]): string[][] {
+  const buckets: Record<'src' | 'tests' | 'ops' | 'other', string[]> = {
+    src: [],
+    tests: [],
+    ops: [],
+    other: [],
+  };
+  for (const file of files) {
+    buckets[classifyPathBucket(file)].push(file);
+  }
+
+  const chunks: string[][] = [];
+  if (buckets.src.length > 0) chunks.push(['src/**']);
+  if (buckets.tests.length > 0) chunks.push(['tests/**']);
+  if (buckets.ops.length > 0) chunks.push(['scripts/**', '.github/**', 'docs/**', '*.md']);
+  if (buckets.other.length > 0) chunks.push([...new Set(buckets.other)]);
+  return chunks;
+}
+
+function chooseWorstCorrectness(values: ReviewCorrectness[]): ReviewCorrectness {
+  const rank: Record<ReviewCorrectness, number> = {
+    'patch is correct': 0,
+    'needs attention': 1,
+    'patch is incorrect': 2,
+  };
+  return values.reduce((worst, next) => (rank[next] > rank[worst] ? next : worst), 'patch is correct');
+}
+
+function mergeChunkOutputs(outputs: ReviewGitDiffOutput[]): ReviewGitDiffOutput {
+  const findings = outputs.flatMap((out) => out.review.findings);
+  const uniqueFindings: typeof findings = [];
+  const seen = new Set<string>();
+  for (const finding of findings) {
+    const key = [
+      finding.id,
+      finding.code_location.file_path,
+      finding.code_location.line_range.start,
+      finding.title,
+    ].join('|');
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueFindings.push(finding);
+  }
+
+  uniqueFindings.sort((a, b) => a.priority - b.priority || b.confidence_score - a.confidence_score);
+
+  const filesChanged = Array.from(
+    new Set(outputs.flatMap((out) => out.git_info.files_changed))
+  ).sort((a, b) => a.localeCompare(b));
+
+  const confidenceValues = outputs.map((out) => out.review.overall_confidence_score).filter((v) => Number.isFinite(v));
+  const averageConfidence = confidenceValues.length > 0
+    ? confidenceValues.reduce((sum, v) => sum + v, 0) / confidenceValues.length
+    : 0;
+
+  const correctness = chooseWorstCorrectness(outputs.map((out) => out.review.overall_correctness));
+  const categoriesReviewed = Array.from(
+    new Set(outputs.flatMap((out) => out.review.metadata.categories_reviewed))
+  );
+
+  const durationMs = outputs.reduce((sum, out) => sum + out.review.metadata.review_duration_ms, 0);
+  const filteredCount = outputs.reduce((sum, out) => sum + out.review.metadata.findings_filtered, 0);
+
+  const explanation = `Chunked parallel review merged from ${outputs.length} chunk(s). ` +
+    outputs.map((out) => out.review.overall_explanation).filter(Boolean).join(' ').trim();
+
+  return {
+    git_info: {
+      target: outputs[0]?.git_info.target ?? 'staged',
+      base: outputs[0]?.git_info.base,
+      command: `chunked_parallel_review(${outputs.length})`,
+      files_changed: filesChanged,
+      stats: {
+        additions: outputs.reduce((sum, out) => sum + out.git_info.stats.additions, 0),
+        deletions: outputs.reduce((sum, out) => sum + out.git_info.stats.deletions, 0),
+        files_count: filesChanged.length,
+      },
+    },
+    review: {
+      findings: uniqueFindings,
+      overall_correctness: correctness,
+      overall_explanation: explanation,
+      overall_confidence_score: averageConfidence,
+      changes_summary: {
+        files_changed: filesChanged.length,
+        lines_added: outputs.reduce((sum, out) => sum + out.review.changes_summary.lines_added, 0),
+        lines_removed: outputs.reduce((sum, out) => sum + out.review.changes_summary.lines_removed, 0),
+      },
+      metadata: {
+        reviewed_at: new Date().toISOString(),
+        review_duration_ms: durationMs,
+        model_used: outputs[0]?.review.metadata.model_used ?? 'chunked-review',
+        tool_version: outputs[0]?.review.metadata.tool_version ?? '1.0.0',
+        findings_filtered: filteredCount,
+        confidence_threshold: outputs[0]?.review.metadata.confidence_threshold ?? 0.7,
+        categories_reviewed: categoriesReviewed,
+      },
+    },
+  };
+}
+
+async function runWithConcurrency<T, R>(
+  items: T[],
+  workerLimit: number,
+  run: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = [];
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: Math.max(1, Math.min(workerLimit, items.length || 1)) }).map(async () => {
+    while (true) {
+      const current = nextIndex;
+      nextIndex += 1;
+      if (current >= items.length) return;
+      const result = await run(items[current], current);
+      results[current] = result;
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
+async function runChunkedParallelGitReview(
+  args: ReviewAutoArgs,
+  serviceClient: ContextServiceClient
+): Promise<ChunkExecutionResult | null> {
+  if (!isChunkedParallelEnabled()) return null;
+  if (args.include_patterns && args.include_patterns.length > 0) return null;
+
+  const target = args.target ?? 'staged';
+  if (looksLikeCommitHash(target)) return null;
+
+  const workspacePath = serviceClient.getWorkspacePath();
+  const baseDiff = await getGitDiff(workspacePath, {
+    target,
+    base: args.base,
+  });
+  if (!baseDiff.diff.trim()) {
+    return null;
+  }
+  if (baseDiff.files_changed.length < getReviewAutoChunkMinFiles()) {
+    return null;
+  }
+
+  const chunks = buildChunkPatternsFromFiles(baseDiff.files_changed);
+  if (chunks.length <= 1) {
+    return null;
+  }
+
+  const chunkRuns = await runWithConcurrency(chunks, getReviewAutoParallelWorkers(), async (chunkPatterns) => {
+    try {
+      const resultStr = await handleReviewGitDiff(
+        {
+          target: args.target,
+          base: args.base,
+          include_patterns: chunkPatterns,
+          options: args.review_git_diff_options ?? {},
+        },
+        serviceClient
+      );
+      return { ok: true as const, output: parseJsonOrThrow<ReviewGitDiffOutput>(resultStr, 'chunk review_git_diff output') };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/No changes found for review_git_diff target/i.test(message)) {
+        return { ok: false as const, skipped: true as const };
+      }
+      return { ok: false as const, skipped: false as const };
+    }
+  });
+
+  const successful = chunkRuns.filter((run): run is { ok: true; output: ReviewGitDiffOutput } => run.ok).map((run) => run.output);
+  const skippedChunks = chunkRuns.filter((run) => !run.ok && run.skipped).length;
+  if (successful.length === 0) {
+    return null;
+  }
+
+  return {
+    output: mergeChunkOutputs(successful),
+    chunkCount: chunks.length,
+    completedChunks: successful.length,
+    skippedChunks,
+    fallbackUsed: false,
+  };
 }
 
 function selectTool(args: ReviewAutoArgs): { selected: ReviewAutoSelectedTool; rationale: string } {
@@ -175,17 +414,35 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
     throw new Error('review_git_diff selected; review_diff_options is not applicable');
   }
 
-  const resultStr = await handleReviewGitDiff(
-    {
-      target: args.target,
-      base: args.base,
-      include_patterns: args.include_patterns,
-      options: args.review_git_diff_options ?? {},
-    } as ReviewGitDiffArgs,
-    serviceClient
-  );
-  const output = parseJsonOrThrow<ReviewGitDiffOutput>(resultStr, 'review_git_diff output');
+  let chunkExecution: ReviewAutoResult['chunked_execution'] | undefined;
+  let output: ReviewGitDiffOutput;
+  const chunked = await runChunkedParallelGitReview(args, serviceClient);
+  if (chunked) {
+    output = chunked.output;
+    chunkExecution = {
+      enabled: true,
+      chunk_count: chunked.chunkCount,
+      completed_chunks: chunked.completedChunks,
+      skipped_chunks: chunked.skippedChunks,
+      parallel_workers: getReviewAutoParallelWorkers(),
+      fallback_used: chunked.fallbackUsed,
+    };
+  } else {
+    const resultStr = await handleReviewGitDiff(
+      {
+        target: args.target,
+        base: args.base,
+        include_patterns: args.include_patterns,
+        options: args.review_git_diff_options ?? {},
+      } as ReviewGitDiffArgs,
+      serviceClient
+    );
+    output = parseJsonOrThrow<ReviewGitDiffOutput>(resultStr, 'review_git_diff output');
+  }
   const result: ReviewAutoResult = { selected_tool: selected, rationale, output };
+  if (chunkExecution) {
+    result.chunked_execution = chunkExecution;
+  }
   if (useV2) {
     const v2Metadata = buildV2SkipMetadata(selected, args);
     result.skipped_steps = v2Metadata.skipped_steps;
