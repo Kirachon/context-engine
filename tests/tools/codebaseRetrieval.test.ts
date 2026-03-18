@@ -72,12 +72,28 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata).toHaveProperty('fallback_state');
   });
 
-  it('respects top_k parameter and delegates to semanticSearch', async () => {
+  it('respects top_k parameter and delegates using default fast profile settings', async () => {
     mockServiceClient.semanticSearch.mockResolvedValue([]);
 
     await handleCodebaseRetrieval({ query: 'test', top_k: 5 }, mockServiceClient as any);
 
-    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith('test', 5);
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+      'test',
+      5,
+      expect.objectContaining({ bypassCache: false, maxOutputLength: 10000 })
+    );
+  });
+
+  it('uses fast profile by default when profile is omitted', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+    await handleCodebaseRetrieval({ query: 'default profile' }, mockServiceClient as any);
+
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+      'default profile',
+      10,
+      expect.objectContaining({ bypassCache: false, maxOutputLength: 20000 })
+    );
   });
 
   it('applies explicit balanced profile settings when requested', async () => {
@@ -174,7 +190,11 @@ describe('codebase_retrieval Tool', () => {
 
     await handleCodebaseRetrieval({ query: '  test  ' }, mockServiceClient as any);
 
-    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith('test', 10);
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+      'test',
+      10,
+      expect.objectContaining({ bypassCache: false, maxOutputLength: 20000 })
+    );
   });
 
   it('adds reason text for each result', async () => {

@@ -183,6 +183,47 @@ describe('retrieve internal pipeline', () => {
     }
   });
 
+  it('runs expanded variants in parallel to reduce end-to-end latency', async () => {
+    const deferred: Array<{ resolve: (value: any[]) => void }> = [];
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const serviceClient = {
+      semanticSearch: jest.fn(() => new Promise<any[]>((resolve) => {
+        inFlight += 1;
+        maxInFlight = Math.max(maxInFlight, inFlight);
+        deferred.push({
+          resolve: (value: any[]) => {
+            inFlight -= 1;
+            resolve(value);
+          },
+        });
+      })),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const pending = retrieve('auth login service flow', serviceClient, {
+      enableExpansion: true,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: false,
+      profile: 'rich',
+      rewriteMode: 'v2',
+      maxVariants: 4,
+      topK: 5,
+    });
+
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(maxInFlight).toBeGreaterThan(1);
+
+    for (const item of deferred) {
+      item.resolve([]);
+    }
+
+    const results = await pending;
+    expect(results).toEqual([]);
+    expect(serviceClient.semanticSearch.mock.calls.length).toBeGreaterThan(1);
+  });
+
   it('fails open when reranker throws', async () => {
     const serviceClient = {
       semanticSearch: jest.fn(async () => [

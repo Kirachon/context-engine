@@ -2638,8 +2638,21 @@ export class ContextServiceClient {
     topK: number,
     options?: { bypassCache?: boolean; maxOutputLength?: number }
   ): Promise<SearchResult[]> {
-    return searchWithSemanticRuntime(query, topK, options, {
-      searchAndAsk: (searchQuery, prompt) => this.searchAndAsk(searchQuery, prompt),
+    const semanticTimeoutMs = envMs('CE_SEMANTIC_SEARCH_AI_TIMEOUT_MS', 30_000, {
+      min: MIN_API_TIMEOUT_MS,
+      max: MAX_API_TIMEOUT_MS,
+    });
+    const parallelFallback = process.env.CE_SEMANTIC_PARALLEL_FALLBACK === 'true';
+    return searchWithSemanticRuntime(query, topK, {
+      ...options,
+      timeoutMs: semanticTimeoutMs,
+      parallelFallback,
+    }, {
+      searchAndAsk: (searchQuery, prompt, runtimeOptions) =>
+        this.searchAndAsk(searchQuery, prompt, {
+          timeoutMs: runtimeOptions?.timeoutMs ?? semanticTimeoutMs,
+          priority: 'interactive',
+        }),
       keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
         this.keywordFallbackSearch(fallbackQuery, fallbackTopK),
     });

@@ -84,7 +84,7 @@ async function applyRerankStage(
   candidates: InternalSearchResult[],
   settings: NormalizedRetrievalOptions
 ): Promise<InternalSearchResult[]> {
-  if (!settings.enableRerank || candidates.length === 0) {
+  if (!settings.enableRerank || candidates.length <= 1) {
     return candidates;
   }
 
@@ -213,49 +213,56 @@ export async function retrieve(
     localKeywordSearch?: (input: string, topK: number) => Promise<SearchResult[]>;
   }).localKeywordSearch;
 
-  for (const variant of expandedQueries) {
-    const semanticPromise = withTimeout(
-      semanticSearch(variant.query, settings.perQueryTopK),
-      settings.timeoutMs,
-      []
-    ).catch((error) => {
-      if (settings.log) {
-        console.error(`[retrieve] Failed variant \"${variant.query}\":`, error);
-      }
-      return [] as SearchResult[];
-    });
+  const perVariantResults = await Promise.all(
+    expandedQueries.map(async (variant) => {
+      const semanticPromise = withTimeout(
+        semanticSearch(variant.query, settings.perQueryTopK),
+        settings.timeoutMs,
+        []
+      ).catch((error) => {
+        if (settings.log) {
+          console.error(`[retrieve] Failed variant \"${variant.query}\":`, error);
+        }
+        return [] as SearchResult[];
+      });
 
-    const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
-      ? withTimeout(
-          localKeywordSearch(variant.query, settings.perQueryTopK),
-          settings.timeoutMs,
-          []
-        ).catch((error) => {
-          if (settings.log) {
-            console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
-          }
-          return [] as SearchResult[];
-        })
-      : Promise.resolve([] as SearchResult[]);
+      const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
+        ? withTimeout(
+            localKeywordSearch(variant.query, settings.perQueryTopK),
+            settings.timeoutMs,
+            []
+          ).catch((error) => {
+            if (settings.log) {
+              console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
+            }
+            return [] as SearchResult[];
+          })
+        : Promise.resolve([] as SearchResult[]);
 
-    const densePromise = settings.enableDense && denseProvider
-      ? withTimeout(
-          denseProvider.search(variant.query, settings.perQueryTopK),
-          settings.timeoutMs,
-          []
-        ).catch((error) => {
-          if (settings.log) {
-            console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
-          }
-          return [] as SearchResult[];
-        })
-      : Promise.resolve([] as SearchResult[]);
+      const densePromise = settings.enableDense && denseProvider
+        ? withTimeout(
+            denseProvider.search(variant.query, settings.perQueryTopK),
+            settings.timeoutMs,
+            []
+          ).catch((error) => {
+            if (settings.log) {
+              console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
+            }
+            return [] as SearchResult[];
+          })
+        : Promise.resolve([] as SearchResult[]);
 
-    const [semanticResults, lexicalResults, denseResults] = await Promise.all([
-      semanticPromise,
-      lexicalPromise,
-      densePromise,
-    ]);
+      const [semanticResults, lexicalResults, denseResults] = await Promise.all([
+        semanticPromise,
+        lexicalPromise,
+        densePromise,
+      ]);
+
+      return { variant, semanticResults, lexicalResults, denseResults };
+    })
+  );
+
+  for (const { variant, semanticResults, lexicalResults, denseResults } of perVariantResults) {
 
     for (const result of semanticResults) {
       const semanticScore = result.relevanceScore ?? result.score ?? 0;

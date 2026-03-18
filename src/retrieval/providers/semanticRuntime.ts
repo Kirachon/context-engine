@@ -4,10 +4,16 @@ import { isOperationalDocsQuery } from './queryHeuristics.js';
 
 export interface SemanticSearchOptions {
   maxOutputLength?: number;
+  timeoutMs?: number;
+  parallelFallback?: boolean;
 }
 
 export interface SemanticSearchRuntimeDependencies {
-  searchAndAsk: (searchQuery: string, prompt: string) => Promise<string>;
+  searchAndAsk: (
+    searchQuery: string,
+    prompt: string,
+    options?: { timeoutMs?: number }
+  ) => Promise<string>;
   keywordFallbackSearch: (query: string, topK: number) => Promise<SearchResult[]>;
 }
 
@@ -25,26 +31,46 @@ export async function searchWithSemanticRuntime(
     .filter(Boolean);
   const hasStrongIdentifierToken = queryTokens.some((token) => token.length >= 12);
   const isSingleTokenQuery = queryTokens.length === 1;
+  const useParallelFallback = options?.parallelFallback === true;
+  let fallbackPromise: Promise<SearchResult[]> | null = useParallelFallback
+    ? dependencies.keywordFallbackSearch(query, topK).catch(() => [])
+    : null;
+  const resolveFallback = () =>
+    fallbackPromise ?? dependencies.keywordFallbackSearch(query, topK);
 
   // Fast path: operational and setup-style questions usually do not need the
   // expensive provider round-trip when a local keyword search already finds
   // good docs or setup instructions.
   if (isOperationalDocsQuery(normalizedQuery)) {
-    const keywordResults = await dependencies.keywordFallbackSearch(query, topK);
+    const keywordResults = await resolveFallback();
     if (keywordResults.length > 0) {
       return keywordResults;
     }
+    fallbackPromise = null;
   }
 
   const prompt = buildSemanticSearchPrompt(query, topK, options);
-  const rawResponse = await dependencies.searchAndAsk(query, prompt);
+  let rawResponse: string;
+  try {
+    rawResponse = await dependencies.searchAndAsk(query, prompt, {
+      timeoutMs: options?.timeoutMs,
+    });
+  } catch (error) {
+    if (fallbackPromise) {
+      const fallback = await fallbackPromise;
+      if (fallback.length > 0) {
+        return fallback;
+      }
+    }
+    throw error;
+  }
   const parseResult = parseAIProviderSearchResults(rawResponse, topK);
   if (parseResult !== null) {
     if (parseResult.length > 0) {
       return parseResult;
     }
     if (compatEmptyArrayFallbackEnabled) {
-      return dependencies.keywordFallbackSearch(query, topK);
+      return resolveFallback();
     }
     return [];
   }
@@ -55,7 +81,7 @@ export async function searchWithSemanticRuntime(
   }
 
   if ((rawResponse && rawResponse.trim() !== '') || isSingleTokenQuery || hasStrongIdentifierToken) {
-    return dependencies.keywordFallbackSearch(query, topK);
+    return resolveFallback();
   }
 
   return [];

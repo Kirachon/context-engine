@@ -128,6 +128,24 @@ describe('semanticRuntime helpers', () => {
     expect(keywordFallbackSearch).not.toHaveBeenCalled();
   });
 
+  it('forwards semantic timeout option to searchAndAsk', async () => {
+    const searchAndAsk = jest.fn(async () => JSON.stringify([
+      { path: 'src/a.ts', content: 'alpha', relevanceScore: 0.7, matchType: 'semantic' },
+    ]));
+    const keywordFallbackSearch = jest.fn(async () => []);
+
+    await searchWithSemanticRuntime(
+      'timeout forwarding',
+      5,
+      { timeoutMs: 12345 },
+      { searchAndAsk, keywordFallbackSearch }
+    );
+
+    expect(searchAndAsk).toHaveBeenCalledTimes(1);
+    const timeoutArg = (searchAndAsk as jest.Mock).mock.calls[0]?.[2];
+    expect(timeoutArg).toEqual(expect.objectContaining({ timeoutMs: 12345 }));
+  });
+
   it('uses keyword fallback first for setup and install style queries', async () => {
     const fallbackResults: SearchResult[] = [
       {
@@ -153,6 +171,33 @@ describe('semanticRuntime helpers', () => {
     expect(keywordFallbackSearch).toHaveBeenCalledTimes(1);
     expect(keywordFallbackSearch.mock.calls[0]).toEqual(['how do I install this mcp on codex', 5]);
     expect(searchAndAsk).not.toHaveBeenCalled();
+    expect(results).toBe(fallbackResults);
+  });
+
+  it('uses parallel fallback result when provider call fails', async () => {
+    const fallbackResults: SearchResult[] = [
+      {
+        path: 'src/fast-fallback.ts',
+        content: 'fallback wins on provider failure',
+        matchType: 'keyword',
+        relevanceScore: 0.92,
+        retrievedAt: new Date().toISOString(),
+      },
+    ];
+    const searchAndAsk = jest.fn(async () => {
+      throw new Error('provider timeout');
+    });
+    const keywordFallbackSearch = jest.fn(async () => fallbackResults);
+
+    const results = await searchWithSemanticRuntime(
+      'parallel fallback query',
+      5,
+      { parallelFallback: true },
+      { searchAndAsk, keywordFallbackSearch }
+    );
+
+    expect(searchAndAsk).toHaveBeenCalledTimes(1);
+    expect(keywordFallbackSearch).toHaveBeenCalledTimes(1);
     expect(results).toBe(fallbackResults);
   });
 });

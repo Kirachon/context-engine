@@ -208,27 +208,21 @@ export async function handleCodebaseRetrieval(
     );
   }
 
-  const retrievalOptions = profile
-    ? {
-        topK: top_k,
-        perQueryTopK: Math.min(50, top_k * RETRIEVAL_PROFILE_MAP[profile].perQueryMultiplier),
-        maxVariants: RETRIEVAL_PROFILE_MAP[profile].maxVariants,
-        maxOutputLength: top_k * RETRIEVAL_PROFILE_MAP[profile].maxOutputLengthPerResult,
-        enableExpansion: RETRIEVAL_PROFILE_MAP[profile].enableExpansion,
-        rankingMode: featureEnabled('retrieval_ranking_v3')
-          ? 'v3' as const
-          : featureEnabled('retrieval_ranking_v2')
-            ? 'v2' as const
-            : 'v1' as const,
-      }
-    : {
-        topK: top_k,
-        rankingMode: featureEnabled('retrieval_ranking_v3')
-          ? 'v3' as const
-          : featureEnabled('retrieval_ranking_v2')
-            ? 'v2' as const
-            : 'v1' as const,
-      };
+  const effectiveProfile: RetrievalProfile = profile ?? 'fast';
+  const profileSettings = RETRIEVAL_PROFILE_MAP[effectiveProfile];
+  const retrievalOptions = {
+    topK: top_k,
+    perQueryTopK: Math.min(50, top_k * profileSettings.perQueryMultiplier),
+    maxVariants: profileSettings.maxVariants,
+    maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,
+    enableExpansion: profileSettings.enableExpansion,
+    profile: effectiveProfile,
+    rankingMode: featureEnabled('retrieval_ranking_v3')
+      ? 'v3' as const
+      : featureEnabled('retrieval_ranking_v2')
+        ? 'v2' as const
+        : 'v1' as const,
+  };
 
   const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, retrievalOptions);
   const searchResults = retrieval.results;
@@ -359,7 +353,7 @@ Before editing a file, ALWAYS first call the codebase-retrieval MCP tool, asking
       profile: {
         type: 'string',
         enum: ['fast', 'balanced', 'rich'],
-        description: 'Optional retrieval profile override. Defaults to legacy behavior when omitted.',
+        description: 'Optional retrieval profile override. Defaults to "fast" when omitted.',
       },
       response_version: {
         type: 'string',
