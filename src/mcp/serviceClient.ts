@@ -260,6 +260,14 @@ const DEFAULT_SEARCH_QUEUE_MAX = 50;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD = 2;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS = 2500;
 const SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS = 2000;
+const FALLBACK_DISCOVER_FILES_CACHE_TTL_MS = envMs('CE_FALLBACK_DISCOVER_FILES_CACHE_TTL_MS', 30_000, {
+  min: 0,
+  max: 5 * 60_000,
+});
+const FALLBACK_SEARCH_READ_CONCURRENCY = envInt('CE_FALLBACK_SEARCH_READ_CONCURRENCY', 8, {
+  min: 1,
+  max: 16,
+});
 type SearchAndAskPriority = 'interactive' | 'background';
 type SearchQueueRejectMode = 'observe' | 'shadow' | 'enforce';
 
@@ -1044,6 +1052,11 @@ export class ContextServiceClient {
   private readonly connectorRegistry = createConnectorRegistry();
   private aiProvider: AIProvider | null = null;
   private lastSearchDiagnostics: SearchDiagnostics | null = null;
+  private fallbackDiscoverFilesCache: {
+    cacheKey: string;
+    cachedAt: number;
+    files: string[];
+  } | null = null;
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
@@ -1114,6 +1127,31 @@ export class ContextServiceClient {
     context?: RetrievalProviderCallbackContext
   ): RetrievalProviderId {
     return context?.providerId ?? this.retrievalProviderId;
+  }
+
+  private getFallbackDiscoverFilesCacheKey(): string {
+    return this.workspacePath;
+  }
+
+  private async getCachedFallbackFiles(): Promise<string[]> {
+    const cacheKey = this.getFallbackDiscoverFilesCacheKey();
+    const now = Date.now();
+    const cached = this.fallbackDiscoverFilesCache;
+    if (
+      cached
+      && cached.cacheKey === cacheKey
+      && (now - cached.cachedAt) <= FALLBACK_DISCOVER_FILES_CACHE_TTL_MS
+    ) {
+      return cached.files;
+    }
+
+    const files = await this.discoverFiles(this.workspacePath);
+    this.fallbackDiscoverFilesCache = {
+      cacheKey,
+      cachedAt: now,
+      files,
+    };
+    return files;
   }
 
   private getAIProvider(): AIProvider {
@@ -1791,6 +1829,7 @@ export class ContextServiceClient {
     this.searchCache.clear();
     this.cacheHits = 0;
     this.cacheMisses = 0;
+    this.fallbackDiscoverFilesCache = null;
   }
 
   private isPersistentCacheEnabled(): boolean {
@@ -2911,7 +2950,7 @@ export class ContextServiceClient {
     const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
     const pureCodeIntent = codeIntent && !opsEvidenceIntent;
 
-    const files = await this.discoverFiles(this.workspacePath);
+    const files = await this.getCachedFallbackFiles();
     if (files.length === 0) return [];
     const filtersApplied: string[] = [];
     if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');
@@ -2966,7 +3005,9 @@ export class ContextServiceClient {
       const retrievedAt = new Date().toISOString();
       const scoredResults: Array<SearchResult & { __score: number }> = [];
 
-      for (const candidate of candidates) {
+      const scoreCandidate = async (
+        candidate: { filePath: string; score: number }
+      ): Promise<(SearchResult & { __score: number }) | null> => {
         try {
           const content = await this.getFile(candidate.filePath);
           const lowerContent = content.toLowerCase();
@@ -2980,12 +3021,12 @@ export class ContextServiceClient {
               }
             }
           }
-          if (matchIndex === -1) continue;
+          if (matchIndex === -1) return null;
 
           const snippetStart = Math.max(0, matchIndex - 200);
           const snippetEnd = Math.min(content.length, matchIndex + 400);
           const snippet = content.substring(snippetStart, snippetEnd).trim();
-          if (!snippet) continue;
+          if (!snippet) return null;
 
           const normalizedPath = candidate.filePath.replace(/\\/g, '/').toLowerCase();
           let finalScore = candidate.score;
@@ -3014,11 +3055,17 @@ export class ContextServiceClient {
             if (symbolHitCount > 0) {
               finalScore += 70 * symbolHitCount;
             }
-            if (/\/ai\/providers\//.test(normalizedPath)) finalScore += 14;
-            if (/\/factory\.(ts|tsx|js|jsx)$/.test(normalizedPath)) finalScore += hasFactoryIntent ? 70 : 30;
+            if (/\/ai\/providers\//.test(normalizedPath)) {
+              finalScore += 14;
+            }
+            if (/\/factory\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
+              finalScore += hasFactoryIntent ? 70 : 30;
+            }
             if (/\/factory\.test\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
               finalScore += hasFactoryIntent ? 65 : 25;
-              if (hasTestIntent) finalScore += 30;
+              if (hasTestIntent) {
+                finalScore += 30;
+              }
             }
             if (hasProviderIntent && /\/providers\//.test(normalizedPath)) {
               finalScore += 18;
@@ -3028,7 +3075,7 @@ export class ContextServiceClient {
           const startLine = content.slice(0, snippetStart).split('\n').length;
           const endLine = startLine + Math.max(0, snippet.split('\n').length - 1);
 
-          scoredResults.push({
+          return {
             path: candidate.filePath.replace(/\\/g, '/'),
             content: snippet,
             lines: `${startLine}-${Math.max(startLine, endLine)}`,
@@ -3036,12 +3083,23 @@ export class ContextServiceClient {
             matchType: 'keyword',
             retrievedAt,
             __score: finalScore,
-          });
+          };
         } catch {
           // Skip files that cannot be read in fallback mode.
+          return null;
+        }
+      };
+
+      const concurrency = Math.max(1, Math.min(FALLBACK_SEARCH_READ_CONCURRENCY, candidates.length));
+      for (let index = 0; index < candidates.length; index += concurrency) {
+        const batch = candidates.slice(index, index + concurrency);
+        const batchResults = await Promise.all(batch.map((candidate) => scoreCandidate(candidate)));
+        for (const result of batchResults) {
+          if (result) {
+            scoredResults.push(result);
+          }
         }
       }
-
       return {
         rankedResults: scoredResults
           .sort((a, b) => b.__score - a.__score || a.path.localeCompare(b.path))
