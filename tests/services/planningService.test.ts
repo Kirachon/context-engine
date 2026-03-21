@@ -45,6 +45,66 @@ describe('PlanningService', () => {
     };
   }
 
+  function createPlanResponse(goal = 'Test goal') {
+    return JSON.stringify({
+      goal,
+      scope: { included: ['src/'], excluded: [], assumptions: [], constraints: [] },
+      mvp_features: [],
+      nice_to_have_features: [],
+      architecture: { notes: 'notes', patterns_used: [], diagrams: [] },
+      risks: [],
+      milestones: [],
+      steps: [],
+      testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+      acceptance_criteria: [],
+      confidence_score: 0.8,
+      questions_for_clarification: [],
+      alternative_approaches: [],
+      context_files: ['src/index.ts'],
+      codebase_insights: ['insight'],
+    });
+  }
+
+  function createExecutionResponse() {
+    return JSON.stringify({
+      success: true,
+      reasoning: 'Implemented the step',
+      changes: [],
+    });
+  }
+
+  function createContextBundle(fileCount: number, totalTokens: number) {
+    return {
+      summary: 'Context summary',
+      query: 'query',
+      files: Array.from({ length: fileCount }, (_, index) => ({
+        path: `src/file-${index + 1}.ts`,
+        extension: '.ts',
+        summary: `Summary for file ${index + 1}`,
+        relevance: 0.8,
+        tokenCount: 300,
+        snippets: [
+          {
+            text: `export const value${index + 1} = ${index + 1};\nexport function helper${index + 1}() { return value${index + 1}; }`,
+            lines: '1-2',
+            relevance: 0.8,
+            tokenCount: 80,
+            codeType: 'function',
+          },
+        ],
+      })),
+      hints: ['Use the existing service layer'],
+      metadata: {
+        totalFiles: fileCount,
+        totalSnippets: fileCount,
+        totalTokens,
+        tokenBudget: totalTokens,
+        truncated: false,
+        searchTimeMs: 12,
+      },
+    };
+  }
+
   describe('analyzeDependencies', () => {
     describe('Linear Chain', () => {
       it('should handle linear dependency chain (1→2→3→4)', () => {
@@ -302,6 +362,122 @@ describe('PlanningService', () => {
       const diagram = planningService.generateDependencyDiagram(plan as any);
       expect(diagram).toContain('graph TD');
       expect(diagram).toContain('Step 1'); // Fallback title
+    });
+  });
+
+  describe('Prompt profiles and cancellation plumbing', () => {
+    it('stops immediately when the planning signal is already aborted', async () => {
+      const controller = new AbortController();
+      controller.abort(new Error('cancelled by test'));
+
+      const result = await planningService.generatePlan(
+        'Implement a login form',
+        undefined,
+        controller.signal
+      );
+
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/cancelled by test|Operation cancelled/i);
+      expect(mockServiceClient.getContextForPrompt).not.toHaveBeenCalled();
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+    });
+
+    it('uses compact planning prompts for small tasks and forwards the abort signal', async () => {
+      const controller = new AbortController();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Compact plan'));
+
+      const result = await planningService.generatePlan(
+        'Implement a login form',
+        undefined,
+        controller.signal
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ maxFiles: 5, tokenBudget: 8000 })
+      );
+
+      const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
+      expect(prompt).toContain('## Task');
+      expect(prompt).toContain('## Context');
+      expect(prompt).toContain('Return ONLY valid JSON');
+      expect(prompt).not.toContain('## Deep Planning Guidance');
+      expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ signal: controller.signal })
+      );
+    });
+
+    it('switches to a deep planning prompt for complex tasks', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(7, 9200));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Deep plan'));
+
+      const result = await planningService.generatePlan(
+        'Perform a multi-step architecture migration with rollout and reliability work'
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ maxFiles: 5, tokenBudget: 8000 })
+      );
+
+      const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
+      expect(prompt).toContain('## Deep Planning Guidance');
+    });
+
+    it('forwards the abort signal through plan refinement and step execution', async () => {
+      const controller = new AbortController();
+      const currentPlan = {
+        id: 'plan_1',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Refine me',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: [
+          createStep(1, [], []),
+        ],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [1] },
+        testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: [],
+      } as any;
+
+      mockServiceClient.searchAndAsk
+        .mockResolvedValueOnce(createPlanResponse('Refined plan'))
+        .mockResolvedValueOnce(createExecutionResponse());
+
+      const refined = await planningService.refinePlan(
+        currentPlan,
+        { feedback: 'Make it shorter', clarifications: {} },
+        controller.signal
+      );
+      expect(refined.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ signal: controller.signal })
+      );
+
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 1000));
+      const stepResult = await planningService.executeStep(
+        currentPlan,
+        1,
+        'Additional context',
+        controller.signal
+      );
+      expect(stepResult.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk.mock.calls[1][2]).toEqual(
+        expect.objectContaining({ signal: controller.signal })
+      );
     });
   });
 });

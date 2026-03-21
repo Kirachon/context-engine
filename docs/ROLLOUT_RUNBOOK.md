@@ -39,6 +39,44 @@ Queue policy note:
 - `observe` and `shadow` only log saturation; `enforce` rejects overflow with retry hints.
 - Size the lanes with `CE_SEARCH_AND_ASK_QUEUE_MAX` and `CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND` before flipping `CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE=enforce`.
 
+## Slow OpenAI tool rollout
+
+Use this flow for the prompt-heavy OpenAI tools:
+- `enhance_prompt`
+- `create_plan`
+- `refine_plan`
+- `execute_plan`
+
+Baseline / candidate capture:
+
+```bash
+npm run bench -- --mode enhance_prompt --workspace . --prompt "Fix the slow review timeout path." --iterations 5 --json > artifacts/bench/slow-openai-enhance-baseline.json
+npm run bench -- --mode create_plan --workspace . --task "Harden slow OpenAI tools" --iterations 5 --json > artifacts/bench/slow-openai-create-plan-baseline.json
+npm run bench -- --mode refine_plan --workspace . --current-plan '{...}' --feedback "Make the prompts smaller." --iterations 5 --json > artifacts/bench/slow-openai-refine-plan-baseline.json
+npm run bench -- --mode execute_plan --workspace . --current-plan '{...}' --step-number 1 --iterations 5 --json > artifacts/bench/slow-openai-execute-plan-baseline.json
+```
+
+Gate criteria:
+- Compare warm repeat latency with `payload.timing.repeat_avg_ms`.
+- Compare prompt size with `payload.prompt_stats.avg_chars`.
+- Reject regressions that materially increase prompt size or warm repeat latency.
+- Keep the same provenance lock as the retrieval benchmarks.
+- If a request closes or times out, the underlying slow tool must stop; cancellation failures block rollout.
+- Run the CI smoke `npm test -- --runInBand tests/ci/slowOpenAiToolHardening.test.ts` before promoting a slow-tool change set.
+
+Compare examples:
+
+```bash
+npm run bench:compare -- --baseline artifacts/bench/slow-openai-enhance-baseline.json --candidate artifacts/bench/slow-openai-enhance-candidate.json --metric payload.timing.repeat_avg_ms --max-regression-pct 15 --max-regression-abs 250
+npm run bench:compare -- --baseline artifacts/bench/slow-openai-enhance-baseline.json --candidate artifacts/bench/slow-openai-enhance-candidate.json --metric payload.prompt_stats.avg_chars --max-regression-pct 5 --max-regression-abs 200
+```
+
+Recommended order:
+1. Capture a cold baseline with `--cold`.
+2. Capture a warm repeat candidate without `--cold`.
+3. Compare `repeat_avg_ms` first, then `prompt_stats.avg_chars`.
+4. Only promote if cancellation smoke and compare gates stay green.
+
 ## Readiness check (required before stage changes)
 
 Run this command from repo root:

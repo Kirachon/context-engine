@@ -39,6 +39,7 @@ import {
   extractJsonFromResponse,
   STEP_EXECUTION_SYSTEM_PROMPT,
   buildStepExecutionPrompt,
+  type PlanningPromptProfile,
 } from '../prompts/planning.js';
 import { envMs } from '../../config/env.js';
 
@@ -64,6 +65,33 @@ const DEFAULT_PLAN_AI_TIMEOUT_MS = 5 * 60 * 1000;
 const MIN_PLAN_AI_TIMEOUT_MS = 30_000;
 const MAX_PLAN_AI_TIMEOUT_MS = 30 * 60 * 1000;
 
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  const reason = signal.reason;
+  if (reason instanceof Error) throw reason;
+  throw new Error(typeof reason === 'string' && reason.trim() ? reason : 'Operation cancelled');
+}
+
+function clampContextFileCount(maxFiles: number, profile: PlanningPromptProfile): number {
+  return profile === 'deep' ? maxFiles : Math.max(1, Math.min(maxFiles, 5));
+}
+
+function clampContextTokenBudget(tokenBudget: number, profile: PlanningPromptProfile): number {
+  return profile === 'deep' ? tokenBudget : Math.max(2_000, Math.min(tokenBudget, 8_000));
+}
+
+function truncateText(text: string, maxChars: number): string {
+  const trimmed = text.trim();
+  if (trimmed.length <= maxChars) return trimmed;
+  return `${trimmed.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
+}
+
+function truncateMultilineText(text: string, maxLines: number, maxChars: number): string {
+  const lines = text.trim().split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const shortened = lines.slice(0, maxLines).join('\n');
+  return truncateText(shortened, maxChars);
+}
+
 // ============================================================================
 // Planning Service Class
 // ============================================================================
@@ -75,6 +103,33 @@ export class PlanningService {
     this.contextClient = contextClient;
   }
 
+  private choosePlanningPromptProfile(
+    task: string,
+    options: Required<PlanGenerationOptions>,
+    contextFileCount: number = 0,
+    totalTokens: number = 0
+  ): PlanningPromptProfile {
+    const normalizedTask = task.trim().toLowerCase();
+    const compactSignals = [
+      /quick|simple|small|light|basic|minimal/.test(normalizedTask),
+      normalizedTask.length <= 160,
+      contextFileCount <= 4,
+      totalTokens <= 6000,
+    ];
+
+    const deepSignals = [
+      /architecture|migration|refactor|rollout|performance|reliab|parallel|dependency|redesign|multi-step/.test(normalizedTask),
+      normalizedTask.length > 160,
+      contextFileCount > 4,
+      totalTokens > 6000,
+      options.generate_diagrams === true && /diagram|architecture/.test(normalizedTask),
+    ];
+
+    const compactScore = compactSignals.filter(Boolean).length;
+    const deepScore = deepSignals.filter(Boolean).length;
+    return deepScore > compactScore ? 'deep' : 'compact';
+  }
+
   // ==========================================================================
   // Core Planning Methods
   // ==========================================================================
@@ -84,7 +139,8 @@ export class PlanningService {
    */
   async generatePlan(
     task: string,
-    options?: PlanGenerationOptions
+    options?: PlanGenerationOptions,
+    signal?: AbortSignal
   ): Promise<PlanResult> {
     const startTime = Date.now();
     const opts = { ...DEFAULT_OPTIONS, ...options };
@@ -94,16 +150,26 @@ export class PlanningService {
     console.error(`[PlanningService] Generating plan for: "${taskPreview}..."`);
 
     try {
+      throwIfAborted(signal);
+
       // Step 1: Get relevant codebase context
-      const context = await this.getRelevantContext(task, opts);
+      const contextProfile = this.choosePlanningPromptProfile(task, opts);
+      const context = await this.getRelevantContext(task, opts, contextProfile);
       console.error(`[PlanningService] Retrieved context from ${context.files.length} files`);
 
       // Step 2: Build the planning prompt with context
-      const contextSummary = this.formatContextForPrompt(context);
-      const planningPrompt = buildPlanningPrompt(task, contextSummary);
+      const promptProfile = this.choosePlanningPromptProfile(
+        task,
+        opts,
+        context.files.length,
+        context.metadata.totalTokens
+      );
+      const contextSummary = this.formatContextForPrompt(context, promptProfile);
+      const planningPrompt = buildPlanningPrompt(task, contextSummary, promptProfile);
 
       // Step 3: Combine system prompt with planning prompt for searchAndAsk
       const fullPrompt = `${PLANNING_SYSTEM_PROMPT}\n\n${planningPrompt}`;
+      throwIfAborted(signal);
 
       // Step 4: Call AI to generate the plan
       const response = await this.contextClient.searchAndAsk(task, fullPrompt, {
@@ -111,6 +177,7 @@ export class PlanningService {
           min: MIN_PLAN_AI_TIMEOUT_MS,
           max: MAX_PLAN_AI_TIMEOUT_MS,
         }),
+        signal,
       });
 
       // =========================================================================
@@ -187,24 +254,35 @@ export class PlanningService {
    */
   async refinePlan(
     currentPlan: EnhancedPlanOutput,
-    options: PlanRefinementOptions
+    options: PlanRefinementOptions,
+    signal?: AbortSignal
   ): Promise<PlanResult> {
     const startTime = Date.now();
 
     console.error(`[PlanningService] Refining plan v${currentPlan.version}`);
 
     try {
+      throwIfAborted(signal);
+
       // Build refinement prompt
       const feedback = options.feedback || 'Please refine based on the clarifications provided.';
       const currentPlanJson = JSON.stringify(currentPlan, null, 2);
+      const profile = this.choosePlanningPromptProfile(
+        `${currentPlan.goal} ${feedback}`,
+        DEFAULT_OPTIONS,
+        currentPlan.steps?.length ?? 0,
+        currentPlanJson.length
+      );
       const refinementPrompt = buildRefinementPrompt(
         currentPlanJson,
         feedback,
-        options.clarifications
+        options.clarifications,
+        profile
       );
 
       // Combine with refinement system prompt
       const fullPrompt = `${REFINEMENT_SYSTEM_PROMPT}\n\n${refinementPrompt}`;
+      throwIfAborted(signal);
 
       // Call AI to refine
       const response = await this.contextClient.searchAndAsk(currentPlan.goal, fullPrompt, {
@@ -212,6 +290,7 @@ export class PlanningService {
           min: MIN_PLAN_AI_TIMEOUT_MS,
           max: MAX_PLAN_AI_TIMEOUT_MS,
         }),
+        signal,
       });
 
       // Parse the refined plan
@@ -249,13 +328,16 @@ export class PlanningService {
    */
   private async getRelevantContext(
     task: string,
-    options: Required<PlanGenerationOptions>
+    options: Required<PlanGenerationOptions>,
+    profile: PlanningPromptProfile
   ): Promise<ContextBundle> {
+    const effectiveMaxFiles = clampContextFileCount(options.max_context_files, profile);
+    const effectiveTokenBudget = clampContextTokenBudget(options.context_token_budget, profile);
     return this.contextClient.getContextForPrompt(task, {
-      maxFiles: options.max_context_files,
-      tokenBudget: options.context_token_budget,
+      maxFiles: effectiveMaxFiles,
+      tokenBudget: effectiveTokenBudget,
       includeRelated: options.include_related_files,
-      minRelevance: 0.2,
+      minRelevance: profile === 'deep' ? 0.2 : 0.3,
       includeSummaries: true,
     });
   }
@@ -263,7 +345,33 @@ export class PlanningService {
   /**
    * Format context bundle for inclusion in the planning prompt
    */
-  private formatContextForPrompt(context: ContextBundle): string {
+  private formatContextForPrompt(context: ContextBundle, profile: PlanningPromptProfile = 'compact'): string {
+    if (profile === 'compact') {
+      let formatted = `### Summary\n${truncateText(context.summary, 280)}\n\n`;
+
+      if (context.hints.length > 0) {
+        formatted += `### Key Signals\n`;
+        for (const hint of context.hints.slice(0, 4)) {
+          formatted += `- ${truncateText(hint, 180)}\n`;
+        }
+        formatted += '\n';
+      }
+
+      formatted += `### Relevant Files (${context.files.length} files)\n\n`;
+
+      for (const file of context.files.slice(0, 5)) {
+        formatted += `#### ${file.path}\n`;
+        formatted += `- ${truncateText(file.summary, 180)}\n`;
+        const snippet = file.snippets[0];
+        if (snippet) {
+          formatted += `- Lines ${snippet.lines}: ${truncateMultilineText(snippet.text, 8, 420)}\n`;
+        }
+        formatted += '\n';
+      }
+
+      return formatted.trimEnd();
+    }
+
     let formatted = `### Summary\n${context.summary}\n\n`;
 
     if (context.hints.length > 0) {
@@ -959,7 +1067,8 @@ export class PlanningService {
   async executeStep(
     plan: EnhancedPlanOutput,
     stepNumber: number,
-    additionalContext?: string
+    additionalContext?: string,
+    signal?: AbortSignal
   ): Promise<StepExecutionResult> {
     const startTime = Date.now();
 
@@ -977,23 +1086,28 @@ export class PlanningService {
     }
 
     try {
+      throwIfAborted(signal);
+
       // Get relevant context for the files involved in this step
       const filePaths = [
         ...step.files_to_modify.map(f => f.path),
         ...step.files_to_create.map(f => f.path),
       ];
+      const executionProfile: PlanningPromptProfile =
+        filePaths.length > 3 || (additionalContext?.length ?? 0) > 500 ? 'deep' : 'compact';
 
       // Build context query from step details
       const contextQuery = `${step.title}: ${step.description}. Files: ${filePaths.join(', ')}`;
       const context = await this.contextClient.getContextForPrompt(contextQuery, {
-        maxFiles: 10,
-        tokenBudget: 8000,
+        maxFiles: clampContextFileCount(10, executionProfile),
+        tokenBudget: clampContextTokenBudget(8000, executionProfile),
         includeRelated: true,
-        minRelevance: 0.2,
+        minRelevance: executionProfile === 'deep' ? 0.2 : 0.3,
         includeSummaries: true,
       });
 
-      const contextSummary = this.formatContextForPrompt(context);
+      throwIfAborted(signal);
+      const contextSummary = this.formatContextForPrompt(context, executionProfile);
 
       // Build the execution prompt
       const executionPrompt = buildStepExecutionPrompt(
@@ -1008,11 +1122,13 @@ export class PlanningService {
         },
         plan.goal,
         contextSummary,
-        additionalContext
+        additionalContext,
+        executionProfile
       );
 
       // Combine with system prompt
       const fullPrompt = `${STEP_EXECUTION_SYSTEM_PROMPT}\n\n${executionPrompt}`;
+      throwIfAborted(signal);
 
       // Call AI to generate the code
       const response = await this.contextClient.searchAndAsk(contextQuery, fullPrompt, {
@@ -1020,6 +1136,7 @@ export class PlanningService {
           min: MIN_PLAN_AI_TIMEOUT_MS,
           max: MAX_PLAN_AI_TIMEOUT_MS,
         }),
+        signal,
       });
 
       // Parse the response

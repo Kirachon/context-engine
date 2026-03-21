@@ -77,7 +77,7 @@ import { reviewAutoTool, handleReviewAuto } from './tools/reviewAuto.js';
 import { checkInvariantsTool, handleCheckInvariants } from './tools/checkInvariants.js';
 import { runStaticAnalysisTool, handleRunStaticAnalysis } from './tools/staticAnalysis.js';
 import { incCounter, observeDurationMs } from '../metrics/metrics.js';
-import { executeToolCall, type ToolHandler as RuntimeToolHandler } from './tooling/runtime.js';
+import { type ToolHandler as RuntimeToolHandler } from './tooling/runtime.js';
 import {
   reactiveReviewTools,
   handleReactiveReviewPR,
@@ -92,11 +92,93 @@ import { FileWatcher } from '../watcher/index.js';
 
 type ToolRegistryEntry = {
   tool: { name: string };
-  handler: ToolHandler;
+  handler: SignalAwareToolHandler;
 };
 
 // Re-export for compatibility with existing server.ts type import paths.
 export type ToolHandler = RuntimeToolHandler;
+
+type SignalAwareToolHandler = (args: unknown, signal?: AbortSignal) => Promise<string>;
+
+function formatToolExecutionResponse(result: string): {
+  response: {
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: false;
+  };
+} {
+  return {
+    response: {
+      content: [
+        {
+          type: 'text',
+          text: result,
+        },
+      ],
+    },
+  };
+}
+
+async function executeToolCallWithSignal(params: {
+  name: string;
+  args: unknown;
+  toolHandlers: Map<string, SignalAwareToolHandler>;
+  signal?: AbortSignal;
+  now?: () => number;
+  log?: (message: string) => void;
+}): Promise<{
+  response: {
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: true;
+  } | {
+    content: Array<{ type: 'text'; text: string }>;
+    isError?: false;
+  };
+  result: 'success' | 'error';
+  elapsedMs: number;
+}> {
+  const { name, args, toolHandlers, signal } = params;
+  const now = params.now ?? Date.now;
+  const log = params.log ?? console.error;
+  const startTime = now();
+
+  log(`[${new Date().toISOString()}] Tool: ${name}`);
+
+  try {
+    const handler = toolHandlers.get(name);
+    if (!handler) {
+      throw new Error(`Unknown tool: ${name}`);
+    }
+
+    const result = await handler(args, signal);
+    const elapsedMs = now() - startTime;
+    log(`[${new Date().toISOString()}] Tool ${name} completed in ${elapsedMs}ms`);
+
+    return {
+      response: formatToolExecutionResponse(result).response,
+      result: 'success',
+      elapsedMs,
+    };
+  } catch (error) {
+    const elapsedMs = now() - startTime;
+    const errorMessage = error instanceof Error ? error.message : String(error);
+
+    log(`[${new Date().toISOString()}] Tool ${name} failed after ${elapsedMs}ms: ${errorMessage}`);
+
+    return {
+      response: {
+        content: [
+          {
+            type: 'text',
+            text: `Error: ${errorMessage}`,
+          },
+        ],
+        isError: true,
+      },
+      result: 'error',
+      elapsedMs,
+    };
+  }
+}
 
 export class ContextEngineMCPServer {
   private server: Server;
@@ -267,7 +349,7 @@ export class ContextEngineMCPServer {
       { tool: semanticSearchTool, handler: (args) => handleSemanticSearch(args as any, this.serviceClient) },
       { tool: getFileTool, handler: (args) => handleGetFile(args as any, this.serviceClient) },
       { tool: getContextTool, handler: (args) => handleGetContext(args as any, this.serviceClient) },
-      { tool: enhancePromptTool, handler: (args) => handleEnhancePrompt(args as any, this.serviceClient) },
+      { tool: enhancePromptTool, handler: (args, signal) => handleEnhancePrompt(args as any, this.serviceClient, signal) },
       { tool: indexStatusTool, handler: (args) => handleIndexStatus(args as any, this.serviceClient) },
       { tool: reindexWorkspaceTool, handler: (args) => handleReindexWorkspace(args as any, this.serviceClient) },
       { tool: clearIndexTool, handler: (args) => handleClearIndex(args as any, this.serviceClient) },
@@ -276,10 +358,10 @@ export class ContextEngineMCPServer {
       { tool: addMemoryTool, handler: (args) => handleAddMemory(args as any, this.serviceClient) },
       { tool: listMemoriesTool, handler: (args) => handleListMemories(args as any, this.serviceClient) },
       // Planning tools (Phase 1)
-      { tool: createPlanTool, handler: (args) => handleCreatePlan(args as any, this.serviceClient) },
-      { tool: refinePlanTool, handler: (args) => handleRefinePlan(args as any, this.serviceClient) },
+      { tool: createPlanTool, handler: (args, signal) => handleCreatePlan(args as any, this.serviceClient, signal) },
+      { tool: refinePlanTool, handler: (args, signal) => handleRefinePlan(args as any, this.serviceClient, signal) },
       { tool: visualizePlanTool, handler: (args) => handleVisualizePlan(args as any, this.serviceClient) },
-      { tool: executePlanTool, handler: (args) => handleExecutePlan(args as any, this.serviceClient) },
+      { tool: executePlanTool, handler: (args, signal) => handleExecutePlan(args as any, this.serviceClient, signal) },
       // Plan management tools (Phase 2)
       { tool: findToolByName(planManagementTools, 'save_plan'), handler: (args) => handleSavePlan(args as Record<string, unknown>) },
       { tool: findToolByName(planManagementTools, 'load_plan'), handler: (args) => handleLoadPlan(args as Record<string, unknown>) },
@@ -295,10 +377,42 @@ export class ContextEngineMCPServer {
       { tool: findToolByName(planManagementTools, 'compare_plan_versions'), handler: (args) => handleComparePlanVersions(args as Record<string, unknown>) },
       { tool: findToolByName(planManagementTools, 'rollback_plan'), handler: (args) => handleRollbackPlan(args as Record<string, unknown>) },
       // Code Review tools (v1.5.0)
-      { tool: reviewChangesTool, handler: (args) => handleReviewChanges(args as any, this.serviceClient) },
-      { tool: reviewGitDiffTool, handler: (args) => handleReviewGitDiff(args as any, this.serviceClient) },
-      { tool: reviewDiffTool, handler: (args) => handleReviewDiff(args as any, this.serviceClient) },
-      { tool: reviewAutoTool, handler: (args) => handleReviewAuto(args as any, this.serviceClient) },
+      {
+        tool: reviewChangesTool,
+        handler: (args, signal) =>
+          (handleReviewChanges as unknown as (
+            args: unknown,
+            serviceClient: ContextServiceClient,
+            signal?: AbortSignal
+          ) => Promise<string>)(args as any, this.serviceClient, signal),
+      },
+      {
+        tool: reviewGitDiffTool,
+        handler: (args, signal) =>
+          (handleReviewGitDiff as unknown as (
+            args: unknown,
+            serviceClient: ContextServiceClient,
+            signal?: AbortSignal
+          ) => Promise<string>)(args as any, this.serviceClient, signal),
+      },
+      {
+        tool: reviewDiffTool,
+        handler: (args, signal) =>
+          (handleReviewDiff as unknown as (
+            args: unknown,
+            serviceClient: ContextServiceClient,
+            signal?: AbortSignal
+          ) => Promise<string>)(args as any, this.serviceClient, signal),
+      },
+      {
+        tool: reviewAutoTool,
+        handler: (args, signal) =>
+          (handleReviewAuto as unknown as (
+            args: unknown,
+            serviceClient: ContextServiceClient,
+            signal?: AbortSignal
+          ) => Promise<string>)(args as any, this.serviceClient, signal),
+      },
       { tool: checkInvariantsTool, handler: (args) => handleCheckInvariants(args as any, this.serviceClient) },
       { tool: runStaticAnalysisTool, handler: (args) => handleRunStaticAnalysis(args as any, this.serviceClient) },
       // Reactive Review tools (Phase 4)
@@ -325,12 +439,13 @@ export class ContextEngineMCPServer {
     });
 
     // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
       const { name, arguments: args } = request.params;
-      const execution = await executeToolCall({
+      const execution = await executeToolCallWithSignal({
         name,
         args,
         toolHandlers,
+        signal: extra.signal,
       });
 
       const metricLabels = { tool: name, result: execution.result };

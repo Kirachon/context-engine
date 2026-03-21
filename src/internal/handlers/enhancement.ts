@@ -26,7 +26,7 @@ const ENHANCED_PROMPT_PLACEHOLDER = 'enhanced prompt goes here';
 const DEFAULT_CONTEXT_TOP_K = 3;
 const DEFAULT_CONTEXT_MAX_FILES = 3;
 const DEFAULT_CONTEXT_MAX_CHARS = 1200;
-const ENHANCE_PROMPT_TEMPLATE_VERSION = '2.0.0';
+const ENHANCE_PROMPT_TEMPLATE_VERSION = '2.1.0';
 const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
 const REQUIRED_STRUCTURED_SECTIONS = [
@@ -225,17 +225,58 @@ function setCachedContextSnippet(cacheKey: string, snippet: string | null): void
   });
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorLabel: string): Promise<T> {
+function createAbortError(context: string): Error {
+  const error = new Error(`${context} aborted`);
+  error.name = 'AbortError';
+  return error;
+}
+
+function throwIfSignalAborted(signal: AbortSignal | undefined, context: string): void {
+  if (signal?.aborted) {
+    throw createAbortError(context);
+  }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  errorLabel: string,
+  signal?: AbortSignal
+): Promise<T> {
   if (timeoutMs <= 0) {
     return Promise.reject(new Error(`${errorLabel} timed out`));
   }
 
+  if (signal?.aborted) {
+    return Promise.reject(createAbortError(errorLabel));
+  }
+
   return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${errorLabel} timed out`)), timeoutMs);
+    let settled = false;
+    const finalize = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const onAbort = () => {
+      finalize();
+      reject(createAbortError(errorLabel));
+    };
+    const timer = setTimeout(() => {
+      finalize();
+      reject(new Error(`${errorLabel} timed out`));
+    }, timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
     promise
-      .then((value) => resolve(value))
-      .catch((error) => reject(error))
-      .finally(() => clearTimeout(timer));
+      .then((value) => {
+        finalize();
+        resolve(value);
+      })
+      .catch((error) => {
+        finalize();
+        reject(error);
+      });
   });
 }
 
@@ -268,9 +309,23 @@ function computeRetryBackoffMs(attempt: number, errorMessage: string): number {
   return Math.max(250, Math.min(MAX_ENHANCE_RETRY_BACKOFF_MS, exponential));
 }
 
-async function sleepMs(durationMs: number): Promise<void> {
+async function sleepMs(durationMs: number, signal?: AbortSignal): Promise<void> {
   if (durationMs <= 0) return;
-  await new Promise((resolve) => setTimeout(resolve, durationMs));
+  if (signal?.aborted) {
+    throw createAbortError('Enhance prompt backoff');
+  }
+
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, durationMs);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(createAbortError('Enhance prompt backoff'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 function parseStructuredHeadersIgnoringCodeFences(content: string): string[] {
@@ -420,29 +475,40 @@ function logEnhancementFlowSummary(
  * from enhance-handler.ts in the prompt-enhancer-server
  */
 export function buildAIEnhancementPrompt(originalPrompt: string, contextBlock?: string): string {
-  const contextSection = contextBlock
-    ? `\n\nHere is relevant code context that may help:\n\n${contextBlock}\n\n`
-    : '\n\n';
+  const promptParts = [
+    'Improve the instruction below.',
+    'Preserve fenced code blocks unless needed.',
+    'Return only this response envelope.',
+    '',
+    '### BEGIN RESPONSE ###',
+    'Here is an enhanced version of the original instruction that is more specific and clear:',
+    '<enhanced-prompt>enhanced prompt goes here</enhanced-prompt>',
+    '### END RESPONSE ###',
+    '',
+    'Use these section headers in order:',
+    ...REQUIRED_STRUCTURED_SECTIONS.map((section) => `- ${section}`),
+    '',
+    'Cover these requirements:',
+    ...CORE_REQUIREMENT_LINES.map((line, index) => `${index + 1}. ${line}`),
+    '',
+  ];
 
-  return (
-    "Here is an instruction that I'd like to give you, but it needs to be improved. " +
-    "Rewrite and enhance this instruction to make it clearer, more specific, " +
-    "less ambiguous, and correct any mistakes. " +
-    "If there is code in triple backticks (```) consider whether it is a code sample and should remain unchanged. " +
-    "The enhanced prompt must be structured markdown with exact section headers in this order:\n" +
-    `${REQUIRED_STRUCTURED_SECTIONS.map((section) => `- ${section}`).join('\n')}\n` +
-    "Within the section content, explicitly cover these requirement points:\n" +
-    `${CORE_REQUIREMENT_LINES.map((line, index) => `${index + 1}. ${line}`).join('\n')}\n` +
-    "Each section must have non-empty bullet points. " +
-    "Reply with the following format:\n\n" +
-    "### BEGIN RESPONSE ###\n" +
-    "Here is an enhanced version of the original instruction that is more specific and clear:\n" +
-    "<enhanced-prompt>enhanced prompt goes here</enhanced-prompt>\n\n" +
-    "### END RESPONSE ###\n\n" +
-    contextSection +
-    "Here is my original instruction:\n\n" +
-    originalPrompt
+  if (contextBlock) {
+    promptParts.push(
+      'Here is relevant code context that may help:',
+      '',
+      contextBlock.trim(),
+      ''
+    );
+  }
+
+  promptParts.push(
+    'Here is my original instruction:',
+    '',
+    originalPrompt.trim()
   );
+
+  return promptParts.join('\n');
 }
 
 /**
@@ -501,15 +567,17 @@ export class EnhancePromptError extends Error {
 
 export async function internalPromptEnhancer(
   prompt: string,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<string> {
-  const result = await internalPromptEnhancerDetailed(prompt, serviceClient);
+  const result = await internalPromptEnhancerDetailed(prompt, serviceClient, signal);
   return result.enhancedPrompt;
 }
 
 export async function internalPromptEnhancerDetailed(
   prompt: string,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<PromptEnhancementResult> {
   const totalStartMs = Date.now();
   const flow = createRetrievalFlowContext('enhance_prompt', {
@@ -543,6 +611,8 @@ export async function internalPromptEnhancerDetailed(
   const retryAttempts = normalizeEnhanceRetryAttempts(process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS);
   let lastTransientRetryAfterMs: number | undefined;
 
+  throwIfSignalAborted(signal, 'Enhance prompt');
+
   const baseEnhancementPrompt = buildAIEnhancementPrompt(prompt);
   let enhancementPrompt = baseEnhancementPrompt;
   const retrievalEnabled = mode !== 'off' && (mode === 'light' || isRetrievalPipelineEnabled());
@@ -570,6 +640,7 @@ export async function internalPromptEnhancerDetailed(
       let contextSnippet = hasCachedSnippet ? cachedContextSnippet ?? null : null;
 
       if (!hasCachedSnippet && retrievalStageTimeoutMs > 0) {
+        throwIfSignalAborted(signal, 'Enhance prompt');
         const preferLocalDocsSearch = mode === 'light' || isOperationalDocsQuery(prompt);
         if (preferLocalDocsSearch) {
           const localSearch = (serviceClient as unknown as {
@@ -591,7 +662,8 @@ export async function internalPromptEnhancerDetailed(
               localResults = await withTimeout(
                 localSearch.call(serviceClient, prompt, DEFAULT_CONTEXT_TOP_K),
                 retrievalStageTimeoutMs,
-                'Local keyword retrieval'
+                'Local keyword retrieval',
+                signal
               );
             } catch (localError) {
               if (mode !== 'light') {
@@ -610,13 +682,18 @@ export async function internalPromptEnhancerDetailed(
 
           if (!contextSnippet && mode !== 'light') {
             noteEnhancementFlowStage(flow, 'retrieval:semantic_search');
-            const retrievalResults = await retrieve(prompt, serviceClient, {
-              topK: DEFAULT_CONTEXT_TOP_K,
-              perQueryTopK: DEFAULT_CONTEXT_TOP_K,
-              maxVariants: 1,
-              enableExpansion: false,
-              timeoutMs: retrievalStageTimeoutMs,
-            });
+            const retrievalResults = await withTimeout(
+              retrieve(prompt, serviceClient, {
+                topK: DEFAULT_CONTEXT_TOP_K,
+                perQueryTopK: DEFAULT_CONTEXT_TOP_K,
+                maxVariants: 1,
+                enableExpansion: false,
+                timeoutMs: retrievalStageTimeoutMs,
+              }),
+              retrievalStageTimeoutMs,
+              'Enhance prompt retrieval',
+              signal
+            );
             contextSnippet = internalContextSnippet(
               retrievalResults,
               DEFAULT_CONTEXT_MAX_FILES,
@@ -624,13 +701,19 @@ export async function internalPromptEnhancerDetailed(
             );
           }
         } else if (mode === 'rich') {
-          const retrievalResults = await retrieve(prompt, serviceClient, {
-            topK: DEFAULT_CONTEXT_TOP_K,
-            perQueryTopK: DEFAULT_CONTEXT_TOP_K,
-            maxVariants: 1,
-            enableExpansion: false,
-            timeoutMs: retrievalStageTimeoutMs,
-          });
+          throwIfSignalAborted(signal, 'Enhance prompt');
+          const retrievalResults = await withTimeout(
+            retrieve(prompt, serviceClient, {
+              topK: DEFAULT_CONTEXT_TOP_K,
+              perQueryTopK: DEFAULT_CONTEXT_TOP_K,
+              maxVariants: 1,
+              enableExpansion: false,
+              timeoutMs: retrievalStageTimeoutMs,
+            }),
+            retrievalStageTimeoutMs,
+            'Enhance prompt retrieval',
+            signal
+          );
           contextSnippet = internalContextSnippet(
             retrievalResults,
             DEFAULT_CONTEXT_MAX_FILES,
@@ -670,6 +753,7 @@ export async function internalPromptEnhancerDetailed(
     let attemptPrompt = enhancementPrompt;
     let lastTransientError: unknown = null;
     for (let attempt = 0; attempt <= retryAttempts; attempt++) {
+      throwIfSignalAborted(signal, 'Enhance prompt');
       const stageTimeoutMs = budget.stageBudgetMs('enhancement');
       if (stageTimeoutMs <= 0) {
         throw new Error('AI enhancement timed out');
@@ -677,9 +761,15 @@ export async function internalPromptEnhancerDetailed(
 
       try {
         noteEnhancementFlowStage(flow, `model:attempt:${attempt + 1}`);
-        response = await serviceClient.searchAndAsk(prompt, attemptPrompt, {
-          timeoutMs: stageTimeoutMs,
-        });
+        response = await withTimeout(
+          serviceClient.searchAndAsk(prompt, attemptPrompt, {
+            timeoutMs: stageTimeoutMs,
+            signal,
+          }),
+          stageTimeoutMs,
+          'AI enhancement',
+          signal
+        );
         break;
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
@@ -708,7 +798,7 @@ export async function internalPromptEnhancerDetailed(
           1,
           'Enhance prompt transient retries before fallback.'
         );
-        await sleepMs(backoffMs);
+        await sleepMs(backoffMs, signal);
       }
     }
     if (!response && lastTransientError) {
@@ -762,9 +852,11 @@ export async function internalPromptEnhancerDetailed(
       const repairResponse = await withTimeout(
         serviceClient.searchAndAsk(prompt, buildRepairEnhancementPrompt(prompt, enhanced), {
           timeoutMs: repairTimeoutMs,
+          signal,
         }),
         repairTimeoutMs,
-        'Enhancement repair'
+        'Enhancement repair',
+        signal
       );
       const repaired = parseEnhancedPrompt(repairResponse);
       if (!repaired) {

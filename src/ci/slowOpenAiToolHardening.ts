@@ -1,19 +1,80 @@
-#!/usr/bin/env node
-/**
- * Compare two benchmark JSON outputs from scripts/bench.ts.
- *
- * Exit codes:
- * - 0: pass (within thresholds)
- * - 1: fail (threshold breach)
- * - 2: usage / parsing error
- */
+export type SlowToolMode = 'enhance_prompt' | 'create_plan' | 'refine_plan' | 'execute_plan';
 
-import * as fs from 'fs';
-import * as path from 'path';
+export type SlowToolCallSample = {
+  search_query_chars: number;
+  prompt_chars: number;
+  timeout_ms: number | null;
+  priority: string | null;
+};
+
+export type SlowToolRunSample = {
+  elapsed_ms: number;
+  output_chars: number;
+  call_count: number;
+  prompt_chars_total: number;
+  prompt_chars_max: number;
+  prompt_chars_min: number;
+  prompt_call_samples: SlowToolCallSample[];
+};
+
+type NumericSummary = {
+  count: number;
+  avg: number;
+  p50: number;
+  p95: number;
+  p99: number;
+  min: number;
+  max: number;
+};
+
+type MsSummary = {
+  count: number;
+  avg_ms: number;
+  p50_ms: number;
+  p95_ms: number;
+  p99_ms: number;
+  min_ms: number;
+  max_ms: number;
+};
+
+type CharSummary = {
+  count: number;
+  avg_chars: number;
+  p50_chars: number;
+  p95_chars: number;
+  p99_chars: number;
+  min_chars: number;
+  max_chars: number;
+};
+
+export type SlowToolBenchmarkPayload = {
+  mode: SlowToolMode;
+  tool: SlowToolMode;
+  workspace: string;
+  cold: boolean;
+  iterations: number;
+  input: Record<string, unknown>;
+  timing: MsSummary;
+  repeat: {
+    first_ms: number;
+    repeat_count: number;
+    repeat_avg_ms: number;
+    repeat_p95_ms: number;
+    repeat_delta_ms: number;
+    repeat_delta_pct: number;
+  };
+  prompt_stats: CharSummary;
+  run_prompt_stats: CharSummary;
+  call_stats: {
+    total_calls: number;
+    avg_calls_per_run: number;
+    p95_calls_per_run: number;
+    max_calls_per_run: number;
+  };
+  output_stats: CharSummary;
+};
 
 interface CompareArgs {
-  baselinePath: string;
-  candidatePath: string;
   metricPath?: string;
   maxRegressionPct?: number;
   maxRegressionAbs?: number;
@@ -61,103 +122,96 @@ export interface BenchComparisonResult {
   failed: boolean;
 }
 
-function parseNumber(value: string | undefined, name: string): number {
-  if (!value) throw new Error(`Missing value for ${name}`);
-  const parsed = Number(value);
-  if (!Number.isFinite(parsed)) throw new Error(`Invalid number for ${name}: ${value}`);
-  return parsed;
-}
-
-function parseArgs(argv: string[]): CompareArgs {
-  const args: CompareArgs = {
-    baselinePath: '',
-    candidatePath: '',
-    higherIsBetter: false,
-    requireSameMode: true,
+function summarizeNumbers(samples: number[]): NumericSummary {
+  const sorted = [...samples].sort((a, b) => a - b);
+  const sum = samples.reduce((acc, value) => acc + value, 0);
+  const pick = (pct: number): number => {
+    if (!sorted.length) {
+      return 0;
+    }
+    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
+    return sorted[index] ?? 0;
   };
 
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    const next = () => argv[i + 1];
-
-    if ((a === '--baseline' || a === '-b') && next()) {
-      args.baselinePath = next()!;
-      i++;
-      continue;
-    }
-    if ((a === '--candidate' || a === '-c') && next()) {
-      args.candidatePath = next()!;
-      i++;
-      continue;
-    }
-    if (a === '--metric' && next()) {
-      args.metricPath = next()!;
-      i++;
-      continue;
-    }
-    if (a === '--max-regression-pct' && next()) {
-      args.maxRegressionPct = parseNumber(next(), '--max-regression-pct');
-      i++;
-      continue;
-    }
-    if (a === '--max-regression-abs' && next()) {
-      args.maxRegressionAbs = parseNumber(next(), '--max-regression-abs');
-      i++;
-      continue;
-    }
-    if (a === '--higher-is-better') {
-      args.higherIsBetter = true;
-      continue;
-    }
-    if (a === '--no-require-same-mode') {
-      args.requireSameMode = false;
-      continue;
-    }
-    if (a === '--help' || a === '-h') {
-      printHelpAndExit(0);
-    }
-  }
-
-  if (!args.baselinePath || !args.candidatePath) {
-    throw new Error('Both --baseline and --candidate are required.');
-  }
-  if (args.maxRegressionPct == null && args.maxRegressionAbs == null) {
-    args.maxRegressionPct = 10;
-  }
-
-  return args;
+  return {
+    count: samples.length,
+    avg: samples.length ? sum / samples.length : 0,
+    p50: pick(50),
+    p95: pick(95),
+    p99: pick(99),
+    min: sorted[0] ?? 0,
+    max: sorted[sorted.length - 1] ?? 0,
+  };
 }
 
-function printHelpAndExit(code: number): never {
-  // eslint-disable-next-line no-console
-  console.log(`
-Usage:
-  npm run bench:compare -- --baseline bench-baseline.json --candidate bench-candidate.json [options]
-
-Options:
-  --baseline, -b <path>       Baseline benchmark JSON
-  --candidate, -c <path>      Candidate benchmark JSON
-  --metric <dot.path>         Metric path (default auto-detect)
-  --max-regression-pct <n>    Allowed regression percent (default 10)
-  --max-regression-abs <n>    Allowed regression absolute units (ms for latency metrics)
-  --higher-is-better          Use for throughput metrics (e.g., files_per_sec)
-  --no-require-same-mode      Allow comparison even if payload.mode differs
-
-Examples:
-  --metric payload.timing.repeat_avg_ms
-  --metric payload.prompt_stats.avg_chars
-`);
-  process.exit(code);
+function summarizeMs(samplesMs: number[]): MsSummary {
+  const summary = summarizeNumbers(samplesMs);
+  return {
+    count: summary.count,
+    avg_ms: summary.avg,
+    p50_ms: summary.p50,
+    p95_ms: summary.p95,
+    p99_ms: summary.p99,
+    min_ms: summary.min,
+    max_ms: summary.max,
+  };
 }
 
-function readJson(filePath: string): BenchOutput {
-  const absPath = path.resolve(filePath);
-  const raw = fs.readFileSync(absPath, 'utf8');
-  const parsed = JSON.parse(raw) as BenchOutput;
-  if (!parsed || typeof parsed !== 'object') {
-    throw new Error(`Invalid JSON object in ${filePath}`);
-  }
-  return parsed;
+function summarizeChars(samples: number[]): CharSummary {
+  const summary = summarizeNumbers(samples);
+  return {
+    count: summary.count,
+    avg_chars: summary.avg,
+    p50_chars: summary.p50,
+    p95_chars: summary.p95,
+    p99_chars: summary.p99,
+    min_chars: summary.min,
+    max_chars: summary.max,
+  };
+}
+
+export function summarizeSlowToolRuns(samples: SlowToolRunSample[]): SlowToolBenchmarkPayload['timing'] extends MsSummary
+  ? {
+      timing: MsSummary;
+      repeat: SlowToolBenchmarkPayload['repeat'];
+      prompt_stats: SlowToolBenchmarkPayload['prompt_stats'];
+      run_prompt_stats: SlowToolBenchmarkPayload['run_prompt_stats'];
+      call_stats: SlowToolBenchmarkPayload['call_stats'];
+      output_stats: SlowToolBenchmarkPayload['output_stats'];
+    }
+  : never {
+  const elapsedMs = samples.map((sample) => sample.elapsed_ms);
+  const promptLengths = samples.flatMap((sample) => sample.prompt_call_samples.map((call) => call.prompt_chars));
+  const runPromptTotals = samples.map((sample) => sample.prompt_chars_total);
+  const outputLengths = samples.map((sample) => sample.output_chars);
+  const callCounts = samples.map((sample) => sample.call_count);
+  const firstMs = samples[0]?.elapsed_ms ?? 0;
+  const repeatSamples = samples.slice(1).map((sample) => sample.elapsed_ms);
+  const repeatAvgMs = repeatSamples.length ? repeatSamples.reduce((acc, value) => acc + value, 0) / repeatSamples.length : 0;
+  const repeatSummary = summarizeNumbers(repeatSamples);
+  const repeatDeltaMs = firstMs - repeatAvgMs;
+  const repeatDeltaPct = firstMs > 0 ? (repeatDeltaMs / firstMs) * 100 : 0;
+
+  return {
+    timing: summarizeMs(elapsedMs),
+    repeat: {
+      first_ms: firstMs,
+      repeat_count: repeatSamples.length,
+      repeat_avg_ms: repeatAvgMs,
+      repeat_p95_ms: repeatSummary.p95,
+      repeat_delta_ms: repeatDeltaMs,
+      repeat_delta_pct: repeatDeltaPct,
+    },
+    prompt_stats: summarizeChars(promptLengths),
+    run_prompt_stats: summarizeChars(runPromptTotals),
+    call_stats: {
+      total_calls: callCounts.reduce((acc, value) => acc + value, 0),
+      avg_calls_per_run: callCounts.length ? callCounts.reduce((acc, value) => acc + value, 0) / callCounts.length : 0,
+      p95_calls_per_run: summarizeNumbers(callCounts).p95,
+      max_calls_per_run: summarizeNumbers(callCounts).max,
+    },
+    output_stats: summarizeChars(outputLengths),
+  };
 }
 
 function getByPath(obj: unknown, pathValue: string): unknown {
@@ -173,12 +227,7 @@ function getByPath(obj: unknown, pathValue: string): unknown {
 }
 
 function detectMetricPath(bench: BenchOutput): string {
-  const candidates = [
-    'payload.timing.p95_ms',
-    'payload.timing.avg_ms',
-    'payload.elapsed_ms',
-    'total_ms',
-  ];
+  const candidates = ['payload.timing.p95_ms', 'payload.timing.avg_ms', 'payload.elapsed_ms', 'total_ms'];
   for (const candidate of candidates) {
     const value = getByPath(bench, candidate);
     if (typeof value === 'number' && Number.isFinite(value)) {
@@ -331,49 +380,3 @@ export function compareBenchmarks(
     failed: breachedPct || breachedAbs,
   };
 }
-
-function main(): void {
-  let args: CompareArgs;
-  try {
-    args = parseArgs(process.argv.slice(2));
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(error instanceof Error ? error.message : String(error));
-    printHelpAndExit(2);
-  }
-
-  try {
-    const baseline = readJson(args.baselinePath);
-    const candidate = readJson(args.candidatePath);
-    const comparison = compareBenchmarks(baseline, candidate, args);
-
-    // eslint-disable-next-line no-console
-    console.log(`metric=${comparison.metricPath}`);
-    // eslint-disable-next-line no-console
-    console.log(`baseline=${comparison.baselineMetric}`);
-    // eslint-disable-next-line no-console
-    console.log(`candidate=${comparison.candidateMetric}`);
-    // eslint-disable-next-line no-console
-    console.log(`regression_abs=${comparison.regressionAbs}`);
-    // eslint-disable-next-line no-console
-    console.log(`regression_pct=${Number.isFinite(comparison.regressionPct) ? comparison.regressionPct.toFixed(2) : 'Infinity'}`);
-    // eslint-disable-next-line no-console
-    console.log(`thresholds: max_regression_pct=${args.maxRegressionPct ?? 'n/a'} max_regression_abs=${args.maxRegressionAbs ?? 'n/a'}`);
-
-    if (comparison.failed) {
-      // eslint-disable-next-line no-console
-      console.error('Benchmark threshold breached.');
-      process.exit(1);
-    }
-
-    // eslint-disable-next-line no-console
-    console.log('Benchmark comparison passed.');
-    process.exit(0);
-  } catch (error) {
-    // eslint-disable-next-line no-console
-    console.error(error instanceof Error ? error.message : String(error));
-    process.exit(2);
-  }
-}
-
-main();

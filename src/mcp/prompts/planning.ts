@@ -15,20 +15,16 @@
  */
 export const PLANNING_SYSTEM_PROMPT = `You are an expert software architect in strict Planning Mode.
 
-## Your Role
-- Deeply analyze the provided codebase context
-- Generate detailed, actionable implementation plans
-- Think through all steps required to accomplish the task
-- Identify dependencies, risks, and parallelization opportunities
+Analyze the provided codebase context and return ONLY valid JSON matching the exact schema below.
+Do not write code, suggest file edits, or add any text outside the JSON.
 
-## Strict Rules
-- Do NOT write, suggest, or output any code
-- Do NOT propose file edits or implementation details
-- Output ONLY valid JSON matching the exact schema below
-- No extra text, markdown, or explanations outside the JSON
+Focus on:
+- clear scope boundaries
+- essential MVP steps first
+- dependencies, risks, and parallel work
+- concrete validation
 
-## Output Schema
-You MUST return a JSON object with this exact structure:
+Required JSON shape:
 
 {
   "goal": "Clear restatement of the task with scope boundaries",
@@ -96,14 +92,10 @@ You MUST return a JSON object with this exact structure:
 }
 
 ## Best Practices
-1. Prioritize MVP features - identify what's essential vs nice-to-have
-2. Mark parallel opportunities - steps that can run concurrently
-3. Include Mermaid diagrams for architecture when helpful
-4. Be specific about file changes - exact paths and reasons
-5. Estimate effort realistically - include buffer for unknowns
-6. Identify risks early - especially integration and dependency risks
-7. Consider rollback strategies for risky changes
-8. Reference actual files from the provided codebase context
+1. Start with MVP scope and concrete validation.
+2. Call out parallel work, risks, and rollback early.
+3. Reference actual files and exact reasons for change.
+4. Keep diagrams concise and only when they help.
 
 ## Diagram Guidelines
 Use Mermaid syntax for diagrams:
@@ -121,31 +113,19 @@ Keep diagrams focused and readable.`;
  */
 export const REFINEMENT_SYSTEM_PROMPT = `You are an expert software architect refining an existing implementation plan.
 
-## Your Role
-- Review the current plan and user feedback
-- Incorporate clarifications and answers to questions
-- Improve the plan based on feedback
-- Maintain consistency with the original architecture decisions
+Review the current plan and user feedback, then return ONLY the updated JSON plan.
+Preserve the original structure, increment the version number, and only change sections affected by the feedback.
 
-## Strict Rules
-- Do NOT write, suggest, or output any code
-- Output ONLY the updated JSON plan
-- Preserve the original plan structure
-- Only modify sections that need changes based on feedback
-- Increment the version number
-
-## Input Format
-You will receive:
-1. The current plan (JSON)
+Input:
+1. The current plan JSON
 2. User feedback or clarifications
-3. Additional codebase context if needed
+3. Optional extra codebase context
 
-## Output
-Return the complete updated plan JSON with:
+Output requirements:
 - version incremented by 1
 - updated_at set to current timestamp
-- questions_for_clarification cleared if all questions answered
-- Any sections modified based on feedback`;
+- questions_for_clarification cleared when answered
+- no extra text outside the JSON`;
 
 // ============================================================================
 // Diagram Generation Prompt
@@ -172,23 +152,33 @@ Use consistent styling throughout.`;
 /**
  * Build the initial planning prompt with task and context
  */
-export function buildPlanningPrompt(task: string, contextSummary: string): string {
-  return `## Task
-${task}
+export function buildPlanningPrompt(
+  task: string,
+  contextSummary: string,
+  profile: PlanningPromptProfile = 'compact'
+): string {
+  const prompt = [
+    '## Task',
+    task.trim(),
+    '',
+    '## Context',
+    contextSummary.trim() || 'No relevant codebase context was found.',
+    '',
+    '## Instructions',
+    'Return ONLY valid JSON that matches the planning schema in the system prompt.',
+    'Keep the plan actionable, minimal, and grounded in the repository context.',
+  ];
 
-## Codebase Context
-${contextSummary}
+  if (profile === 'deep') {
+    prompt.push(
+      '',
+      '## Deep Planning Guidance',
+      '- Include dependencies, parallel work, rollback notes, and validation details.',
+      '- Favor concrete file references and milestones when the task is complex.'
+    );
+  }
 
-## Instructions
-Analyze the task and codebase context above. Generate a comprehensive implementation plan following the schema in your system prompt.
-
-Focus on:
-1. Understanding how the existing code is structured
-2. Identifying what needs to change or be created
-3. Finding opportunities for parallel execution
-4. Minimizing risk through careful planning
-
-Return ONLY valid JSON.`;
+  return prompt.join('\n');
 }
 
 /**
@@ -197,26 +187,40 @@ Return ONLY valid JSON.`;
 export function buildRefinementPrompt(
   currentPlan: string,
   feedback: string,
-  clarifications?: Record<string, string>
+  clarifications?: Record<string, string>,
+  profile: PlanningPromptProfile = 'compact'
 ): string {
-  let prompt = `## Current Plan
-${currentPlan}
-
-## User Feedback
-${feedback}`;
+  const prompt = [
+    '## Current Plan',
+    currentPlan.trim(),
+    '',
+    '## Feedback',
+    feedback.trim(),
+  ];
 
   if (clarifications && Object.keys(clarifications).length > 0) {
-    prompt += `\n\n## Clarification Answers`;
+    prompt.push('', '## Clarification Answers');
     for (const [question, answer] of Object.entries(clarifications)) {
-      prompt += `\nQ: ${question}\nA: ${answer}`;
+      prompt.push(`- Q: ${question}`, `  A: ${answer}`);
     }
   }
 
-  prompt += `\n\n## Instructions
-Update the plan based on the feedback and clarifications above.
-Return the complete updated plan as valid JSON.`;
+  prompt.push(
+    '',
+    '## Instructions',
+    'Update the plan to reflect the feedback and return the complete JSON plan only.'
+  );
 
-  return prompt;
+  if (profile === 'deep') {
+    prompt.push(
+      '',
+      '## Deep Refinement Guidance',
+      '- Preserve plan structure and versioning.',
+      '- Re-evaluate scope, steps, and validation if the feedback changes the approach.'
+    );
+  }
+
+  return prompt.join('\n');
 }
 
 /**
@@ -259,22 +263,12 @@ export function extractJsonFromResponse(response: string): string | null {
 /**
  * System prompt for executing a single plan step
  */
-export const STEP_EXECUTION_SYSTEM_PROMPT = `You are an expert software developer executing a specific step from an implementation plan.
+export const STEP_EXECUTION_SYSTEM_PROMPT = `You are an expert software developer executing one step from an implementation plan.
 
-## Your Role
-- Generate the exact code changes needed to complete this step
-- Follow the plan's architecture and design decisions
-- Write clean, well-documented code
-- Ensure changes are minimal and focused on the step's requirements
+Generate the exact code changes needed for that step and return ONLY valid JSON.
+Follow the plan architecture, keep the changes minimal, and include all required imports and dependencies.
 
-## Strict Rules
-- Output ONLY valid JSON matching the exact schema below
-- Generate complete, working code - no placeholders or TODOs
-- Follow existing code patterns and conventions from the codebase context
-- Include all necessary imports and dependencies
-
-## Output Schema
-You MUST return a JSON object with this exact structure:
+Required output:
 
 {
   "success": true,
@@ -296,8 +290,10 @@ You MUST return a JSON object with this exact structure:
 3. For deletions: set content to null
 4. Keep explanations concise but informative
 5. Ensure code compiles and follows TypeScript/JavaScript best practices
-6. Include proper error handling
-7. Add JSDoc comments for public APIs`;
+ 6. Include proper error handling
+ 7. Add JSDoc comments for public APIs`;
+
+export type PlanningPromptProfile = 'compact' | 'deep';
 
 /**
  * Build the step execution prompt with step details and context
@@ -314,45 +310,58 @@ export function buildStepExecutionPrompt(
   },
   planGoal: string,
   contextSummary: string,
-  additionalContext?: string
+  additionalContext?: string,
+  profile: PlanningPromptProfile = 'compact'
 ): string {
-  let prompt = `## Plan Goal
-${planGoal}
-
-## Current Step: Step ${step.step_number} - ${step.title}
-
-### Description
-${step.description}
-
-### Files to Modify
-${step.files_to_modify.length > 0
-  ? step.files_to_modify.map(f => `- ${f.path}: ${f.reason}`).join('\n')
-  : 'None'}
-
-### Files to Create
-${step.files_to_create.length > 0
-  ? step.files_to_create.map(f => `- ${f.path}: ${f.reason}`).join('\n')
-  : 'None'}
-
-### Files to Delete
-${step.files_to_delete.length > 0
-  ? step.files_to_delete.map(f => `- ${f}`).join('\n')
-  : 'None'}
-
-### Acceptance Criteria
-${step.acceptance_criteria.map(c => `- ${c}`).join('\n')}
-
-## Codebase Context
-${contextSummary}`;
+  const prompt = [
+    '## Plan Goal',
+    planGoal.trim(),
+    '',
+    `## Step ${step.step_number}: ${step.title.trim()}`,
+    step.description.trim(),
+    '',
+    '## Files to Modify',
+    step.files_to_modify.length > 0
+      ? step.files_to_modify.map((f) => `- ${f.path}: ${f.reason}`).join('\n')
+      : '- None',
+    '',
+    '## Files to Create',
+    step.files_to_create.length > 0
+      ? step.files_to_create.map((f) => `- ${f.path}: ${f.reason}`).join('\n')
+      : '- None',
+    '',
+    '## Files to Delete',
+    step.files_to_delete.length > 0
+      ? step.files_to_delete.map((f) => `- ${f}`).join('\n')
+      : '- None',
+    '',
+    '## Acceptance Criteria',
+    step.acceptance_criteria.length > 0
+      ? step.acceptance_criteria.map((c) => `- ${c}`).join('\n')
+      : '- None',
+    '',
+    '## Context',
+    contextSummary.trim() || 'No relevant codebase context was found.',
+  ];
 
   if (additionalContext) {
-    prompt += `\n\n## Additional Context\n${additionalContext}`;
+    prompt.push('', '## Additional Context', additionalContext.trim());
   }
 
-  prompt += `\n\n## Instructions
-Generate the code changes needed to complete this step. Follow the existing code patterns and conventions.
-Return ONLY valid JSON matching the schema in your system prompt.`;
+  prompt.push(
+    '',
+    '## Instructions',
+    'Generate the code changes needed to complete this step and return only valid JSON.'
+  );
 
-  return prompt;
+  if (profile === 'deep') {
+    prompt.push(
+      '',
+      '## Deep Execution Guidance',
+      '- Include imports, dependencies, and safety checks.',
+      '- Keep the patch minimal but complete.'
+    );
+  }
+
+  return prompt.join('\n');
 }
-

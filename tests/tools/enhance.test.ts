@@ -7,8 +7,8 @@
 
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 import { handleEnhancePrompt, EnhancePromptArgs, enhancePromptTool } from '../../src/mcp/tools/enhance.js';
+import { buildAIEnhancementPrompt, parseEnhancedPrompt } from '../../src/internal/handlers/enhancement.js';
 import { ContextServiceClient } from '../../src/mcp/serviceClient.js';
-import { parseEnhancedPrompt } from '../../src/internal/handlers/enhancement.js';
 
 describe('enhance_prompt Tool (AI Mode Only)', () => {
   let mockServiceClient: any;
@@ -113,6 +113,27 @@ Here is an enhanced version of the original instruction that is more specific an
     });
   });
 
+  describe('Prompt Envelope', () => {
+    it('should build a compact and stable prompt envelope', () => {
+      const prompt = buildAIEnhancementPrompt(
+        'fix the login bug',
+        'File: src/auth/login.ts\nSummary: handles login flow.'
+      );
+
+      expect(prompt).toContain('### BEGIN RESPONSE ###');
+      expect(prompt).toContain('Here is relevant code context that may help:');
+      expect(prompt).toContain('Here is my original instruction:');
+      expect(prompt).toContain('<enhanced-prompt>enhanced prompt goes here</enhanced-prompt>');
+      expect(prompt.indexOf('### BEGIN RESPONSE ###')).toBeLessThan(
+        prompt.indexOf('Here is relevant code context that may help:')
+      );
+      expect(prompt.indexOf('Here is relevant code context that may help:')).toBeLessThan(
+        prompt.indexOf('Here is my original instruction:')
+      );
+      expect(prompt.length).toBeLessThan(1000);
+    });
+  });
+
   describe('AI Enhancement Mode', () => {
     describe('Mode Resolution', () => {
       it('should use default light mode behavior when mode is unset', async () => {
@@ -197,6 +218,52 @@ Here is an enhanced version of the original instruction that is more specific an
         );
         expect(promptText).toContain('revised');
         expect(promptText).not.toContain('draft');
+      });
+
+      it('should forward abort signal to searchAndAsk', async () => {
+        const aiResponse = `### BEGIN RESPONSE ###
+Here is an enhanced version of the original instruction that is more specific and clear:
+<enhanced-prompt>Signal forwarding works.</enhanced-prompt>
+
+### END RESPONSE ###`;
+        const controller = new AbortController();
+        mockServiceClient.searchAndAsk.mockResolvedValue(aiResponse);
+
+        const result = await handleEnhancePrompt(
+          {
+            prompt: 'forward the abort signal',
+          },
+          mockServiceClient as any,
+          controller.signal
+        );
+
+        expect(result).toContain('Signal forwarding works.');
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
+          'forward the abort signal',
+          expect.any(String),
+          expect.objectContaining({
+            timeoutMs: expect.any(Number),
+            signal: controller.signal,
+          })
+        );
+      });
+
+      it('should stop immediately when aborted before work starts', async () => {
+        const controller = new AbortController();
+        controller.abort();
+
+        await expect(
+          handleEnhancePrompt(
+            {
+              prompt: 'stop before starting',
+            },
+            mockServiceClient as any,
+            controller.signal
+          )
+        ).rejects.toThrow(/AbortError|aborted|cancelled/i);
+
+        expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
       });
     });
 

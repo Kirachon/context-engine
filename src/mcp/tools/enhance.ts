@@ -48,7 +48,8 @@ const ENHANCE_RESPONSE_SCHEMA_VERSION = '2.0.0';
  */
 export async function handleEnhancePrompt(
   args: EnhancePromptArgs,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<string> {
   const { prompt } = args;
   const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : prompt;
@@ -70,7 +71,7 @@ export async function handleEnhancePrompt(
   const normalizedResponseFormat = ENHANCE_RESPONSE_FORMATS.has(responseFormat) ? responseFormat : 'text';
 
   try {
-    const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient);
+    const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient, signal);
     if (normalizedResponseFormat === 'json') {
       return JSON.stringify(
         {

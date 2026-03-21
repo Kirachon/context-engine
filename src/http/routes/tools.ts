@@ -46,6 +46,91 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: strin
     });
 }
 
+function createRequestAbortError(operation: string, reason?: unknown): Error {
+    const message =
+        typeof reason === 'string' && reason.trim()
+            ? reason.trim()
+            : `${operation} aborted by client`;
+    const error = new HttpError(499, message);
+    error.name = 'AbortError';
+    return error;
+}
+
+function attachRequestAbortSignal(req: Request, controller: AbortController, operation: string): () => void {
+    const abort = (reason?: unknown): void => {
+        if (!controller.signal.aborted) {
+            controller.abort(createRequestAbortError(operation, reason));
+        }
+    };
+
+    const onAborted = () => abort('request aborted');
+    const onClose = () => abort('request closed');
+
+    req.on('aborted', onAborted);
+    req.on('close', onClose);
+
+    return () => {
+        req.off('aborted', onAborted);
+        req.off('close', onClose);
+    };
+}
+
+export async function runAbortableTool<T>(
+    req: Request,
+    timeoutMs: number,
+    operation: string,
+    executor: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+    const controller = new AbortController();
+    const detach = attachRequestAbortSignal(req, controller, operation);
+    const timeoutError = new HttpError(
+        504,
+        `${operation} timed out after ${timeoutMs}ms. Check server logs and authentication.`
+    );
+
+    return await new Promise<T>((resolve, reject) => {
+        let settled = false;
+        let timeoutId: NodeJS.Timeout | undefined;
+
+        const finalize = (): void => {
+            if (timeoutId) {
+                clearTimeout(timeoutId);
+                timeoutId = undefined;
+            }
+            detach();
+            controller.signal.removeEventListener('abort', onAbort);
+        };
+
+        const settleResolve = (value: T): void => {
+            if (settled) return;
+            settled = true;
+            finalize();
+            resolve(value);
+        };
+
+        const settleReject = (error: unknown): void => {
+            if (settled) return;
+            settled = true;
+            finalize();
+            reject(error);
+        };
+
+        const onAbort = (): void => {
+            const reason = controller.signal.reason;
+            settleReject(reason instanceof Error ? reason : createRequestAbortError(operation, reason));
+        };
+
+        controller.signal.addEventListener('abort', onAbort, { once: true });
+        timeoutId = setTimeout(() => {
+            controller.abort(timeoutError);
+        }, timeoutMs);
+
+        Promise.resolve(executor(controller.signal))
+            .then(settleResolve)
+            .catch(settleReject);
+    });
+}
+
 /**
  * Async handler wrapper to catch promise rejections.
  */
@@ -196,10 +281,11 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('prompt is required and must be a string');
             }
 
-            const enhanced = await withTimeout(
-                handleEnhancePrompt({ prompt }, serviceClient),
+            const enhanced = await runAbortableTool(
+                req,
                 AI_TOOL_TIMEOUT_MS,
-                'Prompt enhancement'
+                'Prompt enhancement',
+                (signal) => handleEnhancePrompt({ prompt }, serviceClient, signal)
             );
 
             res.json({
@@ -223,10 +309,15 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('task is required and must be a string');
             }
 
-            const plan = await withTimeout(
-                handleCreatePlan(args, serviceClient),
+            const plan = await runAbortableTool(
+                req,
                 PLAN_TOOL_TIMEOUT_MS,
-                'Plan generation'
+                'Plan generation',
+                (signal) => (handleCreatePlan as unknown as (
+                    args: CreatePlanArgs,
+                    serviceClient: ContextServiceClient,
+                    signal?: AbortSignal
+                ) => Promise<string>)(args, serviceClient, signal)
             );
 
             res.json({ plan });
@@ -296,10 +387,20 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('diff is required and must be a string');
             }
 
-            const resultJson = await withTimeout(
-                handleReviewChanges({ diff, file_contexts, options } as ReviewChangesArgs, serviceClient),
+            const resultJson = await runAbortableTool(
+                req,
                 AI_TOOL_TIMEOUT_MS,
-                'Code review'
+                'Code review',
+                (signal) =>
+                    (handleReviewChanges as unknown as (
+                        args: ReviewChangesArgs,
+                        serviceClient: ContextServiceClient,
+                        signal?: AbortSignal
+                    ) => Promise<string>)(
+                        { diff, file_contexts, options } as ReviewChangesArgs,
+                        serviceClient,
+                        signal
+                    )
             );
             const result = JSON.parse(resultJson);
             res.json(result);
@@ -316,10 +417,20 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
         asyncHandler(async (req, res) => {
             const { target, base, include_patterns, options } = req.body || {};
 
-            const resultJson = await withTimeout(
-                handleReviewGitDiff({ target, base, include_patterns, options } as ReviewGitDiffArgs, serviceClient),
+            const resultJson = await runAbortableTool(
+                req,
                 AI_TOOL_TIMEOUT_MS,
-                'Git code review'
+                'Git code review',
+                (signal) =>
+                    (handleReviewGitDiff as unknown as (
+                        args: ReviewGitDiffArgs,
+                        serviceClient: ContextServiceClient,
+                        signal?: AbortSignal
+                    ) => Promise<string>)(
+                        { target, base, include_patterns, options } as ReviewGitDiffArgs,
+                        serviceClient,
+                        signal
+                    )
             );
             const result = JSON.parse(resultJson);
             res.json(result);
@@ -336,10 +447,16 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
         asyncHandler(async (req, res) => {
             const args = (req.body || {}) as ReviewAutoArgs;
 
-            const resultJson = await withTimeout(
-                handleReviewAuto(args, serviceClient),
+            const resultJson = await runAbortableTool(
+                req,
                 AI_TOOL_TIMEOUT_MS,
-                'Auto code review'
+                'Auto code review',
+                (signal) =>
+                    (handleReviewAuto as unknown as (
+                        args: ReviewAutoArgs,
+                        serviceClient: ContextServiceClient,
+                        signal?: AbortSignal
+                    ) => Promise<string>)(args, serviceClient, signal)
             );
             const result = JSON.parse(resultJson);
             res.json(result);

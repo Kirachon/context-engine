@@ -134,7 +134,8 @@ export interface ExecutePlanArgs {
  */
 export async function handleCreatePlan(
   args: CreatePlanArgs,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<string> {
   const startTime = Date.now();
   const {
@@ -162,7 +163,7 @@ export async function handleCreatePlan(
 
   console.error(`[create_plan] Generating plan for: "${validatedTask.substring(0, 100)}..."`);
 
-  const result = await planningService.generatePlan(validatedTask, options);
+  const result = await planningService.generatePlan(validatedTask, options, signal);
 
   if (!result.success) {
     throw new Error(`Failed to generate plan: ${result.error}`);
@@ -216,7 +217,8 @@ export async function handleCreatePlan(
  */
 export async function handleRefinePlan(
   args: RefinePlanArgs,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<string> {
   const startTime = Date.now();
   const { current_plan, feedback, clarifications, focus_steps } = args;
@@ -245,7 +247,7 @@ export async function handleRefinePlan(
 
   console.error(`[refine_plan] Refining plan v${plan.version}`);
 
-  const result = await planningService.refinePlan(plan, options);
+  const result = await planningService.refinePlan(plan, options, signal);
 
   if (!result.success) {
     throw new Error(`Failed to refine plan: ${result.error}`);
@@ -503,7 +505,8 @@ async function applyGeneratedChanges(
  */
 export async function handleExecutePlan(
   args: ExecutePlanArgs,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<string> {
   const planJson = args.plan;
   const step_number = args.step_number;
@@ -610,7 +613,7 @@ export async function handleExecutePlan(
     console.error(`[execute_plan] Executing ${stepsToExecute.length} steps in parallel (all_ready mode)`);
 
     const stepPromises = stepsToExecute.map(stepNum =>
-      planningService.executeStep(plan, stepNum, additional_context)
+      planningService.executeStep(plan, stepNum, additional_context, signal)
         .catch(error => ({
           step_number: stepNum,
           success: false,
@@ -633,7 +636,10 @@ export async function handleExecutePlan(
   } else {
     // Sequential execution for single_step, full_plan, or single step in all_ready
     for (const stepNum of stepsToExecute) {
-      const result = await planningService.executeStep(plan, stepNum, additional_context);
+      if (signal?.aborted) {
+        throw signal.reason instanceof Error ? signal.reason : new Error('Operation cancelled');
+      }
+      const result = await planningService.executeStep(plan, stepNum, additional_context, signal);
       stepResults.push(result);
 
       if (!result.success && stop_on_failure) {

@@ -75,6 +75,45 @@ To measure worst-case behavior (no caches), use very small iteration counts:
 npm run bench -- --mode retrieve --workspace . --query "file watcher" --topk 10 --iterations 2 --retrieve-mode deep --bypass-cache --cold
 ```
 
+### 4b) Slow OpenAI tool benchmarks (`enhance_prompt`, `create_plan`, `refine_plan`, `execute_plan`)
+
+These modes measure the prompt-heavy OpenAI-facing tools that are slower than retrieval:
+- `enhance_prompt`
+- `create_plan`
+- `refine_plan`
+- `execute_plan`
+
+Recommended measurements:
+- `payload.timing.repeat_avg_ms` for warm repeat latency
+- `payload.timing.p95_ms` for variance-sensitive latency checks
+- `payload.prompt_stats.avg_chars` for prompt size
+- `payload.call_stats.avg_calls_per_run` for search-and-ask fan-out
+- `payload.repeat.first_ms` vs `payload.repeat.repeat_avg_ms` for cache reuse
+
+Example commands:
+
+```bash
+npm run bench -- --mode enhance_prompt --workspace . --prompt "Fix the slow review timeout path." --iterations 5 --json > artifacts/bench/slow-openai-enhance-baseline.json
+npm run bench -- --mode create_plan --workspace . --task "Harden slow OpenAI tools" --iterations 5 --json > artifacts/bench/slow-openai-create-plan-baseline.json
+npm run bench -- --mode refine_plan --workspace . --current-plan '{"id":"plan-1","version":1,"created_at":"2025-01-01T00:00:00.000Z","updated_at":"2025-01-01T00:00:00.000Z","goal":"Benchmark","scope":{"included":[],"excluded":[],"assumptions":[],"constraints":[]},"mvp_features":[],"nice_to_have_features":[],"architecture":{"notes":"","patterns_used":[],"diagrams":[]},"risks":[],"milestones":[],"steps":[],"dependency_graph":{"nodes":[],"edges":[],"critical_path":[],"parallel_groups":[],"execution_order":[]},"testing_strategy":{"unit":"","integration":"","coverage_target":"80%"},"acceptance_criteria":[],"confidence_score":0.5,"questions_for_clarification":[],"context_files":[],"codebase_insights":[]}' --feedback "Make the prompts smaller." --iterations 5 --json > artifacts/bench/slow-openai-refine-plan-baseline.json
+npm run bench -- --mode execute_plan --workspace . --current-plan '{"id":"plan-1","version":1,"created_at":"2025-01-01T00:00:00.000Z","updated_at":"2025-01-01T00:00:00.000Z","goal":"Benchmark","scope":{"included":[],"excluded":[],"assumptions":[],"constraints":[]},"mvp_features":[],"nice_to_have_features":[],"architecture":{"notes":"","patterns_used":[],"diagrams":[]},"risks":[],"milestones":[],"steps":[{"step_number":1,"id":"step-1","title":"Bench step","description":"Measure the execute path","files_to_modify":[],"files_to_create":[],"files_to_delete":[],"depends_on":[],"blocks":[],"can_parallel_with":[],"priority":"medium","estimated_effort":"1h","acceptance_criteria":["Runs once"]}],"dependency_graph":{"nodes":[{"id":"step-1","step_number":1}],"edges":[],"critical_path":[1],"parallel_groups":[],"execution_order":[1]},"testing_strategy":{"unit":"","integration":"","coverage_target":"80%"},"acceptance_criteria":[],"confidence_score":0.5,"questions_for_clarification":[],"context_files":[],"codebase_insights":[]}' --step-number 1 --iterations 5 --json > artifacts/bench/slow-openai-execute-plan-baseline.json
+```
+
+Use `--cold` when you want a no-cache baseline; omit it when you want repeat-call cache behavior.
+
+Recommended compare commands:
+
+```bash
+npm run bench:compare -- --baseline artifacts/bench/slow-openai-enhance-baseline.json --candidate artifacts/bench/slow-openai-enhance-candidate.json --metric payload.timing.repeat_avg_ms --max-regression-pct 15 --max-regression-abs 250
+npm run bench:compare -- --baseline artifacts/bench/slow-openai-enhance-baseline.json --candidate artifacts/bench/slow-openai-enhance-candidate.json --metric payload.prompt_stats.avg_chars --max-regression-pct 5 --max-regression-abs 200
+```
+
+Slow-tool artifact expectations:
+- `provenance.dataset_id` should be stable for the tool mode, for example `slow-tool:enhance_prompt`.
+- `provenance.dataset_hash` should change when the input prompt, task, plan, feedback, or step changes.
+- Keep the same required provenance lock as the retrieval benchmarks: `timestamp_utc`, `commit_sha`, `branch_or_tag`, `workspace_fingerprint`, `index_fingerprint`, `dataset_id`, `dataset_hash`, `retrieval_provider`, `feature_flags_snapshot`, `node_version`, `os_version`, `env_fingerprint`.
+- Record `meta.slow_tool.mode`, `meta.slow_tool.cold`, and `meta.slow_tool.iterations` alongside the benchmark output when reviewing artifacts.
+
 ## Output
 
 - Human-readable by default.

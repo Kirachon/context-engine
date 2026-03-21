@@ -32,6 +32,89 @@ describe('Planning MCP Tools', () => {
     };
   });
 
+  function createPlanResponse(goal = 'Generated plan') {
+    return JSON.stringify({
+      goal,
+      scope: { included: ['src/'], excluded: [], assumptions: [], constraints: [] },
+      mvp_features: [],
+      nice_to_have_features: [],
+      architecture: { notes: 'notes', patterns_used: [], diagrams: [] },
+      risks: [],
+      milestones: [],
+      steps: [
+        {
+          step_number: 1,
+          id: 'step_1',
+          title: 'Step 1',
+          description: 'First step',
+          files_to_modify: [],
+          files_to_create: [],
+          files_to_delete: [],
+          depends_on: [],
+          blocks: [],
+          can_parallel_with: [],
+          priority: 'medium',
+          estimated_effort: '1h',
+          acceptance_criteria: [],
+        },
+      ],
+      dependency_graph: {
+        nodes: [],
+        edges: [],
+        critical_path: [],
+        parallel_groups: [],
+        execution_order: [1],
+      },
+      testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+      acceptance_criteria: [],
+      confidence_score: 0.8,
+      questions_for_clarification: [],
+      alternative_approaches: [],
+      context_files: ['src/index.ts'],
+      codebase_insights: ['insight'],
+    });
+  }
+
+  function createExecutionResponse() {
+    return JSON.stringify({
+      success: true,
+      reasoning: 'Implemented the step',
+      changes: [],
+    });
+  }
+
+  function createContextBundle(fileCount: number, totalTokens: number) {
+    return {
+      summary: 'Context summary',
+      query: 'query',
+      files: Array.from({ length: fileCount }, (_, index) => ({
+        path: `src/file-${index + 1}.ts`,
+        extension: '.ts',
+        summary: `Summary for file ${index + 1}`,
+        relevance: 0.8,
+        tokenCount: 300,
+        snippets: [
+          {
+            text: `export const value${index + 1} = ${index + 1};`,
+            lines: '1-1',
+            relevance: 0.8,
+            tokenCount: 20,
+            codeType: 'function',
+          },
+        ],
+      })),
+      hints: ['Use the existing service layer'],
+      metadata: {
+        totalFiles: fileCount,
+        totalSnippets: fileCount,
+        totalTokens,
+        tokenBudget: totalTokens,
+        truncated: false,
+        searchTimeMs: 12,
+      },
+    };
+  }
+
   describe('create_plan Tool', () => {
     describe('Input Validation', () => {
       it('should reject empty task', async () => {
@@ -56,6 +139,23 @@ describe('Planning MCP Tools', () => {
         await expect(
           handleCreatePlan({ task: '   ' }, mockServiceClient)
         ).rejects.toThrow(/task is required/i);
+      });
+
+      it('should forward an abort signal to the planning service', async () => {
+        const controller = new AbortController();
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+        mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Compact plan'));
+
+        const result = await handleCreatePlan(
+          { task: 'Implement a login form', auto_save: false },
+          mockServiceClient,
+          controller.signal
+        );
+
+        expect(result).toContain('Implementation Plan');
+        expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
+          expect.objectContaining({ signal: controller.signal })
+        );
       });
     });
 
@@ -104,6 +204,44 @@ describe('Planning MCP Tools', () => {
             mockServiceClient
           )
         ).rejects.toThrow('clarifications must be valid JSON');
+      });
+
+      it('should forward an abort signal to the refinement service', async () => {
+        const controller = new AbortController();
+        const currentPlan = JSON.stringify({
+          id: 'plan_1',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Refine me',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [],
+          dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] },
+          testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.8,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        });
+
+        mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Refined plan'));
+
+        const result = await handleRefinePlan(
+          { current_plan: currentPlan, feedback: 'Make it shorter', clarifications: '{}' },
+          mockServiceClient,
+          controller.signal
+        );
+
+        expect(result).toContain('Implementation Plan');
+        expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
+          expect.objectContaining({ signal: controller.signal })
+        );
       });
     });
 
@@ -351,6 +489,67 @@ describe('Planning MCP Tools', () => {
             mockServiceClient
           )
         ).rejects.toThrow('stop_on_failure must be a boolean');
+      });
+
+      it('should forward an abort signal to step execution', async () => {
+        const controller = new AbortController();
+        const plan = JSON.stringify({
+          id: 'plan_test',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Test plan',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [
+            {
+              step_number: 1,
+              id: 'step_1',
+              title: 'Step 1',
+              description: 'First step',
+              files_to_modify: [],
+              files_to_create: [],
+              files_to_delete: [],
+              depends_on: [],
+              blocks: [],
+              can_parallel_with: [],
+              priority: 'medium',
+              estimated_effort: '1h',
+              acceptance_criteria: [],
+            },
+          ],
+          dependency_graph: {
+            nodes: [],
+            edges: [],
+            critical_path: [],
+            parallel_groups: [],
+            execution_order: [1],
+          },
+          testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.8,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        });
+
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 1000));
+        mockServiceClient.searchAndAsk.mockResolvedValue(createExecutionResponse());
+
+        const result = await handleExecutePlan(
+          { plan, mode: 'single_step', step_number: 1 },
+          mockServiceClient,
+          controller.signal
+        );
+
+        expect(result).toContain('Plan Execution Result');
+        expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
+          expect.objectContaining({ signal: controller.signal })
+        );
       });
     });
 
