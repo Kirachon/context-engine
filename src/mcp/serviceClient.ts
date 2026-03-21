@@ -3346,11 +3346,9 @@ export class ContextServiceClient {
       min: MIN_API_TIMEOUT_MS,
       max: MAX_API_TIMEOUT_MS,
     });
-    const parallelFallback = process.env.CE_SEMANTIC_PARALLEL_FALLBACK === 'true';
     return searchWithSemanticRuntime(query, topK, {
       ...options,
       timeoutMs: semanticTimeoutMs,
-      parallelFallback,
     }, {
       searchAndAsk: (searchQuery, prompt, runtimeOptions) =>
         this.searchAndAsk(searchQuery, prompt, {

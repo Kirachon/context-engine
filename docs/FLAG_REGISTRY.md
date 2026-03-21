@@ -41,11 +41,11 @@ Reject mode guidance:
 ## Retrieval fallback and shadow flags
 
 These env vars belong to the retrieval fallback domain, not the AI-provider runtime contract.
+The legacy semantic parallel-fallback toggle is retired from the active operator registry; only the empty-array compatibility fallback remains active here.
 
 | Flag | Type | Default | Owner | Purpose |
 | --- | --- | --- | --- | --- |
 | `CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK` | boolean | `false` | Search owner | When the semantic provider returns explicit `[]`, allow a keyword fallback for compatibility with older retrieval behavior. |
-| `CE_SEMANTIC_PARALLEL_FALLBACK` | boolean | `false` | Search owner | Warm the keyword fallback in parallel with the provider call so retrieval can recover faster on provider failure. |
 | `CE_RETRIEVAL_SHADOW_COMPARE_ENABLED` | boolean | `false` | Search owner | Sample shadow comparisons between provider-backed retrieval and the fallback path. |
 | `CE_RETRIEVAL_SHADOW_SAMPLE_RATE` | number | `0` | Search owner | Shadow comparison sampling rate between `0` and `1`. |
 

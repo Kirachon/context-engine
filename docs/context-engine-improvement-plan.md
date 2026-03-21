@@ -262,7 +262,8 @@ Any retrieval artifact or benchmark payload that participates in shadow compare,
 
 ### Related flags
 
-- `CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK` and `CE_SEMANTIC_PARALLEL_FALLBACK` belong to the retrieval fallback domain.
+- `CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK` belongs to the retrieval fallback domain.
+- The legacy semantic parallel-fallback toggle is retired from operator control and remains only as an internal helper behavior for direct runtime tests.
 - `CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE` belongs to the AI-provider admission domain.
 - `CE_RETRIEVAL_SHADOW_COMPARE_ENABLED` and `CE_RETRIEVAL_SHADOW_SAMPLE_RATE` are shadow-only observability controls.
 

@@ -294,6 +294,9 @@ Current state that this plan builds on:
 - **Validation**:
   - Final regression suite and rollout approval
 
+**Implementation note**:
+- The legacy semantic parallel-fallback toggle is retired from the active rollout set; shadow compare and canary controls now cover the migration path.
+
 ## Testing Strategy
 - Keep the current contract tests for `semantic_search` and `codebase_retrieval` in place throughout the migration
 - Add focused tests for each new backend layer before wiring the next layer on top

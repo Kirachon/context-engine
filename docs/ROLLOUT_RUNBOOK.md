@@ -30,6 +30,10 @@ Rollback matrix:
 - Output-noise regression in prompt context: disable `CE_CONTEXT_PACKS_V2`.
 - Any severe instability: set `CE_ROLLOUT_KILL_SWITCH=true` and move to `dark_launch`.
 
+Legacy semantic fallback note:
+- The parallel-fallback compatibility toggle is retired from the active rollout path; stage gating now uses the retrieval shadow flags below instead.
+- `CE_RETRIEVAL_SHADOW_COMPARE_ENABLED` and `CE_RETRIEVAL_SHADOW_SAMPLE_RATE` control candidate-versus-legacy comparison sampling.
+
 Queue policy note:
 - Roll the queue through `observe -> shadow -> enforce`: dark launch uses `observe`, canary uses `shadow`, and controlled ramp/GA uses `enforce`.
 - `observe` and `shadow` only log saturation; `enforce` rejects overflow with retry hints.
