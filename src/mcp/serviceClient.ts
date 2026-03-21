@@ -183,6 +183,26 @@ export interface SearchDiagnostics {
   second_pass_used: boolean;
 }
 
+type ChunkSearchEngine = {
+  search: (query: string, topK: number, options?: ChunkSearchOptions) => Promise<SearchResult[]>;
+  clearCache?: () => void;
+};
+
+type ChunkSearchOptions = {
+  bypassCache?: boolean;
+  workspacePath?: string;
+  indexStatePath?: string;
+  chunkIndexPath?: string;
+  includeArtifacts?: boolean;
+  includeDocs?: boolean;
+  includeJson?: boolean;
+  queryTokens?: string[];
+  symbolTokens?: string[];
+  codeIntent?: boolean;
+  opsEvidenceIntent?: boolean;
+  normalizedQuery?: string;
+};
+
 export interface RetrievalRuntimeMetadata {
   providerId: RetrievalProviderId;
   shadowCompare: {
@@ -326,6 +346,8 @@ const CONTEXT_IGNORE_FILES = ['.contextignore', '.augment-ignore'];
 
 /** Memory directory for persistent cross-session memories */
 const MEMORIES_DIR = '.memories';
+
+const nodeRequire = createRequire(import.meta.url);
 
 // ============================================================================
 // Request Queue for Serializing SDK Calls
@@ -1025,6 +1047,8 @@ export class ContextServiceClient {
   private persistentCacheWriteTimer: NodeJS.Timeout | null = null;
   private semanticSearchCacheGeneration = 0;
   private semanticSearchInFlight: Map<string, SemanticSearchInFlightRequest> = new Map();
+  private chunkSearchEngine: ChunkSearchEngine | null = null;
+  private chunkSearchEngineLoadAttempted = false;
 
   /** Persistent context bundle cache (best-effort). */
   private persistentContextCache: Map<string, CacheEntry<ContextBundle>> = new Map();
@@ -1912,10 +1936,117 @@ export class ContextServiceClient {
     this.keywordFallbackSearchCacheGeneration += 1;
     this.keywordFallbackSearchCache.clear();
     this.keywordFallbackSearchInFlight.clear();
+    this.clearChunkSearchEngineCache();
     this.cacheHits = 0;
     this.cacheMisses = 0;
     this.fallbackDiscoverFilesCache = null;
     this.fallbackDiscoverFilesInFlight = null;
+  }
+
+  private isChunkAwareExactSearchEnabled(): boolean {
+    return featureEnabled('retrieval_chunk_search_v1');
+  }
+
+  private clearChunkSearchEngineCache(): void {
+    try {
+      this.chunkSearchEngine?.clearCache?.();
+    } catch {
+      // Best-effort cache reset only.
+    } finally {
+      this.chunkSearchEngine = null;
+      this.chunkSearchEngineLoadAttempted = false;
+    }
+  }
+
+  private buildChunkSearchEngineFromModule(moduleExports: Record<string, unknown>): ChunkSearchEngine | null {
+    const workspacePath = this.workspacePath;
+    const indexStatePath = path.join(this.workspacePath, '.augment-index-state.json');
+    const chunkIndexPath = path.join(this.workspacePath, '.augment-chunk-index.json');
+    const moduleOptions = { workspacePath, indexStatePath, chunkIndexPath };
+
+    const factoryCandidates = [
+      moduleExports.createWorkspaceChunkSearchIndex,
+      moduleExports.createChunkSearchIndex,
+      moduleExports.default,
+    ];
+
+    for (const candidate of factoryCandidates) {
+      if (typeof candidate !== 'function') {
+        continue;
+      }
+
+      try {
+        const factory = candidate as (options: {
+          workspacePath: string;
+          indexStatePath: string;
+          chunkIndexPath: string;
+        }) => ChunkSearchEngine | null | undefined;
+        const engine = factory(moduleOptions);
+        if (engine && typeof engine.search === 'function') {
+          return engine;
+        }
+      } catch {
+        // Try the next factory candidate.
+      }
+    }
+
+    const directSearch = moduleExports.search;
+    if (typeof directSearch === 'function') {
+      const search = directSearch as (
+        query: string,
+        topK: number,
+        options?: ChunkSearchOptions
+      ) => Promise<SearchResult[]>;
+      return {
+        search: (query: string, topK: number, options?: ChunkSearchOptions) =>
+          search(
+            query,
+            topK,
+            {
+              ...moduleOptions,
+              ...options,
+            }
+          ),
+        clearCache: typeof moduleExports.clearCache === 'function'
+          ? () => {
+              void (moduleExports.clearCache as () => void)();
+            }
+          : undefined,
+      };
+    }
+
+    return null;
+  }
+
+  private getChunkSearchEngine(): ChunkSearchEngine | null {
+    if (!this.isChunkAwareExactSearchEnabled()) {
+      return null;
+    }
+
+    if (this.chunkSearchEngine) {
+      return this.chunkSearchEngine;
+    }
+
+    if (this.chunkSearchEngineLoadAttempted) {
+      return null;
+    }
+
+    this.chunkSearchEngineLoadAttempted = true;
+
+    try {
+      const moduleExports = nodeRequire('../internal/retrieval/chunkIndex.js') as Record<string, unknown>;
+      const engine = this.buildChunkSearchEngineFromModule(moduleExports);
+      if (engine) {
+        this.chunkSearchEngine = engine;
+        return engine;
+      }
+    } catch (error) {
+      if (process.env.CE_DEBUG_SEARCH === 'true') {
+        console.error('[chunkSearch] Exact-search helper unavailable, falling back to file scan:', error);
+      }
+    }
+
+    return null;
   }
 
   private isPersistentCacheEnabled(): boolean {
@@ -3296,6 +3427,39 @@ export class ContextServiceClient {
       || identifierLikeToken;
     const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
     const pureCodeIntent = codeIntent && !opsEvidenceIntent;
+
+    if (this.isChunkAwareExactSearchEnabled()) {
+      const chunkSearchEngine = this.getChunkSearchEngine();
+      if (chunkSearchEngine) {
+        try {
+          const chunkResults = await chunkSearchEngine.search(rawQuery, topK, {
+            bypassCache,
+            workspacePath: this.workspacePath,
+            includeArtifacts,
+            includeDocs,
+            includeJson,
+            queryTokens,
+            symbolTokens,
+            codeIntent,
+            opsEvidenceIntent,
+            normalizedQuery,
+          });
+          if (chunkResults.length > 0) {
+            this.setLastSearchDiagnostics({
+              filters_applied: [],
+              filtered_paths_count: 0,
+              second_pass_used: false,
+            });
+            return chunkResults;
+          }
+        } catch (error) {
+          if (process.env.CE_DEBUG_SEARCH === 'true') {
+            console.error('[chunkSearch] Helper search failed, falling back to file scan:', error);
+          }
+        }
+      }
+    }
+
     const computeKeywordFallbackSearch = async (): Promise<SearchResult[]> => {
       const files = await this.getCachedFallbackFiles(options);
       if (files.length === 0) return [];

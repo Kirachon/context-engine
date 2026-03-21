@@ -34,6 +34,7 @@ const { renderPrometheusMetrics } = await import('../src/metrics/metrics.js');
 describe('ContextServiceClient', () => {
   let client: InstanceType<typeof ContextServiceClient>;
   const testWorkspace = process.cwd();
+  const featureFlags = FEATURE_FLAGS as unknown as Record<string, boolean>;
 
   const configureOpenAISemanticProvider = (targetClient: InstanceType<typeof ContextServiceClient>, response: string | Error) => {
     const providerCall = jest.fn(async () => ({
@@ -87,6 +88,7 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED;
     delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
     delete process.env.CE_METRICS;
+    delete featureFlags.retrieval_chunk_search_v1;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -97,6 +99,7 @@ describe('ContextServiceClient', () => {
     FEATURE_FLAGS.retrieval_ranking_v2 = false;
     FEATURE_FLAGS.retrieval_ranking_v3 = false;
     FEATURE_FLAGS.retrieval_request_memo_v2 = false;
+    featureFlags.retrieval_chunk_search_v1 = false;
   });
 
   describe('Retrieval Provider Dispatch', () => {
@@ -1523,6 +1526,74 @@ describe('ContextServiceClient', () => {
       expect(getFileSpy).toHaveBeenCalledTimes(1);
     });
 
+    it('should keep file-scan fallback when chunk search is disabled', async () => {
+      featureFlags.retrieval_chunk_search_v1 = false;
+
+      const chunkSearchEngine = {
+        search: jest.fn(async () => [
+          {
+            path: 'src/chunked.ts',
+            content: 'chunk helper hit',
+            lines: '10-14',
+            chunkId: 'chunk-1',
+            relevanceScore: 0.99,
+            matchType: 'keyword',
+          },
+        ]),
+      };
+      (client as any).chunkSearchEngine = chunkSearchEngine;
+
+      const getCachedFallbackFilesSpy = jest
+        .spyOn(client as any, 'getCachedFallbackFiles')
+        .mockResolvedValue(['src/fallback.ts']);
+      const getFileSpy = jest.fn(async () => 'export const fallbackNeedle = true;');
+      (client as any).getFile = getFileSpy;
+
+      const results = await client.localKeywordSearch('fallbackNeedle', 5, { bypassCache: true });
+
+      expect(chunkSearchEngine.search).not.toHaveBeenCalled();
+      expect(getCachedFallbackFilesSpy).toHaveBeenCalledTimes(1);
+      expect(getFileSpy).toHaveBeenCalledTimes(1);
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(expect.objectContaining({ path: 'src/fallback.ts', matchType: 'keyword' }));
+    });
+
+    it('should use chunk-aware exact search when the chunk flag is enabled', async () => {
+      featureFlags.retrieval_chunk_search_v1 = true;
+
+      const chunkSearchEngine = {
+        search: jest.fn(async (query: string, topK: number, options?: { bypassCache?: boolean }) => [
+          {
+            path: 'src/chunked.ts',
+            content: `chunk hit for ${query}`,
+            lines: '12-18',
+            chunkId: 'chunk-1',
+            relevanceScore: 0.93,
+            matchType: 'keyword',
+            retrievedAt: '2026-03-21T00:00:00.000Z',
+          },
+        ]),
+      };
+      (client as any).chunkSearchEngine = chunkSearchEngine;
+
+      const getCachedFallbackFilesSpy = jest.spyOn(client as any, 'getCachedFallbackFiles');
+      const getFileSpy = jest.fn();
+      (client as any).getFile = getFileSpy;
+
+      const results = await client.localKeywordSearch('chunk exact query', 5, { bypassCache: true });
+
+      expect(chunkSearchEngine.search).toHaveBeenCalledWith('chunk exact query', 5, expect.objectContaining({ bypassCache: true }));
+      expect(getCachedFallbackFilesSpy).not.toHaveBeenCalled();
+      expect(getFileSpy).not.toHaveBeenCalled();
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(expect.objectContaining({
+        path: 'src/chunked.ts',
+        chunkId: 'chunk-1',
+        lines: '12-18',
+        matchType: 'keyword',
+      }));
+    });
+
     it('should not use cache for different queries', async () => {
       const providerCall = configureOpenAISemanticProvider(
         client,
@@ -1546,11 +1617,15 @@ describe('ContextServiceClient', () => {
       expect(providerCall).toHaveBeenCalledTimes(1);
 
       // Clear cache
+      const chunkClearCache = jest.fn();
+      (client as any).chunkSearchEngine = { search: jest.fn(async () => []), clearCache: chunkClearCache };
       client.clearCache();
 
       // Should hit provider again
       await client.semanticSearch('clear test', 5);
       expect(providerCall).toHaveBeenCalledTimes(2);
+      expect(chunkClearCache).toHaveBeenCalledTimes(1);
+      expect((client as any).chunkSearchEngine).toBeNull();
     });
 
     it('should not use cache for different topK values', async () => {
