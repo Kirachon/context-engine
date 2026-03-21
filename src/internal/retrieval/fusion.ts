@@ -8,6 +8,18 @@ function parseLineStart(lines?: string): number {
   return Number.isFinite(value) ? value : Number.MAX_SAFE_INTEGER;
 }
 
+function parseLineSpan(lines?: string): number | null {
+  if (!lines) return null;
+  const match = lines.match(/(\d+)\s*-\s*(\d+)/);
+  if (!match) return null;
+  const start = Number.parseInt(match[1], 10);
+  const end = Number.parseInt(match[2], 10);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) {
+    return null;
+  }
+  return end - start + 1;
+}
+
 function fusionKey(result: InternalSearchResult): string {
   const normalized = (result.content ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
   return `${result.path}::${result.lines ?? ''}::${normalized}`;
@@ -16,6 +28,24 @@ function fusionKey(result: InternalSearchResult): string {
 function clampWeight(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(1, value));
+}
+
+function chunkAffinityBonus(result: InternalSearchResult): number {
+  let bonus = 0;
+  if (typeof result.chunkId === 'string' && result.chunkId.trim().length > 0) {
+    bonus += 0.02;
+  }
+  const span = parseLineSpan(result.lines);
+  if (span !== null) {
+    if (span <= 8) {
+      bonus += 0.05;
+    } else if (span <= 24) {
+      bonus += 0.03;
+    } else if (span <= 60) {
+      bonus += 0.015;
+    }
+  }
+  return Math.min(0.08, bonus);
 }
 
 export interface FusionOptions {
@@ -87,10 +117,12 @@ export function fuseCandidates(
     const normalizedSemantic = maxSemantic > 0 ? semanticScore / maxSemantic : 0;
     const normalizedLexical = maxLexical > 0 ? lexicalScore / maxLexical : 0;
     const normalizedDense = maxDense > 0 ? denseScore / maxDense : 0;
+    const chunkBonus = chunkAffinityBonus(representative);
     const fusedScore =
       (normalizedSemantic * semanticNormWeight) +
       (normalizedLexical * lexicalNormWeight) +
-      (normalizedDense * denseNormWeight);
+      (normalizedDense * denseNormWeight) +
+      chunkBonus;
 
     const hasSemantic = semanticScore > 0;
     const hasLexical = lexicalScore > 0;

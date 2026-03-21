@@ -87,4 +87,28 @@ describe('fuseCandidates', () => {
     expect(fused[0].denseScore).toBeCloseTo(0.9);
     expect((fused[0].combinedScore ?? 0)).toBeGreaterThan(0);
   });
+
+  it('prefers compact chunk candidates when scores tie', () => {
+    const fused = fuseCandidates([
+      makeCandidate({
+        path: 'src/auth/login.ts',
+        lines: '1-120',
+        retrievalSource: 'semantic',
+        semanticScore: 0.6,
+        relevanceScore: 0.6,
+      }),
+      makeCandidate({
+        path: 'src/auth/login.ts',
+        lines: '10-14',
+        chunkId: 'src/auth/login.ts#chunk-1',
+        retrievalSource: 'semantic',
+        semanticScore: 0.6,
+        relevanceScore: 0.6,
+      }),
+    ]);
+
+    expect(fused).toHaveLength(2);
+    expect(fused[0].lines).toBe('10-14');
+    expect(fused[0].chunkId).toBe('src/auth/login.ts#chunk-1');
+  });
 });

@@ -259,12 +259,16 @@ export async function handleCodebaseRetrieval(
 
   const effectiveProfile: RetrievalProfile = profile ?? 'fast';
   const profileSettings = RETRIEVAL_PROFILE_MAP[effectiveProfile];
+  const denseEnabled = featureEnabled('retrieval_lancedb_v1') && effectiveProfile !== 'fast';
+  const denseWeight = denseEnabled ? (effectiveProfile === 'rich' ? 0.3 : 0.2) : 0;
   const retrievalOptions = {
     topK: top_k,
     perQueryTopK: Math.min(50, top_k * profileSettings.perQueryMultiplier),
     maxVariants: profileSettings.maxVariants,
     maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,
     enableExpansion: profileSettings.enableExpansion,
+    enableDense: denseEnabled,
+    denseWeight,
     profile: effectiveProfile,
     rankingMode: featureEnabled('retrieval_ranking_v3')
       ? 'v3' as const

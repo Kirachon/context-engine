@@ -205,6 +205,9 @@ Current state that this plan builds on:
 - **Validation**:
   - Fusion regression tests and benchmark slices
 
+**Implementation note**:
+- Dense retrieval is now enabled for balanced and rich profiles when `CE_RETRIEVAL_LANCEDB_V1=true`, and fusion gives compact chunk hits a small deterministic bonus so chunk-level matches stay visible after merging sources.
+
 ### Task 5.3: Add Quality Gates for the New Stack
 - **Location**: `docs/BENCHMARKING.md`, `scripts/ci/`
 - **Description**: Add relevance metrics and parity gates that make quality changes visible before rollout.

@@ -291,6 +291,8 @@ export async function handleSemanticSearch(
   const effectiveProfile = resolveSearchProfile(mode, profile);
   const profileSettings = RETRIEVAL_PROFILE_MAP[effectiveProfile];
   const rerankTopN = Math.max(top_k, profileSettings.rerankTopN);
+  const denseEnabled = featureEnabled('retrieval_lancedb_v1') && effectiveProfile !== 'fast';
+  const denseWeight = denseEnabled ? (effectiveProfile === 'rich' ? 0.3 : 0.2) : 0;
   const retrievalOptions = {
     topK: top_k,
     perQueryTopK: Math.min(50, top_k * profileSettings.perQueryMultiplier),
@@ -306,6 +308,8 @@ export async function handleSemanticSearch(
     bypassCache: bypass_cache,
     maxOutputLength: top_k * profileSettings.maxOutputLengthPerResult,
     enableExpansion: profileSettings.enableExpansion,
+    enableDense: denseEnabled,
+    denseWeight,
     enableRerank: profileSettings.enableRerank,
     rerankTopN,
     rerankTimeoutMs: profileSettings.rerankTimeoutMs,
