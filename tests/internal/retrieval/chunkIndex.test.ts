@@ -199,6 +199,55 @@ describe('workspace chunk search index', () => {
     expect(results[0].relevanceScore ?? 0).toBeGreaterThan((results[1]?.relevanceScore ?? 0));
   });
 
+  it('returns a tight snippet window around the best matching lines', async () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/snippet.ts',
+      [
+        'export function snippetExample() {',
+        '  const line01 = 1;',
+        '  const line02 = 2;',
+        '  const line03 = 3;',
+        '  const line04 = 4;',
+        '  const line05 = 5;',
+        '  const line06 = 6;',
+        '  const line07 = 7;',
+        '  const line08 = 8;',
+        '  const line09 = 9;',
+        '  const line10 = 10;',
+        '  const exact = "needle target";',
+        '  const line12 = 12;',
+        '  const line13 = 13;',
+        '  const line14 = 14;',
+        '  const line15 = 15;',
+        '  const line16 = 16;',
+        '  const line17 = 17;',
+        '  const line18 = 18;',
+        '  const line19 = 19;',
+        '  return exact;',
+        '}',
+      ].join('\n')
+    );
+
+    writeIndexState(tempDir, {
+      'src/snippet.ts': { hash: 'hash-snippet-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+    await index.refresh();
+
+    const results = await index.search('needle target', 5);
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe('src/snippet.ts');
+    expect(results[0].lines).toBe('10-14');
+    expect(results[0].content).toContain('needle target');
+    expect(results[0].content).not.toContain('line01');
+    expect(results[0].content).not.toContain('line19');
+  });
+
   it('excludes artifact chunks for code-intent searches when artifacts are not included', async () => {
     tempDir = createTempWorkspace();
 

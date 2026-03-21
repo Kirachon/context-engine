@@ -8,6 +8,8 @@ const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const CHUNK_INDEX_VERSION = 1;
 const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
+const DEFAULT_SNIPPET_WINDOW_LINES = 5;
+const DEFAULT_SNIPPET_MAX_CHARS = 1_200;
 const STOPWORDS = new Set([
   'and',
   'the',
@@ -230,6 +232,129 @@ function countOccurrences(haystack: string, needle: string): number {
     }
   }
   return count;
+}
+
+function scoreSnippetLine(line: string, context: ChunkSearchContext): number {
+  const normalizedLine = normalizeSearchText(line);
+  if (!normalizedLine) {
+    return 0;
+  }
+
+  let score = 0;
+  if (context.normalizedQuery && normalizedLine.includes(context.normalizedQuery)) {
+    score += 10;
+  }
+
+  for (const token of context.queryTokens) {
+    if (token && normalizedLine.includes(token)) {
+      score += 1.2;
+    }
+  }
+
+  for (const symbol of context.symbolTokens) {
+    if (symbol && normalizedLine.includes(symbol)) {
+      score += 4;
+    }
+  }
+
+  if (context.codeIntent) {
+    if (/^\s*(export\s+)?(async\s+)?(function|class|interface|type|const|let|var|enum|struct|trait|impl|def)\b/.test(line)) {
+      score += 0.35;
+    }
+    if (/^\s*#[#\s]+\S/.test(line)) {
+      score += 0.15;
+    }
+  }
+
+  return score;
+}
+
+function buildChunkSnippet(chunk: ChunkRecord, context: ChunkSearchContext): {
+  content: string;
+  startLine: number;
+  endLine: number;
+} {
+  const contentLines = chunk.content.split(/\r?\n/);
+  if (contentLines.length === 0) {
+    return {
+      content: chunk.content.trimEnd(),
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+    };
+  }
+
+  const scoredLines = contentLines.map((line, index) => ({
+    index,
+    score: scoreSnippetLine(line, context),
+  }));
+  const bestLine = scoredLines.reduce((best, candidate) => (
+    candidate.score > best.score ? candidate : best
+  ), scoredLines[0]);
+
+  const windowSize = Math.max(
+    3,
+    Math.min(
+      DEFAULT_SNIPPET_WINDOW_LINES,
+      contentLines.length
+    )
+  );
+
+  let startIndex = 0;
+  if (bestLine.score > 0) {
+    const halfWindow = Math.floor(windowSize / 2);
+    startIndex = Math.max(0, bestLine.index - halfWindow);
+  }
+
+  let endIndex = Math.min(contentLines.length - 1, startIndex + windowSize - 1);
+  if (endIndex - startIndex + 1 < windowSize) {
+    startIndex = Math.max(0, endIndex - windowSize + 1);
+  }
+
+  let snippetLines = contentLines.slice(startIndex, endIndex + 1);
+  let snippetContent = snippetLines.join('\n').trimEnd();
+
+  if (bestLine.score <= 0 && snippetContent.length > DEFAULT_SNIPPET_MAX_CHARS && contentLines.length > windowSize) {
+    const headLines = contentLines.slice(0, windowSize);
+    snippetLines = headLines;
+    snippetContent = headLines.join('\n').trimEnd();
+    startIndex = 0;
+    endIndex = Math.min(contentLines.length - 1, windowSize - 1);
+  }
+
+  while (snippetContent.length > DEFAULT_SNIPPET_MAX_CHARS && snippetLines.length > 1) {
+    if (bestLine.score > 0) {
+      const bestRelative = Math.max(0, Math.min(snippetLines.length - 1, bestLine.index - startIndex));
+      const canTrimStart = bestRelative > 0;
+      const canTrimEnd = bestRelative < snippetLines.length - 1;
+      if (canTrimEnd && (!canTrimStart || snippetLines[snippetLines.length - 1].length >= snippetLines[0].length)) {
+        snippetLines = snippetLines.slice(0, -1);
+        endIndex -= 1;
+      } else if (canTrimStart) {
+        snippetLines = snippetLines.slice(1);
+        startIndex += 1;
+      } else {
+        break;
+      }
+    } else {
+      snippetLines = snippetLines.slice(0, -1);
+      endIndex -= 1;
+    }
+    snippetContent = snippetLines.join('\n').trimEnd();
+  }
+
+  if (snippetContent.trim() === '') {
+    return {
+      content: chunk.content.trimEnd(),
+      startLine: chunk.startLine,
+      endLine: chunk.endLine,
+    };
+  }
+
+  return {
+    content: snippetContent,
+    startLine: chunk.startLine + startIndex,
+    endLine: chunk.startLine + endIndex,
+  };
 }
 
 type ChunkSearchContext = {
@@ -512,7 +637,12 @@ export function createWorkspaceChunkSearchIndex(
     const maxScore = scored.reduce((max, item) => Math.max(max, item.rawScore), 0);
     return scored.slice(0, safeTopK).map(({ chunk, rawScore }) => {
       const normalizedScore = maxScore > 0 ? Math.max(0, Math.min(1, rawScore / maxScore)) : 0;
-      return toSearchResult(chunk, normalizedScore, retrievedAt);
+      const snippet = buildChunkSnippet(chunk, searchContext);
+      return {
+        ...toSearchResult(chunk, normalizedScore, retrievedAt),
+        content: snippet.content,
+        lines: `${snippet.startLine}-${snippet.endLine}`,
+      };
     });
   };
 
