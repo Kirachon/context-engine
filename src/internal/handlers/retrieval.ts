@@ -134,9 +134,11 @@ export async function internalRetrieveCode(
 
     if (qualityGuardEnabled && shouldTriggerQualityGuardFallback(results)) {
       try {
-        const fallbackResults = options?.bypassCache
-          ? await serviceClient.semanticSearch(query, options?.topK ?? 10, { bypassCache: true })
-          : await serviceClient.semanticSearch(query, options?.topK ?? 10);
+        const fallbackResults = typeof serviceClient.localKeywordSearch === 'function'
+          ? await serviceClient.localKeywordSearch(query, options?.topK ?? 10, { bypassCache: options?.bypassCache })
+          : options?.bypassCache
+            ? await serviceClient.semanticSearch(query, options?.topK ?? 10, { bypassCache: true })
+            : await serviceClient.semanticSearch(query, options?.topK ?? 10);
         results = sortByScoreDesc(mergeUniqueResults(results, fallbackResults)).slice(
           0,
           options?.topK ?? 10

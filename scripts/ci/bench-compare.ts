@@ -27,10 +27,18 @@ interface BenchPayload {
 }
 
 interface ProvenanceMetadata {
+  timestamp_utc?: string;
   commit_sha?: string;
+  branch_or_tag?: string;
+  workspace_fingerprint?: string;
+  index_fingerprint?: string;
   bench_mode?: string;
   dataset_id?: string;
+  dataset_hash?: string;
+  retrieval_provider?: string;
+  feature_flags_snapshot?: string;
   node_version?: string;
+  os_version?: string;
   env_fingerprint?: string;
   [key: string]: unknown;
 }
@@ -215,15 +223,31 @@ function readRequiredProvenanceField(
 }
 
 function assertProvenanceIntegrity(baseline: BenchOutput, candidate: BenchOutput): void {
+  readRequiredProvenanceField(baseline.provenance, 'timestamp_utc', 'baseline');
+  readRequiredProvenanceField(candidate.provenance, 'timestamp_utc', 'candidate');
   const baselineMode = readRequiredProvenanceField(baseline.provenance, 'bench_mode', 'baseline');
   const candidateMode = readRequiredProvenanceField(candidate.provenance, 'bench_mode', 'candidate');
+  readRequiredProvenanceField(baseline.provenance, 'branch_or_tag', 'baseline');
+  readRequiredProvenanceField(candidate.provenance, 'branch_or_tag', 'candidate');
+  const baselineWorkspace = readRequiredProvenanceField(baseline.provenance, 'workspace_fingerprint', 'baseline');
+  const candidateWorkspace = readRequiredProvenanceField(candidate.provenance, 'workspace_fingerprint', 'candidate');
+  const baselineIndex = readRequiredProvenanceField(baseline.provenance, 'index_fingerprint', 'baseline');
+  const candidateIndex = readRequiredProvenanceField(candidate.provenance, 'index_fingerprint', 'candidate');
   const baselineDataset = readRequiredProvenanceField(baseline.provenance, 'dataset_id', 'baseline');
   const candidateDataset = readRequiredProvenanceField(candidate.provenance, 'dataset_id', 'candidate');
+  const baselineDatasetHash = readRequiredProvenanceField(baseline.provenance, 'dataset_hash', 'baseline');
+  const candidateDatasetHash = readRequiredProvenanceField(candidate.provenance, 'dataset_hash', 'candidate');
+  const baselineRetrievalProvider = readRequiredProvenanceField(baseline.provenance, 'retrieval_provider', 'baseline');
+  const candidateRetrievalProvider = readRequiredProvenanceField(candidate.provenance, 'retrieval_provider', 'candidate');
+  const baselineFeatureFlags = readRequiredProvenanceField(baseline.provenance, 'feature_flags_snapshot', 'baseline');
+  const candidateFeatureFlags = readRequiredProvenanceField(candidate.provenance, 'feature_flags_snapshot', 'candidate');
 
   const baselineCommit = readRequiredProvenanceField(baseline.provenance, 'commit_sha', 'baseline');
   const candidateCommit = readRequiredProvenanceField(candidate.provenance, 'commit_sha', 'candidate');
   readRequiredProvenanceField(baseline.provenance, 'node_version', 'baseline');
   readRequiredProvenanceField(candidate.provenance, 'node_version', 'candidate');
+  readRequiredProvenanceField(baseline.provenance, 'os_version', 'baseline');
+  readRequiredProvenanceField(candidate.provenance, 'os_version', 'candidate');
   readRequiredProvenanceField(baseline.provenance, 'env_fingerprint', 'baseline');
   readRequiredProvenanceField(candidate.provenance, 'env_fingerprint', 'candidate');
 
@@ -237,6 +261,23 @@ function assertProvenanceIntegrity(baseline: BenchOutput, candidate: BenchOutput
   }
   if (baselineDataset !== candidateDataset) {
     throw new Error(`Dataset mismatch: baseline=${baselineDataset} candidate=${candidateDataset}`);
+  }
+  if (baselineDatasetHash !== candidateDatasetHash) {
+    throw new Error(`Dataset hash mismatch: baseline=${baselineDatasetHash} candidate=${candidateDatasetHash}`);
+  }
+  if (baselineWorkspace !== candidateWorkspace) {
+    throw new Error(`Workspace fingerprint mismatch: baseline=${baselineWorkspace} candidate=${candidateWorkspace}`);
+  }
+  if (baselineIndex !== candidateIndex) {
+    throw new Error(`Index fingerprint mismatch: baseline=${baselineIndex} candidate=${candidateIndex}`);
+  }
+  if (baselineRetrievalProvider !== candidateRetrievalProvider) {
+    throw new Error(
+      `Retrieval provider mismatch: baseline=${baselineRetrievalProvider} candidate=${candidateRetrievalProvider}`
+    );
+  }
+  if (baselineFeatureFlags !== candidateFeatureFlags) {
+    throw new Error('Feature-flag snapshot mismatch: baseline and candidate artifacts must share the same snapshot.');
   }
 }
 

@@ -164,6 +164,24 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.results[0]).not.toHaveProperty('preview');
   });
 
+  it('falls back to the legacy v1 shape when response_version is unknown', async () => {
+    const mockResults: SearchResult[] = [
+      { path: 'src/legacy.ts', content: 'legacy snippet', lines: '1-3', relevanceScore: 0.75 },
+    ];
+    mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleCodebaseRetrieval(
+      { query: 'legacy version', response_version: 'v3' as any, compact: true, legacy_field: 'ignored' } as any,
+      mockServiceClient as any
+    );
+    const parsed = JSON.parse(result);
+
+    expect(parsed.metadata).not.toHaveProperty('responseVersion');
+    expect(parsed.metadata).not.toHaveProperty('providerResolution');
+    expect(parsed.results[0].content).toBe('legacy snippet');
+    expect(parsed.results[0]).not.toHaveProperty('preview');
+  });
+
   it('uses compact preview snippets only in v2 mode', async () => {
     const content = 'x'.repeat(320);
     const mockResults: SearchResult[] = [

@@ -8,6 +8,25 @@ Purpose: reproducible baseline commands and canonical artifact paths for `T1` ex
 - Evidence modes for KPI verdicts: `retrieve`, `search`
 - Diagnostic-only mode: `scan` (not valid for final KPI pass/fail)
 
+## Required Evidence Fields
+
+Record these fields in every PR, nightly, and release note so the baseline pack is attachable without schema conversion.
+
+| Field group | Required fields |
+| --- | --- |
+| Provenance | `timestamp_utc`, `commit_sha`, `branch_or_tag`, `workspace_fingerprint`, `index_fingerprint`, `dataset_id`, `dataset_hash`, `retrieval_provider`, `feature_flags_snapshot`, `node_version`, `os_version`, `cpu_model`, `ram`, `storage_type` |
+| Scenario | `mode`, `tool`, `profile`, `state`, `query_family`, `repo_size`, `query_text`, `top_k`, `iterations`, `cold`, `bypass_cache` |
+| Queue setup | `queue_lane`, `queue_depth`, `queue_reject_mode`, `timeout_budget_ms` |
+| Queued-run evidence | `queue_wait_ms`, `retry_after_ms` (when saturated or rejected) |
+| Evidence links | `baseline_artifact`, `candidate_artifact`, `transcript_path`, `gate_output_path` |
+
+When the benchmark output nests provenance, keep the nested keys intact:
+- `provenance.retrieval_provider`
+- `provenance.bench_mode`
+- `provenance.dataset_id`
+- `provenance.dataset_hash`
+- `provenance.workspace_fingerprint`
+
 ## Reproducible Command Set
 
 Run from repo root in PowerShell.

@@ -5,6 +5,7 @@ import path from 'path';
 import { spawnSync } from 'child_process';
 
 type BenchFixture = {
+  total_ms?: number;
   payload: {
     mode: string;
     timing: {
@@ -12,10 +13,18 @@ type BenchFixture = {
     };
   };
   provenance: {
+    timestamp_utc?: string;
     commit_sha?: string;
+    branch_or_tag?: string;
+    workspace_fingerprint?: string;
+    index_fingerprint?: string;
     bench_mode?: string;
     dataset_id?: string;
+    dataset_hash?: string;
+    retrieval_provider?: string;
+    feature_flags_snapshot?: string;
     node_version?: string;
+    os_version?: string;
     env_fingerprint?: string;
   };
 };
@@ -51,10 +60,18 @@ function makeFixture(p95: number, commitSha: string): BenchFixture {
       },
     },
     provenance: {
+      timestamp_utc: '2026-03-21T00:00:00.000Z',
       commit_sha: commitSha,
+      branch_or_tag: 'main',
+      workspace_fingerprint: 'workspace-fingerprint-1',
+      index_fingerprint: 'fingerprint-index-1',
       bench_mode: 'search',
       dataset_id: 'dataset-v1',
+      dataset_hash: 'dataset-hash-1',
+      retrieval_provider: 'local_native',
+      feature_flags_snapshot: '{"metrics":true}',
       node_version: 'v22.0.0',
+      os_version: 'Linux 6.8.0 (x64)',
       env_fingerprint: 'env-stable',
     },
   };
@@ -103,6 +120,30 @@ describe('scripts/ci/bench-compare.ts', () => {
 
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('Missing required provenance field "dataset_id" in candidate artifact.');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('fails when workspace fingerprint or feature-flag snapshot is missing', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-bench-compare-fingerprint-'));
+    const baselinePath = path.join(tmp, 'bench-baseline.json');
+    const candidatePath = path.join(tmp, 'bench-candidate.json');
+
+    const baseline = makeFixture(100, '1111111');
+    const candidate = makeFixture(101, '2222222');
+    delete candidate.provenance.workspace_fingerprint;
+
+    writeJson(baselinePath, baseline);
+    writeJson(candidatePath, candidate);
+
+    const result = runBenchCompare([
+      '--baseline', baselinePath,
+      '--candidate', candidatePath,
+      '--metric', 'payload.timing.p95_ms',
+    ]);
+
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('Missing required provenance field "workspace_fingerprint" in candidate artifact.');
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

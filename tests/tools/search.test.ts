@@ -172,6 +172,36 @@ describe('semantic_search Tool', () => {
         expect.objectContaining({ bypassCache: true })
       );
     });
+
+    it('ignores unknown legacy fields without changing the semantic search contract', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      const result = await handleSemanticSearch(
+        {
+          query: '  compat  ',
+          top_k: 7,
+          legacy_field: 'ignored',
+          future_flag: true,
+        } as any,
+        mockServiceClient as any
+      );
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'compat',
+        7,
+        expect.objectContaining({
+          bypassCache: false,
+          maxOutputLength: 14000,
+        })
+      );
+
+      const callOptions = mockServiceClient.semanticSearch.mock.calls[0][2] as Record<string, unknown>;
+      expect(Object.keys(callOptions)).not.toContain('legacy_field');
+      expect(Object.keys(callOptions)).not.toContain('future_flag');
+      expect(result).toContain('# 🔍 Search Results');
+      expect(result).toContain('No results found');
+    });
   });
 
   describe('Output Formatting', () => {

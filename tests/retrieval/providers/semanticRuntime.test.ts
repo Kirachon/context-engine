@@ -200,4 +200,38 @@ describe('semanticRuntime helpers', () => {
     expect(keywordFallbackSearch).toHaveBeenCalledTimes(1);
     expect(results).toBe(fallbackResults);
   });
+
+  it('returns keyword fallback early for strong identifier queries when the provider is slow', async () => {
+    jest.useFakeTimers();
+    try {
+      const fallbackResults: SearchResult[] = [
+        {
+          path: 'src/slow-provider-fallback.ts',
+          content: 'fallback wins on slow provider',
+          matchType: 'keyword',
+          relevanceScore: 0.95,
+          retrievedAt: new Date().toISOString(),
+        },
+      ];
+      const searchAndAsk = jest.fn(async () => {
+        await new Promise<void>(() => undefined);
+        return 'unreachable';
+      });
+      const keywordFallbackSearch = jest.fn(async () => fallbackResults);
+
+      const promise = searchWithSemanticRuntime(
+        'ContextServiceClientStrongTokenProof',
+        5,
+        undefined,
+        { searchAndAsk, keywordFallbackSearch }
+      );
+
+      await jest.advanceTimersByTimeAsync(30);
+      await expect(promise).resolves.toBe(fallbackResults);
+      expect(searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(keywordFallbackSearch).toHaveBeenCalledTimes(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 });

@@ -16,6 +16,32 @@ Runtime and rollout control flags used by operators.
 | `CE_CONTEXT_PACKS_V2` | boolean | `false` | Search owner | Enables richer context-pack output sections (why selected + dependency map). |
 | `CE_RETRIEVAL_QUALITY_GUARD_V1` | boolean | `false` | Search owner | Enables quality-guard state reporting and blend/revert fallback controls. |
 
+## Queue policy flags
+
+Queue saturation is controlled by the search queue. Roll it out with `observe -> shadow -> enforce`.
+
+| Flag | Type | Default | Owner | Purpose | Rollout use |
+| --- | --- | --- | --- | --- | --- |
+| `CE_SEARCH_AND_ASK_QUEUE_MAX` | integer | `50` | Search owner | Maximum in-flight + waiting requests for the interactive lane before saturation handling starts. | Start here during dark launch sizing. |
+| `CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND` | integer | `50` | Search owner | Maximum queue size for the background lane. Keep this separate from interactive pressure. | Tune alongside the interactive cap when background work is expected. |
+| `CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE` | string | `enforce` | Search owner | Saturation mode: `observe`, `shadow`, or `enforce`. | Use `observe` first, `shadow` during sampled rehearsal, `enforce` only after rollout evidence is green. |
+
+Reject mode guidance:
+- `observe`: log saturation only. Do not reject requests. Use for initial dark launch and baseline collection.
+- `shadow`: keep the user-visible path unchanged while monitoring saturation during sampled traffic or shadow rehearsal.
+- `enforce`: reject overflow with `retry_after_ms`. Use only after observe/shadow evidence shows the queue caps are safe.
+
+## Retrieval fallback and shadow flags
+
+These env vars belong to the retrieval fallback domain, not the AI-provider runtime contract.
+
+| Flag | Type | Default | Owner | Purpose |
+| --- | --- | --- | --- | --- |
+| `CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK` | boolean | `false` | Search owner | When the semantic provider returns explicit `[]`, allow a keyword fallback for compatibility with older retrieval behavior. |
+| `CE_SEMANTIC_PARALLEL_FALLBACK` | boolean | `false` | Search owner | Warm the keyword fallback in parallel with the provider call so retrieval can recover faster on provider failure. |
+| `CE_RETRIEVAL_SHADOW_COMPARE_ENABLED` | boolean | `false` | Search owner | Sample shadow comparisons between provider-backed retrieval and the fallback path. |
+| `CE_RETRIEVAL_SHADOW_SAMPLE_RATE` | number | `0` | Search owner | Shadow comparison sampling rate between `0` and `1`. |
+
 ## Existing performance and telemetry flags (reference)
 
 | Flag | Purpose |

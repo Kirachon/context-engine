@@ -12,10 +12,12 @@ export interface SemanticSearchRuntimeDependencies {
   searchAndAsk: (
     searchQuery: string,
     prompt: string,
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number; signal?: AbortSignal }
   ) => Promise<string>;
   keywordFallbackSearch: (query: string, topK: number) => Promise<SearchResult[]>;
 }
+
+const LOCAL_FIRST_GRACE_MS = 25;
 
 export async function searchWithSemanticRuntime(
   query: string,
@@ -31,7 +33,8 @@ export async function searchWithSemanticRuntime(
     .filter(Boolean);
   const hasStrongIdentifierToken = queryTokens.some((token) => token.length >= 12);
   const isSingleTokenQuery = queryTokens.length === 1;
-  const useParallelFallback = options?.parallelFallback === true;
+  const preferLocalFirst = isOperationalDocsQuery(normalizedQuery) || isSingleTokenQuery || hasStrongIdentifierToken;
+  const useParallelFallback = options?.parallelFallback === true || preferLocalFirst;
   let fallbackPromise: Promise<SearchResult[]> | null = useParallelFallback
     ? dependencies.keywordFallbackSearch(query, topK).catch(() => [])
     : null;
@@ -50,11 +53,36 @@ export async function searchWithSemanticRuntime(
   }
 
   const prompt = buildSemanticSearchPrompt(query, topK, options);
-  let rawResponse: string;
+  const providerAbortController = preferLocalFirst ? new AbortController() : null;
+  const providerOutcomePromise = dependencies.searchAndAsk(query, prompt, {
+    timeoutMs: options?.timeoutMs,
+    signal: providerAbortController?.signal,
+  }).then((rawResponse) => ({ ok: true as const, rawResponse }))
+    .catch((error) => ({ ok: false as const, error }));
+
+  let providerOutcome: Awaited<typeof providerOutcomePromise>;
   try {
-    rawResponse = await dependencies.searchAndAsk(query, prompt, {
-      timeoutMs: options?.timeoutMs,
-    });
+    if (preferLocalFirst && fallbackPromise) {
+      const firstOutcome = await Promise.race([
+        providerOutcomePromise,
+        new Promise<{ kind: 'grace' }>((resolve) => {
+          setTimeout(() => resolve({ kind: 'grace' }), LOCAL_FIRST_GRACE_MS);
+        }),
+      ]);
+
+      if ('ok' in firstOutcome) {
+        providerOutcome = firstOutcome;
+      } else {
+        const fallback = await fallbackPromise;
+        if (fallback.length > 0) {
+          providerAbortController?.abort();
+          return fallback;
+        }
+        providerOutcome = await providerOutcomePromise;
+      }
+    } else {
+      providerOutcome = await providerOutcomePromise;
+    }
   } catch (error) {
     if (fallbackPromise) {
       const fallback = await fallbackPromise;
@@ -64,6 +92,16 @@ export async function searchWithSemanticRuntime(
     }
     throw error;
   }
+  if (!providerOutcome.ok) {
+    if (fallbackPromise) {
+      const fallback = await fallbackPromise;
+      if (fallback.length > 0) {
+        return fallback;
+      }
+    }
+    throw providerOutcome.error;
+  }
+  const rawResponse = providerOutcome.rawResponse;
   const parseResult = parseAIProviderSearchResults(rawResponse, topK);
   if (parseResult !== null) {
     if (parseResult.length > 0) {

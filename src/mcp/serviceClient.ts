@@ -260,6 +260,9 @@ const DEFAULT_SEARCH_QUEUE_MAX = 50;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD = 2;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS = 2500;
 const SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS = 2000;
+const SEARCH_AND_ASK_TOTAL_DURATION_METRIC = 'context_engine_search_and_ask_duration_seconds';
+const SEARCH_AND_ASK_QUEUE_WAIT_METRIC = 'context_engine_search_and_ask_queue_wait_seconds';
+const SEARCH_AND_ASK_EXECUTION_METRIC = 'context_engine_search_and_ask_execution_seconds';
 const FALLBACK_DISCOVER_FILES_CACHE_TTL_MS = envMs('CE_FALLBACK_DISCOVER_FILES_CACHE_TTL_MS', 30_000, {
   min: 0,
   max: 5 * 60_000,
@@ -276,6 +279,8 @@ function resolveSearchQueueRejectMode(raw: string | undefined): SearchQueueRejec
   if (normalized === 'observe' || normalized === 'shadow' || normalized === 'enforce') {
     return normalized;
   }
+  // Staged rollout policy: observe/shadow can surface saturation before we
+  // flip the queue to hard enforcement, but enforce remains the default.
   return 'enforce';
 }
 
@@ -966,6 +971,18 @@ interface IndexFingerprintFile {
   updatedAt: string;
 }
 
+interface KeywordFallbackSearchInFlightRequest {
+  generation: number;
+  shouldCache: boolean;
+  promise: Promise<SearchResult[]>;
+}
+
+interface SemanticSearchInFlightRequest {
+  generation: number;
+  shouldCache: boolean;
+  promise: Promise<SearchResult[]>;
+}
+
 // ============================================================================
 // Context Service Client
 // ============================================================================
@@ -987,6 +1004,8 @@ export class ContextServiceClient {
   private persistentSearchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
   private persistentCacheLoaded = false;
   private persistentCacheWriteTimer: NodeJS.Timeout | null = null;
+  private semanticSearchCacheGeneration = 0;
+  private semanticSearchInFlight: Map<string, SemanticSearchInFlightRequest> = new Map();
 
   /** Persistent context bundle cache (best-effort). */
   private persistentContextCache: Map<string, CacheEntry<ContextBundle>> = new Map();
@@ -1058,6 +1077,9 @@ export class ContextServiceClient {
     files: string[];
   } | null = null;
   private fallbackDiscoverFilesInFlight: Promise<string[]> | null = null;
+  private keywordFallbackSearchCacheGeneration = 0;
+  private keywordFallbackSearchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
+  private keywordFallbackSearchInFlight: Map<string, KeywordFallbackSearchInFlightRequest> = new Map();
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
@@ -1852,6 +1874,11 @@ export class ContextServiceClient {
    */
   clearCache(): void {
     this.searchCache.clear();
+    this.semanticSearchCacheGeneration += 1;
+    this.semanticSearchInFlight.clear();
+    this.keywordFallbackSearchCacheGeneration += 1;
+    this.keywordFallbackSearchCache.clear();
+    this.keywordFallbackSearchInFlight.clear();
     this.cacheHits = 0;
     this.cacheMisses = 0;
     this.fallbackDiscoverFilesCache = null;
@@ -2149,6 +2176,48 @@ export class ContextServiceClient {
       return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
     }
     return baseKey;
+  }
+
+  private getSemanticSearchInFlightKey(
+    query: string,
+    topK: number,
+    providerId: RetrievalProviderId,
+    maxOutputLength?: number
+  ): string {
+    const baseKey = this.getCommitAwareCacheKey(query, topK, providerId);
+    return `${baseKey}|maxOutputLength=${maxOutputLength ?? 'default'}`;
+  }
+
+  private getKeywordFallbackSearchCacheKey(query: string, topK: number): string {
+    const baseKey = `keyword:${query}:${topK}`;
+    if (this.commitCacheEnabled && this.currentCommitHash) {
+      return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
+    }
+    return baseKey;
+  }
+
+  private getCachedKeywordFallbackSearch(cacheKey: string): SearchResult[] | null {
+    const entry = this.keywordFallbackSearchCache.get(cacheKey);
+    if (entry && Date.now() - entry.timestamp < CACHE_TTL_MS) {
+      return entry.data;
+    }
+    if (entry) {
+      this.keywordFallbackSearchCache.delete(cacheKey);
+    }
+    return null;
+  }
+
+  private setCachedKeywordFallbackSearch(cacheKey: string, results: SearchResult[]): void {
+    if (this.keywordFallbackSearchCache.size >= this.maxCacheSize) {
+      const oldestKey = this.keywordFallbackSearchCache.keys().next().value;
+      if (oldestKey) {
+        this.keywordFallbackSearchCache.delete(oldestKey);
+      }
+    }
+    this.keywordFallbackSearchCache.set(cacheKey, {
+      data: results,
+      timestamp: Date.now(),
+    });
   }
 
   /**
@@ -2657,49 +2726,103 @@ export class ContextServiceClient {
       }
     }
 
-    let searchResults: SearchResult[] = [];
-    try {
-      searchResults = await this.retrievalProvider.search(query, topK, options);
-
-      if (!bypassCache) {
-        // Cache results
-        this.setCachedSearch(memoryCacheKey, searchResults);
-        if (persistentCacheKey) {
-          this.setPersistentSearch(persistentCacheKey, searchResults);
-        }
+    const inFlightKey = this.getSemanticSearchInFlightKey(
+      query,
+      topK,
+      retrievalProvider,
+      options?.maxOutputLength
+    );
+    const inFlightRequest = this.semanticSearchInFlight.get(inFlightKey);
+    if (inFlightRequest) {
+      if (inFlightRequest.generation === this.semanticSearchCacheGeneration) {
+        inFlightRequest.shouldCache = inFlightRequest.shouldCache || !bypassCache;
+        this.cacheHits++;
+        incCounter(
+          'context_engine_semantic_search_total',
+          { cache: 'inflight', bypass: bypassCache ? 'true' : 'false' },
+          1,
+          'Total semanticSearch calls labeled by cache path.'
+        );
+        const searchResults = await inFlightRequest.promise;
+        observeDurationMs(
+          'context_engine_semantic_search_duration_seconds',
+          { cache: 'inflight', bypass: bypassCache ? 'true' : 'false' },
+          Date.now() - metricsStart,
+          { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
+        );
+        return searchResults;
       }
-      this.maybeRunRetrievalShadowCompare(query, topK, searchResults);
-      incCounter(
-        'context_engine_semantic_search_total',
-        { cache: 'miss', bypass: bypassCache ? 'true' : 'false' },
-        1,
-        'Total semanticSearch calls labeled by cache path.'
-      );
-      observeDurationMs(
-        'context_engine_semantic_search_duration_seconds',
-        { cache: 'miss', bypass: bypassCache ? 'true' : 'false' },
-        Date.now() - metricsStart,
-        { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
-      );
-      return searchResults;
-    } catch (error) {
-      console.error('Search failed:', error);
-      incCounter(
-        'context_engine_semantic_search_total',
-        { cache: 'error', bypass: bypassCache ? 'true' : 'false' },
-        1,
-        'Total semanticSearch calls labeled by cache path.'
-      );
-      observeDurationMs(
-        'context_engine_semantic_search_duration_seconds',
-        { cache: 'error', bypass: bypassCache ? 'true' : 'false' },
-        Date.now() - metricsStart,
-        { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
-      );
-      try {
-        return await this.keywordFallbackSearch(query, topK, { bypassCache });
-      } catch {
-        return [];
+
+      this.semanticSearchInFlight.delete(inFlightKey);
+    }
+
+    const currentSearchGeneration = this.semanticSearchCacheGeneration;
+    const sharedRequest: SemanticSearchInFlightRequest = {
+      generation: currentSearchGeneration,
+      shouldCache: !bypassCache,
+      promise: Promise.resolve().then(async () => {
+        try {
+          const searchResults = await this.retrievalProvider.search(query, topK, options);
+
+          if (
+            sharedRequest.generation === this.semanticSearchCacheGeneration &&
+            sharedRequest.shouldCache
+          ) {
+            // Cache results
+            this.setCachedSearch(memoryCacheKey, searchResults);
+            if (persistentCacheKey) {
+              this.setPersistentSearch(persistentCacheKey, searchResults);
+            }
+          }
+          this.maybeRunRetrievalShadowCompare(query, topK, searchResults);
+          this.cacheMisses++;
+          incCounter(
+            'context_engine_semantic_search_total',
+            { cache: 'miss', bypass: bypassCache ? 'true' : 'false' },
+            1,
+            'Total semanticSearch calls labeled by cache path.'
+          );
+          observeDurationMs(
+            'context_engine_semantic_search_duration_seconds',
+            { cache: 'miss', bypass: bypassCache ? 'true' : 'false' },
+            Date.now() - metricsStart,
+            { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
+          );
+          return searchResults;
+        } catch (error) {
+          console.error('Search failed:', error);
+          this.cacheMisses++;
+          incCounter(
+            'context_engine_semantic_search_total',
+            { cache: 'error', bypass: bypassCache ? 'true' : 'false' },
+            1,
+            'Total semanticSearch calls labeled by cache path.'
+          );
+          observeDurationMs(
+            'context_engine_semantic_search_duration_seconds',
+            { cache: 'error', bypass: bypassCache ? 'true' : 'false' },
+            Date.now() - metricsStart,
+            { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
+          );
+          try {
+            return await this.keywordFallbackSearch(query, topK, { bypassCache });
+          } catch {
+            return [];
+          }
+        } finally {
+          if (this.semanticSearchInFlight.get(inFlightKey) === sharedRequest) {
+            this.semanticSearchInFlight.delete(inFlightKey);
+          }
+        }
+      }),
+    };
+    this.semanticSearchInFlight.set(inFlightKey, sharedRequest);
+
+    try {
+      return await sharedRequest.promise;
+    } finally {
+      if (this.semanticSearchInFlight.get(inFlightKey) === sharedRequest) {
+        this.semanticSearchInFlight.delete(inFlightKey);
       }
     }
   }
@@ -2723,6 +2846,7 @@ export class ContextServiceClient {
         this.searchAndAsk(searchQuery, prompt, {
           timeoutMs: runtimeOptions?.timeoutMs ?? semanticTimeoutMs,
           priority: 'interactive',
+          signal: runtimeOptions?.signal,
         }),
       keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
         this.keywordFallbackSearch(fallbackQuery, fallbackTopK),
@@ -2732,8 +2856,12 @@ export class ContextServiceClient {
   /**
    * Deterministic local retrieval path for internal callers that should not depend on provider output format.
    */
-  async localKeywordSearch(query: string, topK: number = 10): Promise<SearchResult[]> {
-    return this.keywordFallbackSearch(query, topK);
+  async localKeywordSearch(
+    query: string,
+    topK: number = 10,
+    options?: { bypassCache?: boolean }
+  ): Promise<SearchResult[]> {
+    return this.keywordFallbackSearch(query, topK, { bypassCache: options?.bypassCache });
   }
 
   private maybeRunRetrievalShadowCompare(query: string, topK: number, primaryResults: SearchResult[]): void {
@@ -2825,7 +2953,16 @@ export class ContextServiceClient {
         throw admissionTimeoutError;
       }
 
+      const queuedAt = Date.now();
       const response = await searchQueue.enqueue(async () => {
+        const queueWaitMs = Date.now() - queuedAt;
+        observeDurationMs(
+          SEARCH_AND_ASK_QUEUE_WAIT_METRIC,
+          { lane: priority },
+          queueWaitMs,
+          { help: 'searchAndAsk queue wait duration in seconds.' }
+        );
+        const providerExecutionStart = Date.now();
         try {
           const queueLength = searchQueue.length;
           console.error(
@@ -2849,10 +2986,17 @@ export class ContextServiceClient {
         } catch (error) {
           console.error('[searchAndAsk] Failed:', error);
           throw error;
+        } finally {
+          observeDurationMs(
+            SEARCH_AND_ASK_EXECUTION_METRIC,
+            { lane: priority },
+            Date.now() - providerExecutionStart,
+            { help: 'searchAndAsk provider execution duration in seconds.' }
+          );
         }
       }, timeoutMs, options?.signal);
       observeDurationMs(
-        'context_engine_search_and_ask_duration_seconds',
+        SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
         { result: 'success' },
         Date.now() - metricsStart,
         { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
@@ -2867,7 +3011,7 @@ export class ContextServiceClient {
           'Total searchAndAsk calls rejected before execution.'
         );
         observeDurationMs(
-          'context_engine_search_and_ask_duration_seconds',
+          SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
           { result: 'queue_full' },
           Date.now() - metricsStart,
           { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
@@ -2880,7 +3024,7 @@ export class ContextServiceClient {
           'Total searchAndAsk calls rejected before execution.'
         );
         observeDurationMs(
-          'context_engine_search_and_ask_duration_seconds',
+          SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
           { result: 'queue_timeout_budget' },
           Date.now() - metricsStart,
           { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
@@ -2888,7 +3032,7 @@ export class ContextServiceClient {
       } else {
         incCounter('context_engine_search_and_ask_errors_total', undefined, 1, 'Total searchAndAsk failures.');
         observeDurationMs(
-          'context_engine_search_and_ask_duration_seconds',
+          SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
           { result: 'error' },
           Date.now() - metricsStart,
           { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
@@ -2941,6 +3085,23 @@ export class ContextServiceClient {
     topK: number,
     options?: { bypassCache?: boolean }
   ): Promise<SearchResult[]> {
+    const bypassCache = options?.bypassCache === true;
+    const cacheKey = this.getKeywordFallbackSearchCacheKey(query, topK);
+    if (!bypassCache) {
+      const cached = this.getCachedKeywordFallbackSearch(cacheKey);
+      if (cached) {
+        this.cacheHits++;
+        return cached;
+      }
+
+      const inFlightRequest = this.keywordFallbackSearchInFlight.get(cacheKey);
+      if (inFlightRequest && inFlightRequest.generation === this.keywordFallbackSearchCacheGeneration) {
+        inFlightRequest.shouldCache = inFlightRequest.shouldCache || !bypassCache;
+        this.cacheHits++;
+        return inFlightRequest.promise;
+      }
+    }
+
     const rawQuery = query.trim();
     const includeArtifacts = /\binclude:artifacts\b/i.test(rawQuery);
     const includeDocs = /\binclude:docs\b/i.test(rawQuery);
@@ -2979,195 +3140,220 @@ export class ContextServiceClient {
       || identifierLikeToken;
     const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
     const pureCodeIntent = codeIntent && !opsEvidenceIntent;
+    const computeKeywordFallbackSearch = async (): Promise<SearchResult[]> => {
+      const files = await this.getCachedFallbackFiles(options);
+      if (files.length === 0) return [];
+      const filtersApplied: string[] = [];
+      if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');
+      if (codeIntent && !includeDocs) filtersApplied.push('deprioritize:docs');
+      if (codeIntent && !includeJson) filtersApplied.push('deprioritize:json');
 
-    const files = await this.getCachedFallbackFiles(options);
-    if (files.length === 0) return [];
-    const filtersApplied: string[] = [];
-    if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');
-    if (codeIntent && !includeDocs) filtersApplied.push('deprioritize:docs');
-    if (codeIntent && !includeJson) filtersApplied.push('deprioritize:json');
-
-    const runPass = async (allowHardExclusions: boolean): Promise<{
-      rankedResults: Array<SearchResult & { __score: number }>;
-      filteredPathsCount: number;
-    }> => {
-      let filteredPathsCount = 0;
-      const ranked = files
-        .map((filePath) => {
-          const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
-          if (allowHardExclusions && pureCodeIntent && !includeArtifacts && normalizedPath.startsWith('artifacts/')) {
-            filteredPathsCount += 1;
-            return null;
-          }
-
-          const lowerPath = filePath.toLowerCase();
-          let score = 0;
-          if (lowerPath.includes(normalizedQuery)) score += 8;
-          for (const token of queryTokens) {
-            if (lowerPath.includes(token)) score += 2;
-          }
-          if (codeIntent) {
-            if (normalizedPath.startsWith('src/') || normalizedPath.startsWith('test/') || normalizedPath.startsWith('tests/')) {
-              score += 8;
+      const runPass = async (allowHardExclusions: boolean): Promise<{
+        rankedResults: Array<SearchResult & { __score: number }>;
+        filteredPathsCount: number;
+      }> => {
+        let filteredPathsCount = 0;
+        const ranked = files
+          .map((filePath) => {
+            const normalizedPath = filePath.replace(/\\/g, '/').toLowerCase();
+            if (allowHardExclusions && pureCodeIntent && !includeArtifacts && normalizedPath.startsWith('artifacts/')) {
+              filteredPathsCount += 1;
+              return null;
             }
-            if (/\/__tests__\//.test(normalizedPath)) {
-              score += 4;
-            }
-            if (!includeDocs && /^(docs|benchmark|bench|tmp|coverage|dist|build)\//.test(normalizedPath)) {
-              score -= 8;
-            }
-            if (!includeJson && normalizedPath.endsWith('.json')) {
-              score -= 5;
-            } else if (!includeDocs && normalizedPath.endsWith('.md')) {
-              score -= 3;
-            }
-          }
-          return { filePath, score };
-        })
-        .filter((candidate): candidate is { filePath: string; score: number } => candidate !== null)
-        .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath));
 
-      const scanLimit = Math.min(
-        Math.max(topK * 30, 120),
-        ranked.length
-      );
-      const candidates = ranked.slice(0, scanLimit);
-      const retrievedAt = new Date().toISOString();
-      const scoredResults: Array<SearchResult & { __score: number }> = [];
-
-      const scoreCandidate = async (
-        candidate: { filePath: string; score: number }
-      ): Promise<(SearchResult & { __score: number }) | null> => {
-        try {
-          const content = await this.getFile(candidate.filePath);
-          const lowerContent = content.toLowerCase();
-          let matchIndex = lowerContent.indexOf(normalizedQuery);
-          if (matchIndex === -1) {
+            const lowerPath = filePath.toLowerCase();
+            let score = 0;
+            if (lowerPath.includes(normalizedQuery)) score += 8;
             for (const token of queryTokens) {
-              const idx = lowerContent.indexOf(token);
-              if (idx !== -1) {
-                matchIndex = idx;
-                break;
+              if (lowerPath.includes(token)) score += 2;
+            }
+            if (codeIntent) {
+              if (normalizedPath.startsWith('src/') || normalizedPath.startsWith('test/') || normalizedPath.startsWith('tests/')) {
+                score += 8;
+              }
+              if (/\/__tests__\//.test(normalizedPath)) {
+                score += 4;
+              }
+              if (!includeDocs && /^(docs|benchmark|bench|tmp|coverage|dist|build)\//.test(normalizedPath)) {
+                score -= 8;
+              }
+              if (!includeJson && normalizedPath.endsWith('.json')) {
+                score -= 5;
+              } else if (!includeDocs && normalizedPath.endsWith('.md')) {
+                score -= 3;
               }
             }
-          }
-          if (matchIndex === -1) return null;
+            return { filePath, score };
+          })
+          .filter((candidate): candidate is { filePath: string; score: number } => candidate !== null)
+          .sort((a, b) => b.score - a.score || a.filePath.localeCompare(b.filePath));
 
-          const snippetStart = Math.max(0, matchIndex - 200);
-          const snippetEnd = Math.min(content.length, matchIndex + 400);
-          const snippet = content.substring(snippetStart, snippetEnd).trim();
-          if (!snippet) return null;
+        const scanLimit = Math.min(
+          Math.max(topK * 30, 120),
+          ranked.length
+        );
+        const candidates = ranked.slice(0, scanLimit);
+        const retrievedAt = new Date().toISOString();
+        const scoredResults: Array<SearchResult & { __score: number }> = [];
 
-          const normalizedPath = candidate.filePath.replace(/\\/g, '/').toLowerCase();
-          let finalScore = candidate.score;
-          const hasFactoryIntent = queryTokens.includes('factory');
-          const hasProviderIntent = queryTokens.includes('provider');
-          const hasTestIntent = queryTokens.includes('test') || queryTokens.includes('tests');
-          if (lowerContent.includes(normalizedQuery)) {
-            finalScore += 16;
-          }
-          for (const token of queryTokens) {
-            if (lowerContent.includes(token)) {
-              finalScore += 2;
+        const scoreCandidate = async (
+          candidate: { filePath: string; score: number }
+        ): Promise<(SearchResult & { __score: number }) | null> => {
+          try {
+            const content = await this.getFile(candidate.filePath);
+            const lowerContent = content.toLowerCase();
+            let matchIndex = lowerContent.indexOf(normalizedQuery);
+            if (matchIndex === -1) {
+              for (const token of queryTokens) {
+                const idx = lowerContent.indexOf(token);
+                if (idx !== -1) {
+                  matchIndex = idx;
+                  break;
+                }
+              }
             }
-          }
-          let symbolHitCount = 0;
-          for (const symbol of symbolTokens) {
-            if (lowerContent.includes(symbol)) {
-              finalScore += 28;
-              symbolHitCount += 1;
-            }
-            if (normalizedPath.includes(symbol)) {
+            if (matchIndex === -1) return null;
+
+            const snippetStart = Math.max(0, matchIndex - 200);
+            const snippetEnd = Math.min(content.length, matchIndex + 400);
+            const snippet = content.substring(snippetStart, snippetEnd).trim();
+            if (!snippet) return null;
+
+            const normalizedPath = candidate.filePath.replace(/\\/g, '/').toLowerCase();
+            let finalScore = candidate.score;
+            const hasFactoryIntent = queryTokens.includes('factory');
+            const hasProviderIntent = queryTokens.includes('provider');
+            const hasTestIntent = queryTokens.includes('test') || queryTokens.includes('tests');
+            if (lowerContent.includes(normalizedQuery)) {
               finalScore += 16;
             }
-          }
-          if (codeIntent) {
-            if (symbolHitCount > 0) {
-              finalScore += 70 * symbolHitCount;
-            }
-            if (/\/ai\/providers\//.test(normalizedPath)) {
-              finalScore += 14;
-            }
-            if (/\/factory\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
-              finalScore += hasFactoryIntent ? 70 : 30;
-            }
-            if (/\/factory\.test\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
-              finalScore += hasFactoryIntent ? 65 : 25;
-              if (hasTestIntent) {
-                finalScore += 30;
+            for (const token of queryTokens) {
+              if (lowerContent.includes(token)) {
+                finalScore += 2;
               }
             }
-            if (hasProviderIntent && /\/providers\//.test(normalizedPath)) {
-              finalScore += 18;
+            let symbolHitCount = 0;
+            for (const symbol of symbolTokens) {
+              if (lowerContent.includes(symbol)) {
+                finalScore += 28;
+                symbolHitCount += 1;
+              }
+              if (normalizedPath.includes(symbol)) {
+                finalScore += 16;
+              }
+            }
+            if (codeIntent) {
+              if (symbolHitCount > 0) {
+                finalScore += 70 * symbolHitCount;
+              }
+              if (/\/ai\/providers\//.test(normalizedPath)) {
+                finalScore += 14;
+              }
+              if (/\/factory\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
+                finalScore += hasFactoryIntent ? 70 : 30;
+              }
+              if (/\/factory\.test\.(ts|tsx|js|jsx)$/.test(normalizedPath)) {
+                finalScore += hasFactoryIntent ? 65 : 25;
+                if (hasTestIntent) {
+                  finalScore += 30;
+                }
+              }
+              if (hasProviderIntent && /\/providers\//.test(normalizedPath)) {
+                finalScore += 18;
+              }
+            }
+
+            const startLine = content.slice(0, snippetStart).split('\n').length;
+            const endLine = startLine + Math.max(0, snippet.split('\n').length - 1);
+
+            return {
+              path: candidate.filePath.replace(/\\/g, '/'),
+              content: snippet,
+              lines: `${startLine}-${Math.max(startLine, endLine)}`,
+              relevanceScore: undefined,
+              matchType: 'keyword',
+              retrievedAt,
+              __score: finalScore,
+            };
+          } catch {
+            // Skip files that cannot be read in fallback mode.
+            return null;
+          }
+        };
+
+        const concurrency = Math.max(1, Math.min(FALLBACK_SEARCH_READ_CONCURRENCY, candidates.length));
+        for (let index = 0; index < candidates.length; index += concurrency) {
+          const batch = candidates.slice(index, index + concurrency);
+          const batchResults = await Promise.all(batch.map((candidate) => scoreCandidate(candidate)));
+          for (const result of batchResults) {
+            if (result) {
+              scoredResults.push(result);
             }
           }
-
-          const startLine = content.slice(0, snippetStart).split('\n').length;
-          const endLine = startLine + Math.max(0, snippet.split('\n').length - 1);
-
-          return {
-            path: candidate.filePath.replace(/\\/g, '/'),
-            content: snippet,
-            lines: `${startLine}-${Math.max(startLine, endLine)}`,
-            relevanceScore: undefined,
-            matchType: 'keyword',
-            retrievedAt,
-            __score: finalScore,
-          };
-        } catch {
-          // Skip files that cannot be read in fallback mode.
-          return null;
         }
+        return {
+          rankedResults: scoredResults
+            .sort((a, b) => b.__score - a.__score || a.path.localeCompare(b.path))
+            .slice(0, topK),
+          filteredPathsCount,
+        };
       };
 
-      const concurrency = Math.max(1, Math.min(FALLBACK_SEARCH_READ_CONCURRENCY, candidates.length));
-      for (let index = 0; index < candidates.length; index += concurrency) {
-        const batch = candidates.slice(index, index + concurrency);
-        const batchResults = await Promise.all(batch.map((candidate) => scoreCandidate(candidate)));
-        for (const result of batchResults) {
-          if (result) {
-            scoredResults.push(result);
-          }
-        }
+      const firstPass = await runPass(true);
+      let rankedResults = firstPass.rankedResults;
+      let secondPassUsed = false;
+      let filteredPathsCount = firstPass.filteredPathsCount;
+
+      if (rankedResults.length === 0 && firstPass.filteredPathsCount > 0) {
+        secondPassUsed = true;
+        const secondPass = await runPass(false);
+        rankedResults = secondPass.rankedResults;
+        filteredPathsCount += secondPass.filteredPathsCount;
       }
-      return {
-        rankedResults: scoredResults
-          .sort((a, b) => b.__score - a.__score || a.path.localeCompare(b.path))
-          .slice(0, topK),
-        filteredPathsCount,
-      };
+
+      this.setLastSearchDiagnostics({
+        filters_applied: filtersApplied,
+        filtered_paths_count: filteredPathsCount,
+        second_pass_used: secondPassUsed,
+      });
+
+      if (rankedResults.length === 0) {
+        return [];
+      }
+
+      const maxScore = Math.max(...rankedResults.map((item) => item.__score));
+      const minScore = Math.min(...rankedResults.map((item) => item.__score));
+      const scoreRange = Math.max(1, maxScore - minScore);
+
+      return rankedResults.map(({ __score, ...result }) => ({
+        ...result,
+        relevanceScore: Math.max(0, Math.min(1, 0.4 + (0.6 * (__score - minScore)) / scoreRange)),
+      }));
     };
 
-    const firstPass = await runPass(true);
-    let rankedResults = firstPass.rankedResults;
-    let secondPassUsed = false;
-    let filteredPathsCount = firstPass.filteredPathsCount;
-
-    if (rankedResults.length === 0 && firstPass.filteredPathsCount > 0) {
-      secondPassUsed = true;
-      const secondPass = await runPass(false);
-      rankedResults = secondPass.rankedResults;
-      filteredPathsCount += secondPass.filteredPathsCount;
+    const currentGeneration = this.keywordFallbackSearchCacheGeneration;
+    const sharedRequest: KeywordFallbackSearchInFlightRequest = {
+      generation: currentGeneration,
+      shouldCache: !bypassCache,
+      promise: Promise.resolve().then(async () => {
+        const rankedResults = await computeKeywordFallbackSearch();
+        if (sharedRequest.generation === this.keywordFallbackSearchCacheGeneration && sharedRequest.shouldCache) {
+          this.setCachedKeywordFallbackSearch(cacheKey, rankedResults);
+        }
+        return rankedResults;
+      }),
+    };
+    if (!bypassCache) {
+      this.keywordFallbackSearchInFlight.set(cacheKey, sharedRequest);
     }
 
-    this.setLastSearchDiagnostics({
-      filters_applied: filtersApplied,
-      filtered_paths_count: filteredPathsCount,
-      second_pass_used: secondPassUsed,
-    });
-
-    if (rankedResults.length === 0) {
-      return [];
+    try {
+      return await sharedRequest.promise;
+    } finally {
+      if (this.keywordFallbackSearchInFlight.get(cacheKey) === sharedRequest) {
+        this.keywordFallbackSearchInFlight.delete(cacheKey);
+      }
     }
-
-    const maxScore = Math.max(...rankedResults.map((item) => item.__score));
-    const minScore = Math.min(...rankedResults.map((item) => item.__score));
-    const scoreRange = Math.max(1, maxScore - minScore);
-
-    return rankedResults.map(({ __score, ...result }) => ({
-      ...result,
-      relevanceScore: Math.max(0, Math.min(1, 0.4 + (0.6 * (__score - minScore)) / scoreRange)),
-    }));
   }
 
   private parseFormattedResults(formattedResults: string, topK: number): SearchResult[] {

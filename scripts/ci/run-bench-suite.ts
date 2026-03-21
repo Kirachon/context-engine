@@ -12,9 +12,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { buildProbeFailureMessage, resolveModeProbeOrder } from '../../src/ci/benchSuiteModePolicy';
+import { hashString, makeBenchProvenance, type BenchProvenance } from './bench-provenance.js';
 
 type SuiteMode = 'pr' | 'nightly';
 type BenchMode = 'scan' | 'search' | 'retrieve';
@@ -29,17 +29,8 @@ interface SuiteArgs {
 interface BenchOutput {
   total_ms?: number;
   payload?: Record<string, unknown>;
-  provenance?: ProvenanceMetadata;
+  provenance?: BenchProvenance;
   [key: string]: unknown;
-}
-
-interface ProvenanceMetadata {
-  commit_sha: string;
-  bench_mode: BenchMode;
-  retrieval_provider?: RetrievalProvider;
-  dataset_id: string;
-  node_version: string;
-  env_fingerprint: string;
 }
 
 interface Thresholds {
@@ -192,32 +183,6 @@ function runBenchProbe(benchArgs: string[], timeoutMs: number): ProbeResult {
   };
 }
 
-function runGit(args: string[]): string | undefined {
-  const result = spawnSync('git', args, {
-    encoding: 'utf8',
-    env: process.env,
-  });
-  if (result.status !== 0) {
-    return undefined;
-  }
-  const value = (result.stdout || '').trim();
-  return value || undefined;
-}
-
-function resolveCommitSha(): string {
-  const fromEnv = (
-    process.env.GITHUB_SHA ||
-    process.env.CI_COMMIT_SHA ||
-    process.env.BUILDKITE_COMMIT ||
-    process.env.CIRCLE_SHA1 ||
-    process.env.TRAVIS_COMMIT
-  )?.trim();
-  if (fromEnv) {
-    return fromEnv;
-  }
-  return runGit(['rev-parse', 'HEAD']) ?? 'unknown';
-}
-
 function resolveDatasetId(workspace: string): string {
   const fromEnv = process.env.BENCH_DATASET_ID?.trim();
   if (fromEnv) {
@@ -226,41 +191,37 @@ function resolveDatasetId(workspace: string): string {
   return `workspace:${path.basename(workspace) || 'root'}`;
 }
 
-function normalizeEnvValue(value: string | undefined): string {
-  return (value ?? '').replace(/\\/g, '/');
-}
-
-function resolveEnvFingerprint(): string {
-  const keys = [
-    'CI',
-    'GITHUB_ACTIONS',
-    'RUNNER_OS',
-    'RUNNER_ARCH',
-    'CE_RETRIEVAL_PROVIDER',
-    'CE_AI_PROVIDER',
-    'npm_config_user_agent',
-  ];
-  const canonical = keys
-    .slice()
-    .sort()
-    .map(key => `${key}=${normalizeEnvValue(process.env[key])}`)
-    .join('|');
-  return createHash('sha256').update(canonical).digest('hex').slice(0, 16);
+function resolveDatasetHash(benchMode: BenchMode, workspace: string): string {
+  const normalizedWorkspace = path.resolve(workspace).replace(/\\/g, '/');
+  const workload = benchMode === 'scan'
+    ? {
+        bench_mode: benchMode,
+        workspace: normalizedWorkspace,
+        read_files: true,
+      }
+    : {
+        bench_mode: benchMode,
+        workspace: normalizedWorkspace,
+        query: 'search queue',
+        top_k: 10,
+        cold: true,
+        retrieve_mode: benchMode === 'retrieve' ? 'fast' : 'search',
+      };
+  return hashString(JSON.stringify(workload));
 }
 
 function makeProvenance(
   benchMode: BenchMode,
   workspace: string,
   retrievalProvider: RetrievalProvider
-): ProvenanceMetadata {
-  return {
-    commit_sha: resolveCommitSha(),
-    bench_mode: benchMode,
-    retrieval_provider: retrievalProvider,
-    dataset_id: resolveDatasetId(workspace),
-    node_version: process.version,
-    env_fingerprint: resolveEnvFingerprint(),
-  };
+): BenchProvenance {
+  return makeBenchProvenance({
+    benchMode,
+    workspace,
+    retrievalProvider,
+    datasetId: resolveDatasetId(workspace),
+    datasetHash: resolveDatasetHash(benchMode, workspace),
+  });
 }
 
 function assertProvenanceForSuite(
@@ -279,6 +240,11 @@ function assertProvenanceForSuite(
       `Dataset mismatch for suite compare: baseline=${baselineProv.dataset_id} candidate=${candidateProv.dataset_id}.`
     );
   }
+  if (baselineProv.dataset_hash !== candidateProv.dataset_hash) {
+    throw new Error(
+      `Dataset hash mismatch for suite compare: baseline=${baselineProv.dataset_hash} candidate=${candidateProv.dataset_hash}.`
+    );
+  }
   if (baselineProv.bench_mode !== candidateProv.bench_mode) {
     throw new Error(
       `Benchmark mode mismatch for suite compare: baseline=${baselineProv.bench_mode} candidate=${candidateProv.bench_mode}.`
@@ -289,6 +255,21 @@ function assertProvenanceForSuite(
   if (baselineProvider !== candidateProvider) {
     throw new Error(
       `Retrieval provider mismatch for suite compare: baseline=${baselineProvider} candidate=${candidateProvider}.`
+    );
+  }
+  if (baselineProv.workspace_fingerprint !== candidateProv.workspace_fingerprint) {
+    throw new Error(
+      `Workspace fingerprint mismatch for suite compare: baseline=${baselineProv.workspace_fingerprint} candidate=${candidateProv.workspace_fingerprint}.`
+    );
+  }
+  if (baselineProv.index_fingerprint !== candidateProv.index_fingerprint) {
+    throw new Error(
+      `Index fingerprint mismatch for suite compare: baseline=${baselineProv.index_fingerprint} candidate=${candidateProv.index_fingerprint}.`
+    );
+  }
+  if (baselineProv.feature_flags_snapshot !== candidateProv.feature_flags_snapshot) {
+    throw new Error(
+      'Feature-flag snapshot mismatch for suite compare: baseline and candidate must use the same runtime flags.'
     );
   }
 

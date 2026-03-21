@@ -9,6 +9,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { hashString, makeBenchProvenance, type BenchProvenance } from './bench-provenance.js';
 
 type BenchMode = 'scan' | 'search' | 'retrieve';
 const VALID_BENCH_MODES: readonly BenchMode[] = ['scan', 'search', 'retrieve'] as const;
@@ -28,7 +29,7 @@ interface Args {
 interface BenchOutput {
   total_ms?: number;
   payload?: Record<string, unknown>;
-  provenance?: Record<string, unknown>;
+  provenance?: BenchProvenance;
   [key: string]: unknown;
 }
 
@@ -241,6 +242,36 @@ function buildBenchArgs(mode: BenchMode, workspace: string): string[] {
   ];
 }
 
+function resolveDatasetId(workspace: string, fallback?: unknown): string {
+  if (typeof fallback === 'string' && fallback.trim()) {
+    return fallback.trim();
+  }
+  const envValue = process.env.BENCH_DATASET_ID?.trim();
+  if (envValue) {
+    return envValue;
+  }
+  return `workspace:${path.basename(workspace) || 'root'}`;
+}
+
+function resolveDatasetHash(mode: BenchMode, workspace: string): string {
+  const normalizedWorkspace = path.resolve(workspace).replace(/\\/g, '/');
+  const workload = mode === 'scan'
+    ? {
+        bench_mode: mode,
+        workspace: normalizedWorkspace,
+        read_files: true,
+      }
+    : {
+        bench_mode: mode,
+        workspace: normalizedWorkspace,
+        query: 'search queue',
+        top_k: 10,
+        cold: true,
+        retrieve_mode: mode === 'retrieve' ? 'fast' : 'search',
+      };
+  return hashString(JSON.stringify(workload));
+}
+
 function resolveBenchArgs(mode: BenchMode, workspace: string): string[] {
   const args = buildBenchArgs(mode, workspace);
   const probe = runNodeTsScript(path.join('scripts', 'bench.ts'), args, true);
@@ -351,19 +382,16 @@ function main(): void {
   const medianCandidate = {
     ...first,
     payload,
-    provenance: {
-      commit_sha:
-        (process.env.GITHUB_SHA && String(process.env.GITHUB_SHA).trim()) ||
-        (typeof baselineProvenance.commit_sha === 'string' ? baselineProvenance.commit_sha : 'local-dev'),
-      bench_mode: benchMode,
-      dataset_id:
-        (typeof baselineProvenance.dataset_id === 'string' ? baselineProvenance.dataset_id : `workspace:${path.basename(args.workspace)}`),
-      node_version: process.version,
-      env_fingerprint:
-        (typeof baselineProvenance.env_fingerprint === 'string'
-          ? baselineProvenance.env_fingerprint
-          : `${process.platform}-${process.arch}`),
-    },
+    provenance: makeBenchProvenance({
+      benchMode,
+      workspace: args.workspace,
+      retrievalProvider: 'local_native',
+      datasetId: resolveDatasetId(args.workspace, baselineProvenance.dataset_id),
+      datasetHash:
+        typeof baselineProvenance.dataset_hash === 'string' && baselineProvenance.dataset_hash.trim()
+          ? baselineProvenance.dataset_hash.trim()
+          : resolveDatasetHash(benchMode, args.workspace),
+    }),
     release: {
       bench_mode: benchMode,
       candidate_runs: candidateMetrics,

@@ -29,6 +29,7 @@ const mockContextInstance: Record<string, jest.Mock<any>> = {
 // Import after establishing test doubles
 const { ContextServiceClient } = await import('../src/mcp/serviceClient.js');
 const { FEATURE_FLAGS } = await import('../src/config/features.js');
+const { renderPrometheusMetrics } = await import('../src/metrics/metrics.js');
 
 describe('ContextServiceClient', () => {
   let client: InstanceType<typeof ContextServiceClient>;
@@ -85,11 +86,13 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_RETRIEVAL_PROVIDER;
     delete process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED;
     delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
+    delete process.env.CE_METRICS;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
     FEATURE_FLAGS.skip_unchanged_indexing = false;
     FEATURE_FLAGS.hash_normalize_eol = false;
+    FEATURE_FLAGS.metrics = false;
   });
 
   describe('Retrieval Provider Dispatch', () => {
@@ -1059,6 +1062,46 @@ describe('ContextServiceClient', () => {
       expect(providerCall).toHaveBeenCalledTimes(1);
     });
 
+    it('should record queue wait and execution histograms for queued searchAndAsk calls when metrics are enabled', async () => {
+      FEATURE_FLAGS.metrics = true;
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '2';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let releaseFirst: () => void = () => undefined;
+      const firstGate = new Promise<void>((resolve) => {
+        releaseFirst = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery === 'hold') {
+          await firstGate;
+          return { text: `released:${request.searchQuery}`, model: 'codex-session' };
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const first = laneClient.searchAndAsk('hold', 'hold', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+      const second = laneClient.searchAndAsk('queued', 'queued', { priority: 'interactive' });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      releaseFirst();
+      await expect(first).resolves.toBe('released:hold');
+      await expect(second).resolves.toBe('ok:queued');
+
+      const metricsText = renderPrometheusMetrics();
+      expect(metricsText).toContain('context_engine_search_and_ask_queue_wait_seconds_bucket');
+      expect(metricsText).toContain('context_engine_search_and_ask_execution_seconds_bucket');
+      expect(metricsText).toContain('context_engine_search_and_ask_duration_seconds_bucket');
+      expect(metricsText).toContain('lane="interactive"');
+    });
+
     it('should route background lane independently when interactive lane is saturated', async () => {
       process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '1';
       process.env.CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND = '1';
@@ -1179,6 +1222,42 @@ describe('ContextServiceClient', () => {
       await expect(second).resolves.toBe('ok:hold-2');
     });
 
+    it('should reject too-small timeout budgets before queue admission when queue pressure is high', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '5';
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery.startsWith('hold')) {
+          await gate;
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      const first = laneClient.searchAndAsk('hold-1', 'hold', { priority: 'interactive', timeoutMs: 8000 });
+      await new Promise((resolve) => setImmediate(resolve));
+      const second = laneClient.searchAndAsk('hold-2', 'hold', { priority: 'interactive', timeoutMs: 8000 });
+      await new Promise((resolve) => setImmediate(resolve));
+
+      await expect(
+        laneClient.searchAndAsk('storm', 'storm', { priority: 'interactive', timeoutMs: 1000 })
+      ).rejects.toThrow(/queue timeout budget|too small/i);
+      expect(providerCall.mock.calls.some(([request]) => request.searchQuery === 'storm')).toBe(false);
+
+      release();
+      await expect(first).resolves.toBe('ok:hold-1');
+      await expect(second).resolves.toBe('ok:hold-2');
+    });
+
     it('should allow observed saturation in shadow mode without immediate rejection', async () => {
       process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '1';
       process.env.CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE = 'shadow';
@@ -1211,6 +1290,59 @@ describe('ContextServiceClient', () => {
       await expect(first).resolves.toBe('ok:hold');
       await expect(second).resolves.toBe('ok:hold-2');
       await expect(overflow).resolves.toBe('ok:overflow');
+    });
+
+    it('should allow observed saturation in observe mode without immediate rejection and log saturation', async () => {
+      process.env.CE_SEARCH_AND_ASK_QUEUE_MAX = '1';
+      process.env.CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE = 'observe';
+      const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+      const laneClient = new ContextServiceClient(testWorkspace);
+
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = () => resolve();
+      });
+      const providerCall = jest.fn(async (request: { searchQuery: string }) => {
+        if (request.searchQuery === 'hold') {
+          await gate;
+        }
+        return { text: `ok:${request.searchQuery}`, model: 'codex-session' };
+      });
+      (laneClient as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (laneClient as any).aiProviderId = 'openai_session';
+
+      try {
+        const first = laneClient.searchAndAsk('hold', 'hold', { priority: 'interactive' });
+        await new Promise((resolve) => setImmediate(resolve));
+        const second = laneClient.searchAndAsk('hold-2', 'hold', { priority: 'interactive' });
+        await new Promise((resolve) => setImmediate(resolve));
+        const overflow = laneClient.searchAndAsk('overflow', 'overflow', { priority: 'interactive' });
+
+        await expect(
+          Promise.race([
+            overflow.then(
+              () => 'resolved',
+              () => 'rejected'
+            ),
+            new Promise((resolve) => setImmediate(() => resolve('pending'))),
+          ])
+        ).resolves.toBe('pending');
+        expect(errorSpy).toHaveBeenCalledWith(
+          expect.stringContaining('[SearchQueue] observe mode: queue saturation observed for interactive lane;')
+        );
+
+        release();
+        await expect(first).resolves.toBe('ok:hold');
+        await expect(second).resolves.toBe('ok:hold-2');
+        await expect(overflow).resolves.toBe('ok:overflow');
+      } finally {
+        release();
+        errorSpy.mockRestore();
+      }
     });
 
     it('should propagate cancellation while request is waiting in queue', async () => {
@@ -1264,6 +1396,71 @@ describe('ContextServiceClient', () => {
       // Second call with same query - should use cache
       await client.semanticSearch('cache test', 5);
       expect(providerCall).toHaveBeenCalledTimes(1); // Still 1, cache hit
+    });
+
+    it('should coalesce concurrent semantic search misses into one provider call', async () => {
+      let resolveProviderCall!: (value: { text: string; model: string }) => void;
+      const providerCall = jest.fn(
+        () =>
+          new Promise<{ text: string; model: string }>((resolve) => {
+            resolveProviderCall = resolve;
+          })
+      );
+
+      (client as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (client as any).aiProviderId = 'openai_session';
+
+      const firstSearch = client.semanticSearch('concurrent search query', 5, { bypassCache: true });
+      const secondSearch = client.semanticSearch('concurrent search query', 5, { bypassCache: true });
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(providerCall).toHaveBeenCalledTimes(1);
+
+      resolveProviderCall({
+        text: JSON.stringify([
+          {
+            path: 'src/concurrent.ts',
+            content: 'deduped content',
+            relevanceScore: 0.91,
+          },
+        ]),
+        model: 'codex-session',
+      });
+
+      await expect(firstSearch).resolves.toHaveLength(1);
+      await expect(secondSearch).resolves.toHaveLength(1);
+      expect(providerCall).toHaveBeenCalledTimes(1);
+    });
+
+    it('should coalesce concurrent local keyword scans into one file scan', async () => {
+      let resolveFileContent!: (value: string) => void;
+      const getCachedFallbackFilesSpy = jest
+        .spyOn(client as any, 'getCachedFallbackFiles')
+        .mockResolvedValue(['src/cacheable.ts']);
+      const getFileSpy = jest.fn(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveFileContent = resolve;
+          })
+      );
+      (client as any).getFile = getFileSpy;
+
+      const firstSearch = client.localKeywordSearch('cacheableQueryMarker', 5);
+      const secondSearch = client.localKeywordSearch('cacheableQueryMarker', 5);
+
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(getCachedFallbackFilesSpy).toHaveBeenCalledTimes(1);
+      expect(getFileSpy).toHaveBeenCalledTimes(1);
+
+      resolveFileContent('export const cacheableQueryMarker = true;');
+
+      await expect(firstSearch).resolves.toHaveLength(1);
+      await expect(secondSearch).resolves.toHaveLength(1);
+      expect(getFileSpy).toHaveBeenCalledTimes(1);
     });
 
     it('should not use cache for different queries', async () => {

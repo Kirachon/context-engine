@@ -53,3 +53,20 @@ Additional required fields for retrieval speed/quality promotions:
 - dataset id + dataset hash
 - commit SHA + environment fingerprint
 - feature-flag state snapshot
+
+## Governance gate template
+
+Use this template for PR, nightly, and release decisions.
+
+| Field | Required value | Operator note |
+| --- | --- | --- |
+| Gate name | Stable short label | Keep the label identical across runs so evidence is easy to diff. |
+| Owner | Named role | One accountable owner for the gate decision. |
+| Numeric threshold | Exact metric + limit | Example: `p95 <= +15%`, `error_rate <= +0.5pp`. |
+| Evidence bundle | Canonical artifact paths | Include baseline, candidate, environment, and readiness/rollback artifacts. |
+| Freeze trigger | Exact hold condition | Missing evidence, threshold breach, or unstable variance freezes progression. |
+| Rollback trigger | Exact revert condition | Persistent failure, abort threshold breach, or runtime instability moves to rollback order. |
+
+Template rules:
+- If the evidence bundle is incomplete, treat the run as `HOLD`, not `PASS`.
+- If rollback trigger conditions are met, do not promote the stage even if the numeric threshold passed on a partial sample.

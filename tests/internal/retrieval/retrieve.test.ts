@@ -482,13 +482,12 @@ describe('retrieve internal pipeline', () => {
     FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
 
     const serviceClient = {
-      semanticSearch: jest
-        .fn()
-        .mockResolvedValueOnce([])
-        .mockResolvedValueOnce([
-          { path: 'src/fallback.ts', content: 'fallback result', relevanceScore: 0.91, lines: '1-2', matchType: 'semantic' },
-        ]),
-      localKeywordSearch: jest.fn(async () => []),
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/weak.ts', content: 'weak result', relevanceScore: 0.05, lines: '1-2', matchType: 'semantic' },
+      ]),
+      localKeywordSearch: jest.fn(async () => [
+        { path: 'src/fallback.ts', content: 'fallback result', relevanceScore: 0.91, lines: '1-2', matchType: 'keyword' },
+      ]),
     } as any;
 
     const response = await internalRetrieveCode('weak query', serviceClient, {
@@ -504,6 +503,8 @@ describe('retrieve internal pipeline', () => {
     expect(response.fallbackState).toBe('active');
     expect(response.results.some((item) => item.path === 'src/fallback.ts')).toBe(true);
     expect(response.flow?.stages).toEqual(expect.arrayContaining(['start', 'expanded_queries:1', 'handler:complete']));
+    expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
+    expect(serviceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
   });
 
   it('honors cancellation before retrieval work starts', async () => {

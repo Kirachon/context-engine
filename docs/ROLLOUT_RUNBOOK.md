@@ -30,6 +30,11 @@ Rollback matrix:
 - Output-noise regression in prompt context: disable `CE_CONTEXT_PACKS_V2`.
 - Any severe instability: set `CE_ROLLOUT_KILL_SWITCH=true` and move to `dark_launch`.
 
+Queue policy note:
+- Roll the queue through `observe -> shadow -> enforce`: dark launch uses `observe`, canary uses `shadow`, and controlled ramp/GA uses `enforce`.
+- `observe` and `shadow` only log saturation; `enforce` rejects overflow with retry hints.
+- Size the lanes with `CE_SEARCH_AND_ASK_QUEUE_MAX` and `CE_SEARCH_AND_ASK_QUEUE_MAX_BACKGROUND` before flipping `CE_SEARCH_AND_ASK_QUEUE_REJECT_MODE=enforce`.
+
 ## Readiness check (required before stage changes)
 
 Run this command from repo root:

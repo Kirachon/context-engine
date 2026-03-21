@@ -11,9 +11,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { performance } from 'perf_hooks';
-import { createHash } from 'crypto';
 import { ContextServiceClient } from '../src/mcp/serviceClient.js';
 import { internalRetrieveCode } from '../src/internal/handlers/retrieval.js';
+import { hashString, makeBenchProvenance, type BenchProvenance } from './ci/bench-provenance.js';
 
 type Mode = 'scan' | 'index' | 'search' | 'retrieve';
 type RetrieveMode = 'fast' | 'deep';
@@ -227,7 +227,44 @@ function normalizeForHash(value: string): string {
 }
 
 function sha256Hex(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
+  return hashString(value);
+}
+
+function resolveDatasetId(workspace: string, datasetId: string | null): string {
+  if (datasetId && datasetId.trim()) {
+    return datasetId.trim();
+  }
+  return `workspace:${path.basename(workspace) || 'root'}`;
+}
+
+function resolveDatasetHash(args: {
+  mode: Mode;
+  workspace: string;
+  query: string;
+  topK: number;
+  readFiles: boolean;
+  cold: boolean;
+  bypassCache: boolean;
+  retrieveMode: RetrieveMode;
+}): string {
+  const normalizedWorkspace = path.resolve(args.workspace).replace(/\\/g, '/');
+  const workload =
+    args.mode === 'scan'
+      ? {
+          bench_mode: args.mode,
+          workspace: normalizedWorkspace,
+          read_files: args.readFiles,
+        }
+      : {
+          bench_mode: args.mode,
+          workspace: normalizedWorkspace,
+          query: args.query,
+          top_k: args.topK,
+          cold: args.cold,
+          bypass_cache: args.bypassCache,
+          retrieve_mode: args.mode === 'retrieve' ? args.retrieveMode : 'search',
+        };
+  return sha256Hex(JSON.stringify(workload));
 }
 
 function getDeterministicQueries(args: Args): {
@@ -572,7 +609,28 @@ async function main(): Promise<void> {
   }
 
   const totalMs = performance.now() - started;
-  const out = { meta, total_ms: totalMs, payload };
+  const datasetId = resolveDatasetId(args.workspace, deterministicQueries.dataset_id);
+  const datasetHash =
+    deterministicQueries.dataset_hash && deterministicQueries.dataset_hash.trim()
+      ? deterministicQueries.dataset_hash
+      : resolveDatasetHash({
+          mode: args.mode,
+          workspace: args.workspace,
+          query: deterministicQueries.queries[0] ?? args.query,
+          topK: args.topK,
+          readFiles: args.readFiles,
+          cold: args.cold,
+          bypassCache: args.bypassCache,
+          retrieveMode: args.retrieveMode,
+        });
+  const provenance: BenchProvenance = makeBenchProvenance({
+    benchMode: args.mode === 'scan' ? 'scan' : args.mode === 'retrieve' ? 'retrieve' : 'search',
+    workspace: args.workspace,
+    retrievalProvider: retrievalProvider.provider,
+    datasetId,
+    datasetHash,
+  });
+  const out = { meta, total_ms: totalMs, payload, provenance };
   (out.meta as Record<string, unknown>).dataset = {
     source: deterministicQueries.source,
     dataset_id: deterministicQueries.dataset_id,
