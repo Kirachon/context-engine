@@ -89,12 +89,14 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
     delete process.env.CE_METRICS;
     delete process.env.CE_RETRIEVAL_SQLITE_FTS5_V1;
+    delete process.env.CE_RETRIEVAL_LANCEDB_V1;
     delete featureFlags.retrieval_chunk_search_v1;
     delete featureFlags.retrieval_provider_v2;
     delete featureFlags.retrieval_artifacts_v2;
     delete featureFlags.retrieval_shadow_control_v2;
     delete featureFlags.retrieval_tree_sitter_v1;
     delete featureFlags.retrieval_sqlite_fts5_v1;
+    delete featureFlags.retrieval_lancedb_v1;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -111,6 +113,7 @@ describe('ContextServiceClient', () => {
     featureFlags.retrieval_shadow_control_v2 = false;
     featureFlags.retrieval_tree_sitter_v1 = false;
     featureFlags.retrieval_sqlite_fts5_v1 = false;
+    featureFlags.retrieval_lancedb_v1 = false;
   });
 
   describe('Feature flags', () => {
@@ -118,6 +121,12 @@ describe('ContextServiceClient', () => {
       process.env.CE_RETRIEVAL_SQLITE_FTS5_V1 = 'true';
       const flags = getFeatureFlagsFromEnv();
       expect(flags.retrieval_sqlite_fts5_v1).toBe(true);
+    });
+
+    it('should parse the LanceDB vector flag from env', () => {
+      process.env.CE_RETRIEVAL_LANCEDB_V1 = 'true';
+      const flags = getFeatureFlagsFromEnv();
+      expect(flags.retrieval_lancedb_v1).toBe(true);
     });
   });
 
@@ -349,6 +358,7 @@ describe('ContextServiceClient', () => {
       FEATURE_FLAGS.retrieval_provider_v2 = true;
       FEATURE_FLAGS.retrieval_artifacts_v2 = true;
       FEATURE_FLAGS.retrieval_chunk_search_v1 = true;
+      FEATURE_FLAGS.retrieval_lancedb_v1 = false;
 
       const localClient = new ContextServiceClient(testWorkspace);
       const runtimeMetadata = localClient.getRetrievalRuntimeMetadata();
@@ -372,6 +382,24 @@ describe('ContextServiceClient', () => {
       });
       expect(artifactMetadata.workspace_fingerprint).toMatch(/^workspace:/);
       expect(artifactMetadata.env_fingerprint).toMatch(/^env:/);
+    });
+
+    it('should record the LanceDB vector engine when the vector flag is enabled', () => {
+      FEATURE_FLAGS.retrieval_provider_v2 = true;
+      FEATURE_FLAGS.retrieval_artifacts_v2 = true;
+      FEATURE_FLAGS.retrieval_lancedb_v1 = true;
+
+      const localClient = new ContextServiceClient(testWorkspace);
+      const artifactMetadata = localClient.getRetrievalArtifactMetadata({
+        fallbackDomain: 'retrieval',
+        fallbackReason: 'vector_backend_enabled',
+      });
+
+      expect(artifactMetadata.retrieval_engine_version).toBe('lancedb-vector-v1');
+      expect(artifactMetadata.embedding_model_id).toBe('hash-32');
+      expect(artifactMetadata.vector_dimension).toBe(32);
+      expect(artifactMetadata.fallback_domain).toBe('retrieval');
+      expect(artifactMetadata.fallback_reason).toBe('vector_backend_enabled');
     });
   });
 

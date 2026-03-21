@@ -5,14 +5,18 @@ import { FEATURE_FLAGS } from '../../../src/config/features.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createHashEmbeddingRuntime } from '../../../src/internal/retrieval/embeddingRuntime.js';
+import { createWorkspaceLanceDbVectorRetriever } from '../../../src/internal/retrieval/lancedbVectorIndex.js';
 
 describe('retrieve internal pipeline', () => {
   const originalEnv = { ...process.env };
   const originalQualityGuard = FEATURE_FLAGS.retrieval_quality_guard_v1;
+  const originalLanceDbFlag = FEATURE_FLAGS.retrieval_lancedb_v1;
 
   afterEach(() => {
     process.env = { ...originalEnv };
     FEATURE_FLAGS.retrieval_quality_guard_v1 = originalQualityGuard;
+    FEATURE_FLAGS.retrieval_lancedb_v1 = originalLanceDbFlag;
     setInternalCache(undefined);
   });
 
@@ -124,6 +128,49 @@ describe('retrieve internal pipeline', () => {
     expect(results.length).toBeGreaterThan(0);
     expect((results[0] as any).retrievalSource).toBe('dense');
     expect(fs.existsSync(path.join(tmp, '.augment-dense-index.json'))).toBe(true);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('uses LanceDB vector retriever when enableDense is true and the LanceDB flag is enabled', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-retrieve-lancedb-default-'));
+    const sampleFile = path.join(tmp, 'src', 'vector.ts');
+    const secondaryFile = path.join(tmp, 'src', 'schema.ts');
+    fs.mkdirSync(path.dirname(sampleFile), { recursive: true });
+    fs.writeFileSync(sampleFile, 'export const vector = "vector retrieval";', 'utf8');
+    fs.writeFileSync(secondaryFile, 'export const schema = "database schema";', 'utf8');
+    fs.writeFileSync(path.join(tmp, '.augment-index-state.json'), JSON.stringify({
+      files: {
+        'src/vector.ts': { hash: 'hvector1', indexed_at: new Date().toISOString() },
+        'src/schema.ts': { hash: 'hschema1', indexed_at: new Date().toISOString() },
+      },
+    }), 'utf8');
+
+    FEATURE_FLAGS.retrieval_lancedb_v1 = true;
+
+    const serviceClient = {
+      workspacePath: tmp,
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+    const denseProvider = createWorkspaceLanceDbVectorRetriever({
+      workspacePath: tmp,
+      embeddingRuntime: createHashEmbeddingRuntime(32),
+    });
+
+    const results = await retrieve('vector retrieval', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableDense: true,
+      enableFusion: true,
+      denseWeight: 1,
+      denseProvider,
+      topK: 5,
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect((results[0] as any).retrievalSource).toBe('dense');
+    expect(fs.existsSync(path.join(tmp, '.augment-lancedb-index.json'))).toBe(true);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

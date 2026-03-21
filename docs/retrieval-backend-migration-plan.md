@@ -155,6 +155,10 @@ Current state that this plan builds on:
 - **Validation**:
   - Adapter smoke tests and artifact metadata checks
 
+**Implementation note**:
+- The codebase now has a dedicated embedding runtime seam in `src/internal/retrieval/embeddingRuntime.ts`.
+- The default runtime remains local and deterministic for now, which keeps the eventual swap to a real local model bounded to one adapter.
+
 ### Task 4.2: Build the LanceDB Index Path
 - **Location**: `src/internal/retrieval/`, workspace artifact files
 - **Description**: Persist and query the MVP vector index through a single LanceDB-backed path.

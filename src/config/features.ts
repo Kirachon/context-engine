@@ -39,6 +39,8 @@ export interface FeatureFlags {
   retrieval_chunk_search_v1: boolean;
   /** Enable SQLite FTS5 lexical search backend for keyword fallback. */
   retrieval_sqlite_fts5_v1: boolean;
+  /** Enable LanceDB-backed vector search backend for the MVP vector path. */
+  retrieval_lancedb_v1: boolean;
 }
 
 export function getFeatureFlagsFromEnv(): FeatureFlags {
@@ -62,6 +64,7 @@ export function getFeatureFlagsFromEnv(): FeatureFlags {
    retrieval_tree_sitter_v1: envBool('CE_RETRIEVAL_TREE_SITTER_V1', false),
    retrieval_chunk_search_v1: envBool('CE_RETRIEVAL_CHUNK_SEARCH_V1', false),
    retrieval_sqlite_fts5_v1: envBool('CE_RETRIEVAL_SQLITE_FTS5_V1', false),
+   retrieval_lancedb_v1: envBool('CE_RETRIEVAL_LANCEDB_V1', false),
  };
 }
 

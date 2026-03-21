@@ -1202,11 +1202,23 @@ export class ContextServiceClient {
   getRetrievalArtifactMetadata(
     options?: RetrievalArtifactMetadataOptions
   ): RetrievalArtifactV2Metadata {
+    const retrievalEngineVersion = featureEnabled('retrieval_lancedb_v1')
+      ? 'lancedb-vector-v1'
+      : 'local-native-v1';
+    const embeddingModelId = featureEnabled('retrieval_lancedb_v1')
+      ? 'hash-32'
+      : 'hash-128';
+    const vectorDimension = featureEnabled('retrieval_lancedb_v1')
+      ? 32
+      : 128;
     return buildRetrievalArtifactV2Metadata({
       retrieval_provider: this.retrievalProviderId,
       workspace_path: this.workspacePath,
       index_fingerprint: this.getIndexFingerprint(),
       feature_flags_snapshot: snapshotRetrievalV2FeatureFlags(),
+      retrieval_engine_version: retrievalEngineVersion,
+      embedding_model_id: embeddingModelId,
+      vector_dimension: vectorDimension,
       fallback_domain: options?.fallbackDomain ?? 'unknown',
       fallback_reason: options?.fallbackReason ?? null,
     });

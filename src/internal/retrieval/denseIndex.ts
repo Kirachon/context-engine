@@ -3,7 +3,8 @@ import * as path from 'path';
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import { envInt } from '../../config/env.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
-import type { DenseRetriever, EmbeddingProvider } from './embeddingProvider.js';
+import type { DenseRetriever } from './embeddingProvider.js';
+import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
 const DENSE_INDEX_FILE_NAME = '.augment-dense-index.json';
 const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
@@ -23,6 +24,8 @@ interface DenseIndexEntry {
 interface DenseIndexFile {
   version: number;
   embedding_provider: string;
+  embedding_model_id: string;
+  vector_dimension: number;
   updated_at: string;
   docs: Record<string, DenseIndexEntry>;
 }
@@ -38,7 +41,7 @@ interface IndexStateFile {
 
 export interface WorkspaceDenseRetrieverOptions {
   workspacePath: string;
-  embeddingProvider: EmbeddingProvider;
+  embeddingRuntime: EmbeddingRuntime;
   denseIndexPath?: string;
   indexStatePath?: string;
 }
@@ -94,10 +97,12 @@ function readIndexState(filePath: string): IndexStateFile {
   return { files: parsed.files as Record<string, IndexStateFileEntry> };
 }
 
-function readDenseIndex(filePath: string, providerId: string): DenseIndexFile {
+function readDenseIndex(filePath: string, embeddingRuntime: EmbeddingRuntime): DenseIndexFile {
   const fallback: DenseIndexFile = {
     version: INDEX_VERSION,
-    embedding_provider: providerId,
+    embedding_provider: embeddingRuntime.id,
+    embedding_model_id: embeddingRuntime.modelId,
+    vector_dimension: embeddingRuntime.vectorDimension,
     updated_at: new Date(0).toISOString(),
     docs: {},
   };
@@ -106,12 +111,18 @@ function readDenseIndex(filePath: string, providerId: string): DenseIndexFile {
   if (!parsed || typeof parsed !== 'object') {
     return fallback;
   }
-  if (parsed.embedding_provider !== providerId) {
+  if (parsed.embedding_provider !== embeddingRuntime.id) {
     return fallback;
   }
   return {
     version: typeof parsed.version === 'number' ? parsed.version : INDEX_VERSION,
-    embedding_provider: providerId,
+    embedding_provider: embeddingRuntime.id,
+    embedding_model_id: typeof parsed.embedding_model_id === 'string'
+      ? parsed.embedding_model_id
+      : embeddingRuntime.modelId,
+    vector_dimension: typeof parsed.vector_dimension === 'number'
+      ? parsed.vector_dimension
+      : embeddingRuntime.vectorDimension,
     updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : fallback.updated_at,
     docs: parsed.docs && typeof parsed.docs === 'object' ? (parsed.docs as Record<string, DenseIndexEntry>) : {},
   };
@@ -145,7 +156,7 @@ async function refreshDenseIndex(
   workspacePath: string,
   denseIndex: DenseIndexFile,
   indexState: IndexStateFile,
-  embeddingProvider: EmbeddingProvider
+  embeddingRuntime: EmbeddingRuntime
 ): Promise<DenseIndexFile> {
   const refreshMaxDocs = envInt(
     'CE_DENSE_REFRESH_MAX_DOCS',
@@ -206,22 +217,22 @@ async function refreshDenseIndex(
       const batchDocs = toEmbedDocs.slice(i, i + embedBatchSize);
       const batchPaths = toEmbedPaths.slice(i, i + embedBatchSize);
       const batchStart = Date.now();
-      const embeddings = await embeddingProvider.embedDocuments(batchDocs);
+      const embeddings = await embeddingRuntime.embedDocuments(batchDocs);
       observeDurationMs(
         'context_engine_dense_embed_batch_duration_seconds',
-        { provider: embeddingProvider.id },
+        { provider: embeddingRuntime.id },
         Date.now() - batchStart,
         { help: 'Dense embedding batch duration in seconds.' }
       );
       incCounter(
         'context_engine_dense_embed_batches_total',
-        { provider: embeddingProvider.id },
+        { provider: embeddingRuntime.id },
         1,
         'Total dense embedding batches.'
       );
       incCounter(
         'context_engine_dense_embed_docs_total',
-        { provider: embeddingProvider.id },
+        { provider: embeddingRuntime.id },
         batchDocs.length,
         'Total dense embedding documents processed.'
       );
@@ -235,20 +246,22 @@ async function refreshDenseIndex(
 
   observeDurationMs(
     'context_engine_dense_refresh_duration_seconds',
-    { provider: embeddingProvider.id },
+    { provider: embeddingRuntime.id },
     Date.now() - refreshStart,
     { help: 'Dense refresh duration in seconds.' }
   );
   incCounter(
     'context_engine_dense_refresh_docs_total',
-    { provider: embeddingProvider.id },
+    { provider: embeddingRuntime.id },
     refreshedDocs,
     'Total dense-refresh docs recomputed.'
   );
 
   return {
     version: INDEX_VERSION,
-    embedding_provider: embeddingProvider.id,
+    embedding_provider: embeddingRuntime.id,
+    embedding_model_id: embeddingRuntime.modelId,
+    vector_dimension: embeddingRuntime.vectorDimension,
     updated_at: nowIso,
     docs: nextDocs,
   };
@@ -259,20 +272,20 @@ export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOp
   const indexStatePath = options.indexStatePath ?? path.join(options.workspacePath, INDEX_STATE_FILE_NAME);
 
   return {
-    id: `dense:${options.embeddingProvider.id}`,
+    id: `dense:${options.embeddingRuntime.id}`,
     async search(query: string, topK: number): Promise<SearchResult[]> {
       const safeTopK = clampTopK(topK);
       const indexState = readIndexState(indexStatePath);
-      const existingDense = readDenseIndex(denseIndexPath, options.embeddingProvider.id);
+      const existingDense = readDenseIndex(denseIndexPath, options.embeddingRuntime);
       const refreshedDense = await refreshDenseIndex(
         options.workspacePath,
         existingDense,
         indexState,
-        options.embeddingProvider
+        options.embeddingRuntime
       );
       safeWriteJson(denseIndexPath, refreshedDense);
 
-      const queryEmbedding = await options.embeddingProvider.embedQuery(query);
+      const queryEmbedding = await options.embeddingRuntime.embedQuery(query);
       const ranked = Object.values(refreshedDense.docs)
         .map((doc) => {
           const score = cosineSimilarity(queryEmbedding, doc.embedding);

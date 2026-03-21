@@ -1,7 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createHashEmbeddingProvider } from '../../../src/internal/retrieval/embeddingProvider.js';
+import { createHashEmbeddingRuntime } from '../../../src/internal/retrieval/embeddingRuntime.js';
 import { createWorkspaceDenseRetriever } from '../../../src/internal/retrieval/denseIndex.js';
 
 function writeJson(filePath: string, value: unknown): void {
@@ -40,16 +40,22 @@ describe('createWorkspaceDenseRetriever', () => {
       workspacePath: tmp,
       indexStatePath,
       denseIndexPath,
-      embeddingProvider: createHashEmbeddingProvider(32),
+      embeddingRuntime: createHashEmbeddingRuntime(32),
     });
 
     const first = await retriever.search('auth', 5);
     expect(first.length).toBeGreaterThan(0);
     expect(fs.existsSync(denseIndexPath)).toBe(true);
 
-    const firstIndex = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as { docs: Record<string, { hash: string }> };
+    const firstIndex = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as {
+      embedding_model_id: string;
+      vector_dimension: number;
+      docs: Record<string, { hash: string }>;
+    };
     expect(Object.keys(firstIndex.docs).sort()).toEqual(['src/a.ts', 'src/b.ts']);
     expect(firstIndex.docs['src/a.ts'].hash).toBe('h1');
+    expect(firstIndex.embedding_model_id).toBe('hash-32');
+    expect(firstIndex.vector_dimension).toBe(32);
 
     fs.writeFileSync(fileA, 'export const alpha = "auth login updated";', 'utf8');
     writeJson(indexStatePath, {
@@ -61,10 +67,16 @@ describe('createWorkspaceDenseRetriever', () => {
     const second = await retriever.search('updated auth', 5);
     expect(second.length).toBeGreaterThan(0);
 
-    const secondIndex = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as { docs: Record<string, { hash: string; content: string }> };
+    const secondIndex = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as {
+      embedding_model_id: string;
+      vector_dimension: number;
+      docs: Record<string, { hash: string; content: string }>;
+    };
     expect(Object.keys(secondIndex.docs)).toEqual(['src/a.ts']);
     expect(secondIndex.docs['src/a.ts'].hash).toBe('h1b');
     expect(secondIndex.docs['src/a.ts'].content).toContain('updated');
+    expect(secondIndex.embedding_model_id).toBe('hash-32');
+    expect(secondIndex.vector_dimension).toBe(32);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
@@ -97,7 +109,11 @@ describe('createWorkspaceDenseRetriever', () => {
       workspacePath: tmp,
       indexStatePath,
       denseIndexPath,
-      embeddingProvider,
+      embeddingRuntime: {
+        ...embeddingProvider,
+        modelId: 'test-model',
+        vectorDimension: 3,
+      },
     });
 
     const results = await retriever.search('dense', 10);
@@ -106,9 +122,15 @@ describe('createWorkspaceDenseRetriever', () => {
     expect(embeddingProvider.embedDocuments).toHaveBeenNthCalledWith(1, [expect.stringContaining('file0')]);
     expect(embeddingProvider.embedDocuments).toHaveBeenNthCalledWith(2, [expect.stringContaining('file1')]);
 
-    const denseFile = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as { docs: Record<string, unknown> };
+    const denseFile = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as {
+      embedding_model_id: string;
+      vector_dimension: number;
+      docs: Record<string, unknown>;
+    };
     expect(Object.keys(denseFile.docs).length).toBe(2);
     expect(Object.keys(denseFile.docs).sort()).toEqual(['src/file-0.ts', 'src/file-1.ts']);
+    expect(denseFile.embedding_model_id).toBe('test-model');
+    expect(denseFile.vector_dimension).toBe(3);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

@@ -6,7 +6,8 @@ import { expandQuery } from './expandQuery.js';
 import { dedupeResults } from './dedupe.js';
 import { scoreDenseCandidates } from './dense.js';
 import { createWorkspaceDenseRetriever } from './denseIndex.js';
-import { createHashEmbeddingProvider } from './embeddingProvider.js';
+import { createWorkspaceLanceDbVectorRetriever } from './lancedbVectorIndex.js';
+import { createHashEmbeddingRuntime } from './embeddingRuntime.js';
 import { fuseCandidates } from './fusion.js';
 import {
   assertRetrievalFlowActive,
@@ -191,9 +192,19 @@ function resolveDenseProvider(
     ? ((serviceClient as unknown as { workspacePath: string }).workspacePath)
     : process.cwd();
 
+  const embeddingRuntime = featureEnabled('retrieval_lancedb_v1')
+    ? createHashEmbeddingRuntime(32)
+    : createHashEmbeddingRuntime();
+  if (featureEnabled('retrieval_lancedb_v1')) {
+    return createWorkspaceLanceDbVectorRetriever({
+      workspacePath,
+      embeddingRuntime,
+    });
+  }
+
   return createWorkspaceDenseRetriever({
     workspacePath,
-    embeddingProvider: createHashEmbeddingProvider(),
+    embeddingRuntime,
   });
 }
 

@@ -21,6 +21,7 @@ Runtime and rollout control flags used by operators.
 | `CE_RETRIEVAL_TREE_SITTER_V1` | boolean | `false` | Search owner | Enables Tree-sitter-backed parser extraction for supported code files with heuristic fallback. |
 | `CE_RETRIEVAL_CHUNK_SEARCH_V1` | boolean | `false` | Search owner | Enables the chunk-aware exact search foundation for the next retrieval phase. |
 | `CE_RETRIEVAL_SQLITE_FTS5_V1` | boolean | `false` | Search owner | Enables the SQLite FTS5 lexical backend for keyword fallback when available. |
+| `CE_RETRIEVAL_LANCEDB_V1` | boolean | `false` | Search owner | Enables the LanceDB-backed vector backend for the MVP vector path when dense retrieval is requested. |
 
 ## Queue policy flags
 
