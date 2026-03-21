@@ -372,3 +372,23 @@ Behavior:
   - `--max-regression-pct 5`
   - `--max-regression-abs 15`
 - Fails with a clear error if fewer than 3 candidate runs succeed.
+
+### Combined retrieval backend migration gate
+
+Use this when you want one CI-friendly gate that checks:
+- benchmark provenance and latency regression using `scripts/ci/bench-compare.ts`
+- retrieval quality evidence using `scripts/ci/check-retrieval-quality-gate.ts`
+
+```bash
+node --import tsx scripts/ci/check-retrieval-bench-gate.ts \
+  --baseline artifacts/bench/pr-baseline.json \
+  --candidate artifacts/bench/pr-candidate.json \
+  --quality-report artifacts/bench/retrieval-quality-report.json
+```
+
+Behavior:
+- validates the benchmark artifact provenance lock before comparing latency
+- compares `payload.timing.p95_ms` by default with `10%` and `25ms` regression limits
+- runs the nested retrieval quality gate against the supplied quality report
+- fails if either the latency/provenance compare or quality gate fails
+- writes a combined gate artifact plus the nested quality-gate artifact for CI inspection

@@ -159,4 +159,22 @@ describe('sqlite lexical index', () => {
     const results = await index.search('needle', 5);
     expect(results.length).toBeGreaterThan(0);
   });
+
+  it('recovers from a corrupt sqlite artifact on first load', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(workspacePath, 'src/alpha.ts', 'const alpha = "needle";');
+
+    const dbPath = path.join(workspacePath, '.augment-lexical-index.sqlite');
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+
+    await index.refresh();
+    index.clearCache?.();
+    fs.writeFileSync(dbPath, 'not-a-sqlite-db', 'utf8');
+
+    const results = await index.search('needle', 5);
+    expect(results.length).toBeGreaterThan(0);
+    expect(fs.existsSync(dbPath)).toBe(true);
+  });
 });

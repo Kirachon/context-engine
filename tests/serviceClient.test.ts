@@ -263,6 +263,46 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it('should fall back to a full lexical refresh when incremental refresh fails', async () => {
+      featureFlags.retrieval_sqlite_fts5_v1 = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-lexical-refresh-fallback-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'alpha.ts'),
+        'export const alpha = "needle one";',
+        'utf-8'
+      );
+
+      const refreshClient = new ContextServiceClient(tempDir);
+      const lexicalEngine = {
+        search: jest.fn(async () => []),
+        applyWorkspaceChanges: jest.fn(async () => {
+          throw new Error('incremental refresh failed');
+        }),
+        refresh: jest.fn(async () => undefined),
+        clearCache: jest.fn(),
+      };
+      const getLexicalEngineSpy = jest
+        .spyOn(refreshClient as any, 'getLexicalSqliteSearchEngine')
+        .mockReturnValue(lexicalEngine);
+      const indexFilesSpy = jest
+        .spyOn(refreshClient as any, 'indexFiles')
+        .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
+
+      await refreshClient.applyWorkspaceChanges([
+        { type: 'change', path: 'src/alpha.ts' },
+      ]);
+
+      expect(getLexicalEngineSpy).toHaveBeenCalledTimes(1);
+      expect(lexicalEngine.applyWorkspaceChanges).toHaveBeenCalledTimes(1);
+      expect(lexicalEngine.refresh).toHaveBeenCalledTimes(1);
+      expect(indexFilesSpy).toHaveBeenCalledWith(['src/alpha.ts']);
+
+      getLexicalEngineSpy.mockRestore();
+      indexFilesSpy.mockRestore();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
     it('should route local_native semantic search via provider boundary without touching legacy runtime parsing path', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-provider-dispatch-'));
@@ -379,6 +419,10 @@ describe('ContextServiceClient', () => {
         index_fingerprint: expect.any(String),
         fallback_domain: 'retrieval',
         fallback_reason: 'provider_empty_array',
+        shadow_compare: {
+          enabled: true,
+          sampleRate: 0.25,
+        },
       });
       expect(artifactMetadata.workspace_fingerprint).toMatch(/^workspace:/);
       expect(artifactMetadata.env_fingerprint).toMatch(/^env:/);

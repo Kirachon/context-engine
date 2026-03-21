@@ -250,6 +250,13 @@ export interface RetrievalArtifactMetadataOptions {
   fallbackReason?: string | null;
 }
 
+export type RetrievalArtifactObservability = RetrievalArtifactV2Metadata & {
+  shadow_compare: {
+    enabled: boolean;
+    sampleRate: number;
+  };
+};
+
 export interface WorkspaceFileChange {
   type: 'add' | 'change' | 'unlink';
   path: string;
@@ -1201,7 +1208,8 @@ export class ContextServiceClient {
 
   getRetrievalArtifactMetadata(
     options?: RetrievalArtifactMetadataOptions
-  ): RetrievalArtifactV2Metadata {
+  ): RetrievalArtifactObservability {
+    const shadowCompare = this.getConfiguredShadowCompareState();
     const retrievalEngineVersion = featureEnabled('retrieval_lancedb_v1')
       ? 'lancedb-vector-v1'
       : 'local-native-v1';
@@ -1211,7 +1219,8 @@ export class ContextServiceClient {
     const vectorDimension = featureEnabled('retrieval_lancedb_v1')
       ? 32
       : 128;
-    return buildRetrievalArtifactV2Metadata({
+    return {
+      ...buildRetrievalArtifactV2Metadata({
       retrieval_provider: this.retrievalProviderId,
       workspace_path: this.workspacePath,
       index_fingerprint: this.getIndexFingerprint(),
@@ -1221,7 +1230,12 @@ export class ContextServiceClient {
       vector_dimension: vectorDimension,
       fallback_domain: options?.fallbackDomain ?? 'unknown',
       fallback_reason: options?.fallbackReason ?? null,
-    });
+      }),
+      shadow_compare: {
+        enabled: shadowCompare.enabled,
+        sampleRate: shadowCompare.sampleRate,
+      },
+    } as RetrievalArtifactObservability;
   }
 
   getActiveAIModelLabel(): string {

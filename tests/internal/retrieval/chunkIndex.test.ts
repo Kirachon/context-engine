@@ -373,4 +373,31 @@ describe('workspace chunk search index', () => {
     expect(results[0].path).toBe('src/real.ts');
     expect(results.some((result) => result.path.startsWith('artifacts/'))).toBe(false);
   });
+
+  it('recovers from a corrupt chunk sidecar on first load', async () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/recover.ts',
+      [
+        'export function recoverNeedle() {',
+        '  return "needle target";',
+        '}',
+      ].join('\n')
+    );
+
+    writeIndexState(tempDir, {
+      'src/recover.ts': { hash: 'hash-recover-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    fs.writeFileSync(path.join(tempDir, '.augment-chunk-index.json'), 'corrupt-chunk-json', 'utf8');
+
+    const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+    const results = await index.search('needle target', 5);
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe('src/recover.ts');
+    expect(fs.existsSync(path.join(tempDir, '.augment-chunk-index.json'))).toBe(true);
+  });
 });

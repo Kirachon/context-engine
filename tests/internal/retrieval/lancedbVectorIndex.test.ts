@@ -78,4 +78,35 @@ describe('createWorkspaceLanceDbVectorRetriever', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('recovers from a corrupt LanceDB sidecar path on first load', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-lancedb-recover-'));
+    const fileA = path.join(tmp, 'src', 'a.ts');
+    fs.mkdirSync(path.dirname(fileA), { recursive: true });
+    fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
+
+    const indexStatePath = path.join(tmp, '.augment-index-state.json');
+    const vectorIndexPath = path.join(tmp, '.augment-lancedb-index.json');
+    const vectorDbPath = path.join(tmp, '.augment-lancedb');
+
+    writeJson(indexStatePath, {
+      files: {
+        'src/a.ts': { hash: 'h1', indexed_at: new Date().toISOString() },
+      },
+    });
+    fs.writeFileSync(vectorDbPath, 'corrupt-vector-db-path', 'utf8');
+
+    const retriever = createWorkspaceLanceDbVectorRetriever({
+      workspacePath: tmp,
+      indexStatePath,
+      vectorDbPath,
+      embeddingRuntime: createHashEmbeddingRuntime(32),
+    });
+
+    const results = await retriever.search('auth', 5);
+    expect(results.length).toBeGreaterThan(0);
+    expect(fs.existsSync(vectorIndexPath)).toBe(true);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

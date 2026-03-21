@@ -161,9 +161,25 @@ function getLinesPreview(content: string): string {
 async function getConnection(vectorDbPath: string): Promise<lancedb.Connection> {
   const cached = connectionCache.get(vectorDbPath);
   if (cached) return cached;
-  const promise = lancedb.connect(vectorDbPath);
+  const promise = lancedb.connect(vectorDbPath).catch((error) => {
+    connectionCache.delete(vectorDbPath);
+    throw error;
+  });
   connectionCache.set(vectorDbPath, promise);
   return promise;
+}
+
+function resetVectorConnection(vectorDbPath: string): void {
+  connectionCache.delete(vectorDbPath);
+}
+
+function removeVectorArtifacts(vectorDbPath: string): void {
+  resetVectorConnection(vectorDbPath);
+  try {
+    fs.rmSync(vectorDbPath, { recursive: true, force: true });
+  } catch {
+    // ignore delete failures; callers will retry with a fresh path if possible
+  }
 }
 
 async function hasTable(connection: lancedb.Connection, tableName: string): Promise<boolean> {
@@ -488,55 +504,68 @@ export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbV
     id: `lancedb:${options.embeddingRuntime.id}`,
     async search(query: string, topK: number): Promise<SearchResult[]> {
       const safeTopK = clampTopK(topK);
-      const indexState = readIndexState(indexStatePath);
-      const existingVectorIndex = readVectorIndex(vectorIndexPath, options.embeddingRuntime);
-      const refreshedVectorIndex = await refreshVectorIndex(
-        options.workspacePath,
-        vectorDbPath,
-        existingVectorIndex,
-        indexState,
-        options.embeddingRuntime
-      );
-      safeWriteJson(vectorIndexPath, refreshedVectorIndex);
+      const runSearch = async (): Promise<SearchResult[]> => {
+        const indexState = readIndexState(indexStatePath);
+        const existingVectorIndex = readVectorIndex(vectorIndexPath, options.embeddingRuntime);
+        const refreshedVectorIndex = await refreshVectorIndex(
+          options.workspacePath,
+          vectorDbPath,
+          existingVectorIndex,
+          indexState,
+          options.embeddingRuntime
+        );
+        safeWriteJson(vectorIndexPath, refreshedVectorIndex);
 
-      const connection = await getConnection(vectorDbPath);
-      if (!(await hasTable(connection, TABLE_NAME))) {
-        return [];
+        const connection = await getConnection(vectorDbPath);
+        if (!(await hasTable(connection, TABLE_NAME))) {
+          return [];
+        }
+        const table = await loadTable(connection, TABLE_NAME);
+        if (!table) {
+          return [];
+        }
+
+        const queryEmbedding = await options.embeddingRuntime.embedQuery(query);
+        const rows = await table.vectorSearch(queryEmbedding).limit(safeTopK).toArray();
+        const ranked = rows
+          .map((row) => {
+            const distance = typeof row._distance === 'number' ? row._distance : Number.POSITIVE_INFINITY;
+            const relevanceScore = Number.isFinite(distance)
+              ? Math.max(0, Math.min(1, 1 - (distance / 2)))
+              : 0;
+            const content = typeof row.content === 'string' ? row.content : '';
+            return {
+              path: typeof row.path === 'string' ? row.path : '',
+              content,
+              lines: typeof row.lines === 'string' ? row.lines : content,
+              relevanceScore,
+              score: relevanceScore,
+              matchType: 'semantic' as const,
+              retrievedAt: refreshedVectorIndex.updated_at,
+              chunkId: typeof row.path === 'string' ? row.path : undefined,
+            };
+          })
+          .filter((row) => row.path.length > 0)
+          .sort((a, b) => {
+            if ((b.relevanceScore ?? 0) !== (a.relevanceScore ?? 0)) {
+              return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
+            }
+            return a.path.localeCompare(b.path);
+          });
+
+        return ranked.slice(0, safeTopK);
+      };
+
+      try {
+        return await runSearch();
+      } catch {
+        removeVectorArtifacts(vectorDbPath);
+        try {
+          return await runSearch();
+        } catch {
+          return [];
+        }
       }
-      const table = await loadTable(connection, TABLE_NAME);
-      if (!table) {
-        return [];
-      }
-
-      const queryEmbedding = await options.embeddingRuntime.embedQuery(query);
-      const rows = await table.vectorSearch(queryEmbedding).limit(safeTopK).toArray();
-      const ranked = rows
-        .map((row) => {
-          const distance = typeof row._distance === 'number' ? row._distance : Number.POSITIVE_INFINITY;
-          const relevanceScore = Number.isFinite(distance)
-            ? Math.max(0, Math.min(1, 1 - (distance / 2)))
-            : 0;
-          const content = typeof row.content === 'string' ? row.content : '';
-          return {
-            path: typeof row.path === 'string' ? row.path : '',
-            content,
-            lines: typeof row.lines === 'string' ? row.lines : content,
-            relevanceScore,
-            score: relevanceScore,
-            matchType: 'semantic' as const,
-            retrievedAt: refreshedVectorIndex.updated_at,
-            chunkId: typeof row.path === 'string' ? row.path : undefined,
-          };
-        })
-        .filter((row) => row.path.length > 0)
-        .sort((a, b) => {
-          if ((b.relevanceScore ?? 0) !== (a.relevanceScore ?? 0)) {
-            return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
-          }
-          return a.path.localeCompare(b.path);
-        });
-
-      return ranked.slice(0, safeTopK);
     },
   };
 }

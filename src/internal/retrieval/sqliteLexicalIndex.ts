@@ -356,17 +356,86 @@ export function createWorkspaceLexicalSearchIndex(
   };
   let initialized = false;
 
+  const resetDbState = (): void => {
+    if (dbInstance) {
+      try {
+        dbInstance.close();
+      } catch {
+        // ignore close errors
+      } finally {
+        dbInstance = null;
+      }
+    }
+    if (dbPromise) {
+      dbPromise
+        .then((db) => {
+          try {
+            db.close();
+          } catch {
+            // ignore close errors
+          }
+        })
+        .catch(() => {
+          // ignore promise cleanup failures
+        });
+    }
+    dbPromise = null;
+    initialized = false;
+    lastSnapshot = {
+      version: INDEX_SCHEMA_VERSION,
+      updatedAt: null,
+      fileCount: 0,
+      chunkCount: 0,
+    };
+  };
+
+  const removeSqliteArtifact = (): void => {
+    try {
+      if (fs.existsSync(sqlitePath)) {
+        fs.unlinkSync(sqlitePath);
+      }
+    } catch {
+      // ignore delete failures; recovery can still continue on a fresh path
+    }
+  };
+
+  const recoverFromCorruptDb = (): void => {
+    resetDbState();
+    removeSqliteArtifact();
+  };
+
   const ensureDb = async (): Promise<DatabaseSyncInstance> => {
     if (!dbPromise) {
       dbPromise = (async () => {
-        const nodeRequire = createRequire(import.meta.url);
-        const moduleExports = nodeRequire('node:sqlite') as unknown;
-        const sqliteModule = moduleExports as SqliteModule;
-        const db = new sqliteModule.DatabaseSync(sqlitePath);
-        createSchema(db);
-        dbInstance = db;
-        return db;
-      })();
+        const openDb = (): DatabaseSyncInstance => {
+          const nodeRequire = createRequire(import.meta.url);
+          const moduleExports = nodeRequire('node:sqlite') as unknown;
+          const sqliteModule = moduleExports as SqliteModule;
+          const db = new sqliteModule.DatabaseSync(sqlitePath);
+          try {
+            createSchema(db);
+            dbInstance = db;
+            return db;
+          } catch (error) {
+            try {
+              db.close();
+            } catch {
+              // ignore close errors while recovering from a corrupt artifact
+            }
+            throw error;
+          }
+        };
+
+        try {
+          return openDb();
+        } catch {
+          recoverFromCorruptDb();
+          return openDb();
+        }
+      })().catch((error) => {
+        dbPromise = null;
+        throw error;
+      });
     }
     return dbPromise;
   };
@@ -508,222 +577,227 @@ export function createWorkspaceLexicalSearchIndex(
   };
 
   const refresh = async (): Promise<SqliteLexicalIndexRefreshStats> => {
-    const db = await ensureDb();
-    const existingFiles = loadExistingFileMap(db);
-    const workspaceFiles = await resolveWorkspaceFiles();
-    const refreshedFiles: Array<{ path: string; hash: string }> = [];
-    let reusedFiles = 0;
-    let removedFiles = 0;
-    let totalChunks = 0;
+    const runRefresh = async (): Promise<SqliteLexicalIndexRefreshStats> => {
+      const db = await ensureDb();
+      const existingFiles = loadExistingFileMap(db);
+      const workspaceFiles = await resolveWorkspaceFiles();
+      const refreshedFiles: Array<{ path: string; hash: string }> = [];
+      let reusedFiles = 0;
+      let removedFiles = 0;
+      let totalChunks = 0;
 
-    for (const [pathValue, record] of existingFiles.entries()) {
-      if (!workspaceFiles.has(pathValue)) {
-        db.prepare('DELETE FROM lexical_fts WHERE path = ?').run(pathValue);
-        db.prepare('DELETE FROM lexical_files WHERE path = ?').run(pathValue);
-        removedFiles += 1;
+      for (const [pathValue] of existingFiles.entries()) {
+        if (!workspaceFiles.has(pathValue)) {
+          db.prepare('DELETE FROM lexical_fts WHERE path = ?').run(pathValue);
+          db.prepare('DELETE FROM lexical_files WHERE path = ?').run(pathValue);
+          removedFiles += 1;
+        }
       }
-    }
 
-    for (const [pathValue, hashValue] of workspaceFiles.entries()) {
-      const existing = existingFiles.get(pathValue);
-      if (existing && existing.hash === hashValue) {
-        reusedFiles += 1;
-        continue;
+      for (const [pathValue, hashValue] of workspaceFiles.entries()) {
+        const existing = existingFiles.get(pathValue);
+        if (existing && existing.hash === hashValue) {
+          reusedFiles += 1;
+          continue;
+        }
+        refreshedFiles.push({ path: pathValue, hash: hashValue });
       }
-      refreshedFiles.push({ path: pathValue, hash: hashValue });
-    }
 
-    for (const fileEntry of refreshedFiles) {
-      try {
+      for (const fileEntry of refreshedFiles) {
         await indexFileFromDisk(db, fileEntry.path, new Date().toISOString(), fileEntry.hash);
-      } catch {
-        // ignore per-file failures
       }
-    }
 
-    const fileCount = workspaceFiles.size;
-    if (refreshedFiles.length > 0 || removedFiles > 0) {
-      writeMetadataSnapshot(db, new Date().toISOString());
-    }
+      const fileCount = workspaceFiles.size;
+      if (refreshedFiles.length > 0 || removedFiles > 0) {
+        writeMetadataSnapshot(db, new Date().toISOString());
+      }
 
-    syncSnapshotFromDb(db);
-    totalChunks = lastSnapshot.chunkCount;
+      syncSnapshotFromDb(db);
+      totalChunks = lastSnapshot.chunkCount;
 
-    return {
-      refreshedFiles: refreshedFiles.length,
-      reusedFiles,
-      removedFiles,
-      totalFiles: fileCount,
-      totalChunks,
-      wroteIndex: refreshedFiles.length > 0 || removedFiles > 0,
+      return {
+        refreshedFiles: refreshedFiles.length,
+        reusedFiles,
+        removedFiles,
+        totalFiles: fileCount,
+        totalChunks,
+        wroteIndex: refreshedFiles.length > 0 || removedFiles > 0,
+      };
     };
+
+    try {
+      return await runRefresh();
+    } catch {
+      recoverFromCorruptDb();
+      return runRefresh();
+    }
   };
 
   const applyWorkspaceChanges = async (
     changes: WorkspaceSqliteLexicalIndexChange[]
   ): Promise<SqliteLexicalIndexRefreshStats> => {
-    const db = await ensureDb();
-    const existingFiles = loadExistingFileMap(db);
-    const latestByPath = new Map<string, WorkspaceSqliteLexicalIndexChange['type']>();
-    for (const change of changes) {
-      if (!change || typeof change.path !== 'string') {
-        continue;
+    const runApply = async (): Promise<SqliteLexicalIndexRefreshStats> => {
+      const db = await ensureDb();
+      const existingFiles = loadExistingFileMap(db);
+      const latestByPath = new Map<string, WorkspaceSqliteLexicalIndexChange['type']>();
+      for (const change of changes) {
+        if (!change || typeof change.path !== 'string') {
+          continue;
+        }
+        if (change.type !== 'add' && change.type !== 'change' && change.type !== 'unlink') {
+          continue;
+        }
+        const sanitized = sanitizePath(change.path);
+        if (!sanitized) {
+          continue;
+        }
+        latestByPath.set(sanitized, change.type);
       }
-      if (change.type !== 'add' && change.type !== 'change' && change.type !== 'unlink') {
-        continue;
-      }
-      const sanitized = sanitizePath(change.path);
-      if (!sanitized) {
-        continue;
-      }
-      latestByPath.set(sanitized, change.type);
-    }
 
-    if (latestByPath.size === 0) {
+      if (latestByPath.size === 0) {
+        syncSnapshotFromDb(db);
+        return {
+          refreshedFiles: 0,
+          reusedFiles: 0,
+          removedFiles: 0,
+          totalFiles: lastSnapshot.fileCount,
+          totalChunks: lastSnapshot.chunkCount,
+          wroteIndex: false,
+        };
+      }
+
+      const indexedAtIso = new Date().toISOString();
+      let refreshedFiles = 0;
+      let reusedFiles = 0;
+      let removedFiles = 0;
+
+      for (const [filePath, changeType] of latestByPath.entries()) {
+        if (changeType === 'unlink') {
+          if (existingFiles.has(filePath)) {
+            deleteFileFromIndex(db, filePath);
+            existingFiles.delete(filePath);
+            removedFiles += 1;
+          }
+          continue;
+        }
+
+        const absolutePath = path.join(workspacePath, filePath);
+        try {
+          const stats = await fs.promises.stat(absolutePath);
+          if (!stats.isFile() || stats.size > MAX_FILE_SIZE_BYTES) {
+            if (existingFiles.has(filePath)) {
+              deleteFileFromIndex(db, filePath);
+              existingFiles.delete(filePath);
+              removedFiles += 1;
+            }
+            continue;
+          }
+
+          const content = await fs.promises.readFile(absolutePath, 'utf8');
+          if (!content.trim() || isBinaryContent(content)) {
+            if (existingFiles.has(filePath)) {
+              deleteFileFromIndex(db, filePath);
+              existingFiles.delete(filePath);
+              removedFiles += 1;
+            }
+            continue;
+          }
+
+          const nextHash = hashContent(content);
+          const existing = existingFiles.get(filePath);
+          if (existing && existing.hash === nextHash) {
+            reusedFiles += 1;
+            continue;
+          }
+
+          await indexFileContents(db, filePath, content, indexedAtIso, nextHash);
+          existingFiles.set(filePath, { path: filePath, hash: nextHash, indexed_at: indexedAtIso });
+          refreshedFiles += 1;
+        } catch {
+          if (existingFiles.has(filePath)) {
+            deleteFileFromIndex(db, filePath);
+            existingFiles.delete(filePath);
+            removedFiles += 1;
+          }
+        }
+      }
+
+      if (refreshedFiles > 0 || removedFiles > 0) {
+        writeMetadataSnapshot(db, indexedAtIso);
+      }
       syncSnapshotFromDb(db);
+
       return {
-        refreshedFiles: 0,
-        reusedFiles: 0,
-        removedFiles: 0,
+        refreshedFiles,
+        reusedFiles,
+        removedFiles,
         totalFiles: lastSnapshot.fileCount,
         totalChunks: lastSnapshot.chunkCount,
-        wroteIndex: false,
+        wroteIndex: refreshedFiles > 0 || removedFiles > 0,
       };
-    }
-
-    const indexedAtIso = new Date().toISOString();
-    let refreshedFiles = 0;
-    let reusedFiles = 0;
-    let removedFiles = 0;
-
-    for (const [filePath, changeType] of latestByPath.entries()) {
-      if (changeType === 'unlink') {
-        if (existingFiles.has(filePath)) {
-          deleteFileFromIndex(db, filePath);
-          existingFiles.delete(filePath);
-          removedFiles += 1;
-        }
-        continue;
-      }
-
-      const absolutePath = path.join(workspacePath, filePath);
-      try {
-        const stats = await fs.promises.stat(absolutePath);
-        if (!stats.isFile() || stats.size > MAX_FILE_SIZE_BYTES) {
-          if (existingFiles.has(filePath)) {
-            deleteFileFromIndex(db, filePath);
-            existingFiles.delete(filePath);
-            removedFiles += 1;
-          }
-          continue;
-        }
-
-        const content = await fs.promises.readFile(absolutePath, 'utf8');
-        if (!content.trim() || isBinaryContent(content)) {
-          if (existingFiles.has(filePath)) {
-            deleteFileFromIndex(db, filePath);
-            existingFiles.delete(filePath);
-            removedFiles += 1;
-          }
-          continue;
-        }
-
-        const nextHash = hashContent(content);
-        const existing = existingFiles.get(filePath);
-        if (existing && existing.hash === nextHash) {
-          reusedFiles += 1;
-          continue;
-        }
-
-        await indexFileContents(db, filePath, content, indexedAtIso, nextHash);
-        existingFiles.set(filePath, { path: filePath, hash: nextHash, indexed_at: indexedAtIso });
-        refreshedFiles += 1;
-      } catch {
-        if (existingFiles.has(filePath)) {
-          deleteFileFromIndex(db, filePath);
-          existingFiles.delete(filePath);
-          removedFiles += 1;
-        }
-      }
-    }
-
-    if (refreshedFiles > 0 || removedFiles > 0) {
-      writeMetadataSnapshot(db, indexedAtIso);
-    }
-    syncSnapshotFromDb(db);
-
-    return {
-      refreshedFiles,
-      reusedFiles,
-      removedFiles,
-      totalFiles: lastSnapshot.fileCount,
-      totalChunks: lastSnapshot.chunkCount,
-      wroteIndex: refreshedFiles > 0 || removedFiles > 0,
     };
+
+    try {
+      return await runApply();
+    } catch {
+      recoverFromCorruptDb();
+      return runApply();
+    }
   };
 
   const search = async (query: string, topK: number, _options?: SqliteLexicalSearchOptions): Promise<SearchResult[]> => {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) return [];
-    const db = await ensureDb();
-    if (!initialized) {
-      await refresh();
+
+    const runSearch = async (): Promise<SearchResult[]> => {
+      const db = await ensureDb();
+      if (!initialized) {
+        await refresh();
+      }
+
+      const limit = clampTopK(topK);
+      const rows = db.prepare(
+        `SELECT path, chunk_id, lines, content, snippet(lexical_fts, 3, '', '', ' … ', 16) AS snippet, bm25(lexical_fts) AS score\n       FROM lexical_fts\n       WHERE lexical_fts MATCH ?\n       ORDER BY score\n       LIMIT ?`
+      ).all(normalizedQuery, limit) as Array<{
+        path: string;
+        chunk_id: string;
+        lines: string;
+        content: string;
+        snippet?: string;
+        score?: number;
+      }>;
+
+      return rows.map((row) => {
+        const snippet = (row.snippet ?? '').trim();
+        const content = snippet || buildSnippetFallback(row.content, DEFAULT_SNIPPET_MAX_CHARS);
+        const score = computeScore(row.score);
+        return {
+          path: row.path,
+          content,
+          lines: row.lines,
+          chunkId: row.chunk_id,
+          matchType: 'keyword',
+          score,
+          relevanceScore: score,
+          retrievedAt: new Date().toISOString(),
+        };
+      });
+    };
+
+    try {
+      return await runSearch();
+    } catch {
+      recoverFromCorruptDb();
+      try {
+        return await runSearch();
+      } catch {
+        return [];
+      }
     }
-
-    const limit = clampTopK(topK);
-    const rows = db.prepare(
-      `SELECT path, chunk_id, lines, content, snippet(lexical_fts, 3, '', '', ' … ', 16) AS snippet, bm25(lexical_fts) AS score\n       FROM lexical_fts\n       WHERE lexical_fts MATCH ?\n       ORDER BY score\n       LIMIT ?`
-    ).all(normalizedQuery, limit) as Array<{
-      path: string;
-      chunk_id: string;
-      lines: string;
-      content: string;
-      snippet?: string;
-      score?: number;
-    }>;
-
-    return rows.map((row) => {
-      const snippet = (row.snippet ?? '').trim();
-      const content = snippet || buildSnippetFallback(row.content, DEFAULT_SNIPPET_MAX_CHARS);
-      const score = computeScore(row.score);
-      return {
-        path: row.path,
-        content,
-        lines: row.lines,
-        chunkId: row.chunk_id,
-        matchType: 'keyword',
-        score,
-        relevanceScore: score,
-        retrievedAt: new Date().toISOString(),
-      };
-    });
   };
 
   const clearCache = (): void => {
-    if (dbInstance) {
-      try {
-        dbInstance.close();
-      } catch {
-        // ignore close errors
-      } finally {
-        dbInstance = null;
-      }
-    }
-    if (dbPromise) {
-      dbPromise
-        .then((db) => db.close())
-        .catch(() => {
-          // ignore close errors
-        });
-    }
-    dbPromise = null;
-    initialized = false;
-    lastSnapshot = {
-      version: INDEX_SCHEMA_VERSION,
-      updatedAt: null,
-      fileCount: 0,
-      chunkCount: 0,
-    };
+    resetDbState();
   };
 
   const getSnapshot = (): ReturnType<WorkspaceSqliteLexicalIndex['getSnapshot']> => ({

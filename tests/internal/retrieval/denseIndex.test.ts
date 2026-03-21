@@ -134,4 +134,41 @@ describe('createWorkspaceDenseRetriever', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('recovers from a corrupt dense sidecar file on first load', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-recover-'));
+    const fileA = path.join(tmp, 'src', 'a.ts');
+    fs.mkdirSync(path.dirname(fileA), { recursive: true });
+    fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
+
+    const indexStatePath = path.join(tmp, '.augment-index-state.json');
+    const denseIndexPath = path.join(tmp, '.augment-dense-index.json');
+
+    writeJson(indexStatePath, {
+      files: {
+        'src/a.ts': { hash: 'h1', indexed_at: new Date().toISOString() },
+      },
+    });
+    fs.writeFileSync(denseIndexPath, 'corrupt-dense-json', 'utf8');
+
+    const retriever = createWorkspaceDenseRetriever({
+      workspacePath: tmp,
+      indexStatePath,
+      denseIndexPath,
+      embeddingRuntime: createHashEmbeddingRuntime(32),
+    });
+
+    const results = await retriever.search('auth', 5);
+    expect(results.length).toBeGreaterThan(0);
+    const denseFile = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as {
+      embedding_model_id: string;
+      vector_dimension: number;
+      docs: Record<string, unknown>;
+    };
+    expect(Object.keys(denseFile.docs)).toEqual(['src/a.ts']);
+    expect(denseFile.embedding_model_id).toBe('hash-32');
+    expect(denseFile.vector_dimension).toBe(32);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });
