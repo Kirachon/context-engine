@@ -27,6 +27,12 @@ export interface FeatureFlags {
   context_packs_v2: boolean;
   /** Enable retrieval quality guard metadata and fallback policy state reporting. */
   retrieval_quality_guard_v1: boolean;
+  /** Enable retrieval provider V2 migration seam hooks. */
+  retrieval_provider_v2: boolean;
+  /** Enable retrieval artifact V2 metadata generation and validation hooks. */
+  retrieval_artifacts_v2: boolean;
+  /** Enable retrieval shadow-control V2 policy hooks for canary migration. */
+  retrieval_shadow_control_v2: boolean;
 }
 
 export function getFeatureFlagsFromEnv(): FeatureFlags {
@@ -44,6 +50,9 @@ export function getFeatureFlagsFromEnv(): FeatureFlags {
    retrieval_hybrid_v1: envBool('CE_RETRIEVAL_HYBRID_V1', false),
    context_packs_v2: envBool('CE_CONTEXT_PACKS_V2', false),
    retrieval_quality_guard_v1: envBool('CE_RETRIEVAL_QUALITY_GUARD_V1', false),
+   retrieval_provider_v2: envBool('CE_RETRIEVAL_PROVIDER_V2', false),
+   retrieval_artifacts_v2: envBool('CE_RETRIEVAL_ARTIFACTS_V2', false),
+   retrieval_shadow_control_v2: envBool('CE_RETRIEVAL_SHADOW_CONTROL_V2', false),
  };
 }
 

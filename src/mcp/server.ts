@@ -105,14 +105,6 @@ export class ContextEngineMCPServer {
   private workspacePath: string;
   private fileWatcher?: FileWatcher;
   private enableWatcher: boolean;
-  private reindexOnDelete: boolean;
-  private reindexDebounceMs: number;
-  private reindexCooldownMs: number;
-  private reindexDeleteBurstThreshold: number;
-  private deleteBurstCount = 0;
-  private pendingReindexTimer: NodeJS.Timeout | null = null;
-  private reindexInFlight: Promise<void> | null = null;
-  private lastReindexAt: number | null = null;
   private runtimeToolCount = 0;
 
   constructor(
@@ -126,10 +118,6 @@ export class ContextEngineMCPServer {
     // Initialize Phase 2 plan management services
     initializePlanManagementServices(workspacePath);
     this.enableWatcher = options?.enableWatcher ?? false;
-    this.reindexOnDelete = (process.env.CE_WATCHER_REINDEX_ON_DELETE ?? 'true') === 'true';
-    this.reindexDebounceMs = Math.max(250, Number(process.env.CE_WATCHER_REINDEX_DEBOUNCE_MS ?? '2000') || 2000);
-    this.reindexCooldownMs = Math.max(0, Number(process.env.CE_WATCHER_REINDEX_COOLDOWN_MS ?? '60000') || 60000);
-    this.reindexDeleteBurstThreshold = Math.max(1, Number(process.env.CE_WATCHER_DELETE_BURST_THRESHOLD ?? '10') || 10);
 
     this.server = new Server(
       {
@@ -182,15 +170,28 @@ export class ContextEngineMCPServer {
         workspacePath,
         {
           onBatch: async (changes) => {
-            const deleted = changes.filter((c) => c.type === 'unlink');
-            const paths = changes.filter((c) => c.type !== 'unlink').map((c) => c.path);
-
-            if (deleted.length > 0) {
-              this.onFilesDeleted(deleted.length);
+            const workspaceChangeApi = (
+              this.serviceClient as ContextServiceClient & {
+                applyWorkspaceChanges?: (
+                  batch: Array<{ type: 'add' | 'change' | 'unlink'; path: string }>
+                ) => Promise<void>;
+              }
+            ).applyWorkspaceChanges;
+            if (typeof workspaceChangeApi === 'function') {
+              await workspaceChangeApi.call(
+                this.serviceClient,
+                changes.map((change) => ({ type: change.type, path: change.path }))
+              );
+              return;
             }
 
-            if (paths.length === 0) return;
             try {
+              const paths = changes
+                .filter((c) => c.type !== 'unlink')
+                .map((c) => c.path);
+              if (paths.length === 0) {
+                return;
+              }
               await this.serviceClient.indexFiles(paths);
             } catch (error) {
               console.error('[watcher] Incremental indexing failed:', error);
@@ -204,63 +205,6 @@ export class ContextEngineMCPServer {
       );
       this.fileWatcher.start();
     }
-  }
-
-  private onFilesDeleted(count: number): void {
-    if (!this.reindexOnDelete) return;
-    this.deleteBurstCount += count;
-
-    // Large bursts: schedule quickly; otherwise debounce.
-    const dueIn = this.deleteBurstCount >= this.reindexDeleteBurstThreshold
-      ? 250
-      : Math.max(250, this.reindexDebounceMs);
-
-    if (this.pendingReindexTimer) {
-      clearTimeout(this.pendingReindexTimer);
-      this.pendingReindexTimer = null;
-    }
-
-    this.pendingReindexTimer = setTimeout(() => {
-      this.pendingReindexTimer = null;
-      void this.maybeReindexAfterDeletes();
-    }, dueIn);
-  }
-
-  private async maybeReindexAfterDeletes(): Promise<void> {
-    if (!this.reindexOnDelete) return;
-    if (this.isShuttingDown) return;
-    if (this.deleteBurstCount === 0) return;
-
-    // Avoid reindex loops: only do it once per cooldown window.
-    if (this.lastReindexAt && Date.now() - this.lastReindexAt < this.reindexCooldownMs) {
-      return;
-    }
-
-    // If we're already reindexing, don't start another.
-    if (this.reindexInFlight) return;
-
-    // If indexer is busy, retry shortly.
-    const status = this.serviceClient.getIndexStatus();
-    if (status.status === 'indexing') {
-      this.onFilesDeleted(0);
-      return;
-    }
-
-    const burstCount = this.deleteBurstCount;
-    this.deleteBurstCount = 0;
-
-    console.error(`[watcher] Detected ${burstCount} deletions; scheduling full reindex to prevent stale results`);
-    this.lastReindexAt = Date.now();
-
-    this.reindexInFlight = this.serviceClient.indexWorkspaceInBackground()
-      .catch((e) => {
-        console.error('[watcher] Background reindex after deletions failed:', e);
-      })
-      .finally(() => {
-        this.reindexInFlight = null;
-      });
-
-    await this.reindexInFlight;
   }
 
   /**

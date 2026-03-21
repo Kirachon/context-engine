@@ -83,6 +83,13 @@ describe('retrieval provider factory', () => {
     expect(provider.id).toBe('local_native');
   });
 
+  it('creates local_native_v2 when configured via env', () => {
+    process.env.CE_RETRIEVAL_PROVIDER = 'local_native_v2';
+    const { callbacks } = createCallbackHarness();
+    const provider = createRetrievalProvider({ callbacks });
+    expect(provider.id).toBe('local_native_v2');
+  });
+
   it('fails fast with typed error when env explicitly selects a removed provider id', () => {
     process.env.CE_RETRIEVAL_PROVIDER = 'augment_legacy';
     const { callbacks } = createCallbackHarness();
@@ -99,9 +106,9 @@ describe('retrieval provider factory', () => {
     }
   });
 
-  it('exposes only local_native in registry', () => {
+  it('exposes local_native and local_native_v2 in registry', () => {
     const registry = getRetrievalProviderRegistry();
-    expect(Object.keys(registry).sort()).toEqual(['local_native']);
+    expect(Object.keys(registry).sort()).toEqual(['local_native', 'local_native_v2']);
   });
 
   it('routes through local-native callback methods and preserves callback context', async () => {
@@ -140,6 +147,46 @@ describe('retrieval provider factory', () => {
     });
     expect(spies.localNative.health).toHaveBeenCalledWith({
       providerId: 'local_native',
+      operation: 'health',
+    });
+  });
+
+  it('routes local_native_v2 through local-native callbacks with v2 provider context', async () => {
+    const { callbacks, spies } = createCallbackHarness();
+    process.env.CE_RETRIEVAL_PROVIDER = 'local_native_v2';
+    const provider = createRetrievalProvider({ callbacks });
+
+    await provider.search('query', 2, { bypassCache: true });
+    await provider.indexWorkspace();
+    await provider.indexFiles(['a.ts']);
+    await provider.clearIndex();
+    await provider.getIndexStatus();
+    await provider.health();
+
+    expect(spies.localNative.search).toHaveBeenCalledWith(
+      'query',
+      2,
+      { bypassCache: true },
+      { providerId: 'local_native_v2', operation: 'search' }
+    );
+    expect(spies.localNative.indexWorkspace).toHaveBeenCalledWith({
+      providerId: 'local_native_v2',
+      operation: 'indexWorkspace',
+    });
+    expect(spies.localNative.indexFiles).toHaveBeenCalledWith(['a.ts'], {
+      providerId: 'local_native_v2',
+      operation: 'indexFiles',
+    });
+    expect(spies.localNative.clearIndex).toHaveBeenCalledWith({
+      providerId: 'local_native_v2',
+      operation: 'clearIndex',
+    });
+    expect(spies.localNative.getIndexStatus).toHaveBeenCalledWith({
+      providerId: 'local_native_v2',
+      operation: 'getIndexStatus',
+    });
+    expect(spies.localNative.health).toHaveBeenCalledWith({
+      providerId: 'local_native_v2',
       operation: 'health',
     });
   });

@@ -183,6 +183,25 @@ export interface SearchDiagnostics {
   second_pass_used: boolean;
 }
 
+export interface RetrievalRuntimeMetadata {
+  providerId: RetrievalProviderId;
+  shadowCompare: {
+    enabled: boolean;
+    sampleRate: number;
+  };
+  v2: {
+    retrievalRewriteV2: boolean;
+    retrievalRankingV2: boolean;
+    retrievalRankingV3: boolean;
+    retrievalRequestMemoV2: boolean;
+  };
+}
+
+export interface WorkspaceFileChange {
+  type: 'add' | 'change' | 'unlink';
+  path: string;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -1105,6 +1124,20 @@ export class ContextServiceClient {
 
   getActiveRetrievalProviderId(): RetrievalProviderId {
     return this.retrievalProviderId;
+  }
+
+  getRetrievalRuntimeMetadata(): RetrievalRuntimeMetadata {
+    const shadowCompare = this.getConfiguredShadowCompareState();
+    return {
+      providerId: this.retrievalProviderId,
+      shadowCompare,
+      v2: {
+        retrievalRewriteV2: featureEnabled('retrieval_rewrite_v2'),
+        retrievalRankingV2: featureEnabled('retrieval_ranking_v2'),
+        retrievalRankingV3: featureEnabled('retrieval_ranking_v3'),
+        retrievalRequestMemoV2: featureEnabled('retrieval_request_memo_v2'),
+      },
+    };
   }
 
   getActiveAIModelLabel(): string {
@@ -2295,7 +2328,18 @@ export class ContextServiceClient {
   }
 
   private isLocalNativeRetrievalProvider(): boolean {
-    return this.retrievalProviderId === 'local_native';
+    return this.retrievalProviderId === 'local_native' || this.retrievalProviderId === 'local_native_v2';
+  }
+
+  private normalizeWorkspaceChangePath(rawPath: string): string | null {
+    const relativePath = path.isAbsolute(rawPath)
+      ? path.relative(this.workspacePath, rawPath)
+      : rawPath;
+    const normalized = relativePath.replace(/\\/g, '/').trim();
+    if (!normalized || normalized.startsWith('..') || path.isAbsolute(normalized)) {
+      return null;
+    }
+    return normalized;
   }
 
   private writeLocalNativeStateMarker(indexedAtIso: string): void {
@@ -2606,10 +2650,114 @@ export class ContextServiceClient {
   }
 
   /**
+   * Apply watcher-originated file changes using the incremental local-native paths.
+   * Delete events prune persisted index-state entries to avoid full reindex work.
+   */
+  async applyWorkspaceChanges(changes: WorkspaceFileChange[]): Promise<void> {
+    if (!Array.isArray(changes) || changes.length === 0) {
+      return;
+    }
+
+    const latestByPath = new Map<string, WorkspaceFileChange['type']>();
+    for (const change of changes) {
+      if (!change || typeof change.path !== 'string') {
+        continue;
+      }
+      if (change.type !== 'add' && change.type !== 'change' && change.type !== 'unlink') {
+        continue;
+      }
+      const normalizedPath = this.normalizeWorkspaceChangePath(change.path);
+      if (!normalizedPath) {
+        continue;
+      }
+      latestByPath.set(normalizedPath, change.type);
+    }
+
+    if (latestByPath.size === 0) {
+      return;
+    }
+
+    const deletedPaths: string[] = [];
+    const upsertPaths: string[] = [];
+    for (const [filePath, changeType] of latestByPath.entries()) {
+      if (changeType === 'unlink') {
+        deletedPaths.push(filePath);
+      } else {
+        upsertPaths.push(filePath);
+      }
+    }
+
+    if (deletedPaths.length > 0) {
+      await this.pruneDeletedIndexEntries(deletedPaths);
+    }
+
+    if (upsertPaths.length > 0) {
+      await this.indexFiles(upsertPaths);
+    }
+  }
+
+  /**
    * Clear index state and caches
    */
   async clearIndex(): Promise<void> {
     await this.retrievalProvider.clearIndex();
+  }
+
+  private async pruneDeletedIndexEntries(filePaths: string[]): Promise<number> {
+    const normalizedPaths = Array.from(
+      new Set(
+        filePaths
+          .map((filePath) => this.normalizeWorkspaceChangePath(filePath))
+          .filter((value): value is string => Boolean(value))
+      )
+    );
+    if (normalizedPaths.length === 0) {
+      return 0;
+    }
+
+    // Search reads files from disk at query time, so cache invalidation is always safe
+    // even when index-state storage is disabled.
+    this.clearCache();
+
+    if (!this.isLocalNativeRetrievalProvider()) {
+      return 0;
+    }
+
+    const store = this.getIndexStateStore();
+    if (!store) {
+      return 0;
+    }
+
+    const prior = this.loadIndexStateForActiveProvider(store);
+    const nextFiles = { ...prior.files };
+    let removed = 0;
+    for (const filePath of normalizedPaths) {
+      if (Object.prototype.hasOwnProperty.call(nextFiles, filePath)) {
+        delete nextFiles[filePath];
+        removed += 1;
+      }
+    }
+
+    if (removed === 0) {
+      return 0;
+    }
+
+    const updatedAtIso = new Date().toISOString();
+    store.save({
+      version: typeof prior.version === 'number' ? prior.version + 1 : 2,
+      provider_id: this.retrievalProviderId,
+      updated_at: updatedAtIso,
+      files: nextFiles,
+    });
+    this.writeLocalNativeStateMarker(updatedAtIso);
+    this.writeIndexFingerprintFile(crypto.randomUUID());
+    this.updateIndexStatus({
+      status: 'idle',
+      lastIndexed: updatedAtIso,
+      fileCount: Object.keys(nextFiles).length,
+    });
+
+    return removed;
   }
 
   private async clearIndexWithProviderRuntime(options?: { localNative?: boolean }): Promise<void> {
@@ -2864,20 +3012,28 @@ export class ContextServiceClient {
     return this.keywordFallbackSearch(query, topK, { bypassCache: options?.bypassCache });
   }
 
-  private maybeRunRetrievalShadowCompare(query: string, topK: number, primaryResults: SearchResult[]): void {
+  private getConfiguredShadowCompareState(): { enabled: boolean; sampleRate: number } {
     const rawSampleRate = Number.parseFloat(process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE ?? '0');
     const sampleRate = Number.isFinite(rawSampleRate)
       ? Math.max(0, Math.min(1, rawSampleRate))
       : 0;
+    return {
+      enabled: process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED === 'true',
+      sampleRate,
+    };
+  }
+
+  private maybeRunRetrievalShadowCompare(query: string, topK: number, primaryResults: SearchResult[]): void {
+    const shadowCompare = this.getConfiguredShadowCompareState();
     if (!shouldRunShadowCompare({
-      shadowCompareEnabled: process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED === 'true',
-      shadowSampleRate: sampleRate,
+      shadowCompareEnabled: shadowCompare.enabled,
+      shadowSampleRate: shadowCompare.sampleRate,
     })) {
       return;
     }
 
     setImmediate(() => {
-      void this.runRetrievalShadowCompare(query, topK, primaryResults, sampleRate);
+      void this.runRetrievalShadowCompare(query, topK, primaryResults, shadowCompare.sampleRate);
     });
   }
 

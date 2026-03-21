@@ -30,6 +30,12 @@ describe('retrieval provider env resolution', () => {
     expect(resolveRetrievalProviderEnv().providerId).toBe('local_native');
   });
 
+  it('accepts local_native_v2 provider when configured', () => {
+    process.env.CE_RETRIEVAL_PROVIDER = 'local_native_v2';
+
+    expect(resolveRetrievalProviderEnv().providerId).toBe('local_native_v2');
+  });
+
   it('rejects legacy provider alias selection', () => {
     process.env.CE_RETRIEVAL_PROVIDER = 'augment';
 

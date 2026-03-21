@@ -5,10 +5,11 @@ import type {
   RetrievalProviderCallbacks,
   RetrievalProviderId,
 } from './types.js';
-type RetrievalProviderConstructor = new (callbacks: RetrievalProviderCallbacks) => RetrievalProvider;
+type RetrievalProviderFactory = (callbacks: RetrievalProviderCallbacks) => RetrievalProvider;
 
-const PROVIDER_REGISTRY: Record<RetrievalProviderId, RetrievalProviderConstructor> = {
-  local_native: LocalNativeProvider,
+const PROVIDER_REGISTRY: Record<RetrievalProviderId, RetrievalProviderFactory> = {
+  local_native: (callbacks) => new LocalNativeProvider(callbacks, 'local_native'),
+  local_native_v2: (callbacks) => new LocalNativeProvider(callbacks, 'local_native_v2'),
 };
 
 export interface CreateRetrievalProviderOptions {
@@ -20,10 +21,10 @@ export function createRetrievalProvider(
   options: CreateRetrievalProviderOptions
 ): RetrievalProvider {
   const providerId = options.providerId ?? resolveRetrievalProviderId();
-  const ProviderCtor = PROVIDER_REGISTRY[providerId];
-  return new ProviderCtor(options.callbacks);
+  const providerFactory = PROVIDER_REGISTRY[providerId];
+  return providerFactory(options.callbacks);
 }
 
-export function getRetrievalProviderRegistry(): Readonly<Record<RetrievalProviderId, RetrievalProviderConstructor>> {
+export function getRetrievalProviderRegistry(): Readonly<Record<RetrievalProviderId, RetrievalProviderFactory>> {
   return PROVIDER_REGISTRY;
 }

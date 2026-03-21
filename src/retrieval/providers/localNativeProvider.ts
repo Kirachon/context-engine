@@ -1,13 +1,19 @@
 import type {
   RetrievalProvider,
   RetrievalProviderCallbacks,
+  RetrievalProviderId,
   RetrievalSearchOptions,
 } from './types.js';
 
 export class LocalNativeProvider implements RetrievalProvider {
-  readonly id = 'local_native' as const;
+  readonly id: RetrievalProviderId;
 
-  constructor(private readonly callbacks: RetrievalProviderCallbacks) {}
+  constructor(
+    private readonly callbacks: RetrievalProviderCallbacks,
+    providerId: RetrievalProviderId = 'local_native'
+  ) {
+    this.id = providerId;
+  }
 
   search(query: string, topK: number, options?: RetrievalSearchOptions) {
     return this.callbacks.localNative.search(query, topK, options, {

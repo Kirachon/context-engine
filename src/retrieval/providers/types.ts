@@ -1,6 +1,6 @@
 import type { IndexResult, IndexStatus, SearchResult } from '../../mcp/serviceClient.js';
 
-export type RetrievalProviderId = 'local_native';
+export type RetrievalProviderId = 'local_native' | 'local_native_v2';
 export type RetrievalProviderErrorCode =
   | 'provider_config_invalid'
   | 'provider_auth_missing'

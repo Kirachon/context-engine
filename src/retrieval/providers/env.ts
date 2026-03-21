@@ -51,13 +51,16 @@ function parseProviderId(raw: string | undefined): RetrievalProviderId | undefin
     return undefined;
   }
   const normalized = raw.trim().toLowerCase();
-  if (normalized === 'local_native') {
+  if (normalized === 'local_native' || normalized === 'local_native_v2') {
+    if (normalized === 'local_native_v2') {
+      return 'local_native_v2';
+    }
     return 'local_native';
   }
   throw new RetrievalProviderError({
     code: 'provider_config_invalid',
     envVar: 'CE_RETRIEVAL_PROVIDER',
-    message: `Invalid CE_RETRIEVAL_PROVIDER value "${raw}". Allowed values: local_native`,
+    message: `Invalid CE_RETRIEVAL_PROVIDER value "${raw}". Allowed values: local_native, local_native_v2`,
   });
 }
 

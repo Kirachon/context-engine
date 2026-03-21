@@ -93,6 +93,10 @@ describe('ContextServiceClient', () => {
     FEATURE_FLAGS.skip_unchanged_indexing = false;
     FEATURE_FLAGS.hash_normalize_eol = false;
     FEATURE_FLAGS.metrics = false;
+    FEATURE_FLAGS.retrieval_rewrite_v2 = false;
+    FEATURE_FLAGS.retrieval_ranking_v2 = false;
+    FEATURE_FLAGS.retrieval_ranking_v3 = false;
+    FEATURE_FLAGS.retrieval_request_memo_v2 = false;
   });
 
   describe('Retrieval Provider Dispatch', () => {
@@ -209,6 +213,62 @@ describe('ContextServiceClient', () => {
       expect(results.every((result) => result.matchType === 'keyword')).toBe(true);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+  });
+
+  describe('Retrieval Runtime Metadata', () => {
+    it('should report active provider id plus retrieval v2 and shadow config state', () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
+      process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE = '0.35';
+      FEATURE_FLAGS.retrieval_rewrite_v2 = true;
+      FEATURE_FLAGS.retrieval_ranking_v2 = true;
+      FEATURE_FLAGS.retrieval_ranking_v3 = false;
+      FEATURE_FLAGS.retrieval_request_memo_v2 = true;
+
+      const localClient = new ContextServiceClient(testWorkspace);
+      const metadata = localClient.getRetrievalRuntimeMetadata();
+
+      expect(metadata).toEqual({
+        providerId: 'local_native',
+        shadowCompare: {
+          enabled: true,
+          sampleRate: 0.35,
+        },
+        v2: {
+          retrievalRewriteV2: true,
+          retrievalRankingV2: true,
+          retrievalRankingV3: false,
+          retrievalRequestMemoV2: true,
+        },
+      });
+    });
+
+    it('should not change semantic search behavior when metadata is queried', async () => {
+      const providerSearch = jest.fn(
+        async (_query: string, _topK: number, _options?: { bypassCache?: boolean; maxOutputLength?: number }) => [
+          { path: 'src/provider.ts', content: 'provider result', relevanceScore: 0.9 },
+        ]
+      );
+      (client as any).retrievalProvider = {
+        id: 'local_native',
+        search: providerSearch,
+        indexWorkspace: jest.fn(),
+        indexFiles: jest.fn(),
+        clearIndex: jest.fn(),
+        getIndexStatus: jest.fn(async () => client.getIndexStatus()),
+        health: jest.fn(async () => ({ ok: true })),
+      };
+
+      const metadata = client.getRetrievalRuntimeMetadata();
+      expect(metadata.providerId).toBe('local_native');
+      expect(providerSearch).toHaveBeenCalledTimes(0);
+
+      const results = await client.semanticSearch('provider query', 3, { bypassCache: true });
+      expect(providerSearch).toHaveBeenCalledWith('provider query', 3, { bypassCache: true });
+      expect(results).toEqual([
+        expect.objectContaining({ path: 'src/provider.ts', content: 'provider result' }),
+      ]);
     });
   });
 
@@ -1732,6 +1792,108 @@ describe('ContextServiceClient', () => {
       const status = localClient.getIndexStatus();
       expect(status.status).toBe('idle');
       expect(status.fileCount).toBeGreaterThan(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should prune deleted entries via applyWorkspaceChanges without triggering full reindex', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-change-delete-only-'));
+      fs.writeFileSync(path.join(tempDir, 'keep.ts'), 'export const keep = true;\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 3,
+            schema_version: 2,
+            provider_id: 'local_native',
+            updated_at: '2026-03-21T00:00:00.000Z',
+            files: {
+              'keep.ts': { hash: 'a'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
+              'deleted.ts': { hash: 'b'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const localClient = new ContextServiceClient(tempDir);
+      const indexWorkspaceSpy = jest.spyOn(localClient, 'indexWorkspace');
+      const indexFilesSpy = jest.spyOn(localClient, 'indexFiles');
+
+      await localClient.applyWorkspaceChanges([{ type: 'unlink', path: 'deleted.ts' }]);
+
+      const parsedState = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+      ) as {
+        version: number;
+        files: Record<string, { hash: string; indexed_at: string }>;
+      };
+
+      expect(indexWorkspaceSpy).not.toHaveBeenCalled();
+      expect(indexFilesSpy).not.toHaveBeenCalled();
+      expect(parsedState.files['deleted.ts']).toBeUndefined();
+      expect(parsedState.files['keep.ts']).toBeDefined();
+      expect(parsedState.version).toBeGreaterThan(3);
+      expect(localClient.getIndexStatus().fileCount).toBe(1);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should prune deletes and keep incremental indexFiles path for mixed workspace changes', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-change-mixed-'));
+      fs.writeFileSync(path.join(tempDir, 'changed.ts'), 'export const changed = 2;\n', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, 'keep.ts'), 'export const keep = true;\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 7,
+            schema_version: 2,
+            provider_id: 'local_native',
+            updated_at: '2026-03-21T00:00:00.000Z',
+            files: {
+              'changed.ts': { hash: 'c'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
+              'deleted.ts': { hash: 'd'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
+              'keep.ts': { hash: 'e'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const localClient = new ContextServiceClient(tempDir);
+      const indexWorkspaceSpy = jest.spyOn(localClient, 'indexWorkspace');
+      const indexFilesSpy = jest.spyOn(localClient, 'indexFiles');
+
+      await localClient.applyWorkspaceChanges([
+        { type: 'unlink', path: 'deleted.ts' },
+        { type: 'change', path: 'changed.ts' },
+      ]);
+
+      const parsedState = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+      ) as {
+        files: Record<string, { hash: string; indexed_at: string }>;
+      };
+
+      expect(indexWorkspaceSpy).not.toHaveBeenCalled();
+      expect(indexFilesSpy).toHaveBeenCalledTimes(1);
+      expect(indexFilesSpy).toHaveBeenCalledWith(['changed.ts']);
+      expect(parsedState.files['deleted.ts']).toBeUndefined();
+      expect(parsedState.files['changed.ts']).toBeDefined();
+      expect(parsedState.files['changed.ts'].hash).not.toBe('c'.repeat(64));
+      expect(parsedState.files['changed.ts'].hash).toMatch(/^[a-f0-9]{64}$/);
+      expect(localClient.getIndexStatus().fileCount).toBe(2);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
