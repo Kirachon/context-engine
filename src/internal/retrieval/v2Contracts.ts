@@ -21,6 +21,7 @@ export interface RetrievalV2FeatureFlagsSnapshot {
   retrieval_shadow_control_v2: boolean;
   retrieval_tree_sitter_v1: boolean;
   retrieval_chunk_search_v1: boolean;
+  retrieval_sqlite_fts5_v1: boolean;
 }
 
 export interface RetrievalArtifactV2Metadata {
@@ -116,6 +117,7 @@ export function snapshotRetrievalV2FeatureFlags(
     retrieval_shadow_control_v2: featureFlags.retrieval_shadow_control_v2,
     retrieval_tree_sitter_v1: featureFlags.retrieval_tree_sitter_v1,
     retrieval_chunk_search_v1: featureFlags.retrieval_chunk_search_v1,
+    retrieval_sqlite_fts5_v1: featureFlags.retrieval_sqlite_fts5_v1,
   };
 }
 

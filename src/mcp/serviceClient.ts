@@ -209,6 +209,28 @@ type ChunkSearchOptions = {
   normalizedQuery?: string;
 };
 
+type LexicalSearchEngine = {
+  refresh?: () => Promise<void> | void;
+  applyWorkspaceChanges?: (changes: WorkspaceFileChange[]) => Promise<void> | void;
+  search: (query: string, topK: number, options?: LexicalSearchOptions) => Promise<SearchResult[]>;
+  clearCache?: () => void;
+};
+
+type LexicalSearchOptions = {
+  bypassCache?: boolean;
+  workspacePath?: string;
+  indexStatePath?: string;
+  sqliteIndexPath?: string;
+  includeArtifacts?: boolean;
+  includeDocs?: boolean;
+  includeJson?: boolean;
+  queryTokens?: string[];
+  symbolTokens?: string[];
+  codeIntent?: boolean;
+  opsEvidenceIntent?: boolean;
+  normalizedQuery?: string;
+};
+
 export interface RetrievalRuntimeMetadata {
   providerId: RetrievalProviderId;
   shadowCompare: {
@@ -1060,6 +1082,8 @@ export class ContextServiceClient {
   private semanticSearchInFlight: Map<string, SemanticSearchInFlightRequest> = new Map();
   private chunkSearchEngine: ChunkSearchEngine | null = null;
   private chunkSearchEngineLoadAttempted = false;
+  private lexicalSqliteSearchEngine: LexicalSearchEngine | null = null;
+  private lexicalSqliteSearchEngineLoadAttempted = false;
 
   /** Persistent context bundle cache (best-effort). */
   private persistentContextCache: Map<string, CacheEntry<ContextBundle>> = new Map();
@@ -1961,6 +1985,7 @@ export class ContextServiceClient {
     this.keywordFallbackSearchCache.clear();
     this.keywordFallbackSearchInFlight.clear();
     this.clearChunkSearchEngineCache();
+    this.clearLexicalSqliteSearchEngineCache();
     this.cacheHits = 0;
     this.cacheMisses = 0;
     this.fallbackDiscoverFilesCache = null;
@@ -1971,6 +1996,10 @@ export class ContextServiceClient {
     return featureEnabled('retrieval_chunk_search_v1');
   }
 
+  private isLexicalSqliteSearchEnabled(): boolean {
+    return featureEnabled('retrieval_sqlite_fts5_v1');
+  }
+
   private clearChunkSearchEngineCache(): void {
     try {
       this.chunkSearchEngine?.clearCache?.();
@@ -1979,6 +2008,49 @@ export class ContextServiceClient {
     } finally {
       this.chunkSearchEngine = null;
       this.chunkSearchEngineLoadAttempted = false;
+    }
+  }
+
+  private clearLexicalSqliteSearchEngineCache(): void {
+    try {
+      this.lexicalSqliteSearchEngine?.clearCache?.();
+    } catch {
+      // Best-effort cache reset only.
+    } finally {
+      this.lexicalSqliteSearchEngine = null;
+      this.lexicalSqliteSearchEngineLoadAttempted = false;
+    }
+  }
+
+  private async refreshLexicalSqliteSearchEngine(changes?: WorkspaceFileChange[]): Promise<void> {
+    if (!this.isLexicalSqliteSearchEnabled()) {
+      return;
+    }
+
+    const lexicalSearchEngine = this.getLexicalSqliteSearchEngine();
+    if (!lexicalSearchEngine) {
+      return;
+    }
+
+    try {
+      if (changes && changes.length > 0 && typeof lexicalSearchEngine.applyWorkspaceChanges === 'function') {
+        try {
+          await lexicalSearchEngine.applyWorkspaceChanges(changes);
+          return;
+        } catch (error) {
+          if (process.env.CE_DEBUG_SEARCH === 'true') {
+            console.error('[lexicalSearch] incremental background refresh failed, retrying full refresh:', error);
+          }
+        }
+      }
+
+      if (typeof lexicalSearchEngine.refresh === 'function') {
+        await lexicalSearchEngine.refresh();
+      }
+    } catch (error) {
+      if (process.env.CE_DEBUG_SEARCH === 'true') {
+        console.error('[lexicalSearch] background refresh failed:', error);
+      }
     }
   }
 
@@ -2042,6 +2114,80 @@ export class ContextServiceClient {
     return null;
   }
 
+  private buildLexicalSqliteSearchEngineFromModule(moduleExports: Record<string, unknown>): LexicalSearchEngine | null {
+    const workspacePath = this.workspacePath;
+    const indexStatePath = path.join(this.workspacePath, '.augment-index-state.json');
+    const sqliteIndexPath = path.join(this.workspacePath, '.augment-lexical-index.sqlite');
+    const moduleOptions = { workspacePath, indexStatePath, sqliteIndexPath };
+
+    const factoryCandidates = [
+      moduleExports.createWorkspaceLexicalSearchIndex,
+      moduleExports.createLexicalSearchIndex,
+      moduleExports.default,
+    ];
+
+    for (const candidate of factoryCandidates) {
+      if (typeof candidate !== 'function') {
+        continue;
+      }
+
+      try {
+        const factory = candidate as (options: {
+          workspacePath: string;
+          indexStatePath: string;
+          sqliteIndexPath: string;
+        }) => LexicalSearchEngine | null | undefined;
+        const engine = factory(moduleOptions);
+        if (engine && typeof engine.search === 'function') {
+          return engine;
+        }
+      } catch {
+        // Try the next factory candidate.
+      }
+    }
+
+    const directSearch = moduleExports.search;
+    if (typeof directSearch === 'function') {
+      const search = directSearch as (
+        query: string,
+        topK: number,
+        options?: LexicalSearchOptions
+      ) => Promise<SearchResult[]>;
+      return {
+        search: (query: string, topK: number, options?: LexicalSearchOptions) =>
+          search(
+            query,
+            topK,
+            {
+              ...moduleOptions,
+              ...options,
+            }
+          ),
+        refresh: typeof moduleExports.refresh === 'function'
+          ? () => {
+              const refresh = moduleExports.refresh as () => Promise<void> | void;
+              return refresh();
+            }
+          : undefined,
+        applyWorkspaceChanges: typeof moduleExports.applyWorkspaceChanges === 'function'
+          ? (changes: WorkspaceFileChange[]) => {
+              const applyWorkspaceChanges = moduleExports.applyWorkspaceChanges as (
+                nextChanges: WorkspaceFileChange[]
+              ) => Promise<void> | void;
+              return applyWorkspaceChanges(changes);
+            }
+          : undefined,
+        clearCache: typeof moduleExports.clearCache === 'function'
+          ? () => {
+              void (moduleExports.clearCache as () => void)();
+            }
+          : undefined,
+      };
+    }
+
+    return null;
+  }
+
   private getChunkSearchEngine(): ChunkSearchEngine | null {
     if (!this.isChunkAwareExactSearchEnabled()) {
       return null;
@@ -2067,6 +2213,37 @@ export class ContextServiceClient {
     } catch (error) {
       if (process.env.CE_DEBUG_SEARCH === 'true') {
         console.error('[chunkSearch] Exact-search helper unavailable, falling back to file scan:', error);
+      }
+    }
+
+    return null;
+  }
+
+  private getLexicalSqliteSearchEngine(): LexicalSearchEngine | null {
+    if (!this.isLexicalSqliteSearchEnabled()) {
+      return null;
+    }
+
+    if (this.lexicalSqliteSearchEngine) {
+      return this.lexicalSqliteSearchEngine;
+    }
+
+    if (this.lexicalSqliteSearchEngineLoadAttempted) {
+      return null;
+    }
+
+    this.lexicalSqliteSearchEngineLoadAttempted = true;
+
+    try {
+      const moduleExports = nodeRequire('../internal/retrieval/sqliteLexicalIndex.js') as Record<string, unknown>;
+      const engine = this.buildLexicalSqliteSearchEngineFromModule(moduleExports);
+      if (engine) {
+        this.lexicalSqliteSearchEngine = engine;
+        return engine;
+      }
+    } catch (error) {
+      if (process.env.CE_DEBUG_SEARCH === 'true') {
+        console.error('[lexicalSearch] SQLite helper unavailable, falling back to chunk/file scan:', error);
       }
     }
 
@@ -2849,6 +3026,10 @@ export class ContextServiceClient {
     if (upsertPaths.length > 0) {
       await this.indexFiles(upsertPaths);
     }
+
+    await this.refreshLexicalSqliteSearchEngine(
+      Array.from(latestByPath.entries()).map(([path, type]) => ({ path, type }))
+    );
   }
 
   /**
@@ -3451,6 +3632,42 @@ export class ContextServiceClient {
       || identifierLikeToken;
     const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
     const pureCodeIntent = codeIntent && !opsEvidenceIntent;
+
+    if (this.isLexicalSqliteSearchEnabled()) {
+      const lexicalSearchEngine = this.getLexicalSqliteSearchEngine();
+      if (lexicalSearchEngine) {
+        try {
+          const indexStatePath = path.join(this.workspacePath, '.augment-index-state.json');
+          const sqliteIndexPath = path.join(this.workspacePath, '.augment-lexical-index.sqlite');
+          const lexicalResults = await lexicalSearchEngine.search(rawQuery, topK, {
+            bypassCache,
+            workspacePath: this.workspacePath,
+            indexStatePath,
+            sqliteIndexPath,
+            includeArtifacts,
+            includeDocs,
+            includeJson,
+            queryTokens,
+            symbolTokens,
+            codeIntent,
+            opsEvidenceIntent,
+            normalizedQuery,
+          });
+          if (lexicalResults.length > 0) {
+            this.setLastSearchDiagnostics({
+              filters_applied: [],
+              filtered_paths_count: 0,
+              second_pass_used: false,
+            });
+            return lexicalResults;
+          }
+        } catch (error) {
+          if (process.env.CE_DEBUG_SEARCH === 'true') {
+            console.error('[lexicalSearch] SQLite helper search failed, falling back to chunk/file scan:', error);
+          }
+        }
+      }
+    }
 
     if (this.isChunkAwareExactSearchEnabled()) {
       const chunkSearchEngine = this.getChunkSearchEngine();

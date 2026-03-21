@@ -28,7 +28,7 @@ const mockContextInstance: Record<string, jest.Mock<any>> = {
 
 // Import after establishing test doubles
 const { ContextServiceClient } = await import('../src/mcp/serviceClient.js');
-const { FEATURE_FLAGS } = await import('../src/config/features.js');
+const { FEATURE_FLAGS, getFeatureFlagsFromEnv } = await import('../src/config/features.js');
 const { renderPrometheusMetrics } = await import('../src/metrics/metrics.js');
 
 describe('ContextServiceClient', () => {
@@ -88,11 +88,13 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED;
     delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
     delete process.env.CE_METRICS;
+    delete process.env.CE_RETRIEVAL_SQLITE_FTS5_V1;
     delete featureFlags.retrieval_chunk_search_v1;
     delete featureFlags.retrieval_provider_v2;
     delete featureFlags.retrieval_artifacts_v2;
     delete featureFlags.retrieval_shadow_control_v2;
     delete featureFlags.retrieval_tree_sitter_v1;
+    delete featureFlags.retrieval_sqlite_fts5_v1;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -108,6 +110,15 @@ describe('ContextServiceClient', () => {
     featureFlags.retrieval_artifacts_v2 = false;
     featureFlags.retrieval_shadow_control_v2 = false;
     featureFlags.retrieval_tree_sitter_v1 = false;
+    featureFlags.retrieval_sqlite_fts5_v1 = false;
+  });
+
+  describe('Feature flags', () => {
+    it('should parse the SQLite FTS5 lexical flag from env', () => {
+      process.env.CE_RETRIEVAL_SQLITE_FTS5_V1 = 'true';
+      const flags = getFeatureFlagsFromEnv();
+      expect(flags.retrieval_sqlite_fts5_v1).toBe(true);
+    });
   });
 
   describe('Retrieval Provider Dispatch', () => {
@@ -194,6 +205,53 @@ describe('ContextServiceClient', () => {
       expect(clearIndex).toHaveBeenCalledTimes(1);
       expect(workspaceResult.indexed).toBe(2);
       expect(filesResult.indexed).toBe(1);
+    });
+
+    it('should forward watcher batches to the SQLite lexical incremental refresh path', async () => {
+      featureFlags.retrieval_sqlite_fts5_v1 = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-lexical-refresh-dispatch-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'alpha.ts'),
+        'export const alpha = "needle one";',
+        'utf-8'
+      );
+
+      const refreshClient = new ContextServiceClient(tempDir);
+      const lexicalEngine = {
+        search: jest.fn(async () => []),
+        applyWorkspaceChanges: jest.fn(async () => undefined),
+        clearCache: jest.fn(),
+      };
+      const getLexicalEngineSpy = jest
+        .spyOn(refreshClient as any, 'getLexicalSqliteSearchEngine')
+        .mockReturnValue(lexicalEngine);
+      const indexFilesSpy = jest
+        .spyOn(refreshClient as any, 'indexFiles')
+        .mockResolvedValue({ indexed: 1, skipped: 0, errors: [], duration: 1 });
+      const pruneSpy = jest
+        .spyOn(refreshClient as any, 'pruneDeletedIndexEntries')
+        .mockResolvedValue(1);
+
+      await refreshClient.applyWorkspaceChanges([
+        { type: 'change', path: 'src/alpha.ts' },
+        { type: 'unlink', path: 'src/beta.ts' },
+      ]);
+
+      expect(pruneSpy).toHaveBeenCalledWith(['src/beta.ts']);
+      expect(indexFilesSpy).toHaveBeenCalledWith(['src/alpha.ts']);
+      expect(getLexicalEngineSpy).toHaveBeenCalledTimes(1);
+      expect(lexicalEngine.applyWorkspaceChanges).toHaveBeenCalledTimes(1);
+      const lexicalCalls = (lexicalEngine.applyWorkspaceChanges as jest.Mock).mock.calls;
+      expect(lexicalCalls[0]?.[0]).toEqual([
+        { type: 'change', path: 'src/alpha.ts' },
+        { type: 'unlink', path: 'src/beta.ts' },
+      ]);
+
+      getLexicalEngineSpy.mockRestore();
+      indexFilesSpy.mockRestore();
+      pruneSpy.mockRestore();
+      fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
     it('should route local_native semantic search via provider boundary without touching legacy runtime parsing path', async () => {
@@ -1636,6 +1694,90 @@ describe('ContextServiceClient', () => {
       }));
     });
 
+    it('should prefer SQLite lexical search when the flag is enabled', async () => {
+      featureFlags.retrieval_sqlite_fts5_v1 = true;
+      featureFlags.retrieval_chunk_search_v1 = true;
+
+      const lexicalSearchEngine = {
+        search: jest.fn(async (query: string, topK: number, options?: { bypassCache?: boolean }) => [
+          {
+            path: 'src/lexical.ts',
+            content: `lexical hit for ${query}`,
+            lines: '8-12',
+            chunkId: 'lex-1',
+            relevanceScore: 0.97,
+            matchType: 'keyword',
+            retrievedAt: '2026-03-21T00:00:00.000Z',
+          },
+        ]),
+      };
+      (client as any).lexicalSqliteSearchEngine = lexicalSearchEngine;
+
+      const chunkSearchEngine = {
+        search: jest.fn(async () => [
+          {
+            path: 'src/chunked.ts',
+            content: 'chunk helper hit',
+            lines: '10-14',
+            chunkId: 'chunk-1',
+            relevanceScore: 0.9,
+            matchType: 'keyword',
+          },
+        ]),
+      };
+      (client as any).chunkSearchEngine = chunkSearchEngine;
+
+      const getCachedFallbackFilesSpy = jest.spyOn(client as any, 'getCachedFallbackFiles');
+      const getFileSpy = jest.fn();
+      (client as any).getFile = getFileSpy;
+
+      const results = await client.localKeywordSearch('lexical exact query', 5, { bypassCache: true });
+
+      expect(lexicalSearchEngine.search).toHaveBeenCalledWith(
+        'lexical exact query',
+        5,
+        expect.objectContaining({ bypassCache: true })
+      );
+      expect(chunkSearchEngine.search).not.toHaveBeenCalled();
+      expect(getCachedFallbackFilesSpy).not.toHaveBeenCalled();
+      expect(getFileSpy).not.toHaveBeenCalled();
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(expect.objectContaining({
+        path: 'src/lexical.ts',
+        chunkId: 'lex-1',
+        lines: '8-12',
+        matchType: 'keyword',
+      }));
+    });
+
+    it('should fall back to chunk search when SQLite engine is unavailable', async () => {
+      featureFlags.retrieval_sqlite_fts5_v1 = true;
+      featureFlags.retrieval_chunk_search_v1 = true;
+
+      (client as any).lexicalSqliteSearchEngine = null;
+      (client as any).lexicalSqliteSearchEngineLoadAttempted = true;
+
+      const chunkSearchEngine = {
+        search: jest.fn(async () => [
+          {
+            path: 'src/chunked.ts',
+            content: 'chunk helper hit',
+            lines: '10-14',
+            chunkId: 'chunk-1',
+            relevanceScore: 0.9,
+            matchType: 'keyword',
+          },
+        ]),
+      };
+      (client as any).chunkSearchEngine = chunkSearchEngine;
+
+      const results = await client.localKeywordSearch('fallbackNeedle', 5, { bypassCache: true });
+
+      expect(chunkSearchEngine.search).toHaveBeenCalledTimes(1);
+      expect(results).toHaveLength(1);
+      expect(results[0]).toEqual(expect.objectContaining({ path: 'src/chunked.ts', matchType: 'keyword' }));
+    });
+
     it('should not use cache for different queries', async () => {
       const providerCall = configureOpenAISemanticProvider(
         client,
@@ -1661,13 +1803,17 @@ describe('ContextServiceClient', () => {
       // Clear cache
       const chunkClearCache = jest.fn();
       (client as any).chunkSearchEngine = { search: jest.fn(async () => []), clearCache: chunkClearCache };
+      const lexicalClearCache = jest.fn();
+      (client as any).lexicalSqliteSearchEngine = { search: jest.fn(async () => []), clearCache: lexicalClearCache };
       client.clearCache();
 
       // Should hit provider again
       await client.semanticSearch('clear test', 5);
       expect(providerCall).toHaveBeenCalledTimes(2);
       expect(chunkClearCache).toHaveBeenCalledTimes(1);
+      expect(lexicalClearCache).toHaveBeenCalledTimes(1);
       expect((client as any).chunkSearchEngine).toBeNull();
+      expect((client as any).lexicalSqliteSearchEngine).toBeNull();
     });
 
     it('should not use cache for different topK values', async () => {

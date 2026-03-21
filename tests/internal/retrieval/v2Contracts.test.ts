@@ -11,6 +11,7 @@ describe('retrieval v2 contracts', () => {
     retrieval_artifacts_v2: FEATURE_FLAGS.retrieval_artifacts_v2,
     retrieval_chunk_search_v1: FEATURE_FLAGS.retrieval_chunk_search_v1,
     retrieval_tree_sitter_v1: FEATURE_FLAGS.retrieval_tree_sitter_v1,
+    retrieval_sqlite_fts5_v1: FEATURE_FLAGS.retrieval_sqlite_fts5_v1,
   };
 
   afterEach(() => {
@@ -18,6 +19,7 @@ describe('retrieval v2 contracts', () => {
     FEATURE_FLAGS.retrieval_artifacts_v2 = originalFlags.retrieval_artifacts_v2;
     FEATURE_FLAGS.retrieval_chunk_search_v1 = originalFlags.retrieval_chunk_search_v1;
     FEATURE_FLAGS.retrieval_tree_sitter_v1 = originalFlags.retrieval_tree_sitter_v1;
+    FEATURE_FLAGS.retrieval_sqlite_fts5_v1 = originalFlags.retrieval_sqlite_fts5_v1;
   });
 
   it('snapshots retrieval-related feature flags deterministically', () => {
@@ -25,6 +27,7 @@ describe('retrieval v2 contracts', () => {
     FEATURE_FLAGS.retrieval_artifacts_v2 = false;
     FEATURE_FLAGS.retrieval_chunk_search_v1 = true;
     FEATURE_FLAGS.retrieval_tree_sitter_v1 = false;
+    FEATURE_FLAGS.retrieval_sqlite_fts5_v1 = true;
 
     const snapshot = snapshotRetrievalV2FeatureFlags();
 
@@ -33,6 +36,7 @@ describe('retrieval v2 contracts', () => {
       retrieval_artifacts_v2: false,
       retrieval_chunk_search_v1: true,
       retrieval_tree_sitter_v1: false,
+      retrieval_sqlite_fts5_v1: true,
     });
   });
 
