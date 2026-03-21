@@ -7,7 +7,7 @@ import { dedupeResults } from './dedupe.js';
 import { scoreDenseCandidates } from './dense.js';
 import { createWorkspaceDenseRetriever } from './denseIndex.js';
 import { createWorkspaceLanceDbVectorRetriever } from './lancedbVectorIndex.js';
-import { createHashEmbeddingRuntime } from './embeddingRuntime.js';
+import { createHashEmbeddingRuntime, getConfiguredEmbeddingRuntime } from './embeddingRuntime.js';
 import { fuseCandidates } from './fusion.js';
 import {
   assertRetrievalFlowActive,
@@ -193,8 +193,12 @@ function resolveDenseProvider(
     : process.cwd();
 
   const embeddingRuntime = featureEnabled('retrieval_lancedb_v1')
-    ? createHashEmbeddingRuntime(32)
-    : createHashEmbeddingRuntime();
+    ? getConfiguredEmbeddingRuntime({
+        fallbackRuntime: createHashEmbeddingRuntime(32),
+      })
+    : getConfiguredEmbeddingRuntime({
+        fallbackRuntime: createHashEmbeddingRuntime(),
+      });
   if (featureEnabled('retrieval_lancedb_v1')) {
     return createWorkspaceLanceDbVectorRetriever({
       workspacePath,

@@ -13,6 +13,7 @@ describe('feature flag env parsing', () => {
     delete process.env.CE_RETRIEVAL_CHUNK_SEARCH_V1;
     delete process.env.CE_RETRIEVAL_SQLITE_FTS5_V1;
     delete process.env.CE_RETRIEVAL_LANCEDB_V1;
+    delete process.env.CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1;
   });
 
   afterEach(() => {
@@ -29,6 +30,7 @@ describe('feature flag env parsing', () => {
     expect(flags.retrieval_chunk_search_v1).toBe(false);
     expect(flags.retrieval_sqlite_fts5_v1).toBe(false);
     expect(flags.retrieval_lancedb_v1).toBe(false);
+    expect(flags.retrieval_transformer_embeddings_v1).toBe(false);
   });
 
   it('parses retrieval V2 migration flags from env booleans', () => {
@@ -39,6 +41,7 @@ describe('feature flag env parsing', () => {
     process.env.CE_RETRIEVAL_CHUNK_SEARCH_V1 = 'on';
     process.env.CE_RETRIEVAL_SQLITE_FTS5_V1 = 'true';
     process.env.CE_RETRIEVAL_LANCEDB_V1 = 'true';
+    process.env.CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1 = 'true';
 
     const flags = getFeatureFlagsFromEnv();
 
@@ -49,6 +52,7 @@ describe('feature flag env parsing', () => {
     expect(flags.retrieval_chunk_search_v1).toBe(true);
     expect(flags.retrieval_sqlite_fts5_v1).toBe(true);
     expect(flags.retrieval_lancedb_v1).toBe(true);
+    expect(flags.retrieval_transformer_embeddings_v1).toBe(true);
   });
 
   it('falls back to default false for invalid V2 migration flag values', () => {
@@ -59,6 +63,7 @@ describe('feature flag env parsing', () => {
     process.env.CE_RETRIEVAL_CHUNK_SEARCH_V1 = 'later';
     process.env.CE_RETRIEVAL_SQLITE_FTS5_V1 = 'later';
     process.env.CE_RETRIEVAL_LANCEDB_V1 = 'later';
+    process.env.CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1 = 'later';
 
     const flags = getFeatureFlagsFromEnv();
 
@@ -69,5 +74,6 @@ describe('feature flag env parsing', () => {
     expect(flags.retrieval_chunk_search_v1).toBe(false);
     expect(flags.retrieval_sqlite_fts5_v1).toBe(false);
     expect(flags.retrieval_lancedb_v1).toBe(false);
+    expect(flags.retrieval_transformer_embeddings_v1).toBe(false);
   });
 });

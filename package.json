@@ -70,6 +70,7 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "@huggingface/transformers": "^3.8.1",
     "@lancedb/lancedb": "^0.27.1",
     "@modelcontextprotocol/sdk": "^1.0.4",
     "apache-arrow": "^18.1.0",

@@ -38,6 +38,7 @@ import {
   parseFormattedResults as parseFormattedSemanticResults,
   searchWithSemanticRuntime,
 } from '../retrieval/providers/semanticRuntime.js';
+import { describeEmbeddingRuntimeSelection } from '../internal/retrieval/embeddingRuntime.js';
 import {
   buildRetrievalArtifactV2Metadata,
   snapshotRetrievalV2FeatureFlags,
@@ -1213,12 +1214,7 @@ export class ContextServiceClient {
     const retrievalEngineVersion = featureEnabled('retrieval_lancedb_v1')
       ? 'lancedb-vector-v1'
       : 'local-native-v1';
-    const embeddingModelId = featureEnabled('retrieval_lancedb_v1')
-      ? 'hash-32'
-      : 'hash-128';
-    const vectorDimension = featureEnabled('retrieval_lancedb_v1')
-      ? 32
-      : 128;
+    const embeddingRuntime = describeEmbeddingRuntimeSelection(featureEnabled('retrieval_lancedb_v1'));
     return {
       ...buildRetrievalArtifactV2Metadata({
       retrieval_provider: this.retrievalProviderId,
@@ -1226,8 +1222,8 @@ export class ContextServiceClient {
       index_fingerprint: this.getIndexFingerprint(),
       feature_flags_snapshot: snapshotRetrievalV2FeatureFlags(),
       retrieval_engine_version: retrievalEngineVersion,
-      embedding_model_id: embeddingModelId,
-      vector_dimension: vectorDimension,
+      embedding_model_id: embeddingRuntime.modelId,
+      vector_dimension: embeddingRuntime.vectorDimension,
       fallback_domain: options?.fallbackDomain ?? 'unknown',
       fallback_reason: options?.fallbackReason ?? null,
       }),

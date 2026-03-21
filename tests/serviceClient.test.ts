@@ -90,6 +90,7 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_METRICS;
     delete process.env.CE_RETRIEVAL_SQLITE_FTS5_V1;
     delete process.env.CE_RETRIEVAL_LANCEDB_V1;
+    delete process.env.CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1;
     delete featureFlags.retrieval_chunk_search_v1;
     delete featureFlags.retrieval_provider_v2;
     delete featureFlags.retrieval_artifacts_v2;
@@ -97,6 +98,7 @@ describe('ContextServiceClient', () => {
     delete featureFlags.retrieval_tree_sitter_v1;
     delete featureFlags.retrieval_sqlite_fts5_v1;
     delete featureFlags.retrieval_lancedb_v1;
+    delete featureFlags.retrieval_transformer_embeddings_v1;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -114,6 +116,7 @@ describe('ContextServiceClient', () => {
     featureFlags.retrieval_tree_sitter_v1 = false;
     featureFlags.retrieval_sqlite_fts5_v1 = false;
     featureFlags.retrieval_lancedb_v1 = false;
+    featureFlags.retrieval_transformer_embeddings_v1 = false;
   });
 
   describe('Feature flags', () => {
@@ -444,6 +447,25 @@ describe('ContextServiceClient', () => {
       expect(artifactMetadata.vector_dimension).toBe(32);
       expect(artifactMetadata.fallback_domain).toBe('retrieval');
       expect(artifactMetadata.fallback_reason).toBe('vector_backend_enabled');
+    });
+
+    it('should record transformer embedding metadata when the transformer flag is enabled', () => {
+      FEATURE_FLAGS.retrieval_provider_v2 = true;
+      FEATURE_FLAGS.retrieval_artifacts_v2 = true;
+      FEATURE_FLAGS.retrieval_lancedb_v1 = true;
+      FEATURE_FLAGS.retrieval_transformer_embeddings_v1 = true;
+
+      const localClient = new ContextServiceClient(testWorkspace);
+      const artifactMetadata = localClient.getRetrievalArtifactMetadata({
+        fallbackDomain: 'retrieval',
+        fallbackReason: 'transformer_embeddings_enabled',
+      });
+
+      expect(artifactMetadata.retrieval_engine_version).toBe('lancedb-vector-v1');
+      expect(artifactMetadata.embedding_model_id).toBe('Xenova/all-MiniLM-L6-v2');
+      expect(artifactMetadata.vector_dimension).toBe(384);
+      expect(artifactMetadata.fallback_domain).toBe('retrieval');
+      expect(artifactMetadata.fallback_reason).toBe('transformer_embeddings_enabled');
     });
   });
 

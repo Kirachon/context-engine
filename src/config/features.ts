@@ -41,6 +41,8 @@ export interface FeatureFlags {
   retrieval_sqlite_fts5_v1: boolean;
   /** Enable LanceDB-backed vector search backend for the MVP vector path. */
   retrieval_lancedb_v1: boolean;
+  /** Enable local transformer embeddings for vector-backed retrieval paths. */
+  retrieval_transformer_embeddings_v1: boolean;
 }
 
 export function getFeatureFlagsFromEnv(): FeatureFlags {
@@ -65,6 +67,7 @@ export function getFeatureFlagsFromEnv(): FeatureFlags {
    retrieval_chunk_search_v1: envBool('CE_RETRIEVAL_CHUNK_SEARCH_V1', false),
    retrieval_sqlite_fts5_v1: envBool('CE_RETRIEVAL_SQLITE_FTS5_V1', false),
    retrieval_lancedb_v1: envBool('CE_RETRIEVAL_LANCEDB_V1', false),
+   retrieval_transformer_embeddings_v1: envBool('CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1', false),
  };
 }
 
