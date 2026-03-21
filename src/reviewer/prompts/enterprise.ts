@@ -15,20 +15,49 @@ export const ENTERPRISE_FINDINGS_SCHEMA = `{
   ]
 }`;
 
+type EnterprisePromptSection = {
+  title: string;
+  body: string;
+};
+
+function buildEnterprisePrompt(args: {
+  focus: string;
+  customInstructions?: string;
+  sections: EnterprisePromptSection[];
+}): string {
+  const parts = [
+    'You are an expert code reviewer. Return only JSON matching the schema.',
+    `Focus on ${args.focus}.`,
+  ];
+
+  const trimmedInstructions = args.customInstructions?.trim();
+  if (trimmedInstructions) {
+    parts.push(`CUSTOM INSTRUCTIONS:\n${trimmedInstructions}`);
+  }
+
+  for (const section of args.sections) {
+    parts.push(`${section.title}:\n${section.body}`);
+  }
+
+  parts.push(`SCHEMA:\n${ENTERPRISE_FINDINGS_SCHEMA}`);
+  return parts.join('\n\n');
+}
+
 export function buildStructuralPrompt(args: {
   diff: string;
   context: string;
   invariants: string;
   customInstructions?: string;
 }): string {
-  return `You are an expert code reviewer.\n\n` +
-    `Focus on: architecture, API compatibility, error handling patterns, test gaps.\n` +
-    `Do NOT return prose. Return only JSON matching the schema.\n\n` +
-    (args.customInstructions ? `CUSTOM INSTRUCTIONS:\n${args.customInstructions}\n\n` : '') +
-    `DIFF:\n${args.diff}\n\n` +
-    `CONTEXT (diff-first excerpts):\n${args.context}\n\n` +
-    `INVARIANTS (project policies):\n${args.invariants}\n\n` +
-    `SCHEMA:\n${ENTERPRISE_FINDINGS_SCHEMA}\n`;
+  return buildEnterprisePrompt({
+    focus: 'architecture, API compatibility, error handling patterns, and test gaps',
+    customInstructions: args.customInstructions,
+    sections: [
+      { title: 'DIFF', body: args.diff },
+      { title: 'CONTEXT', body: args.context },
+      { title: 'INVARIANTS', body: args.invariants },
+    ],
+  });
 }
 
 export function buildDetailedPrompt(args: {
@@ -38,15 +67,14 @@ export function buildDetailedPrompt(args: {
   structuralFindingsJson: string;
   customInstructions?: string;
 }): string {
-  return `You are an expert code reviewer.\n\n` +
-    `Focus on: correctness bugs, edge cases, security issues, performance regressions.\n` +
-    `Use structural findings as guidance; add new findings only.\n` +
-    `Do NOT return prose. Return only JSON matching the schema.\n\n` +
-    (args.customInstructions ? `CUSTOM INSTRUCTIONS:\n${args.customInstructions}\n\n` : '') +
-    `STRUCTURAL FINDINGS (JSON):\n${args.structuralFindingsJson}\n\n` +
-    `DIFF:\n${args.diff}\n\n` +
-    `CONTEXT (diff-first excerpts):\n${args.context}\n\n` +
-    `INVARIANTS (project policies):\n${args.invariants}\n\n` +
-    `SCHEMA:\n${ENTERPRISE_FINDINGS_SCHEMA}\n`;
+  return buildEnterprisePrompt({
+    focus: 'correctness bugs, edge cases, security issues, and performance regressions',
+    customInstructions: args.customInstructions,
+    sections: [
+      { title: 'STRUCTURAL FINDINGS', body: args.structuralFindingsJson },
+      { title: 'DIFF', body: args.diff },
+      { title: 'CONTEXT', body: args.context },
+      { title: 'INVARIANTS', body: args.invariants },
+    ],
+  });
 }
-

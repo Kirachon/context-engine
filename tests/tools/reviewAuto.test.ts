@@ -294,6 +294,66 @@ index 1234567..abcdefg 100644
     expect(capturedTimeoutMs).toBe(120000);
   });
 
+  it('passes llm_timeout_ms through review_diff options', async () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,2 @@
+ export const a = 1;
++export const b = 2;
+`;
+
+    let capturedTimeoutMs: number | undefined;
+    const previous = process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
+    process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = '65000';
+    try {
+      const mockServiceClient = {
+        getWorkspacePath: () => process.cwd(),
+        getFile: async () => `export const a = 1;\nexport const b = 2;\n`,
+        getActiveAIModelLabel: () => 'test-model',
+        searchAndAsk: async (_q: string, _p: string, opts?: { timeoutMs?: number }) => {
+          capturedTimeoutMs = opts?.timeoutMs;
+          return JSON.stringify({
+            findings: [
+              {
+                id: 'F001',
+                severity: 'HIGH',
+                category: 'architecture',
+                confidence: 0.9,
+                title: 'Structural',
+                location: { file: 'src/a.ts', startLine: 1, endLine: 1 },
+                evidence: ['e'],
+                impact: 'i',
+                recommendation: 'r',
+              },
+            ],
+          });
+        },
+      } as any;
+
+      const resultStr = await handleReviewAuto(
+        {
+          diff,
+          review_diff_options: {
+            enable_llm: true,
+            llm_timeout_ms: 120000,
+            two_pass: true,
+            risk_threshold: 3,
+          },
+        },
+        mockServiceClient
+      );
+
+      const parsed = JSON.parse(resultStr);
+      expect(parsed.selected_tool).toBe('review_diff');
+      expect(capturedTimeoutMs).toBe(120000);
+    } finally {
+      if (previous === undefined) delete process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
+      else process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = previous;
+    }
+  });
+
   it('runs chunked parallel review_git_diff when enabled and changed file count exceeds threshold', async () => {
     const tmp = createRepoWithMultiAreaStagedChange();
     process.env.CE_REVIEW_AUTO_CHUNKED_PARALLEL = 'true';

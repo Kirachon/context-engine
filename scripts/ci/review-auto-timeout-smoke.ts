@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Deterministic smoke check for review_auto timeout passthrough on review_git_diff path.
+ * Deterministic smoke check for review_auto timeout passthrough on both routes:
+ * - review_auto -> review_git_diff
+ * - review_auto -> review_diff
  *
  * Exit codes:
  * - 0: all checks passed
@@ -29,11 +31,20 @@ interface SmokeArtifact {
     duration_ms: number;
     requested_timeout_ms: number;
     observed_timeout_ms: number | null;
+    observed_timeout_ms_review_diff: number | null;
   };
 }
 
 const REQUESTED_TIMEOUT_MS = 120_000;
 const ARTIFACT_PATH = path.resolve('artifacts', 'review_auto_timeout_smoke.json');
+const DIRECT_DIFF = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,1 +1,2 @@
+ export const a = 1;
++export const b = 2;
+`;
 
 function sh(bin: string, args: string[], cwd: string): string {
   return execFileSync(bin, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf-8');
@@ -82,11 +93,12 @@ async function main(): Promise<void> {
   const start = Date.now();
   const checks: SmokeCheck[] = [];
   let observedTimeoutMs: number | null = null;
+  let observedTimeoutMsReviewDiff: number | null = null;
 
   try {
     const tmp = createRepoWithStagedChange();
 
-    const mockServiceClient = {
+    const mockServiceClientGit = {
       getWorkspacePath: () => tmp,
       searchAndAsk: async (_query: string, _prompt: string, opts?: { timeoutMs?: number }) => {
         observedTimeoutMs = opts?.timeoutMs ?? null;
@@ -111,16 +123,16 @@ async function main(): Promise<void> {
       },
     } as any;
 
-    const resultStr = await handleReviewAuto(
+    const gitResultStr = await handleReviewAuto(
       {
         target: 'staged',
         review_git_diff_options: {
           llm_timeout_ms: REQUESTED_TIMEOUT_MS,
         },
       },
-      mockServiceClient
+      mockServiceClientGit
     );
-    const parsed = JSON.parse(resultStr) as {
+    const gitParsed = JSON.parse(gitResultStr) as {
       selected_tool?: string;
       output?: { review?: { findings?: unknown[] } };
     };
@@ -128,20 +140,80 @@ async function main(): Promise<void> {
     pushCheck(
       checks,
       'selected_review_git_diff_path',
-      parsed.selected_tool === 'review_git_diff',
-      `selected_tool=${String(parsed.selected_tool)}`
+      gitParsed.selected_tool === 'review_git_diff',
+      `selected_tool=${String(gitParsed.selected_tool)}`
     );
     pushCheck(
       checks,
-      'observed_timeout_matches_request',
+      'observed_timeout_matches_request_review_git_diff',
       observedTimeoutMs === REQUESTED_TIMEOUT_MS,
       `requested=${REQUESTED_TIMEOUT_MS} observed=${String(observedTimeoutMs)}`
     );
     pushCheck(
       checks,
-      'review_payload_is_present',
-      Array.isArray(parsed.output?.review?.findings),
+      'review_payload_is_present_review_git_diff',
+      Array.isArray(gitParsed.output?.review?.findings),
       'Expected review_auto output.review.findings array.'
+    );
+
+    const mockServiceClientDiff = {
+      getWorkspacePath: () => process.cwd(),
+      getFile: async () => `export const a = 1;\nexport const b = 2;\n`,
+      getActiveAIModelLabel: () => 'test-model',
+      searchAndAsk: async (_query: string, _prompt: string, opts?: { timeoutMs?: number }) => {
+        observedTimeoutMsReviewDiff = opts?.timeoutMs ?? null;
+        return JSON.stringify({
+          findings: [
+            {
+              id: 'F001',
+              severity: 'HIGH',
+              category: 'architecture',
+              confidence: 0.9,
+              title: 'Structural',
+              location: { file: 'src/a.ts', startLine: 1, endLine: 1 },
+              evidence: ['e'],
+              impact: 'i',
+              recommendation: 'r',
+            },
+          ],
+        });
+      },
+    } as any;
+
+    const diffResultStr = await handleReviewAuto(
+      {
+        diff: DIRECT_DIFF,
+        review_diff_options: {
+          enable_llm: true,
+          llm_timeout_ms: REQUESTED_TIMEOUT_MS,
+          two_pass: true,
+          risk_threshold: 3,
+        },
+      },
+      mockServiceClientDiff
+    );
+    const diffParsed = JSON.parse(diffResultStr) as {
+      selected_tool?: string;
+      output?: { findings?: unknown[] };
+    };
+
+    pushCheck(
+      checks,
+      'selected_review_diff_path',
+      diffParsed.selected_tool === 'review_diff',
+      `selected_tool=${String(diffParsed.selected_tool)}`
+    );
+    pushCheck(
+      checks,
+      'observed_timeout_matches_request_review_diff',
+      observedTimeoutMsReviewDiff === REQUESTED_TIMEOUT_MS,
+      `requested=${REQUESTED_TIMEOUT_MS} observed=${String(observedTimeoutMsReviewDiff)}`
+    );
+    pushCheck(
+      checks,
+      'review_payload_is_present_review_diff',
+      Array.isArray(diffParsed.output?.findings),
+      'Expected review_auto output.findings array for review_diff route.'
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -161,6 +233,7 @@ async function main(): Promise<void> {
       duration_ms: Date.now() - start,
       requested_timeout_ms: REQUESTED_TIMEOUT_MS,
       observed_timeout_ms: observedTimeoutMs,
+      observed_timeout_ms_review_diff: observedTimeoutMsReviewDiff,
     },
   };
 
@@ -174,7 +247,7 @@ async function main(): Promise<void> {
   console.log(`artifact=${ARTIFACT_PATH}`);
   // eslint-disable-next-line no-console
   console.log(
-    `metrics duration_ms=${artifact.metrics.duration_ms} requested_timeout_ms=${artifact.metrics.requested_timeout_ms} observed_timeout_ms=${String(artifact.metrics.observed_timeout_ms)}`
+    `metrics duration_ms=${artifact.metrics.duration_ms} requested_timeout_ms=${artifact.metrics.requested_timeout_ms} observed_timeout_ms=${String(artifact.metrics.observed_timeout_ms)} observed_timeout_ms_review_diff=${String(artifact.metrics.observed_timeout_ms_review_diff)}`
   );
   for (const check of artifact.checks) {
     // eslint-disable-next-line no-console
@@ -202,6 +275,7 @@ main().catch((error) => {
       duration_ms: 0,
       requested_timeout_ms: REQUESTED_TIMEOUT_MS,
       observed_timeout_ms: null,
+      observed_timeout_ms_review_diff: null,
     },
   };
   writeArtifact(artifact);

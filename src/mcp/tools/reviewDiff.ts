@@ -20,6 +20,22 @@ const MIN_REVIEW_DIFF_LLM_TIMEOUT_MS = 1_000;
 const MAX_REVIEW_DIFF_LLM_TIMEOUT_MS = 30 * 60 * 1000;
 const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
+function resolveReviewTimeoutMs(
+  requestedTimeoutMs: number | undefined,
+  fallbackTimeoutMs: number
+): number {
+  if (requestedTimeoutMs === undefined) {
+    return fallbackTimeoutMs;
+  }
+  if (!Number.isFinite(requestedTimeoutMs)) {
+    return fallbackTimeoutMs;
+  }
+  return Math.max(
+    MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
+    Math.min(MAX_REVIEW_DIFF_LLM_TIMEOUT_MS, Math.floor(requestedTimeoutMs))
+  );
+}
+
 export interface ReviewDiffArgs {
   diff: string;
   changed_files?: string[];
@@ -42,6 +58,7 @@ export interface ReviewDiffArgs {
     token_budget?: number;
     max_context_files?: number;
     custom_instructions?: string;
+    llm_timeout_ms?: number;
     fail_on_severity?: 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO';
     fail_on_invariant_ids?: string[];
     allowlist_finding_ids?: string[];
@@ -93,13 +110,17 @@ export async function handleReviewDiff(
           max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
         }
       );
+      const effectiveReviewTimeoutMs = resolveReviewTimeoutMs(
+        args.options?.llm_timeout_ms,
+        reviewDiffLlmTimeoutMs
+      );
       noteReviewFlowStage(flow, 'llm:enabled');
       runtime.llm = {
         call: async (searchQuery: string, prompt: string) => {
           noteReviewFlowStage(flow, 'llm:request');
           try {
             const response = await serviceClient.searchAndAsk(searchQuery, prompt, {
-              timeoutMs: reviewDiffLlmTimeoutMs,
+              timeoutMs: effectiveReviewTimeoutMs,
             });
             noteReviewFlowStage(flow, 'llm:response');
             return response;
@@ -191,6 +212,12 @@ export const reviewDiffTool = {
           token_budget: { type: 'number', description: 'Context token budget for diff-first excerpts. Default: 8000', default: 8000 },
           max_context_files: { type: 'number', description: 'Max files to include in diff-first context. Default: 5', default: 5 },
           custom_instructions: { type: 'string', description: 'Custom instructions for the reviewer' },
+          llm_timeout_ms: {
+            type: 'number',
+            description: 'Optional AI timeout override in milliseconds for this review call (1000-1800000).',
+            minimum: 1000,
+            maximum: 1800000,
+          },
           fail_on_severity: {
             type: 'string',
             description: 'CI gating severity threshold. Default: CRITICAL',

@@ -9,6 +9,7 @@ import {
   CODE_REVIEW_SYSTEM_PROMPT,
   CATEGORY_FOCUS_PROMPTS,
   buildCodeReviewPrompt,
+  buildFileReviewPrompt,
   extractJsonFromResponse,
   validateReviewResult,
 } from '../../src/mcp/prompts/codeReview.js';
@@ -101,6 +102,45 @@ describe('Code Review Prompts', () => {
 
       expect(prompt).toContain('File 1 context');
       expect(prompt).toContain('File 2 context');
+    });
+
+    it('should render file contexts and categories in stable sorted order', () => {
+      const fileContexts = {
+        'src/z.ts': '  z context  ',
+        'src/a.ts': 'a context',
+      };
+
+      const prompt = buildCodeReviewPrompt(sampleDiff, fileContexts, {
+        categories: ['performance', 'correctness'],
+        custom_instructions: '  Prefer the smallest safe fix.  ',
+      });
+
+      expect(prompt).toContain('## Context');
+      expect(prompt.indexOf('src/a.ts')).toBeLessThan(prompt.indexOf('src/z.ts'));
+      expect(prompt.indexOf('correctness')).toBeLessThan(prompt.indexOf('performance'));
+      expect(prompt).toContain('Prefer the smallest safe fix.');
+      expect(prompt).not.toContain('File Contexts (for additional understanding)');
+      expect(prompt).not.toContain('Analyze the diff above and return your findings as valid JSON matching the schema in your system prompt.');
+      expect(prompt).toContain('Order findings by priority (P0 first) and include confidence scores.');
+    });
+  });
+
+  describe('buildFileReviewPrompt', () => {
+    it('should normalize changed lines and trim prompt extras', () => {
+      const prompt = buildFileReviewPrompt(
+        'src/file.ts',
+        'const a = 1;\nconst b = 2;\n',
+        [12, 3, 12, 7],
+        {
+          categories: ['style', 'correctness'],
+          custom_instructions: '  Keep it concise.  ',
+        }
+      );
+
+      expect(prompt).toContain('## File Review: src/file.ts');
+      expect(prompt).toContain('3, 7, 12');
+      expect(prompt).toContain('Keep it concise.');
+      expect(prompt).not.toContain('The following line numbers were changed');
     });
   });
 
@@ -272,4 +312,3 @@ End of review.`;
     });
   });
 });
-

@@ -20,6 +20,7 @@ import { evaluateFailurePolicy, postProcessFindings } from './post/normalize.js'
 import { dedupeFindingsById } from './post/findings.js';
 
 const TOOL_VERSION = '1.9.0';
+const REVIEW_CONTEXT_LINES = 16;
 
 export interface ReviewDiffOptions {
   confidence_threshold?: number;
@@ -193,7 +194,7 @@ export async function reviewDiff(input: ReviewDiffInput): Promise<EnterpriseRevi
         });
 
         const contextStart = Date.now();
-        const contextRaw = await fetchPlannedContext(parsedDiff, plan, readFile, { contextLines: 20 });
+        const contextRaw = await fetchPlannedContext(parsedDiff, plan, readFile, { contextLines: REVIEW_CONTEXT_LINES });
         contextFetchMs = Date.now() - contextStart;
 
         const scrubStart = Date.now();

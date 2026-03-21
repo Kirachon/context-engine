@@ -685,4 +685,32 @@ index 1234567..abcdefg 100644
       }
     });
   });
+
+  describe('reviewChanges prompt assembly', () => {
+    it('normalizes file context ordering and trims prompt extras', async () => {
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'looks good',
+          overall_explanation: 'No issues',
+          overall_confidence_score: 0.95,
+        })
+      );
+
+      await codeReviewService.reviewChanges({
+        diff: SIMPLE_DIFF,
+        file_contexts: {
+          'src/z.ts': '  const z = 1;  ',
+          'src/a.ts': 'const a = 1;\n',
+        },
+      });
+
+      const [, prompt] = mockServiceClient.searchAndAsk.mock.calls[0];
+      expect(typeof prompt).toBe('string');
+      expect(prompt).toContain('## Context');
+      expect(prompt.indexOf('src/a.ts')).toBeLessThan(prompt.indexOf('src/z.ts'));
+      expect(prompt).not.toContain('File Contexts (for additional understanding)');
+      expect(prompt).not.toContain('  const z = 1;  ');
+    });
+  });
 });

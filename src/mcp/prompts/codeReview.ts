@@ -111,65 +111,27 @@ Return a JSON object with this EXACT structure:
 export const CATEGORY_FOCUS_PROMPTS: Record<ReviewCategory, string> = {
   correctness: `
 ## Additional Focus: Correctness
-Pay special attention to:
-- Null/undefined handling
-- Off-by-one errors
-- Race conditions
-- Edge cases (empty arrays, null inputs, boundary values)
-- Type mismatches
-- Incorrect boolean logic`,
+Pay special attention to null/undefined handling, off-by-one errors, race conditions, boundary cases, type mismatches, and incorrect boolean logic.`,
 
   security: `
 ## Additional Focus: Security
-Pay special attention to:
-- SQL/NoSQL injection vulnerabilities
-- XSS (Cross-Site Scripting) risks
-- CSRF vulnerabilities
-- Authentication/authorization bypasses
-- Sensitive data exposure (secrets, PII)
-- Insecure cryptographic practices
-- Path traversal vulnerabilities`,
+Pay special attention to injection risks, XSS, CSRF, auth bypasses, sensitive data exposure, weak cryptography, and path traversal.`,
 
   performance: `
 ## Additional Focus: Performance
-Pay special attention to:
-- N+1 query patterns
-- Unnecessary re-renders (React)
-- Memory leaks (event listeners, subscriptions)
-- Inefficient algorithms (O(n²) when O(n) possible)
-- Unnecessary data copying
-- Missing caching opportunities
-- Blocking operations on main thread`,
+Pay special attention to N+1 patterns, unnecessary re-renders, memory leaks, inefficient algorithms, unnecessary copying, missing caching, and blocking work on the main thread.`,
 
   maintainability: `
 ## Additional Focus: Maintainability
-Pay special attention to:
-- High cyclomatic complexity
-- Long functions (>50 lines)
-- Deep nesting (>3 levels)
-- Code duplication
-- Missing or inadequate tests
-- Tight coupling between modules
-- Unclear naming or logic`,
+Pay special attention to complexity, long functions, deep nesting, code duplication, missing tests, tight coupling, and unclear naming or logic.`,
 
   style: `
 ## Additional Focus: Style
-Pay special attention to:
-- Inconsistent naming conventions
-- Formatting issues
-- Import organization
-- Dead code
-- Commented-out code
-- Magic numbers without explanation`,
+Pay special attention to naming consistency, formatting, import organization, dead code, commented-out code, and unexplained magic numbers.`,
 
   documentation: `
 ## Additional Focus: Documentation
-Pay special attention to:
-- Missing JSDoc/docstrings for public APIs
-- Outdated comments
-- Missing README updates for new features
-- Unclear or misleading comments
-- Missing type annotations`,
+Pay special attention to missing or outdated docs, unclear comments, public API docstrings, README updates, and missing type annotations.`,
 };
 
 // ============================================================================
@@ -191,53 +153,46 @@ export function buildCodeReviewPrompt(
     confidence_threshold = 0.7,
   } = options;
 
-  let prompt = `## Diff to Review
-\`\`\`diff
-${diff}
-\`\`\`
-`;
+  const sections: string[] = [`## Diff to Review\n\`\`\`diff\n${diff}\n\`\`\``];
 
-  // Add file contexts if provided
-  if (Object.keys(fileContexts).length > 0) {
-    prompt += `\n## File Contexts (for additional understanding)\n`;
-    for (const [path, content] of Object.entries(fileContexts)) {
-      prompt += `\n### ${path}\n\`\`\`\n${content}\n\`\`\`\n`;
-    }
+  const sortedFileContexts = Object.entries(fileContexts)
+    .filter(([, content]) => typeof content === 'string' && content.trim().length > 0)
+    .sort(([a], [b]) => a.localeCompare(b));
+  if (sortedFileContexts.length > 0) {
+    sections.push(
+      ['## Context', ...sortedFileContexts.map(([path, content]) => `### ${path}\n\`\`\`\n${content.trimEnd()}\n\`\`\``)].join('\n\n')
+    );
   }
 
-  // Add category focus if specific categories requested
-  if (categories && categories.length > 0) {
-    prompt += `\n## Category Focus\nFocus your review on these categories: ${categories.join(', ')}\n`;
-    for (const category of categories) {
-      if (CATEGORY_FOCUS_PROMPTS[category]) {
-        prompt += CATEGORY_FOCUS_PROMPTS[category];
+  const normalizedCategories = categories && categories.length > 0
+    ? Array.from(new Set(categories)).sort((a, b) => a.localeCompare(b))
+    : [];
+  if (normalizedCategories.length > 0) {
+    sections.push(`## Category Focus\nFocus categories: ${normalizedCategories.join(', ')}`);
+    for (const category of normalizedCategories) {
+      const categoryPrompt = CATEGORY_FOCUS_PROMPTS[category];
+      if (categoryPrompt) {
+        sections.push(categoryPrompt.trim());
       }
     }
   }
 
-  // Add changed lines filter instruction
   if (changed_lines_only) {
-    prompt += `\n## Changed Lines Filter
-IMPORTANT: Strongly prefer reporting issues on CHANGED lines (lines with + prefix in the diff).
-Only report issues on unchanged lines if they are P0 (critical) issues directly affected by the changes.
-Set is_on_changed_line appropriately for each finding.`;
+    sections.push(
+      '## Changed Lines Filter\nPrefer findings on changed lines. Only report unchanged-line issues when they are P0 issues directly affected by the change.'
+    );
   }
 
-  // Add confidence threshold instruction
-  prompt += `\n\n## Confidence Threshold
-Only include findings with confidence_score >= ${confidence_threshold}.
-Filter out uncertain or speculative findings.`;
+  sections.push(`## Confidence Threshold\nOnly include findings with confidence_score >= ${confidence_threshold}.`);
 
-  // Add custom instructions if provided
-  if (custom_instructions) {
-    prompt += `\n\n## Custom Instructions\n${custom_instructions}`;
+  const trimmedInstructions = custom_instructions?.trim();
+  if (trimmedInstructions) {
+    sections.push(`## Custom Instructions\n${trimmedInstructions}`);
   }
 
-  prompt += `\n\n## Instructions
-Analyze the diff above and return your findings as valid JSON matching the schema in your system prompt.
-Order findings by priority (P0 first, then P1, etc.) and include confidence scores.`;
+  sections.push('Order findings by priority (P0 first) and include confidence scores.');
 
-  return prompt;
+  return sections.join('\n\n');
 }
 
 /**
@@ -250,23 +205,28 @@ export function buildFileReviewPrompt(
   options: ReviewOptions = {}
 ): string {
   const { categories, custom_instructions } = options;
+  const normalizedChangedLines = Array.from(
+    new Set(changedLines.filter((line): line is number => Number.isFinite(line)))
+  ).sort((a, b) => a - b);
 
-  let prompt = `## File to Review: ${filePath}
+  let prompt = `## File Review: ${filePath}
 
 \`\`\`
-${fileContent}
+${fileContent.trimEnd()}
 \`\`\`
 
 ## Changed Lines
-The following line numbers were changed: ${changedLines.join(', ')}
-Focus your review on these lines and their immediate context.`;
+${normalizedChangedLines.length > 0 ? normalizedChangedLines.join(', ') : '(none)'}
+Focus first on the changed lines and nearby context.`;
 
   if (categories && categories.length > 0) {
-    prompt += `\n\n## Category Focus: ${categories.join(', ')}`;
+    const normalizedCategories = Array.from(new Set(categories)).sort((a, b) => a.localeCompare(b));
+    prompt += `\n\n## Category Focus: ${normalizedCategories.join(', ')}`;
   }
 
-  if (custom_instructions) {
-    prompt += `\n\n## Custom Instructions\n${custom_instructions}`;
+  const trimmedInstructions = custom_instructions?.trim();
+  if (trimmedInstructions) {
+    prompt += `\n\n## Custom Instructions\n${trimmedInstructions}`;
   }
 
   return prompt;
@@ -320,4 +280,3 @@ export function validateReviewResult(result: unknown): boolean {
 
   return true;
 }
-

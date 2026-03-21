@@ -229,6 +229,65 @@ index 1234567..abcdefg 100644
     }
   });
 
+  it('uses per-call llm_timeout_ms override when provided', async () => {
+    const diff = `diff --git a/src/mcp/tools/x.ts b/src/mcp/tools/x.ts
+index 1234567..abcdefg 100644
+--- a/src/mcp/tools/x.ts
++++ b/src/mcp/tools/x.ts
+@@ -1,2 +1,3 @@
+ export const x = 1;
++export const y = 2;
+`;
+
+    const previous = process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
+    process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = '65000';
+
+    let capturedTimeoutMs: number | undefined;
+    try {
+      const resultStr = await handleReviewDiff(
+        {
+          diff,
+          options: {
+            enable_llm: true,
+            llm_timeout_ms: 120000,
+            two_pass: true,
+            risk_threshold: 3,
+          },
+        },
+        {
+          getWorkspacePath: () => process.cwd(),
+          getFile: async () => `export const x = 1;\nexport const y = 2;\n`,
+          getActiveAIModelLabel: () => 'test-model',
+          searchAndAsk: async (_searchQuery: string, _prompt: string, opts?: { timeoutMs?: number }) => {
+            capturedTimeoutMs = opts?.timeoutMs;
+            return JSON.stringify({
+              findings: [
+                {
+                  id: 'F001',
+                  severity: 'HIGH',
+                  category: 'architecture',
+                  confidence: 0.9,
+                  title: 'Structural',
+                  location: { file: 'src/mcp/tools/x.ts', startLine: 1, endLine: 1 },
+                  evidence: ['e'],
+                  impact: 'i',
+                  recommendation: 'r',
+                },
+              ],
+            });
+          },
+        } as any
+      );
+
+      const result = JSON.parse(resultStr);
+      expect(result.stats.llm_passes_executed).toBe(2);
+      expect(capturedTimeoutMs).toBe(120000);
+    } finally {
+      if (previous === undefined) delete process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
+      else process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = previous;
+    }
+  });
+
   it('sets should_fail when a CRITICAL invariant is violated', async () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-gate-'));
     const invPath = path.join(tmpDir, '.review-invariants.yml');

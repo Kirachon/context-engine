@@ -67,6 +67,18 @@ export class CodeReviewService {
     this.contextClient = contextClient;
   }
 
+  private normalizeFileContexts(fileContexts: Record<string, string>): Record<string, string> {
+    const entries = Object.entries(fileContexts)
+      .filter(([, content]) => typeof content === 'string' && content.trim().length > 0)
+      .sort(([a], [b]) => a.localeCompare(b));
+
+    const normalized: Record<string, string> = {};
+    for (const [path, content] of entries) {
+      normalized[path] = content.trimEnd();
+    }
+    return normalized;
+  }
+
   private resolveOptions(options?: ReviewOptions): Required<ReviewOptions> {
     return {
       confidence_threshold: options?.confidence_threshold ?? DEFAULT_OPTIONS.confidence_threshold,
@@ -108,7 +120,7 @@ export class CodeReviewService {
       // Step 3: Build the review prompt
       const reviewPrompt = buildCodeReviewPrompt(
         input.diff,
-        input.file_contexts || {},
+        this.normalizeFileContexts(input.file_contexts || {}),
         opts
       );
 
