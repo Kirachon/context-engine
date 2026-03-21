@@ -17,8 +17,16 @@ export interface ChunkingOptions {
   maxChunkChars?: number;
 }
 
+export interface ChunkParser {
+  id: string;
+  version: number;
+  parse: (content: string, options: ChunkingOptions) => ChunkRecord[];
+}
+
 const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
+export const HEURISTIC_CHUNK_PARSER_ID = 'heuristic-boundary';
+export const HEURISTIC_CHUNK_PARSER_VERSION = 1;
 
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').trim();
@@ -132,4 +140,12 @@ export function splitIntoChunks(content: string, options: ChunkingOptions): Chun
   flush(lines.length);
 
   return chunks;
+}
+
+export function createHeuristicChunkParser(): ChunkParser {
+  return {
+    id: HEURISTIC_CHUNK_PARSER_ID,
+    version: HEURISTIC_CHUNK_PARSER_VERSION,
+    parse: (content: string, options: ChunkingOptions) => splitIntoChunks(content, options),
+  };
 }

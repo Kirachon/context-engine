@@ -18,6 +18,7 @@ Runtime and rollout control flags used by operators.
 | `CE_RETRIEVAL_PROVIDER_V2` | boolean | `false` | Search owner | Enables provider-level V2 migration seam hooks while keeping legacy behavior as default. |
 | `CE_RETRIEVAL_ARTIFACTS_V2` | boolean | `false` | Search owner | Enables versioned retrieval artifact metadata hooks for V2 migration evidence. |
 | `CE_RETRIEVAL_SHADOW_CONTROL_V2` | boolean | `false` | Search owner | Enables V2 shadow/canary control-plane hooks without changing default caller responses. |
+| `CE_RETRIEVAL_TREE_SITTER_V1` | boolean | `false` | Search owner | Enables Tree-sitter-backed parser extraction for supported code files with heuristic fallback. |
 | `CE_RETRIEVAL_CHUNK_SEARCH_V1` | boolean | `false` | Search owner | Enables the chunk-aware exact search foundation for the next retrieval phase. |
 
 ## Queue policy flags

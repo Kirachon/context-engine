@@ -1,7 +1,14 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { featureEnabled } from '../../config/features.js';
 import type { SearchResult } from '../../mcp/serviceClient.js';
-import { splitIntoChunks, type ChunkRecord } from './chunking.js';
+import {
+  createHeuristicChunkParser,
+  type ChunkParser,
+  type ChunkRecord,
+} from './chunking.js';
+import { createTreeSitterChunkParser } from './treeSitterChunkParser.js';
 
 const CHUNK_INDEX_FILE_NAME = '.augment-chunk-index.json';
 const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
@@ -49,9 +56,16 @@ interface ChunkIndexDocument {
   chunks: ChunkRecord[];
 }
 
+interface ChunkIndexParserSnapshot {
+  id: string;
+  version: number;
+}
+
 interface ChunkIndexFile {
   version: number;
   updatedAt: string;
+  workspaceFingerprint: string;
+  parser: ChunkIndexParserSnapshot;
   chunking: {
     version: number;
     maxChunkLines: number;
@@ -66,6 +80,7 @@ export interface WorkspaceChunkSearchIndexOptions {
   chunkIndexPath?: string;
   maxChunkLines?: number;
   maxChunkChars?: number;
+  chunkParserFactory?: () => ChunkParser | null;
 }
 
 export interface ChunkSearchOptions {
@@ -98,6 +113,8 @@ export interface WorkspaceChunkSearchIndex {
     updatedAt: string | null;
     fileCount: number;
     chunkCount: number;
+    workspaceFingerprint: string;
+    parser: ChunkIndexParserSnapshot;
   };
 }
 
@@ -107,6 +124,33 @@ function clampTopK(topK: number): number {
 
 function normalizePath(relativePath: string): string {
   return relativePath.replace(/\\/g, '/').trim();
+}
+
+function buildWorkspaceFingerprint(workspacePath: string): string {
+  const normalizedWorkspacePath = normalizePath(path.resolve(workspacePath));
+  return crypto.createHash('sha256').update(normalizedWorkspacePath).digest('hex').slice(0, 16);
+}
+
+function resolveChunkParser(options: WorkspaceChunkSearchIndexOptions): ChunkParser {
+  try {
+    if (typeof options.chunkParserFactory === 'function') {
+      const customParser = options.chunkParserFactory();
+      if (customParser) {
+        return customParser;
+      }
+    }
+  } catch {
+    // Ignore custom parser factory failures and fall back to runtime resolution.
+  }
+
+  if (featureEnabled('retrieval_tree_sitter_v1')) {
+    const treeSitterParser = createTreeSitterChunkParser();
+    if (treeSitterParser) {
+      return treeSitterParser;
+    }
+  }
+
+  return createHeuristicChunkParser();
 }
 
 function sanitizePath(relativePath: string): string | null {
@@ -150,10 +194,18 @@ function readIndexState(filePath: string): IndexStateFile {
   return { files: parsed.files as Record<string, IndexStateEntry> };
 }
 
-function readChunkIndex(filePath: string, maxChunkLines: number, maxChunkChars: number): ChunkIndexFile {
+function readChunkIndex(
+  filePath: string,
+  workspaceFingerprint: string,
+  parserSnapshot: ChunkIndexParserSnapshot,
+  maxChunkLines: number,
+  maxChunkChars: number
+): ChunkIndexFile {
   const fallback: ChunkIndexFile = {
     version: CHUNK_INDEX_VERSION,
     updatedAt: new Date(0).toISOString(),
+    workspaceFingerprint,
+    parser: parserSnapshot,
     chunking: {
       version: CHUNK_INDEX_VERSION,
       maxChunkLines,
@@ -178,9 +230,30 @@ function readChunkIndex(filePath: string, maxChunkLines: number, maxChunkChars: 
     return fallback;
   }
 
+  const parsedWorkspaceFingerprint = typeof parsed.workspaceFingerprint === 'string'
+    ? parsed.workspaceFingerprint
+    : null;
+  if (parsedWorkspaceFingerprint !== workspaceFingerprint) {
+    return fallback;
+  }
+
+  const parsedParser = parsed.parser;
+  if (
+    !parsedParser
+    || typeof parsedParser !== 'object'
+    || typeof parsedParser.id !== 'string'
+    || typeof parsedParser.version !== 'number'
+    || parsedParser.id !== parserSnapshot.id
+    || parsedParser.version !== parserSnapshot.version
+  ) {
+    return fallback;
+  }
+
   return {
     version: typeof parsed.version === 'number' ? parsed.version : CHUNK_INDEX_VERSION,
     updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : fallback.updatedAt,
+    workspaceFingerprint,
+    parser: parserSnapshot,
     chunking: {
       version: CHUNK_INDEX_VERSION,
       maxChunkLines,
@@ -487,8 +560,16 @@ export function createWorkspaceChunkSearchIndex(
   const chunkIndexPath = options.chunkIndexPath ?? path.join(workspacePath, CHUNK_INDEX_FILE_NAME);
   const maxChunkLines = Math.max(1, Math.min(400, options.maxChunkLines ?? DEFAULT_MAX_CHUNK_LINES));
   const maxChunkChars = Math.max(64, Math.min(50_000, options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS));
+  const parser = resolveChunkParser(options);
+  const workspaceFingerprint = buildWorkspaceFingerprint(workspacePath);
 
-  let currentIndex = readChunkIndex(chunkIndexPath, maxChunkLines, maxChunkChars);
+  let currentIndex = readChunkIndex(
+    chunkIndexPath,
+    workspaceFingerprint,
+    { id: parser.id, version: parser.version },
+    maxChunkLines,
+    maxChunkChars
+  );
 
   const refresh = async (): Promise<ChunkSearchRefreshStats> => {
     const indexState = readIndexState(indexStatePath);
@@ -525,7 +606,7 @@ export function createWorkspaceChunkSearchIndex(
         continue;
       }
 
-      const chunks = splitIntoChunks(content, {
+      const chunks = parser.parse(content, {
         path: safePath,
         maxChunkLines,
         maxChunkChars,
@@ -559,6 +640,8 @@ export function createWorkspaceChunkSearchIndex(
       currentIndex = {
         version: CHUNK_INDEX_VERSION,
         updatedAt: nowIso,
+        workspaceFingerprint,
+        parser: { id: parser.id, version: parser.version },
         chunking: {
           version: CHUNK_INDEX_VERSION,
           maxChunkLines,
@@ -581,6 +664,8 @@ export function createWorkspaceChunkSearchIndex(
       ...existingIndex,
       docs: nextDocs,
       updatedAt: existingIndex.updatedAt,
+      workspaceFingerprint,
+      parser: existingIndex.parser ?? { id: parser.id, version: parser.version },
     };
 
     return {
@@ -655,6 +740,8 @@ export function createWorkspaceChunkSearchIndex(
       updatedAt: currentIndex.updatedAt,
       fileCount: Object.keys(currentIndex.docs).length,
       chunkCount: Object.values(currentIndex.docs).reduce((sum, doc) => sum + doc.chunks.length, 0),
+      workspaceFingerprint: currentIndex.workspaceFingerprint,
+      parser: currentIndex.parser,
     }),
   };
 }

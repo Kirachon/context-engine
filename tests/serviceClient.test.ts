@@ -92,6 +92,7 @@ describe('ContextServiceClient', () => {
     delete featureFlags.retrieval_provider_v2;
     delete featureFlags.retrieval_artifacts_v2;
     delete featureFlags.retrieval_shadow_control_v2;
+    delete featureFlags.retrieval_tree_sitter_v1;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -106,6 +107,7 @@ describe('ContextServiceClient', () => {
     featureFlags.retrieval_provider_v2 = false;
     featureFlags.retrieval_artifacts_v2 = false;
     featureFlags.retrieval_shadow_control_v2 = false;
+    featureFlags.retrieval_tree_sitter_v1 = false;
   });
 
   describe('Retrieval Provider Dispatch', () => {

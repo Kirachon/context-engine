@@ -10,18 +10,21 @@ describe('retrieval v2 contracts', () => {
     retrieval_provider_v2: FEATURE_FLAGS.retrieval_provider_v2,
     retrieval_artifacts_v2: FEATURE_FLAGS.retrieval_artifacts_v2,
     retrieval_chunk_search_v1: FEATURE_FLAGS.retrieval_chunk_search_v1,
+    retrieval_tree_sitter_v1: FEATURE_FLAGS.retrieval_tree_sitter_v1,
   };
 
   afterEach(() => {
     FEATURE_FLAGS.retrieval_provider_v2 = originalFlags.retrieval_provider_v2;
     FEATURE_FLAGS.retrieval_artifacts_v2 = originalFlags.retrieval_artifacts_v2;
     FEATURE_FLAGS.retrieval_chunk_search_v1 = originalFlags.retrieval_chunk_search_v1;
+    FEATURE_FLAGS.retrieval_tree_sitter_v1 = originalFlags.retrieval_tree_sitter_v1;
   });
 
   it('snapshots retrieval-related feature flags deterministically', () => {
     FEATURE_FLAGS.retrieval_provider_v2 = true;
     FEATURE_FLAGS.retrieval_artifacts_v2 = false;
     FEATURE_FLAGS.retrieval_chunk_search_v1 = true;
+    FEATURE_FLAGS.retrieval_tree_sitter_v1 = false;
 
     const snapshot = snapshotRetrievalV2FeatureFlags();
 
@@ -29,6 +32,7 @@ describe('retrieval v2 contracts', () => {
       retrieval_provider_v2: true,
       retrieval_artifacts_v2: false,
       retrieval_chunk_search_v1: true,
+      retrieval_tree_sitter_v1: false,
     });
   });
 

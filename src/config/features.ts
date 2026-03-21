@@ -33,6 +33,8 @@ export interface FeatureFlags {
   retrieval_artifacts_v2: boolean;
   /** Enable retrieval shadow-control V2 policy hooks for canary migration. */
   retrieval_shadow_control_v2: boolean;
+  /** Enable Tree-sitter-backed parser extraction for supported code files. */
+  retrieval_tree_sitter_v1: boolean;
   /** Enable chunk-aware exact search gating for the next retrieval phase. */
   retrieval_chunk_search_v1: boolean;
 }
@@ -55,6 +57,7 @@ export function getFeatureFlagsFromEnv(): FeatureFlags {
    retrieval_provider_v2: envBool('CE_RETRIEVAL_PROVIDER_V2', false),
    retrieval_artifacts_v2: envBool('CE_RETRIEVAL_ARTIFACTS_V2', false),
    retrieval_shadow_control_v2: envBool('CE_RETRIEVAL_SHADOW_CONTROL_V2', false),
+   retrieval_tree_sitter_v1: envBool('CE_RETRIEVAL_TREE_SITTER_V1', false),
    retrieval_chunk_search_v1: envBool('CE_RETRIEVAL_CHUNK_SEARCH_V1', false),
  };
 }

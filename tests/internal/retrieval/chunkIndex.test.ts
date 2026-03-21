@@ -3,7 +3,10 @@ import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { createWorkspaceChunkSearchIndex } from '../../../src/internal/retrieval/chunkIndex.js';
-import { splitIntoChunks } from '../../../src/internal/retrieval/chunking.js';
+import {
+  createHeuristicChunkParser,
+  splitIntoChunks,
+} from '../../../src/internal/retrieval/chunking.js';
 
 type IndexStateFile = {
   files: Record<string, { hash: string; indexed_at: string }>;
@@ -28,6 +31,16 @@ function writeWorkspaceFile(workspacePath: string, relativePath: string, content
 }
 
 describe('chunking', () => {
+  it('exposes a stable heuristic parser identity for future parser swaps', () => {
+    const parser = createHeuristicChunkParser();
+
+    expect(parser).toEqual(expect.objectContaining({
+      id: 'heuristic-boundary',
+      version: 1,
+    }));
+    expect(parser.parse('export const value = 1;', { path: 'src/sample.ts' })).toHaveLength(1);
+  });
+
   it('splits markdown headings and code declarations into stable chunks', () => {
     const chunks = splitIntoChunks(
       [
@@ -119,6 +132,13 @@ describe('workspace chunk search index', () => {
     expect(first.totalChunks).toBeGreaterThan(0);
     expect(fs.existsSync(path.join(tempDir, '.augment-chunk-index.json'))).toBe(true);
 
+    const snapshot = index.getSnapshot();
+    expect(snapshot).toMatchObject({
+      fileCount: 2,
+      parser: { id: 'heuristic-boundary', version: 1 },
+    });
+    expect(snapshot.workspaceFingerprint).toMatch(/^[a-f0-9]{16}$/);
+
     const second = await index.refresh();
     expect(second).toMatchObject({
       refreshedFiles: 0,
@@ -153,9 +173,75 @@ describe('workspace chunk search index', () => {
 
     const persisted = JSON.parse(
       fs.readFileSync(path.join(tempDir, '.augment-chunk-index.json'), 'utf8')
-    ) as { docs: Record<string, { chunks: Array<{ content: string }> }> };
+    ) as {
+      docs: Record<string, { chunks: Array<{ content: string }> }>;
+      parser: { id: string; version: number };
+      workspaceFingerprint: string;
+    };
+    expect(persisted.parser).toEqual({ id: 'heuristic-boundary', version: 1 });
+    expect(persisted.workspaceFingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(Object.keys(persisted.docs).sort()).toEqual(['src/a.ts', 'src/b.ts']);
     expect(persisted.docs['src/a.ts'].chunks.some((chunk) => chunk.content.includes('changed'))).toBe(true);
+  });
+
+  it('uses an injected parser factory and persists parser metadata', async () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/tree.ts',
+      [
+        'export function treeMatch() {',
+        '  return "tree target";',
+        '}',
+      ].join('\n')
+    );
+
+    writeIndexState(tempDir, {
+      'src/tree.ts': { hash: 'hash-tree-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    const fakeParser = {
+      id: 'tree-sitter-typescript',
+      version: 1,
+      parse: (content: string, options: { path: string }) => [{
+        chunkId: `${options.path}#L1-L3`,
+        path: options.path,
+        kind: 'declaration' as const,
+        startLine: 1,
+        endLine: 3,
+        lines: '1-3',
+        content,
+        tokenCount: 4,
+      }],
+    };
+
+    const index = createWorkspaceChunkSearchIndex({
+      workspacePath: tempDir,
+      chunkParserFactory: () => fakeParser,
+    });
+
+    await index.refresh();
+
+    const snapshot = index.getSnapshot();
+    expect(snapshot.parser).toEqual({ id: 'tree-sitter-typescript', version: 1 });
+
+    const results = await index.search('tree target', 5);
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(expect.objectContaining({
+      path: 'src/tree.ts',
+      chunkId: 'src/tree.ts#L1-L3',
+      lines: '1-3',
+    }));
+
+    const persisted = JSON.parse(
+      fs.readFileSync(path.join(tempDir, '.augment-chunk-index.json'), 'utf8')
+    ) as {
+      parser: { id: string; version: number };
+      docs: Record<string, unknown>;
+    };
+    expect(persisted.parser).toEqual({ id: 'tree-sitter-typescript', version: 1 });
+    expect(Object.keys(persisted.docs)).toEqual(['src/tree.ts']);
   });
 
   it('ranks exact chunk matches first and includes chunk metadata', async () => {

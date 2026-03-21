@@ -19,6 +19,7 @@ export interface RetrievalV2FeatureFlagsSnapshot {
   retrieval_provider_v2: boolean;
   retrieval_artifacts_v2: boolean;
   retrieval_shadow_control_v2: boolean;
+  retrieval_tree_sitter_v1: boolean;
   retrieval_chunk_search_v1: boolean;
 }
 
@@ -113,6 +114,7 @@ export function snapshotRetrievalV2FeatureFlags(
     retrieval_provider_v2: featureFlags.retrieval_provider_v2,
     retrieval_artifacts_v2: featureFlags.retrieval_artifacts_v2,
     retrieval_shadow_control_v2: featureFlags.retrieval_shadow_control_v2,
+    retrieval_tree_sitter_v1: featureFlags.retrieval_tree_sitter_v1,
     retrieval_chunk_search_v1: featureFlags.retrieval_chunk_search_v1,
   };
 }
