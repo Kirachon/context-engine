@@ -39,6 +39,12 @@ import {
   searchWithSemanticRuntime,
 } from '../retrieval/providers/semanticRuntime.js';
 import {
+  buildRetrievalArtifactV2Metadata,
+  snapshotRetrievalV2FeatureFlags,
+  type RetrievalArtifactV2Metadata,
+  type RetrievalFallbackDomain,
+} from '../internal/retrieval/v2Contracts.js';
+import {
   buildConnectorFingerprint,
   createConnectorRegistry,
   formatConnectorHint,
@@ -215,6 +221,11 @@ export interface RetrievalRuntimeMetadata {
     retrievalRankingV3: boolean;
     retrievalRequestMemoV2: boolean;
   };
+}
+
+export interface RetrievalArtifactMetadataOptions {
+  fallbackDomain?: RetrievalFallbackDomain;
+  fallbackReason?: string | null;
 }
 
 export interface WorkspaceFileChange {
@@ -1162,6 +1173,19 @@ export class ContextServiceClient {
         retrievalRequestMemoV2: featureEnabled('retrieval_request_memo_v2'),
       },
     };
+  }
+
+  getRetrievalArtifactMetadata(
+    options?: RetrievalArtifactMetadataOptions
+  ): RetrievalArtifactV2Metadata {
+    return buildRetrievalArtifactV2Metadata({
+      retrieval_provider: this.retrievalProviderId,
+      workspace_path: this.workspacePath,
+      index_fingerprint: this.getIndexFingerprint(),
+      feature_flags_snapshot: snapshotRetrievalV2FeatureFlags(),
+      fallback_domain: options?.fallbackDomain ?? 'unknown',
+      fallback_reason: options?.fallbackReason ?? null,
+    });
   }
 
   getActiveAIModelLabel(): string {

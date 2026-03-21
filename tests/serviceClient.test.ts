@@ -89,6 +89,9 @@ describe('ContextServiceClient', () => {
     delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
     delete process.env.CE_METRICS;
     delete featureFlags.retrieval_chunk_search_v1;
+    delete featureFlags.retrieval_provider_v2;
+    delete featureFlags.retrieval_artifacts_v2;
+    delete featureFlags.retrieval_shadow_control_v2;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -100,6 +103,9 @@ describe('ContextServiceClient', () => {
     FEATURE_FLAGS.retrieval_ranking_v3 = false;
     FEATURE_FLAGS.retrieval_request_memo_v2 = false;
     featureFlags.retrieval_chunk_search_v1 = false;
+    featureFlags.retrieval_provider_v2 = false;
+    featureFlags.retrieval_artifacts_v2 = false;
+    featureFlags.retrieval_shadow_control_v2 = false;
   });
 
   describe('Retrieval Provider Dispatch', () => {
@@ -272,6 +278,40 @@ describe('ContextServiceClient', () => {
       expect(results).toEqual([
         expect.objectContaining({ path: 'src/provider.ts', content: 'provider result' }),
       ]);
+    });
+  });
+
+  describe('Retrieval Artifact V2 Metadata', () => {
+    it('should expose a versioned retrieval artifact snapshot without changing runtime metadata', () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
+      process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE = '0.25';
+      FEATURE_FLAGS.retrieval_provider_v2 = true;
+      FEATURE_FLAGS.retrieval_artifacts_v2 = true;
+      FEATURE_FLAGS.retrieval_chunk_search_v1 = true;
+
+      const localClient = new ContextServiceClient(testWorkspace);
+      const runtimeMetadata = localClient.getRetrievalRuntimeMetadata();
+      const artifactMetadata = localClient.getRetrievalArtifactMetadata({
+        fallbackDomain: 'retrieval',
+        fallbackReason: 'provider_empty_array',
+      });
+
+      expect(runtimeMetadata.providerId).toBe('local_native');
+      expect(artifactMetadata).toMatchObject({
+        artifact_schema_version: 1,
+        retrieval_provider: 'local_native',
+        retrieval_engine_version: 'local-native-v1',
+        chunking_version: 1,
+        parser_version: 'heuristic-boundary-v1',
+        embedding_model_id: 'hash-128',
+        vector_dimension: 128,
+        index_fingerprint: expect.any(String),
+        fallback_domain: 'retrieval',
+        fallback_reason: 'provider_empty_array',
+      });
+      expect(artifactMetadata.workspace_fingerprint).toMatch(/^workspace:/);
+      expect(artifactMetadata.env_fingerprint).toMatch(/^env:/);
     });
   });
 
