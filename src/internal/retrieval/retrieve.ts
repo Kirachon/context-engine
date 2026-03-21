@@ -17,7 +17,7 @@ import {
   type RetrievalFlowContext,
 } from './flow.js';
 import { scoreLexicalCandidates } from './lexical.js';
-import { rerankResults } from './rerank.js';
+import { rerankCandidates, rerankResults } from './rerank.js';
 import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.js';
 
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disable', 'disabled']);
@@ -123,7 +123,11 @@ async function applyRerankStage(
       }
       rerankedHead = providerResult.slice(0, topN);
     } else {
-      rerankedHead = rerankResults(head, { originalQuery: query, mode: settings.rankingMode });
+      rerankedHead = await withTimeout<InternalSearchResult[]>(
+        rerankCandidates(head, { originalQuery: query, mode: settings.rankingMode }),
+        settings.rerankTimeoutMs,
+        rerankResults(head, { originalQuery: query, mode: settings.rankingMode })
+      );
     }
 
     observeDurationMs(

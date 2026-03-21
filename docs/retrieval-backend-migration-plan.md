@@ -53,7 +53,7 @@ Current state that this plan builds on:
 
 ### Task 1.3: Lock Migration Flags and Rollout Posture
 - **Location**: `src/config/features.ts`, `docs/FLAG_REGISTRY.md`, `docs/ROLLOUT_RUNBOOK.md`
-- **Description**: Add or confirm the exact migration flags needed for Tree-sitter, FTS5, LanceDB, reranker, and shadow rollout control.
+- **Description**: Add or confirm the exact migration flags needed for Tree-sitter, FTS5, LanceDB, transformer embeddings, reranker, and shadow rollout control.
 - **Dependencies**: Task 1.1
 - **Acceptance Criteria**:
   - Every new backend surface has a flag owner
@@ -157,7 +157,7 @@ Current state that this plan builds on:
 
 **Implementation note**:
 - The codebase now has a dedicated embedding runtime seam in `src/internal/retrieval/embeddingRuntime.ts`.
-- The default runtime remains local and deterministic for now, which keeps the eventual swap to a real local model bounded to one adapter.
+- `CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1` switches the MVP embedding path to the local transformer runtime when available and falls back to the deterministic hash runtime if the model cannot load.
 
 ### Task 4.2: Build the LanceDB Index Path
 - **Location**: `src/internal/retrieval/`, workspace artifact files
@@ -185,7 +185,7 @@ Current state that this plan builds on:
 **Demo/Validation**:
 - Hybrid retrieval returns a better-ranked top result set than any single source alone
 
-### Task 5.1: Add Cross-Encoder Reranker Integration
+### Task 5.1: Add Transformer Reranker Integration
 - **Location**: `src/internal/retrieval/rerank.ts`, `src/internal/retrieval/types.ts`
 - **Description**: Add the reranker adapter and timeout policy for the MVP backend stack.
 - **Dependencies**: Sprint 4 complete
@@ -194,6 +194,9 @@ Current state that this plan builds on:
   - Timeout budgets remain bounded
 - **Validation**:
   - Rerank unit tests and fail-open coverage
+
+**Implementation note**:
+- The reranker uses the local transformer runtime when available and fails open to the existing heuristic reranker on load, timeout, or runtime error.
 
 ### Task 5.2: Tune Hybrid Fusion Inputs
 - **Location**: `src/internal/retrieval/fusion.ts`, `src/internal/retrieval/retrieve.ts`

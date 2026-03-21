@@ -11,12 +11,12 @@ The target architecture should be:
 - **Chunking and parsing:** Tree-sitter
 - **Lexical retrieval:** SQLite FTS5
 - **Vector retrieval:** LanceDB OSS for the MVP vector path, with a later post-MVP option to evaluate Qdrant for production-scale needs
-- **Embeddings:** local open-source embedding model via ONNX Runtime or a self-hosted embeddings service
-- **Reranking:** local open-source cross-encoder reranker
+- **Embeddings:** local transformer runtime in Node, with deterministic hash fallback if the model cannot load
+- **Reranking:** local transformer reranker, with heuristic fail-open fallback if the model cannot load
 - **Emergency fallback only:** ripgrep, not filesystem scanning as the normal path
 - **Evaluation:** BEIR-style retrieval benchmarking plus Ragas-style answer and workflow evaluation
 
-That target is practical because Tree-sitter is built for incremental parsing, FTS5 is SQLite’s full-text search module, LanceDB OSS can run embedded like SQLite, and ONNX Runtime has official Node.js support for CPU and selected acceleration backends. Qdrant remains a later option if the MVP proves out and the scale/ops tradeoff justifies a second backend.
+That target is practical because Tree-sitter is built for incremental parsing, FTS5 is SQLite's full-text search module, and LanceDB OSS can run embedded like SQLite for the MVP path. Qdrant remains a later option if the MVP proves out and the scale/ops tradeoff justifies a second backend.
 
 ## Architecture Decision Record: MVP Vector Backend
 
@@ -420,12 +420,14 @@ Use **Qdrant** if you want a dedicated vector engine with HNSW, payload indexing
 Use **LanceDB OSS** if you want an embedded, in-process database first.
 
 ### Embeddings
-Use a real open-source embedding model, not a placeholder embedding scheme. Good first candidates:
+Use a real local transformer runtime for embeddings, not a placeholder embedding scheme. Good first candidates:
 - `sentence-transformers/all-MiniLM-L6-v2`
 - `BAAI/bge-small-en-v1.5`
+Enable `CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1` to switch the MVP vector path onto the transformer runtime.
 
 ### Runtime
-Use ONNX Runtime in Node if you want local embeddings directly in the app or worker process.
+Use the local transformer runtime in Node if you want embeddings directly in the app or worker process.
+If the model cannot load, fail open to the deterministic hash path so search stays usable.
 
 ### Optional serving layer
 If you want a self-hosted model server instead of embedding inside the app process, use:
@@ -474,6 +476,7 @@ Recommended reranker:
 - optionally `bge-reranker-base` later if needed
 
 Do not rerank everything. Start with reranking only the top 10–20 fused candidates.
+If the reranker cannot load or times out, fail open to the existing heuristic reranker.
 
 ## Codex in this phase
 
@@ -833,12 +836,12 @@ The application’s default retrieval path is now:
 
 ## Default recommendation
 
-If you want the best balance of safety and capability, use:
+If you want the best balance of safety and capability for the MVP, use:
 
 - Tree-sitter
 - SQLite FTS5
-- Qdrant
-- ONNX Runtime Node
+- LanceDB OSS
+- local transformer runtime in Node
 - `BAAI/bge-small-en-v1.5` or `all-MiniLM-L6-v2`
 - `cross-encoder/ms-marco-MiniLM-L6-v2`
 - Ragas
@@ -851,7 +854,7 @@ If you want fewer moving parts at first:
 - Tree-sitter
 - SQLite FTS5
 - LanceDB OSS
-- ONNX Runtime Node
+- local transformer runtime in Node
 - same embedding and reranker choices
 
 LanceDB OSS is a strong option when you want the vector store embedded in-process during the first migration stage.
@@ -876,7 +879,7 @@ LanceDB OSS is a strong option when you want the vector store embedded in-proces
 2. Build the eval dataset and benchmark harness.
 3. Implement chunking with Tree-sitter.
 4. Stand up lexical retrieval with SQLite FTS5.
-5. Stand up vector retrieval with Qdrant or LanceDB.
+5. Stand up vector retrieval with LanceDB-first MVP wiring.
 6. Move embeddings to index time.
 7. Add reranking and hybrid fusion.
 8. Build incremental indexing and warm startup.

@@ -1,9 +1,29 @@
 import { InternalSearchResult, RetrievalRankingMode } from './types.js';
 
+type TransformersModule = typeof import('@huggingface/transformers');
+type TransformersLoader = () => Promise<TransformersModule>;
+
 export interface RerankOptions {
   originalQuery?: string;
   mode?: RetrievalRankingMode;
 }
+
+export interface TransformerRerankOptions extends RerankOptions {
+  loadTransformersModule?: TransformersLoader;
+  modelId?: string;
+}
+
+interface TransformerRuntime {
+  id: string;
+  modelId: string;
+  scoreTexts: (texts: string[]) => Promise<number[][]>;
+}
+
+const DEFAULT_TRANSFORMER_MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
+const MAX_CANDIDATE_TEXT_CHARS = 1600;
+
+const defaultTransformerRuntimeCache = new Map<string, Promise<TransformerRuntime | null>>();
+let customTransformerRuntimeCache = new WeakMap<TransformersLoader, Map<string, Promise<TransformerRuntime | null>>>();
 
 function resultSignature(result: InternalSearchResult): string {
   const lines = result.lines ?? '';
@@ -75,6 +95,180 @@ function exactPathTailMatch(path: string, queryTokens: string[]): boolean {
     || queryTokens.some((token) => token.length >= 3 && normalizedPath.endsWith(`${token}.py`))
     || queryTokens.some((token) => token.length >= 3 && normalizedPath.includes(`/${token}/`))
     || queryTokens.some((token) => token.length >= 3 && normalizedPath.includes(`\\${token}\\`));
+}
+
+function normalizeModelId(modelId: string | undefined): string {
+  const trimmed = modelId?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : DEFAULT_TRANSFORMER_MODEL_ID;
+}
+
+function isFloat32TensorTypeError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  return /float32 tensor/i.test(error.message) && /float32array/i.test(error.message);
+}
+
+function toNumericArray(values: unknown): number[] {
+  if (Array.isArray(values)) {
+    return values.map((value) => (typeof value === 'number' ? value : Number(value)));
+  }
+  if (ArrayBuffer.isView(values)) {
+    return Array.from(values as unknown as ArrayLike<number>, (value) => value);
+  }
+  return [];
+}
+
+function unwrapTensorLike(output: unknown): unknown {
+  if (output && typeof output === 'object' && 'tolist' in output && typeof (output as { tolist?: unknown }).tolist === 'function') {
+    return (output as { tolist: () => unknown }).tolist();
+  }
+  return output;
+}
+
+function normalizeEmbeddingRows(output: unknown): number[][] {
+  const unwrapped = unwrapTensorLike(output);
+  if (!Array.isArray(unwrapped)) {
+    return [];
+  }
+  if (unwrapped.length === 0) {
+    return [];
+  }
+  if (Array.isArray(unwrapped[0])) {
+    return unwrapped.map((row) => toNumericArray(row));
+  }
+  return [toNumericArray(unwrapped)];
+}
+
+function cosineSimilarity(left: number[], right: number[]): number {
+  if (left.length === 0 || right.length === 0) {
+    return 0;
+  }
+
+  const length = Math.min(left.length, right.length);
+  let dot = 0;
+  let leftMagnitude = 0;
+  let rightMagnitude = 0;
+  for (let index = 0; index < length; index += 1) {
+    const leftValue = Number(left[index]) || 0;
+    const rightValue = Number(right[index]) || 0;
+    dot += leftValue * rightValue;
+    leftMagnitude += leftValue * leftValue;
+    rightMagnitude += rightValue * rightValue;
+  }
+
+  const denominator = Math.sqrt(leftMagnitude) * Math.sqrt(rightMagnitude);
+  if (!Number.isFinite(denominator) || denominator <= 0) {
+    return 0;
+  }
+
+  return dot / denominator;
+}
+
+function buildCandidateText(result: InternalSearchResult): string {
+  const content = result.content.slice(0, MAX_CANDIDATE_TEXT_CHARS);
+  return [result.path, result.lines ?? '', content].filter(Boolean).join('\n');
+}
+
+function getTransformerRuntimeCache(loader?: TransformersLoader): Map<string, Promise<TransformerRuntime | null>> {
+  if (!loader) {
+    return defaultTransformerRuntimeCache;
+  }
+
+  const existing = customTransformerRuntimeCache.get(loader);
+  if (existing) {
+    return existing;
+  }
+
+  const created = new Map<string, Promise<TransformerRuntime | null>>();
+  customTransformerRuntimeCache.set(loader, created);
+  return created;
+}
+
+async function buildTransformerRuntime(
+  modelId: string,
+  loadTransformersModule: TransformersLoader
+): Promise<TransformerRuntime> {
+  const transformers = await loadTransformersModule();
+  const extractor = await transformers.pipeline('feature-extraction', modelId, {
+    dtype: 'fp32',
+  });
+  let batchExtractionSupported: boolean | null = null;
+  let runtimeUsable = true;
+
+  return {
+    id: `transformers:${modelId}`,
+    modelId,
+    async scoreTexts(texts: string[]): Promise<number[][]> {
+      if (texts.length === 0) {
+        return [];
+      }
+      if (!runtimeUsable) {
+        return [];
+      }
+
+      const extractEmbeddings = async (input: string[] | string): Promise<number[][]> => {
+        const output = await extractor(input, {
+          pooling: 'mean',
+          normalize: true,
+        });
+        return normalizeEmbeddingRows(output);
+      };
+
+      if (texts.length === 1) {
+        return extractEmbeddings(texts[0]);
+      }
+
+      if (batchExtractionSupported !== false) {
+        try {
+          const batchEmbeddings = await extractEmbeddings(texts);
+          if (batchEmbeddings.length === texts.length && batchEmbeddings.every((row) => row.length > 0)) {
+            batchExtractionSupported = true;
+            return batchEmbeddings;
+          }
+          batchExtractionSupported = false;
+        } catch (error) {
+          batchExtractionSupported = false;
+          if (isFloat32TensorTypeError(error)) {
+            runtimeUsable = false;
+            return [];
+          }
+          // Fall through to per-text extraction for runtimes that fail on batch tensor paths.
+        }
+      }
+
+      const perTextEmbeddings: number[][] = [];
+      for (const text of texts) {
+        let singleEmbeddings: number[][] = [];
+        try {
+          singleEmbeddings = await extractEmbeddings(text);
+        } catch {
+          runtimeUsable = false;
+          return [];
+        }
+        if (singleEmbeddings.length === 0) {
+          return [];
+        }
+        perTextEmbeddings.push(singleEmbeddings[0] ?? []);
+      }
+      return perTextEmbeddings;
+    },
+  };
+}
+
+async function resolveTransformerRuntime(options: TransformerRerankOptions): Promise<TransformerRuntime | null> {
+  const modelId = normalizeModelId(options.modelId);
+  const cache = getTransformerRuntimeCache(options.loadTransformersModule);
+  const cacheKey = modelId;
+  const existing = cache.get(cacheKey);
+  if (existing) {
+    return existing;
+  }
+
+  const loadTransformersModule = options.loadTransformersModule ?? (async () => import('@huggingface/transformers'));
+  const runtimePromise = buildTransformerRuntime(modelId, loadTransformersModule).catch(() => null);
+  cache.set(cacheKey, runtimePromise);
+  return runtimePromise;
 }
 
 export function rerankResults(
@@ -154,4 +348,103 @@ export function rerankResults(
   });
 
   return ranked.map(entry => entry.result);
+}
+
+function getHeuristicScoreMap(
+  results: InternalSearchResult[],
+  options: RerankOptions
+): Map<string, { combinedScore: number; baseScore: number }> {
+  const ranked = rerankResults(results, options);
+  const scoreMap = new Map<string, { combinedScore: number; baseScore: number }>();
+
+  for (const result of ranked) {
+    const signature = resultSignature(result);
+    if (!scoreMap.has(signature)) {
+      scoreMap.set(signature, {
+        combinedScore: result.combinedScore ?? result.relevanceScore ?? result.score ?? 0,
+        baseScore: result.relevanceScore ?? result.score ?? 0,
+      });
+    }
+  }
+
+  return scoreMap;
+}
+
+export async function rerankCandidates(
+  results: InternalSearchResult[],
+  options: TransformerRerankOptions = {}
+): Promise<InternalSearchResult[]> {
+  if (results.length <= 1) {
+    return results;
+  }
+
+  const heuristicRanked = rerankResults(results, options);
+  const query = options.originalQuery?.trim() ?? '';
+  if (!query) {
+    return heuristicRanked;
+  }
+
+  const runtime = await resolveTransformerRuntime(options);
+  if (!runtime) {
+    return heuristicRanked;
+  }
+
+  try {
+    const heuristicScores = getHeuristicScoreMap(results, options);
+    const candidateTexts = results.map((result) => buildCandidateText(result));
+    const embeddings = await runtime.scoreTexts([query, ...candidateTexts]);
+    const queryVector = embeddings[0] ?? [];
+    const candidateVectors = embeddings.slice(1);
+    if (queryVector.length === 0 || candidateVectors.length !== results.length) {
+      return heuristicRanked;
+    }
+
+    const scored = results.map((result, index) => {
+      const transformerScore = cosineSimilarity(queryVector, candidateVectors[index] ?? []);
+      const signature = resultSignature(result);
+      const heuristicScore = heuristicScores.get(signature)?.combinedScore ?? result.combinedScore ?? result.relevanceScore ?? result.score ?? 0;
+      const baseScore = heuristicScores.get(signature)?.baseScore ?? result.relevanceScore ?? result.score ?? 0;
+
+      return {
+        result,
+        transformerScore,
+        heuristicScore,
+        baseScore,
+        index,
+      };
+    });
+
+    scored.sort((a, b) => {
+      if (b.transformerScore !== a.transformerScore) {
+        return b.transformerScore - a.transformerScore;
+      }
+      if (b.heuristicScore !== a.heuristicScore) {
+        return b.heuristicScore - a.heuristicScore;
+      }
+      if (b.baseScore !== a.baseScore) {
+        return b.baseScore - a.baseScore;
+      }
+      if (a.result.path !== b.result.path) {
+        return a.result.path.localeCompare(b.result.path);
+      }
+      const lineA = parseStartLine(a.result.lines);
+      const lineB = parseStartLine(b.result.lines);
+      if (lineA !== lineB) {
+        return lineA - lineB;
+      }
+      return a.index - b.index;
+    });
+
+    return scored.map(({ result, transformerScore }) => ({
+      ...result,
+      combinedScore: transformerScore,
+    }));
+  } catch {
+    return heuristicRanked;
+  }
+}
+
+export function clearRerankerRuntimeCacheForTests(): void {
+  defaultTransformerRuntimeCache.clear();
+  customTransformerRuntimeCache = new WeakMap<TransformersLoader, Map<string, Promise<TransformerRuntime | null>>>();
 }
