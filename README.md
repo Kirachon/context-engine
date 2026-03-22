@@ -20,6 +20,12 @@ If you want to see what this project demonstrates for OpenAI-style agent workflo
 - Windows support and copy-paste setup examples
 - AI-agent-friendly instructions for self-setup
 
+### Why This Matters
+
+- It shows how an OpenAI-powered agent can connect to a real workspace and start using tools right away.
+- It combines retrieval, review, and planning in one MCP server instead of relying on one-off scripts.
+- It gives both humans and AI agents a simple, repeatable setup path, which makes demos and onboarding easier.
+
 Fastest demo path:
 
 ```bash
