@@ -1691,7 +1691,8 @@ export class ContextServiceClient {
       if (fs.existsSync(stateFilePath)) {
         const stats = fs.statSync(stateFilePath);
         const restoredAt = stats.mtime.toISOString();
-        if (this.indexStatus.status !== 'indexing') {
+        const shouldHydrateStatus = this.indexStatus.status !== 'indexing' && this.indexStatus.status !== 'error';
+        if (shouldHydrateStatus) {
           nextStatus.status = 'idle';
           const resolvedLastIndexed = this.resolveLastIndexed(restoredAt);
           if (resolvedLastIndexed !== this.indexStatus.lastIndexed) {

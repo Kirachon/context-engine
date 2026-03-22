@@ -189,6 +189,19 @@ async function startServer(cwd: string, args: string[] = []): Promise<RunningSer
 }
 
 describe('repo-aware launcher startup smoke', () => {
+  it('advertises repo-aware one-time setup in --help output', () => {
+    const result = spawnSync(process.execPath, [tsxCli, entrypoint, '--help'], {
+      cwd: process.cwd(),
+      encoding: 'utf-8',
+      windowsHide: true,
+    });
+
+    expect(result.status).toBe(0);
+    expect(result.stderr).toContain('Register once in ~/.codex/config.toml and reuse across repos');
+    expect(result.stderr).toContain('CE_AUTO_INDEX_ON_STARTUP');
+    expect(result.stderr).not.toContain('args = ["/absolute/path/to/dist/index.js", "--workspace", "/path/to/your/project"]');
+  });
+
   it('starts cleanly from the repo root without requiring --workspace', async () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-launcher-root smoke-'));
     seedRepo(repoRoot);
@@ -282,6 +295,61 @@ describe('repo-aware launcher startup smoke', () => {
     } finally {
       await stopChildProcess(child);
       fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('fails fast when --workspace is provided without a path', () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-launcher-missing-workspace-'));
+    seedRepo(repoRoot);
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [tsxCli, entrypoint, '--workspace', '--http-only'],
+        {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            CE_AUTO_INDEX_ON_STARTUP: 'false',
+          },
+          encoding: 'utf-8',
+          windowsHide: true,
+        }
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Error: --workspace requires a path argument');
+      expect(result.stderr).not.toContain('Starting MCP server (stdio)...');
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('fails fast when --workspace points to a missing path', () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-launcher-missing-path-'));
+    seedRepo(repoRoot);
+    const missingWorkspace = path.join(repoRoot, 'missing workspace');
+
+    try {
+      const result = spawnSync(
+        process.execPath,
+        [tsxCli, entrypoint, '--http-only', '--workspace', missingWorkspace],
+        {
+          cwd: repoRoot,
+          env: {
+            ...process.env,
+            CE_AUTO_INDEX_ON_STARTUP: 'false',
+          },
+          encoding: 'utf-8',
+          windowsHide: true,
+        }
+      );
+
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain('Workspace path does not exist');
+      expect(result.stderr).not.toContain('Starting MCP server (stdio)...');
+    } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
     }
   });
 });

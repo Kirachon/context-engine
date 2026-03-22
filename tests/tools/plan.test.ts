@@ -20,6 +20,7 @@ import {
 } from '../../src/mcp/tools/plan.js';
 import { EnhancedPlanOutput } from '../../src/mcp/types/planning.js';
 import { PlanPersistenceService } from '../../src/mcp/services/planPersistenceService.js';
+import { PlanningService } from '../../src/mcp/services/planningService.js';
 
 describe('Planning MCP Tools', () => {
   let mockServiceClient: any;
@@ -81,6 +82,14 @@ describe('Planning MCP Tools', () => {
       reasoning: 'Implemented the step',
       changes: [],
     });
+  }
+
+  function extractJsonDetails(output: string): Record<string, unknown> {
+    const match = output.match(/```json\n([\s\S]*?)\n```/);
+    if (!match) {
+      throw new Error('Expected output to include a JSON details block');
+    }
+    return JSON.parse(match[1]);
   }
 
   function createContextBundle(fileCount: number, totalTokens: number) {
@@ -548,6 +557,370 @@ describe('Planning MCP Tools', () => {
         expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
           expect.objectContaining({ signal: controller.signal })
         );
+      });
+
+      it('should apply diff-based modify changes and create a backup after validation', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-plan-diff-'));
+        const workspaceFile = path.join(tempDir, 'src', 'example.ts');
+        fs.mkdirSync(path.dirname(workspaceFile), { recursive: true });
+        fs.writeFileSync(workspaceFile, 'export const answer = 1;\nexport const flag = false;\n', 'utf-8');
+
+        const plan = JSON.stringify({
+          id: 'plan_test',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Test plan',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [
+            {
+              step_number: 1,
+              id: 'step_1',
+              title: 'Update example',
+              description: 'Modify the example file',
+              files_to_modify: [{ path: 'src/example.ts', reason: 'Exercise diff application' }],
+              files_to_create: [],
+              files_to_delete: [],
+              depends_on: [],
+              blocks: [],
+              can_parallel_with: [],
+              priority: 'medium',
+              estimated_effort: '1h',
+              acceptance_criteria: [],
+            },
+          ],
+          dependency_graph: {
+            nodes: [],
+            edges: [],
+            critical_path: [],
+            parallel_groups: [],
+            execution_order: [1],
+          },
+          testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.8,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        });
+
+        const diff = `--- a/src/example.ts
++++ b/src/example.ts
+@@ -1,2 +1,2 @@
+ export const answer = 1;
+-export const flag = false;
++export const flag = true;`;
+
+        const executeStepSpy = jest.spyOn(PlanningService.prototype, 'executeStep').mockResolvedValue({
+          step_number: 1,
+          success: true,
+          reasoning: 'Applied diff-based update',
+          generated_code: [
+            {
+              path: 'src/example.ts',
+              change_type: 'modify',
+              diff,
+              explanation: 'Flip the example flag',
+            },
+          ],
+          duration_ms: 12,
+        } as any);
+
+        const serviceClientWithWorkspace = {
+          ...mockServiceClient,
+          getWorkspacePath: () => tempDir,
+        };
+
+        try {
+          const result = await handleExecutePlan(
+            { plan, mode: 'single_step', step_number: 1, apply_changes: true },
+            serviceClientWithWorkspace
+          );
+          const parsed = extractJsonDetails(result) as Record<string, unknown>;
+          const backups = parsed.backups_created as string[] | undefined;
+
+          expect(fs.readFileSync(workspaceFile, 'utf-8')).toContain('flag = true');
+          expect(parsed.files_applied).toEqual(['src/example.ts']);
+          expect(parsed.apply_errors).toEqual([]);
+          expect(backups).toHaveLength(1);
+          expect(backups?.[0]).toContain('.backup.');
+          expect(fs.existsSync(backups![0])).toBe(true);
+        } finally {
+          executeStepSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      });
+
+      it('should preview diff-based modifications when apply_changes is false', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-plan-diff-preview-'));
+
+        const plan = JSON.stringify({
+          id: 'plan_test',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Test plan',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [
+            {
+              step_number: 1,
+              id: 'step_1',
+              title: 'Update example',
+              description: 'Modify the example file',
+              files_to_modify: [{ path: 'src/example.ts', reason: 'Exercise diff application' }],
+              files_to_create: [],
+              files_to_delete: [],
+              depends_on: [],
+              blocks: [],
+              can_parallel_with: [],
+              priority: 'medium',
+              estimated_effort: '1h',
+              acceptance_criteria: [],
+            },
+          ],
+          dependency_graph: {
+            nodes: [],
+            edges: [],
+            critical_path: [],
+            parallel_groups: [],
+            execution_order: [1],
+          },
+          testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.8,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        });
+
+        const diff = `--- a/src/example.ts
++++ b/src/example.ts
+@@ -1,2 +1,2 @@
+ export const answer = 1;
+-export const flag = false;
++export const flag = true;`;
+
+        const executeStepSpy = jest.spyOn(PlanningService.prototype, 'executeStep').mockResolvedValue({
+          step_number: 1,
+          success: true,
+          reasoning: 'Preview diff-only update',
+          generated_code: [
+            {
+              path: 'src/example.ts',
+              change_type: 'modify',
+              diff,
+              explanation: 'Flip the example flag',
+            },
+          ],
+          duration_ms: 7,
+        } as any);
+
+        const serviceClientWithWorkspace = {
+          ...mockServiceClient,
+          getWorkspacePath: () => tempDir,
+        };
+
+        try {
+          const result = await handleExecutePlan(
+            { plan, mode: 'single_step', step_number: 1, apply_changes: false },
+            serviceClientWithWorkspace
+          );
+
+          expect(result).toContain('Patch preview');
+          expect(result).not.toContain('Content preview');
+          expect(result).toContain('```\n--- a/src/example.ts');
+        } finally {
+          executeStepSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      });
+
+      it('should reject sibling-prefix paths and leave the workspace untouched', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-plan-path-'));
+        const siblingWorkspace = `${tempDir}2`;
+        fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+
+        const plan = JSON.stringify({
+          id: 'plan_test',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Test plan',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [
+            {
+              step_number: 1,
+              id: 'step_1',
+              title: 'Update example',
+              description: 'Modify the example file',
+              files_to_modify: [{ path: `${siblingWorkspace}\\evil.ts`, reason: 'Exercise workspace fence' }],
+              files_to_create: [],
+              files_to_delete: [],
+              depends_on: [],
+              blocks: [],
+              can_parallel_with: [],
+              priority: 'medium',
+              estimated_effort: '1h',
+              acceptance_criteria: [],
+            },
+          ],
+          dependency_graph: {
+            nodes: [],
+            edges: [],
+            critical_path: [],
+            parallel_groups: [],
+            execution_order: [1],
+          },
+          testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.8,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        });
+
+        const executeStepSpy = jest.spyOn(PlanningService.prototype, 'executeStep').mockResolvedValue({
+          step_number: 1,
+          success: true,
+          reasoning: 'Attempted invalid write',
+          generated_code: [
+            {
+              path: `${siblingWorkspace}\\evil.ts`,
+              change_type: 'modify',
+              content: 'export const evil = true;\n',
+              explanation: 'Should be blocked',
+            },
+          ],
+          duration_ms: 9,
+        } as any);
+
+        const serviceClientWithWorkspace = {
+          ...mockServiceClient,
+          getWorkspacePath: () => tempDir,
+        };
+
+        try {
+          const result = await handleExecutePlan(
+            { plan, mode: 'single_step', step_number: 1, apply_changes: true },
+            serviceClientWithWorkspace
+          );
+          const parsed = extractJsonDetails(result) as Record<string, unknown>;
+
+          expect(parsed.files_applied).toEqual([]);
+          expect(parsed.backups_created).toEqual([]);
+          expect(parsed.apply_errors).toEqual(
+            expect.arrayContaining([expect.stringContaining('Path is outside workspace')])
+          );
+          expect(result).toContain('Apply Errors');
+        } finally {
+          executeStepSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
+      });
+
+      it('should fail clearly when a diff cannot be applied', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-plan-bad-diff-'));
+        const workspaceFile = path.join(tempDir, 'src', 'example.ts');
+        fs.mkdirSync(path.dirname(workspaceFile), { recursive: true });
+        fs.writeFileSync(workspaceFile, 'export const answer = 1;\nexport const flag = false;\n', 'utf-8');
+
+        const plan = JSON.stringify({
+          id: 'plan_test',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Test plan',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [
+            {
+              step_number: 1,
+              id: 'step_1',
+              title: 'Update example',
+              description: 'Modify the example file',
+              files_to_modify: [{ path: 'src/example.ts', reason: 'Exercise diff application' }],
+              files_to_create: [],
+              files_to_delete: [],
+              depends_on: [],
+              blocks: [],
+              can_parallel_with: [],
+              priority: 'medium',
+              estimated_effort: '1h',
+              acceptance_criteria: [],
+            },
+          ],
+          dependency_graph: {
+            nodes: [],
+            edges: [],
+            critical_path: [],
+            parallel_groups: [],
+            execution_order: [1],
+          },
+          testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.8,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        });
+
+        const executeStepSpy = jest.spyOn(PlanningService.prototype, 'executeStep').mockResolvedValue({
+          step_number: 1,
+          success: true,
+          reasoning: 'Attempted malformed diff',
+          generated_code: [
+            {
+              path: 'src/example.ts',
+              change_type: 'modify',
+              diff: 'not a unified diff',
+              explanation: 'Should fail to apply',
+            },
+          ],
+          duration_ms: 8,
+        } as any);
+
+        const serviceClientWithWorkspace = {
+          ...mockServiceClient,
+          getWorkspacePath: () => tempDir,
+        };
+
+        try {
+          const result = await handleExecutePlan(
+            { plan, mode: 'single_step', step_number: 1, apply_changes: true },
+            serviceClientWithWorkspace
+          );
+          const parsed = extractJsonDetails(result) as Record<string, unknown>;
+
+          expect(parsed.files_applied).toEqual([]);
+          expect(parsed.backups_created).toEqual([]);
+          expect(parsed.apply_errors).toEqual(
+            expect.arrayContaining([expect.stringContaining('Unified diff does not contain any hunks')])
+          );
+          expect(fs.readFileSync(workspaceFile, 'utf-8')).toContain('flag = false');
+          expect(result).toContain('Apply Errors');
+        } finally {
+          executeStepSpy.mockRestore();
+          fs.rmSync(tempDir, { recursive: true, force: true });
+        }
       });
     });
 

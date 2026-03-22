@@ -1386,11 +1386,13 @@ export class PlanningService {
 
     return changes.map((change: unknown) => {
       const c = change as Record<string, unknown>;
+      const content = typeof c.content === 'string' && c.content.trim().length > 0 ? c.content : undefined;
+      const diff = typeof c.diff === 'string' && c.diff.trim().length > 0 ? c.diff : undefined;
       return {
         path: String(c.path || ''),
         change_type: this.validateChangeType(c.change_type),
-        content: c.content != null ? String(c.content) : undefined,
-        diff: c.diff != null ? String(c.diff) : undefined,
+        content,
+        diff,
         explanation: String(c.explanation || ''),
       };
     }).filter(c => c.path.length > 0);

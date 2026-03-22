@@ -339,11 +339,19 @@ function validateFilePath(filePath: string, workspacePath: string): { valid: boo
   const resolvedWorkspace = path.resolve(workspacePath);
   const resolvedPath = path.resolve(fullPath);
 
-  if (!resolvedPath.startsWith(resolvedWorkspace)) {
+  if (!isPathInsideWorkspace(resolvedPath, resolvedWorkspace)) {
     return { valid: false, error: `Path is outside workspace: ${filePath}` };
   }
 
   return { valid: true, fullPath: resolvedPath };
+}
+
+/**
+ * Check whether a resolved path stays inside a resolved workspace root.
+ */
+function isPathInsideWorkspace(resolvedPath: string, resolvedWorkspace: string): boolean {
+  const relativePath = path.relative(resolvedWorkspace, resolvedPath);
+  return relativePath !== '' && !relativePath.startsWith('..') && !path.isAbsolute(relativePath);
 }
 
 /**
@@ -373,6 +381,121 @@ async function ensureParentDirectory(filePath: string): Promise<void> {
     await fs.promises.mkdir(parentDir, { recursive: true });
     console.error(`[apply_changes] Created directory: ${parentDir}`);
   }
+}
+
+/**
+ * Apply a unified diff patch to file content.
+ */
+function applyUnifiedDiffToContent(
+  originalContent: string,
+  diffText: string,
+  filePath: string
+): { success: boolean; content?: string; error?: string } {
+  const normalizedDiff = diffText.replace(/\r\n/g, '\n').trim();
+  if (!normalizedDiff) {
+    return { success: false, error: `Empty diff provided for ${filePath}` };
+  }
+
+  const diffLines = normalizedDiff.split('\n');
+  const hunkStartIndex = diffLines.findIndex((line) => line.startsWith('@@ '));
+  if (hunkStartIndex === -1) {
+    return { success: false, error: `Unified diff does not contain any hunks: ${filePath}` };
+  }
+
+  const normalizedOriginal = originalContent.replace(/\r\n/g, '\n');
+  const originalEndsWithNewline = normalizedOriginal.endsWith('\n');
+  const originalLines = normalizedOriginal.length === 0
+    ? []
+    : normalizedOriginal.split('\n').filter((line, index, arr) => index !== arr.length - 1 || !originalEndsWithNewline);
+  const outputLines: string[] = [];
+  let originalCursor = 0;
+  let diffCursor = hunkStartIndex;
+
+  while (diffCursor < diffLines.length) {
+    const header = diffLines[diffCursor];
+    if (!header.startsWith('@@ ')) {
+      diffCursor++;
+      continue;
+    }
+
+    const match = header.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/);
+    if (!match) {
+      return { success: false, error: `Invalid unified diff hunk header for ${filePath}: ${header}` };
+    }
+
+    const oldStart = Number.parseInt(match[1], 10);
+    if (!Number.isFinite(oldStart) || oldStart < 1) {
+      return { success: false, error: `Invalid unified diff hunk start for ${filePath}: ${header}` };
+    }
+
+    const hunkStart = oldStart - 1;
+    if (hunkStart < originalCursor) {
+      return { success: false, error: `Unified diff hunks overlap or are out of order for ${filePath}` };
+    }
+    if (hunkStart > originalLines.length) {
+      return { success: false, error: `Unified diff references lines beyond the end of ${filePath}` };
+    }
+
+    outputLines.push(...originalLines.slice(originalCursor, hunkStart));
+    originalCursor = hunkStart;
+
+    diffCursor++;
+    let hunkChangeCount = 0;
+    while (diffCursor < diffLines.length && !diffLines[diffCursor].startsWith('@@ ')) {
+      const line = diffLines[diffCursor];
+      if (line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('diff --git ') || line.startsWith('index ') || line.startsWith('new file mode ') || line.startsWith('deleted file mode ')) {
+        diffCursor++;
+        continue;
+      }
+      if (line === '\\ No newline at end of file') {
+        diffCursor++;
+        continue;
+      }
+
+      const marker = line[0];
+      const payload = line.slice(1);
+      if (marker === ' ') {
+        if (originalCursor >= originalLines.length || originalLines[originalCursor] !== payload) {
+          return {
+            success: false,
+            error: `Unified diff context mismatch for ${filePath} at line ${originalCursor + 1}`,
+          };
+        }
+        outputLines.push(originalLines[originalCursor]);
+        originalCursor++;
+        hunkChangeCount++;
+      } else if (marker === '-') {
+        if (originalCursor >= originalLines.length || originalLines[originalCursor] !== payload) {
+          return {
+            success: false,
+            error: `Unified diff deletion mismatch for ${filePath} at line ${originalCursor + 1}`,
+          };
+        }
+        originalCursor++;
+        hunkChangeCount++;
+      } else if (marker === '+') {
+        outputLines.push(payload);
+        hunkChangeCount++;
+      } else {
+        return { success: false, error: `Unsupported unified diff line for ${filePath}: ${line}` };
+      }
+      diffCursor++;
+    }
+
+    if (hunkChangeCount === 0) {
+      return { success: false, error: `Unified diff hunk did not modify any lines for ${filePath}` };
+    }
+  }
+
+  outputLines.push(...originalLines.slice(originalCursor));
+
+  const lineEnding = originalContent.includes('\r\n') ? '\r\n' : '\n';
+  let content = outputLines.join(lineEnding);
+  if (originalEndsWithNewline && content.length > 0) {
+    content += lineEnding;
+  }
+
+  return { success: true, content };
 }
 
 /**
@@ -415,20 +538,27 @@ async function applyCodeChange(
         if (!fs.existsSync(fullPath)) {
           return { success: false, error: `File does not exist for modification: ${filePath}` };
         }
-        // Create backup before modifying
+        const currentContent = await fs.promises.readFile(fullPath, 'utf-8');
+        let nextContent = content;
+
+        if (diff) {
+          const patchResult = applyUnifiedDiffToContent(currentContent, diff, filePath);
+          if (!patchResult.success || patchResult.content === undefined) {
+            return { success: false, error: patchResult.error ?? `Failed to apply diff for ${filePath}` };
+          }
+          nextContent = patchResult.content;
+        }
+
+        if (nextContent === undefined) {
+          return { success: false, error: `No writable content resolved for modify operation: ${filePath}` };
+        }
+
+        // Create backup only after the change is validated in memory.
         const modifyBackup = await createBackup(fullPath);
         if (modifyBackup) backups.push(modifyBackup);
 
-        // For now, we use full content replacement
-        // TODO: Support unified diff format application in future
-        if (content) {
-          await fs.promises.writeFile(fullPath, content, 'utf-8');
-          console.error(`[apply_changes] Modified file: ${filePath}`);
-        } else if (diff) {
-          // Diff application would go here - for now just log a warning
-          console.error(`[apply_changes] Warning: Diff-based modifications not yet implemented, skipping: ${filePath}`);
-          return { success: false, error: `Diff-based modifications not yet implemented: ${filePath}` };
-        }
+        await fs.promises.writeFile(fullPath, nextContent, 'utf-8');
+        console.error(`[apply_changes] Modified file: ${filePath}${diff ? ' (diff)' : ''}`);
         return { success: true };
 
       case 'delete':
@@ -769,8 +899,16 @@ function formatExecutionResult(result: ExecutePlanResult, applyChanges: boolean)
         output += `**${change.change_type.toUpperCase()}:** \`${change.path}\`\n`;
         output += `> ${change.explanation}\n\n`;
 
-        if (change.content && !applyChanges) {
-          // Show preview of content (first 50 lines)
+        if (change.diff && !applyChanges) {
+          const lines = change.diff.split('\n');
+          const preview = lines.slice(0, 50).join('\n');
+          output += `**Patch preview:**\n`;
+          output += '```\n' + preview;
+          if (lines.length > 50) {
+            output += `\n... (${lines.length - 50} more lines)`;
+          }
+          output += '\n```\n\n';
+        } else if (change.content && !applyChanges) {
           const lines = change.content.split('\n');
           const preview = lines.slice(0, 50).join('\n');
           output += '```\n' + preview;

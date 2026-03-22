@@ -302,8 +302,8 @@ Required output:
     {
       "path": "src/path/to/file.ts",
       "change_type": "create|modify|delete",
-      "content": "Full file content for create, or null for delete",
-      "diff": "Unified diff format for modifications (optional)",
+      "content": "Full file content for create, or full replacement content for modify",
+      "diff": "Unified diff format for modifications (optional, supported for modify)",
       "explanation": "Why this change is needed"
     }
   ]
@@ -311,12 +311,12 @@ Required output:
 
 ## Guidelines
 1. For new files: provide complete file content
-2. For modifications: provide the complete new file content
+2. For modifications: provide either the complete new file content or a unified diff that applies cleanly
 3. For deletions: set content to null
 4. Keep explanations concise but informative
 5. Ensure code compiles and follows TypeScript/JavaScript best practices
  6. Include proper error handling
- 7. Add JSDoc comments for public APIs`;
+  7. Add JSDoc comments for public APIs`;
 
 export type PlanningPromptProfile = 'compact' | 'deep';
 

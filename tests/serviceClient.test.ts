@@ -2130,6 +2130,29 @@ describe('ContextServiceClient', () => {
       expect(statusClient.getIndexStatus().lastError).toBeUndefined();
     });
 
+    it('should preserve error status during disk hydration when restart metadata exists', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-hydrate-error-'));
+      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      const statusClient = new ContextServiceClient(tempDir);
+      const updateIndexStatus = (statusClient as any).updateIndexStatus.bind(statusClient) as
+        (partial: Record<string, unknown>) => void;
+
+      try {
+        updateIndexStatus({
+          status: 'error',
+          lastError: 'index worker failed',
+          lastIndexed: new Date('2026-01-01T00:00:00.000Z').toISOString(),
+        });
+
+        const hydrated = statusClient.getIndexStatus();
+        expect(hydrated.status).toBe('error');
+        expect(hydrated.lastError).toBe('index worker failed');
+        expect(hydrated.lastIndexed).toBe(new Date('2026-01-01T00:00:00.000Z').toISOString());
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should skip startup auto-index for healthy workspaces', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-healthy-'));
       fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');

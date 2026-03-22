@@ -27,8 +27,16 @@ export async function resolveWorkspacePath(
   const explicitWorkspace = options.explicitWorkspace?.trim();
 
   if (explicitWorkspace) {
+    const resolvedExplicitWorkspace = path.resolve(cwd, explicitWorkspace);
+    if (!fs.existsSync(resolvedExplicitWorkspace)) {
+      throw new Error(`[context-engine] Error: Workspace path does not exist: ${resolvedExplicitWorkspace}`);
+    }
+    const explicitStats = fs.statSync(resolvedExplicitWorkspace);
+    if (!explicitStats.isDirectory()) {
+      throw new Error(`[context-engine] Error: Workspace path is not a directory: ${resolvedExplicitWorkspace}`);
+    }
     return {
-      workspacePath: path.resolve(explicitWorkspace),
+      workspacePath: resolvedExplicitWorkspace,
       source: 'explicit',
     };
   }

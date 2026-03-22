@@ -916,9 +916,9 @@ export interface GeneratedCodeChange {
   path: string;
   /** Type of change */
   change_type: FileChangeType;
-  /** The generated code content */
+  /** The generated code content (required for create; optional for modify when diff is used) */
   content?: string;
-  /** Diff for modifications (unified diff format) */
+  /** Diff for modifications (unified diff format, supported for modify) */
   diff?: string;
   /** Explanation of the change */
   explanation: string;
@@ -967,4 +967,3 @@ export interface ExecutePlanOptions {
   /** Additional context to provide to the AI */
   additional_context?: string;
 }
-

@@ -21,7 +21,7 @@
 import { ContextEngineMCPServer } from './mcp/server.js';
 import { ContextEngineHttpServer } from './http/index.js';
 import { envBool } from './config/env.js';
-import { resolveWorkspacePath } from './workspace/resolveWorkspace.js';
+import { resolveWorkspacePath, type WorkspaceResolutionResult } from './workspace/resolveWorkspace.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -44,6 +44,7 @@ async function main() {
   const args = process.argv.slice(2);
   let workspacePath = process.cwd();
   let explicitWorkspacePath: string | undefined;
+  let cliParseError: string | undefined;
   let shouldIndex = false;
   let enableWatcher = false;
   let enableHttp = false;
@@ -56,7 +57,12 @@ async function main() {
     const arg = args[i];
 
     if (arg === '--workspace' || arg === '-w') {
-      explicitWorkspacePath = args[i + 1];
+      const nextArg = args[i + 1];
+      if (!nextArg || nextArg.startsWith('-')) {
+        cliParseError = 'Error: --workspace requires a path argument';
+        break;
+      }
+      explicitWorkspacePath = nextArg;
       i++;
     } else if (arg === '--index' || arg === '-i') {
       shouldIndex = true;
@@ -111,25 +117,41 @@ Examples:
   # Index workspace before starting
   context-engine-mcp --workspace /path/to/project --index
 
-MCP Configuration (for Codex CLI):
-Add to ~/.codex/config.toml:
+  MCP Configuration (for Codex CLI):
+  Register once in ~/.codex/config.toml and reuse across repos:
 
-[mcp_servers.context-engine]
-command = "node"
-args = ["/absolute/path/to/dist/index.js", "--workspace", "/path/to/your/project"]
+  [mcp_servers.context-engine]
+  command = "node"
+  args = ["/absolute/path/to/dist/index.js"]
+  env = { CE_AUTO_INDEX_ON_STARTUP = "true" }
 
-Or use the CLI:
-codex mcp add context-engine -- node /absolute/path/to/dist/index.js --workspace /path/to/your/project
+  Or use the CLI once:
+  codex mcp add context-engine -- node /absolute/path/to/dist/index.js
+
+  # Override workspace auto-detection only when needed
+  context-engine-mcp --workspace /path/to/your/project
       `);
       process.exit(0);
     }
   }
 
-  const workspaceResolution = await resolveWorkspacePath({
-    explicitWorkspace: explicitWorkspacePath,
-    cwd: process.cwd(),
-    logWarning: (message) => console.error(message),
-  });
+  if (cliParseError) {
+    console.error(cliParseError);
+    process.exit(1);
+  }
+
+  let workspaceResolution: WorkspaceResolutionResult;
+  try {
+    workspaceResolution = await resolveWorkspacePath({
+      explicitWorkspace: explicitWorkspacePath,
+      cwd: process.cwd(),
+      logWarning: (message) => console.error(message),
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
+    process.exit(1);
+  }
   workspacePath = workspaceResolution.workspacePath;
 
   console.error('='.repeat(80));

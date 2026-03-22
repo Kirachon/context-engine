@@ -26,6 +26,56 @@ describe('resolveWorkspacePath', () => {
     }
   });
 
+  it('resolves relative explicit workspace paths', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-relative-'));
+    const explicit = path.join(tempDir, 'manual-workspace');
+    fs.mkdirSync(explicit, { recursive: true });
+
+    try {
+      const result = await resolveWorkspacePath({
+        explicitWorkspace: path.relative(tempDir, explicit),
+        cwd: tempDir,
+      });
+
+      expect(result.workspacePath).toBe(path.resolve(explicit));
+      expect(result.source).toBe('explicit');
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws when an explicit workspace path does not exist', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-missing-'));
+
+    try {
+      await expect(
+        resolveWorkspacePath({
+          explicitWorkspace: path.join(tempDir, 'missing-workspace'),
+          cwd: tempDir,
+        })
+      ).rejects.toThrow(/Workspace path does not exist/i);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('throws when an explicit workspace path is not a directory', async () => {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-file-'));
+    const explicit = path.join(tempDir, 'workspace-file.txt');
+    fs.writeFileSync(explicit, 'not a directory', 'utf-8');
+
+    try {
+      await expect(
+        resolveWorkspacePath({
+          explicitWorkspace: explicit,
+          cwd: tempDir,
+        })
+      ).rejects.toThrow(/Workspace path is not a directory/i);
+    } finally {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('keeps cwd when launched from the repo root', async () => {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-root-'));
     fs.mkdirSync(path.join(tempDir, '.git'), { recursive: true });
