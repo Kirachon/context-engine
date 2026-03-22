@@ -3,7 +3,7 @@
 > Status: active
 
 This note captures the current repo state after the recent hardening work.
-It is the short, practical version of `docs/updates.md`.
+It is the short, practical active roadmap summary for the repo.
 
 ## Already in the repo
 
