@@ -86,7 +86,7 @@ the repository immediately usable for new users.
 - ✅ **README.md** - Project overview with clear setup instructions
 - ✅ **docs\archive\QUICKSTART.md** - 5-minute setup guide
 - ✅ **package.json** - Version 1.9.0 with correct dependencies
-- ✅ **codex_config.example.toml** - Configuration example for Codex CLI
+- ✅ **examples/mcp-clients/codex_config.example.toml** - Configuration example for Codex CLI
 - ✅ **docs\archive\GETTING_STARTED.md** - Comprehensive getting started guide
 - ✅ **docs\archive\API_REFERENCE.md** - Complete API documentation
 
@@ -99,10 +99,10 @@ the repository immediately usable for new users.
 - ✅ **CHANGELOG.md** - Version history (up to v1.9.0)
 
 ### Configuration Examples
-- ✅ **codex_config.example.toml** - Codex CLI configuration
-- ✅ **codex_config_READY_TO_USE.toml** - Ready-to-use config
-- ✅ **antigravity_mcp_config_READY_TO_USE.json** - Antigravity config
-- ✅ **gemini_settings_READY_TO_USE.json** - Gemini CLI config
+- ✅ **examples/mcp-clients/codex_config.example.toml** - Codex CLI configuration
+- ✅ **examples/mcp-clients/codex_config_READY_TO_USE.toml** - Ready-to-use config
+- ✅ **examples/mcp-clients/antigravity_mcp_config_READY_TO_USE.json** - Antigravity config
+- ✅ **examples/mcp-clients/gemini_settings_READY_TO_USE.json** - Gemini CLI config
 
 ### Build & Test
 - ✅ **package.json** - Build scripts configured

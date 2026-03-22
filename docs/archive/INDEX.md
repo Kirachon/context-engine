@@ -106,7 +106,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 | `tsconfig.json` | TypeScript configuration |
 | `.gitignore` | Git ignore patterns |
 | `.env.example` | Environment variable template |
-| `codex_config.example.toml` | Codex CLI config template |
+| `examples/mcp-clients/codex_config.example.toml` | Codex CLI config template |
 | `verify-setup.js` | Setup verification script |
 
 ## 📁 Source Code Structure

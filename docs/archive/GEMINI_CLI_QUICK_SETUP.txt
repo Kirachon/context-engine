@@ -87,11 +87,11 @@ READY-TO-USE FILES
 
 For your convenience, we've created these files:
 
-1. gemini_settings_READY_TO_USE.json
+1. examples/mcp-clients/gemini_settings_READY_TO_USE.json
    - Full configuration with detailed comments and examples
    - Copy this to C:\Users\preda\.gemini\settings.json
 
-2. gemini_settings_MINIMAL.json
+2. examples/mcp-clients/gemini_settings_MINIMAL.json
    - Clean minimal configuration without comments
    - Copy this if you prefer a simpler config
 

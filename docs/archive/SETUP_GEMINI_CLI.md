@@ -42,7 +42,7 @@ mkdir -Force $env:USERPROFILE\.gemini
 code $env:USERPROFILE\.gemini\settings.json
 ```
 
-**Copy the configuration from `gemini_settings_READY_TO_USE.json` or use this minimal version:**
+**Copy the configuration from `examples/mcp-clients/gemini_settings_READY_TO_USE.json` or use this minimal version:**
 
 ```json
 {
@@ -389,7 +389,7 @@ npm install -g @google/gemini-cli
 # 2. Create configuration directory
 mkdir -Force $env:USERPROFILE\.gemini
 
-# 3. Copy gemini_settings_READY_TO_USE.json to settings.json
+# 3. Copy examples/mcp-clients/gemini_settings_READY_TO_USE.json to settings.json
 # Then replace YOUR-PROJECT-NAME with your actual project
 
 # 4. Verify and start using

@@ -62,6 +62,8 @@ codex mcp add context-engine -- node "D:\GitProjects\context-engine\dist\index.j
 
 See [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) for copy-paste config examples for each client.
 
+Ready-to-use sample config files live in [examples/mcp-clients/](examples/mcp-clients/).
+
 ### If an AI agent is setting this up
 
 Paste this into the agent if you want it to do the setup for you:

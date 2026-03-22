@@ -72,7 +72,7 @@ A complete, production-ready **Model Context Protocol (MCP) server** that provid
 - [x] **tsconfig.json** - TypeScript configuration
 - [x] **.gitignore** - Git ignore patterns
 - [x] **.env.example** - Environment variable template
-- [x] **codex_config.example.toml** - Codex CLI config template
+- [x] **examples/mcp-clients/codex_config.example.toml** - Codex CLI config template
 - [x] **verify-setup.js** - Setup verification script
 
 ### ✅ Developer Experience
@@ -111,7 +111,7 @@ A complete, production-ready **Model Context Protocol (MCP) server** that provid
 2. `tsconfig.json` - TypeScript config
 3. `.gitignore` - Git ignore
 4. `.env.example` - Environment template
-5. `codex_config.example.toml` - Codex CLI config
+5. `examples/mcp-clients/codex_config.example.toml` - Codex CLI config
 6. `verify-setup.js` - Setup verification
 
 **Total: 22 files created/updated**
@@ -219,4 +219,3 @@ All requirements from the original request have been met:
 **Implementation Date**: December 10, 2024
 **Status**: ✅ COMPLETE
 **Version**: 1.0.0
-

@@ -32,8 +32,8 @@ These are mostly non-runtime materials:
   - `docs\archive\DISCOVERY_SUMMARY.md`
   - `docs\archive\IMPLEMENTATION_STATUS_ASSESSMENT.md`
 - Setup templates/snippets not in active runtime:
-  - `gemini_settings_READY_TO_USE.json`
-  - `gemini_settings_MINIMAL.json`
+  - `examples/mcp-clients/gemini_settings_READY_TO_USE.json`
+  - `examples/mcp-clients/gemini_settings_MINIMAL.json`
   - `docs\archive\GEMINI_CLI_QUICK_SETUP.txt`
   - `.gemini/settings.json`
 - Test/guardrail references (intentional for boundary checks):

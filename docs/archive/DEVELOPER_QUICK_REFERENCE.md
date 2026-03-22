@@ -253,7 +253,7 @@ describe('MyService', () => {
 - `CE_AI_PROVIDER` - AI provider for ask flows (`openai_session`)
 
 ### MCP Configuration
-See `codex_config.example.toml` for MCP client setup
+See `examples/mcp-clients/codex_config.example.toml` for MCP client setup
 
 ## 📚 Documentation
 
