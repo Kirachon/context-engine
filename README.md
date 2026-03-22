@@ -2,13 +2,82 @@
 
 A local-first, agent-agnostic Model Context Protocol (MCP) server for workspace indexing, retrieval, planning, and review workflows.
 
-> New here? Check out [docs/archive/INDEX.md](docs/archive/INDEX.md) for a complete documentation guide.
+> New here? Start with the beginner quick start below.
 >
-> Quick Start: [docs/archive/QUICKSTART.md](docs/archive/QUICKSTART.md) -> [docs/archive/GET_STARTED.md](docs/archive/GET_STARTED.md) -> [docs/archive/API_REFERENCE.md](docs/archive/API_REFERENCE.md)
+> If you want client-specific setup help, see [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md).
 >
-> Windows Deployment: [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)
+> If you are on Windows, see [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md).
 >
-> Architecture: [docs/archive/TECHNICAL_ARCHITECTURE.md](docs/archive/TECHNICAL_ARCHITECTURE.md) for deep technical dive
+> Historical docs live in [docs/archive/INDEX.md](docs/archive/INDEX.md) if you need the old planning and migration notes.
+
+## Beginner Quick Start
+
+If you just want to get Context Engine running locally, follow these steps:
+
+1. Install **Node.js 18+**.
+2. Clone this repository and open it in a terminal at the repo root.
+3. Install dependencies:
+
+```bash
+npm install
+```
+
+4. Build the server:
+
+```bash
+npm run build
+```
+
+5. Run the verification checks:
+
+```bash
+npm run verify
+```
+
+6. Start the MCP server for the workspace you want it to inspect:
+
+```bash
+node dist/index.js --workspace .
+```
+
+Replace `.` with the absolute path to the project you want to inspect.
+
+### Connect It To Your MCP Client
+
+The server speaks MCP over `stdio`, so most clients can launch it with the same command.
+
+**Codex CLI**
+
+```bash
+codex mcp add context-engine -- node dist/index.js --workspace /path/to/your/project
+```
+
+**Windows example**
+
+```powershell
+codex mcp add context-engine -- node "D:\GitProjects\context-engine\dist\index.js" --workspace "D:\GitProjects\your-project"
+```
+
+**Claude Code, Claude Desktop, Cursor, Antigravity**
+
+See [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) for copy-paste config examples for each client.
+
+### If an AI agent is setting this up
+
+Paste this into the agent if you want it to do the setup for you:
+
+> Set up Context Engine MCP for this workspace.
+>
+> 1. Run `npm install` and `npm run build`.
+> 2. Pick the workspace path I want you to inspect.
+> 3. Start the server with `node dist/index.js --workspace <absolute-path-to-workspace>`.
+> 4. Register that exact command in the target MCP client.
+> 5. Confirm the server appears in the client and that `tool_manifest()` or an equivalent tool list works.
+> 6. Run one quick retrieval test, for example `semantic_search`, to confirm the connection is working.
+>
+> If the client is Codex CLI, use:
+>
+> `codex mcp add context-engine -- node dist/index.js --workspace <absolute-path-to-workspace>`
 
 ## Architecture
 
@@ -92,9 +161,8 @@ npm run ci:check:legacy-capability-parity:strict
 
 ## Documentation Quick Links
 
-- Setup: [docs/archive/QUICKSTART.md](docs/archive/QUICKSTART.md)
-- MCP Clients: [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)
-- Getting Started: [docs/archive/GET_STARTED.md](docs/archive/GET_STARTED.md)
+- Setup: [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)
+- Windows Deployment: [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)
 - Troubleshooting: [docs/archive/TROUBLESHOOTING.md](docs/archive/TROUBLESHOOTING.md)
 - Testing: [docs/archive/TESTING.md](docs/archive/TESTING.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
