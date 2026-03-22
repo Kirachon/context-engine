@@ -9,7 +9,7 @@ Plan version: Finalized v2
 Execute a controlled adoption of practical legacy-provider-style capabilities into `local_native`, then remove legacy dependency/runtime paths with measurable parity and hard go/no-go gates.
 
 ## Next Wave Pointer
-- Active follow-up implementation plan: [`docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md)
+- Active follow-up implementation plan: [`docs/archive/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/archive/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md)
 - Current focus: Phase 0 and Phase 1 foundations (quality gate scaffolding, lexical/fusion retrieval upgrades).
 
 ## Tracker Metadata
@@ -236,7 +236,7 @@ Wave date: `2026-03-11`
 Wave status: `Completed`
 
 Scope for this wave:
-- [x] Save and publish the implementation plan at [`docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md).
+- [x] Save and publish the implementation plan at [`docs/archive/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md`](/D:/GitProjects/context-engine/docs/archive/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md).
 - [x] Add retrieval quality fixture pack at [`config/ci/retrieval-quality-fixture-pack.json`](/D:/GitProjects/context-engine/config/ci/retrieval-quality-fixture-pack.json).
 - [x] Add deterministic quality report and gate scripts.
 - [x] Add `npm` script wiring for quality report/gate execution.

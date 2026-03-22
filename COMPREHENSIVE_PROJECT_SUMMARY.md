@@ -70,7 +70,7 @@ Quality report gate status: pass (`10/10` checks).
 ## Documentation Sources of Truth
 
 - `README.md` for top-level usage and current status
-- `docs/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md` for staged rollout and outcomes
+- `docs/archive/LOCAL_NATIVE_SEARCH_QUALITY_UPGRADE_PLAN.md` for staged rollout and outcomes
 - `docs/LEGACY_PROVIDER_ADOPTION_AND_REMOVAL_TRACKER.md` for migration tracking
 
 ## Notes on Historical Mentions

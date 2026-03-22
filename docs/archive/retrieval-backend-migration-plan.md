@@ -32,7 +32,7 @@ Current state that this plan builds on:
 - Confirm the current retrieval contract still passes existing tests
 
 ### Task 1.1: Define V2 Artifact and Store Contracts
-- **Location**: `docs/context-engine-improvement-plan.md`, `docs/retrieval-backend-migration-plan.md`
+- **Location**: `docs/context-engine-improvement-plan.md`, `docs/archive/retrieval-backend-migration-plan.md`
 - **Description**: Freeze the versioned artifact fields for parser, chunk, lexical, vector, and rerank stages.
 - **Dependencies**: None
 - **Acceptance Criteria**:

@@ -258,7 +258,7 @@ Checklist:
 - [x] Document any intentional deltas with migration notes.
 
 Progress notes:
-- 2026-02-28: Executed snapshot replay harness and updated compatibility baselines for additive/index-health/tool-manifest deltas; reran replay to pass. Migration notes captured in `docs/COMPATIBILITY_REPLAY_NOTES_2026-02-28.md`.
+- 2026-02-28: Executed snapshot replay harness and updated compatibility baselines for additive/index-health/tool-manifest deltas; reran replay to pass. Migration notes captured in `docs/archive/COMPATIBILITY_REPLAY_NOTES_2026-02-28.md`.
 - 2026-02-28: Added `tests/snapshots/phase2/fixtures/old-client-tool-families.json` with coverage for all currently registered tool families/tools; wired fixture validation into `tests/snapshots/snapshot-harness.ts`; verified with `npm test -- tests/snapshots/oldClientFixtures.test.ts` and `node --import tsx tests/snapshots/snapshot-harness.ts`.
 
 ### WS18 - Versioning and Contract Policy

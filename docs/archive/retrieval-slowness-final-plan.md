@@ -152,12 +152,12 @@ TE4 depends_on [T14,T15]
 
 ### T10: Full Gap Matrix (Implemented / Partial / Missing)
 - **depends_on**: [T1, T2, T3, T4, T5, T6]
-- **location**: `docs/context-engine-improvement-plan.md`, `docs/retrieval-slowness-final-plan.md`
+- **location**: `docs/context-engine-improvement-plan.md`, `docs/archive/retrieval-slowness-final-plan.md`
 - **description**: Build complete gap matrix with latency impact, risk, and confidence for all plan items.
 - **validation**: Matrix covers all items and is decision-ready for architecture selection.
 - **status**: Completed
 - **log**: Added a phase-by-phase gap matrix snapshot covering Workstream 0 through Phase 10. The highest-impact missing pieces are still the V2 seam/flags, Tree-sitter chunking, FTS5 lexical indexing, a real vector backend/embedding runtime, and a true background incremental pipeline.
-- **files edited/created**: `docs/retrieval-slowness-final-plan.md`
+- **files edited/created**: `docs/archive/retrieval-slowness-final-plan.md`
 
 ### T10 Gap Matrix Snapshot
 
@@ -202,12 +202,12 @@ Highest-impact gaps:
 
 ### T13a: Track B Draft Execution Backlog
 - **depends_on**: [T11, T12, T8]
-- **location**: `docs/retrieval-slowness-final-plan.md`
+- **location**: `docs/archive/retrieval-slowness-final-plan.md`
 - **description**: Create initial migration backlog with candidate task waves.
 - **validation**: Draft backlog exists with dependency hypotheses and risk tags.
 - **status**: Completed
 - **log**: Added a draft Track B backlog that groups the remaining migration work into candidate waves, preserving the sequencing from parity evidence to rollback criteria to final wave freeze.
-- **files edited/created**: `docs/retrieval-slowness-final-plan.md`
+- **files edited/created**: `docs/archive/retrieval-slowness-final-plan.md`
 
 #### Draft Track B Backlog (candidate only)
 
@@ -241,12 +241,12 @@ This backlog is intentionally draft-only. It preserves sequencing and ownership 
 
 ### T13b: Finalized Migration Dependency Waves
 - **depends_on**: [T13a, T14, T15]
-- **location**: `docs/retrieval-slowness-final-plan.md`
+- **location**: `docs/archive/retrieval-slowness-final-plan.md`
 - **description**: Finalize executable migration waves after parity and rollback criteria are fixed.
 - **validation**: Final wave plan has no unresolved dependencies.
 - **status**: Completed
 - **log**: Finalized the remaining Track B wave order after parity, rollback, and failure-mode rehearsal were in place, so the execution path is now frozen instead of draft-only.
-- **files edited/created**: `docs/retrieval-slowness-final-plan.md`
+- **files edited/created**: `docs/archive/retrieval-slowness-final-plan.md`
 
 #### Finalized Migration Waves
 
@@ -259,12 +259,12 @@ This backlog is intentionally draft-only. It preserves sequencing and ownership 
 
 ### T16a: Initial Execution Board
 - **depends_on**: [T4, T10]
-- **location**: `docs/retrieval-slowness-final-plan.md`
+- **location**: `docs/archive/retrieval-slowness-final-plan.md`
 - **description**: Create initial owner/timeline/evidence board from governance + full gap matrix.
 - **validation**: Board maps each milestone to owner and required artifact.
 - **status**: Completed
 - **log**: Added a compact execution board for the remaining migration milestones, with role placeholders, wave timing, evidence artifacts, and entry/exit gates so the next phases can be scheduled unambiguously.
-- **files edited/created**: `docs/retrieval-slowness-final-plan.md`
+- **files edited/created**: `docs/archive/retrieval-slowness-final-plan.md`
 
 #### Initial Execution Board
 
@@ -281,21 +281,21 @@ This backlog is intentionally draft-only. It preserves sequencing and ownership 
 
 ### M1: Track B Execution Start Gate
 - **depends_on**: [T13b, T15]
-- **location**: `docs/retrieval-slowness-final-plan.md`
+- **location**: `docs/archive/retrieval-slowness-final-plan.md`
 - **description**: Hard gate that prevents migration execution before finalized waves and rollback criteria exist.
 - **validation**: Gate checklist complete and signed off.
 - **status**: Completed
 - **log**: Added the Track B execution start gate so migration cannot start until the final wave order, rollback criteria, and signoff are all present.
-- **files edited/created**: `docs/retrieval-slowness-final-plan.md`
+- **files edited/created**: `docs/archive/retrieval-slowness-final-plan.md`
 
 ### T16b: Final Integrated Execution Board
 - **depends_on**: [T7, T9, T13b, T15]
-- **location**: `docs/retrieval-slowness-final-plan.md`
+- **location**: `docs/archive/retrieval-slowness-final-plan.md`
 - **description**: Publish final end-to-end execution board for both tracks.
 - **validation**: Final board includes schedule, owners, gates, and evidence expectations.
 - **status**: Completed
 - **log**: The initial execution board is now the canonical final board for both tracks, with the Track B wave order frozen and the execution start gate in place.
-- **files edited/created**: `docs/retrieval-slowness-final-plan.md`
+- **files edited/created**: `docs/archive/retrieval-slowness-final-plan.md`
 
 ### TE1: Telemetry Data-Quality Gates
 - **depends_on**: [T3, T5]
