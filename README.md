@@ -1,6 +1,6 @@
 # Context Engine MCP Server
 
-A local-first, agent-agnostic Model Context Protocol (MCP) server for workspace indexing, retrieval, planning, and review workflows.
+A local-first, agent-agnostic Model Context Protocol (MCP) server for workspace indexing, retrieval, planning, and review workflows, with a setup path that works well for Codex and other OpenAI-powered agents.
 
 > New here? Start with the beginner quick start below.
 >
@@ -9,6 +9,30 @@ A local-first, agent-agnostic Model Context Protocol (MCP) server for workspace 
 > If you are on Windows, see [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md).
 >
 > Historical docs live in [docs/archive/INDEX.md](docs/archive/INDEX.md) if you need the old planning and migration notes.
+
+## OpenAI / Codex Showcase
+
+If you want to see what this project demonstrates for OpenAI-style agent workflows, start here:
+
+- Local workspace indexing and retrieval
+- Review and planning workflows layered on top of the same MCP server
+- Beginner-friendly install and client setup
+- Windows support and copy-paste setup examples
+- AI-agent-friendly instructions for self-setup
+
+Fastest demo path:
+
+```bash
+npm install
+npm run build
+codex mcp add context-engine -- node dist/index.js --workspace /path/to/your/project
+```
+
+Then in Codex, confirm the tools are visible and try:
+
+```text
+use semantic_search to find authentication logic
+```
 
 ## Beginner Quick Start
 
