@@ -65,7 +65,7 @@ Use `tool_manifest()` in the MCP server to inspect the current tool inventory di
 
 ### Key Characteristics
 
-- Local-first runtime with no legacy provider SDK dependency in the active path
+- Local-first runtime for indexing and retrieval, with OpenAI-backed planning/review workflows layered on top
 - Agent-agnostic MCP interface
 - Local-native retrieval provider as the active runtime
 - Thin `context-engine-mcp` launcher for convenience; it starts the same server and does not add features
@@ -103,8 +103,9 @@ npm run ci:check:legacy-capability-parity:strict
 
 ## Current Status
 
-- Active runtime is local-native only
+- Retrieval is local-native and index-backed
+- Planning and review use the OpenAI session path
 - Legacy-provider references that remain are historical docs, tests, or migration guardrails
-- Removal and parity proof tracking lives in [docs/LEGACY_PROVIDER_ADOPTION_AND_REMOVAL_TRACKER.md](docs/LEGACY_PROVIDER_ADOPTION_AND_REMOVAL_TRACKER.md)
+- Current hardening focuses on fast paths, cancellation, and prompt efficiency rather than provider replacement
 
 

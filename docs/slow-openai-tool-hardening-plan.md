@@ -1,4 +1,6 @@
-# Plan: Slow OpenAI Tool Hardening
+# Archived Plan: Slow OpenAI Tool Hardening
+
+> Status: completed and retained for reference. The active short summary lives in `docs/updates-openai-roadmap-summary.md`.
 
 **Generated**: 2026-03-22
 

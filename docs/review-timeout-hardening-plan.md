@@ -1,4 +1,6 @@
-# Plan: Review Timeout Hardening and Prompt Compaction
+# Archived Plan: Review Timeout Hardening and Prompt Compaction
+
+> Status: completed and retained for reference. The active short summary lives in `docs/updates-openai-roadmap-summary.md`.
 
 **Generated**: 2026-03-22
 

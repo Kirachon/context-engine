@@ -396,17 +396,10 @@ describe('PlanningService', () => {
       expect(result.success).toBe(true);
       expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledTimes(1);
       expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
-        expect.objectContaining({ maxFiles: 5, tokenBudget: 8000 })
+        expect.objectContaining({ maxFiles: 4, tokenBudget: 6000 })
       );
-
-      const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
-      expect(prompt).toContain('## Task');
-      expect(prompt).toContain('## Context');
-      expect(prompt).toContain('Return ONLY valid JSON');
-      expect(prompt).not.toContain('## Deep Planning Guidance');
-      expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
-        expect.objectContaining({ signal: controller.signal })
-      );
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+      expect(result.plan?.steps.length).toBe(3);
     });
 
     it('switches to a deep planning prompt for complex tasks', async () => {
@@ -420,11 +413,14 @@ describe('PlanningService', () => {
       expect(result.success).toBe(true);
       expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledTimes(1);
       expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
-        expect.objectContaining({ maxFiles: 5, tokenBudget: 8000 })
+        expect.objectContaining({ maxFiles: 4, tokenBudget: 6000 })
       );
 
       const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
       expect(prompt).toContain('## Deep Planning Guidance');
+      expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ priority: 'background' })
+      );
     });
 
     it('forwards the abort signal through plan refinement and step execution', async () => {
@@ -464,7 +460,7 @@ describe('PlanningService', () => {
       );
       expect(refined.success).toBe(true);
       expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
-        expect.objectContaining({ signal: controller.signal })
+        expect.objectContaining({ signal: controller.signal, priority: 'background' })
       );
 
       mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 1000));
@@ -476,7 +472,7 @@ describe('PlanningService', () => {
       );
       expect(stepResult.success).toBe(true);
       expect(mockServiceClient.searchAndAsk.mock.calls[1][2]).toEqual(
-        expect.objectContaining({ signal: controller.signal })
+        expect.objectContaining({ signal: controller.signal, priority: 'background' })
       );
     });
   });

@@ -32,7 +32,7 @@ import {
   ExecutionProgress,
 } from '../types/planning.js';
 import {
-  PLANNING_SYSTEM_PROMPT,
+  getPlanningSystemPrompt,
   REFINEMENT_SYSTEM_PROMPT,
   buildPlanningPrompt,
   buildRefinementPrompt,
@@ -53,10 +53,10 @@ const MAX_PARSE_RETRIES = 2;
 /** Default options for plan generation */
 const DEFAULT_OPTIONS: Required<PlanGenerationOptions> = {
   max_refinements: 3,
-  max_context_files: 10,
-  context_token_budget: 12000,
+  max_context_files: 8,
+  context_token_budget: 8000,
   include_related_files: true,
-  generate_diagrams: true,
+  generate_diagrams: false,
   analyze_parallelism: true,
   mvp_only: false,
 };
@@ -73,11 +73,11 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 function clampContextFileCount(maxFiles: number, profile: PlanningPromptProfile): number {
-  return profile === 'deep' ? maxFiles : Math.max(1, Math.min(maxFiles, 5));
+  return profile === 'deep' ? maxFiles : Math.max(1, Math.min(maxFiles, 4));
 }
 
 function clampContextTokenBudget(tokenBudget: number, profile: PlanningPromptProfile): number {
-  return profile === 'deep' ? tokenBudget : Math.max(2_000, Math.min(tokenBudget, 8_000));
+  return profile === 'deep' ? tokenBudget : Math.max(2_000, Math.min(tokenBudget, 6_000));
 }
 
 function truncateText(text: string, maxChars: number): string {
@@ -127,7 +127,7 @@ export class PlanningService {
 
     const compactScore = compactSignals.filter(Boolean).length;
     const deepScore = deepSignals.filter(Boolean).length;
-    return deepScore > compactScore ? 'deep' : 'compact';
+    return deepScore >= 3 ? 'deep' : 'compact';
   }
 
   // ==========================================================================
@@ -164,11 +164,28 @@ export class PlanningService {
         context.files.length,
         context.metadata.totalTokens
       );
+      // Fast path: compact planning returns a lightweight local outline immediately.
+      // Deep planning still uses the AI path for complex, architecture-heavy tasks.
+      if (promptProfile === 'compact') {
+        const outlinePlan = this.buildCompactPlanOutline(task, context);
+        const status: PlanStatus = outlinePlan.questions_for_clarification.length > 0
+          ? 'needs_clarification'
+          : 'ready';
+
+        console.error(`[PlanningService] Returned compact local outline (${outlinePlan.steps.length} steps)`);
+
+        return {
+          success: true,
+          plan: outlinePlan,
+          status,
+          duration_ms: Date.now() - startTime,
+        };
+      }
       const contextSummary = this.formatContextForPrompt(context, promptProfile);
       const planningPrompt = buildPlanningPrompt(task, contextSummary, promptProfile);
 
       // Step 3: Combine system prompt with planning prompt for searchAndAsk
-      const fullPrompt = `${PLANNING_SYSTEM_PROMPT}\n\n${planningPrompt}`;
+      const fullPrompt = `${getPlanningSystemPrompt(promptProfile)}\n\n${planningPrompt}`;
       throwIfAborted(signal);
 
       // Step 4: Call AI to generate the plan
@@ -177,6 +194,7 @@ export class PlanningService {
           min: MIN_PLAN_AI_TIMEOUT_MS,
           max: MAX_PLAN_AI_TIMEOUT_MS,
         }),
+        priority: 'background',
         signal,
       });
 
@@ -290,6 +308,7 @@ export class PlanningService {
           min: MIN_PLAN_AI_TIMEOUT_MS,
           max: MAX_PLAN_AI_TIMEOUT_MS,
         }),
+        priority: 'background',
         signal,
       });
 
@@ -336,9 +355,12 @@ export class PlanningService {
     return this.contextClient.getContextForPrompt(task, {
       maxFiles: effectiveMaxFiles,
       tokenBudget: effectiveTokenBudget,
-      includeRelated: options.include_related_files,
+      includeRelated: profile === 'deep' ? options.include_related_files : false,
       minRelevance: profile === 'deep' ? 0.2 : 0.3,
       includeSummaries: true,
+      includeMemories: false,
+      preferLocalSearch: true,
+      priority: 'background',
     });
   }
 
@@ -359,13 +381,9 @@ export class PlanningService {
 
       formatted += `### Relevant Files (${context.files.length} files)\n\n`;
 
-      for (const file of context.files.slice(0, 5)) {
+      for (const file of context.files.slice(0, 3)) {
         formatted += `#### ${file.path}\n`;
-        formatted += `- ${truncateText(file.summary, 180)}\n`;
-        const snippet = file.snippets[0];
-        if (snippet) {
-          formatted += `- Lines ${snippet.lines}: ${truncateMultilineText(snippet.text, 8, 420)}\n`;
-        }
+        formatted += `- ${truncateText(file.summary, 140)}\n`;
         formatted += '\n';
       }
 
@@ -397,6 +415,183 @@ export class PlanningService {
     }
 
     return formatted;
+  }
+
+  /**
+   * Build a fast local outline for compact planning requests.
+   *
+   * This intentionally avoids an AI round-trip so that create_plan can
+   * return a usable outline quickly, while deeper plans still go through
+   * the model path.
+   */
+  private buildCompactPlanOutline(task: string, context: ContextBundle): EnhancedPlanOutput {
+    const now = new Date().toISOString();
+    const keyFiles = context.files.slice(0, 3);
+    const keyFilePaths = keyFiles.map(file => file.path);
+    const contextSignals = [...context.hints.slice(0, 3)];
+    const relatedSummary = keyFilePaths.length > 0
+      ? `Focus on the most relevant files: ${keyFilePaths.join(', ')}.`
+      : 'Focus on the repository areas most likely to contain the requested change.';
+
+    const step1Files = keyFiles.slice(0, 2).map(file => ({
+      path: file.path,
+      change_type: 'modify' as const,
+      estimated_loc: 20,
+      complexity: 'simple' as const,
+      reason: 'Review the current implementation and identify the exact touchpoints for this change.',
+    }));
+
+    const step2Files = keyFiles.slice(0, 3).map(file => ({
+      path: file.path,
+      change_type: 'modify' as const,
+      estimated_loc: 40,
+      complexity: 'moderate' as const,
+      reason: 'Implement the requested change across the main files identified in the compact outline.',
+    }));
+
+    const steps: EnhancedPlanStep[] = [
+      {
+        step_number: 1,
+        id: 'step_1',
+        title: 'Map the change',
+        description: 'Review the current implementation surface and confirm the exact files and behavior that need attention.',
+        files_to_modify: step1Files,
+        files_to_create: [],
+        files_to_delete: [],
+        depends_on: [],
+        blocks: [2],
+        can_parallel_with: [],
+        priority: 'high',
+        estimated_effort: '15-30 minutes',
+        acceptance_criteria: [
+          'Relevant files are identified',
+          'Scope is narrow enough to implement safely',
+        ],
+        rollback_strategy: 'No code changes should be made in this step; revert any exploratory notes or scratch work if needed.',
+      },
+      {
+        step_number: 2,
+        id: 'step_2',
+        title: 'Implement the update',
+        description: 'Make the smallest set of code changes needed to satisfy the task using the files identified in the first step.',
+        files_to_modify: step2Files,
+        files_to_create: [],
+        files_to_delete: [],
+        depends_on: [1],
+        blocks: [3],
+        can_parallel_with: [],
+        priority: 'high',
+        estimated_effort: '30-60 minutes',
+        acceptance_criteria: [
+          'Code changes are applied in the right files',
+          'Behavior remains aligned with the task',
+        ],
+        rollback_strategy: 'Revert the touched files if the change causes regressions.',
+      },
+      {
+        step_number: 3,
+        id: 'step_3',
+        title: 'Validate and refine',
+        description: 'Run the focused validation steps, confirm the behavior, and prepare the plan for the next refinement pass if deeper detail is needed.',
+        files_to_modify: [],
+        files_to_create: [],
+        files_to_delete: [],
+        depends_on: [2],
+        blocks: [],
+        can_parallel_with: [],
+        priority: 'medium',
+        estimated_effort: '15-30 minutes',
+        acceptance_criteria: [
+          'Targeted tests or smoke checks pass',
+          'The outline is good enough to continue or refine later',
+        ],
+        rollback_strategy: 'Undo the last code changes and rerun validation if the compact outline proves insufficient.',
+      },
+    ];
+
+    const dependencyGraph = this.analyzeDependencies(steps);
+
+    return {
+      id: this.generatePlanId(),
+      version: 1,
+      created_at: now,
+      updated_at: now,
+      goal: task.trim(),
+      scope: {
+        included: [task.trim()],
+        excluded: [
+          'Broad architecture rewrites that are not needed for a compact outline',
+          'Deep implementation detail that can wait for a later refinement pass',
+        ],
+        assumptions: [
+          'The repository context already points at the likely change surface',
+          'A smaller outline is acceptable as the fast-path result',
+        ],
+        constraints: [
+          'Keep the outline short enough to return quickly',
+          'Prefer actionable next steps over exhaustive detail',
+        ],
+      },
+      mvp_features: [
+        {
+          name: 'Fast outline',
+          description: 'Return a compact, actionable plan quickly without waiting for a long AI run.',
+          steps: [1, 2, 3],
+        },
+      ],
+      nice_to_have_features: [],
+      architecture: {
+        notes: truncateText(`Compact local outline generated from the retrieved context. ${relatedSummary} ${contextSignals.length > 0 ? `Signals: ${contextSignals.join('; ')}` : ''}`, 420),
+        patterns_used: ['Fast-path planning', 'Local outline fallback'],
+        diagrams: [],
+      },
+      risks: [
+        {
+          issue: 'The outline may be less detailed than a deep AI-generated plan.',
+          mitigation: 'Use the refinement path or a deep task description when more detail is needed.',
+          likelihood: 'medium',
+          impact: 'Some follow-up detail may be required before implementation.',
+        },
+      ],
+      milestones: [
+        {
+          name: 'Compact planning',
+          steps_included: [1, 2, 3],
+          estimated_time: '1-2 hours',
+          deliverables: ['Actionable fast-path plan'],
+        },
+      ],
+      steps,
+      dependency_graph: dependencyGraph,
+      testing_strategy: {
+        unit: 'Validate the touched code paths with focused tests.',
+        integration: 'Run the smallest meaningful smoke checks for the change.',
+        coverage_target: 'N/A',
+        test_files: [],
+      },
+      acceptance_criteria: [
+        {
+          description: 'The plan returns quickly without waiting for a long model run.',
+          verification: 'create_plan completes using the compact local outline path.',
+        },
+      ],
+      confidence_score: 0.45,
+      questions_for_clarification: [],
+      context_files: context.files.map(file => file.path),
+      codebase_insights: [
+        ...context.hints.slice(0, 3),
+        `Context files used: ${context.files.slice(0, 3).map(file => file.path).join(', ') || 'none'}`,
+      ],
+      alternative_approaches: [
+        {
+          name: 'Deep plan',
+          description: 'Use the background AI path for a richer, more detailed plan.',
+          reason_not_chosen: 'Reserved for complex or explicitly deep planning requests.',
+          pros: ['More detail', 'Better dependency analysis'],
+          cons: ['Slower than the compact outline path'],
+        },
+      ],
+    };
   }
 
   // ==========================================================================
@@ -1101,9 +1296,12 @@ export class PlanningService {
       const context = await this.contextClient.getContextForPrompt(contextQuery, {
         maxFiles: clampContextFileCount(10, executionProfile),
         tokenBudget: clampContextTokenBudget(8000, executionProfile),
-        includeRelated: true,
+        includeRelated: executionProfile === 'deep',
         minRelevance: executionProfile === 'deep' ? 0.2 : 0.3,
         includeSummaries: true,
+        includeMemories: false,
+        preferLocalSearch: true,
+        priority: 'background',
       });
 
       throwIfAborted(signal);
@@ -1136,6 +1334,7 @@ export class PlanningService {
           min: MIN_PLAN_AI_TIMEOUT_MS,
           max: MAX_PLAN_AI_TIMEOUT_MS,
         }),
+        priority: 'background',
         signal,
       });
 

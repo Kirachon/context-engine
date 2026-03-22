@@ -146,17 +146,15 @@ describe('Planning MCP Tools', () => {
         mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
         mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Compact plan'));
 
-        const result = await handleCreatePlan(
-          { task: 'Implement a login form', auto_save: false },
-          mockServiceClient,
-          controller.signal
-        );
+      const result = await handleCreatePlan(
+        { task: 'Implement a login form', auto_save: false },
+        mockServiceClient,
+        controller.signal
+      );
 
-        expect(result).toContain('Implementation Plan');
-        expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
-          expect.objectContaining({ signal: controller.signal })
-        );
-      });
+      expect(result).toContain('Implementation Plan');
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+    });
     });
 
     describe('Tool Schema', () => {

@@ -1,4 +1,6 @@
-# Local-Native Search Quality Upgrade Plan
+# Archived Plan: Local-Native Search Quality Upgrade
+
+> Status: complete and retained for reference. The current active roadmap is summarized in `docs/updates-openai-roadmap-summary.md`.
 
 Last updated: 2026-03-11  
 Owner: Context Engine team  

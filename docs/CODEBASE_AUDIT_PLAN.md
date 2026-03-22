@@ -1,4 +1,6 @@
-# Codebase Audit Plan (No Code Changes)
+# Archived Plan: Codebase Audit (No Code Changes)
+
+> Status: completed and retained for reference. The current active roadmap is summarized in `docs/updates-openai-roadmap-summary.md`.
 
 This document is an **analysis-first** audit plan for `D:\GitProjects\context-engine`. It identifies the most likely **breakpoints** (things that can crash/hang or behave incorrectly) and the biggest **slowdowns** (things that waste CPU, memory, or time), and then proposes a **phased plan** to address them.  
 
@@ -383,4 +385,3 @@ The following additional issues were discovered during a comprehensive codebase 
 - Plan persistence: `src/mcp/services/planPersistenceService.ts`
 - Timeout configuration: `src/mcp/utils/timeoutConfig.ts` (new)
 - JSON parsing utilities: `src/mcp/utils/jsonParser.ts` (new)
-

@@ -1,5 +1,7 @@
 # Phase 2 – Safe Tool Consolidation (Implementation Notes)
 
+> Status: active
+
 ## Goals
 - Reduce internal duplication across MCP tools without changing any external contracts.
 - Preserve tool names, schemas, descriptions, outputs, and error messages.

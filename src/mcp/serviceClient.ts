@@ -182,6 +182,10 @@ export interface ContextOptions {
   includeMemories?: boolean;
   /** Bypass caches (default: false). */
   bypassCache?: boolean;
+  /** Prefer a local keyword-first search path before semantic fallback. */
+  preferLocalSearch?: boolean;
+  /** Queue lane for semantic retrieval work (default: interactive). */
+  priority?: 'interactive' | 'background';
 }
 
 export interface SearchDiagnostics {
@@ -3173,7 +3177,7 @@ export class ContextServiceClient {
   async semanticSearch(
     query: string,
     topK: number = 10,
-    options?: { bypassCache?: boolean; maxOutputLength?: number }
+    options?: { bypassCache?: boolean; maxOutputLength?: number; priority?: 'interactive' | 'background' }
   ): Promise<SearchResult[]> {
     const metricsStart = Date.now();
     const debugSearch = process.env.CE_DEBUG_SEARCH === 'true';
@@ -3336,7 +3340,7 @@ export class ContextServiceClient {
   private async searchWithProviderRuntime(
     query: string,
     topK: number,
-    options?: { bypassCache?: boolean; maxOutputLength?: number }
+    options?: { bypassCache?: boolean; maxOutputLength?: number; priority?: 'interactive' | 'background' }
   ): Promise<SearchResult[]> {
     const semanticTimeoutMs = envMs('CE_SEMANTIC_SEARCH_AI_TIMEOUT_MS', 30_000, {
       min: MIN_API_TIMEOUT_MS,
@@ -3349,7 +3353,7 @@ export class ContextServiceClient {
       searchAndAsk: (searchQuery, prompt, runtimeOptions) =>
         this.searchAndAsk(searchQuery, prompt, {
           timeoutMs: runtimeOptions?.timeoutMs ?? semanticTimeoutMs,
-          priority: 'interactive',
+          priority: options?.priority === 'background' ? 'background' : 'interactive',
           signal: runtimeOptions?.signal,
         }),
       keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
@@ -4244,6 +4248,8 @@ export class ContextServiceClient {
       includeSummaries = true,
       includeMemories = true,
       bypassCache = false,
+      preferLocalSearch = false,
+      priority = 'interactive',
     } = options;
 
     const normalizedCacheOptions = {
@@ -4288,10 +4294,10 @@ export class ContextServiceClient {
 
     const semanticSearch = (q: string, k: number) =>
       bypassCache
-        ? this.semanticSearch(q, k, { bypassCache: true })
-        : this.semanticSearch(q, k);
+        ? this.semanticSearch(q, k, { bypassCache: true, priority })
+        : this.semanticSearch(q, k, { priority });
 
-    const useLocalKeywordSearchFirst = isOperationalDocsQuery(query);
+    const useLocalKeywordSearchFirst = preferLocalSearch || isOperationalDocsQuery(query);
     const searchResultsPromise = useLocalKeywordSearchFirst
       ? this.localKeywordSearch(query, maxFiles * 3)
           .then(results => (results.length > 0 ? results : semanticSearch(query, maxFiles * 3)))

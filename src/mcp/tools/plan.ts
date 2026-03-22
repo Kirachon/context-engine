@@ -70,11 +70,11 @@ function buildToolMeta(tool: string, duration_ms: number, status?: string): Tool
 export interface CreatePlanArgs {
   /** The task or goal to plan for */
   task: string;
-  /** Maximum files to include in context (default: 10) */
+  /** Maximum files to include in context (default: 8) */
   max_context_files?: number;
-  /** Token budget for context retrieval (default: 12000) */
+  /** Token budget for context retrieval (default: 8000) */
   context_token_budget?: number;
-  /** Generate architecture diagrams (default: true) */
+  /** Generate architecture diagrams when requested (default: false) */
   generate_diagrams?: boolean;
   /** Focus on MVP only (default: false) */
   mvp_only?: boolean;
@@ -1041,7 +1041,7 @@ This tool enters Planning Mode, where it:
 1. Analyzes the codebase context relevant to your task
 2. Generates a structured, actionable implementation plan
 3. Identifies dependencies, risks, and parallelization opportunities
-4. Creates architecture diagrams when helpful
+4. Creates architecture diagrams when explicitly requested
 
 **When to use this tool:**
 - Before starting a complex feature or refactoring task
@@ -1069,18 +1069,18 @@ By default, plans are persisted so they can be executed later via plan_id.`,
       },
       max_context_files: {
         type: 'number',
-        description: 'Maximum number of files to include in context analysis (default: 10)',
-        default: 10,
+        description: 'Maximum number of files to include in context analysis (default: 8)',
+        default: 8,
       },
       context_token_budget: {
         type: 'number',
-        description: 'Token budget for context retrieval (default: 12000)',
-        default: 12000,
+        description: 'Token budget for context retrieval (default: 8000)',
+        default: 8000,
       },
       generate_diagrams: {
         type: 'boolean',
-        description: 'Generate architecture diagrams in the plan (default: true)',
-        default: true,
+        description: 'Generate architecture diagrams in the plan when requested (default: false)',
+        default: false,
       },
       mvp_only: {
         type: 'boolean',

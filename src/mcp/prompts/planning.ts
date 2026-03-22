@@ -104,6 +104,31 @@ Use Mermaid syntax for diagrams:
 - Flowcharts: \`flowchart TD\`
 Keep diagrams focused and readable.`;
 
+/**
+ * Shorter system prompt for compact planning runs.
+ * Keeps the contract and output shape requirements, but trims the guidance
+ * to reduce prompt size for interactive create_plan requests.
+ */
+export const COMPACT_PLANNING_SYSTEM_PROMPT = `You are an expert software architect in strict Planning Mode.
+
+Return ONLY valid JSON matching the planning schema described below.
+Do not write code, suggest file edits, or add any text outside the JSON.
+
+Keep the plan:
+- minimal and MVP-first
+- grounded in the repository context
+- focused on concrete steps, validation, and rollback
+- free of diagrams unless explicitly needed
+
+Required JSON keys:
+goal, scope, mvp_features, nice_to_have_features, architecture, risks,
+milestones, steps, testing_strategy, acceptance_criteria, confidence_score,
+questions_for_clarification, context_files, codebase_insights`;
+
+export function getPlanningSystemPrompt(profile: PlanningPromptProfile = 'compact'): string {
+  return profile === 'deep' ? PLANNING_SYSTEM_PROMPT : COMPACT_PLANNING_SYSTEM_PROMPT;
+}
+
 // ============================================================================
 // Refinement System Prompt
 // ============================================================================

@@ -1,5 +1,7 @@
 # Context-Engine Improvement Plan
 
+> Status: active
+
 ## Guiding rule
 
 Keep **production retrieval fully open-source and self-hosted/local where possible**, and use **Codex only as the engineering acceleration layer** for refactoring, test generation, benchmarking, rollout prep, and documentation. That fits Codex’s intended role as a coding agent that can work in the CLI, IDE, cloud, and MCP-based workflows, and it supports repo guidance through `AGENTS.md` and reusable Skills.

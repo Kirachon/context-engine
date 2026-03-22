@@ -1,4 +1,6 @@
-# Plan: Swarm-Ready Retrieval Slowness Program (Updated with Party-Mode Review)
+# Archived Plan: Swarm-Ready Retrieval Slowness Program (Updated with Party-Mode Review)
+
+> Status: completed and retained for reference. The active short summary lives in `docs/updates-openai-roadmap-summary.md`.
 
 ## Summary
 This plan is decision-complete and optimized for parallel multi-agent execution.

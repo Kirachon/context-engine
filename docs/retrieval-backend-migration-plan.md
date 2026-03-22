@@ -1,4 +1,6 @@
-# Plan: Retrieval Backend Migration
+# Archived Plan: Retrieval Backend Migration
+
+> Status: completed and retained for reference. The active short summary lives in `docs/updates-openai-roadmap-summary.md`.
 
 **Generated**: 2026-03-21
 **Estimated Complexity**: High
