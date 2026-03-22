@@ -1,4 +1,11 @@
-import { InternalSearchResult, RetrievalRankingMode } from './types.js';
+import {
+  InternalSearchResult,
+  RankingGateDecision,
+  RetrievalRankingMode,
+} from './types.js';
+import {
+  RANKING_V3_WEIGHT_SNAPSHOT,
+} from './rankingCalibration.js';
 
 type TransformersModule = typeof import('@huggingface/transformers');
 type TransformersLoader = () => Promise<TransformersModule>;
@@ -11,6 +18,7 @@ export interface RerankOptions {
 export interface TransformerRerankOptions extends RerankOptions {
   loadTransformersModule?: TransformersLoader;
   modelId?: string;
+  gateDecision?: RankingGateDecision;
 }
 
 interface TransformerRuntime {
@@ -297,25 +305,36 @@ export function rerankResults(
     const baseScore = result.relevanceScore ?? result.score ?? 0;
     const signature = resultSignature(result);
     const entry = stats.get(signature) ?? { count: 1, hasOriginal: false };
-    const frequencyBonus = Math.log2(1 + entry.count) * 0.08;
-    const originalBonus = entry.hasOriginal ? 0.05 : 0;
-    const variantWeightBonus = (result.variantWeight - 0.5) * 0.05;
+    const frequencyBonus = Math.log2(1 + entry.count) * RANKING_V3_WEIGHT_SNAPSHOT.frequencyBonusScale;
+    const originalBonus = entry.hasOriginal ? RANKING_V3_WEIGHT_SNAPSHOT.originalBonus : 0;
+    const variantWeightBonus = (result.variantWeight - 0.5) * RANKING_V3_WEIGHT_SNAPSHOT.variantWeightBonusScale;
     let combinedScore = baseScore + frequencyBonus + originalBonus + variantWeightBonus;
 
     if (mode === 'v2' || mode === 'v3') {
       const pathOverlap = overlapScore(queryTokens, buildPathTokenSet(result.path));
       const sourceConsensus = Math.max(0, (sourceStats.get(signature)?.size ?? 1) - 1);
       const exactSymbolBonus = hasExactSymbolMatch(result, queryTokens) ? 0.04 : 0;
-      combinedScore += (pathOverlap * 0.08) + (sourceConsensus * 0.03) + exactSymbolBonus;
+      combinedScore +=
+        (pathOverlap * RANKING_V3_WEIGHT_SNAPSHOT.v2PathOverlapScale) +
+        (sourceConsensus * RANKING_V3_WEIGHT_SNAPSHOT.v2SourceConsensusScale) +
+        (exactSymbolBonus ? RANKING_V3_WEIGHT_SNAPSHOT.v2ExactSymbolBonus : 0);
     }
 
     if (mode === 'v3') {
       const sourceConsensus = Math.max(0, (sourceStats.get(signature)?.size ?? 1) - 1);
       const lineStart = parseStartLine(result.lines);
-      const lineProximityBonus = Number.isFinite(lineStart) && lineStart < 120 ? 0.03 : 0;
-      const pathSpecificityBonus = exactPathTailMatch(result.path, queryTokens) ? 0.05 : 0;
-      const depthPenalty = Math.max(0, pathDepth(result.path) - 8) * 0.0025;
-      combinedScore += (sourceConsensus * 0.015) + lineProximityBonus + pathSpecificityBonus - depthPenalty;
+      const lineProximityBonus = Number.isFinite(lineStart) && lineStart < 120
+        ? RANKING_V3_WEIGHT_SNAPSHOT.v3LineProximityBonus
+        : 0;
+      const pathSpecificityBonus = exactPathTailMatch(result.path, queryTokens)
+        ? RANKING_V3_WEIGHT_SNAPSHOT.v3PathSpecificityBonus
+        : 0;
+      const depthPenalty = Math.max(0, pathDepth(result.path) - 8) * RANKING_V3_WEIGHT_SNAPSHOT.v3DepthPenaltyPerLevel;
+      combinedScore +=
+        (sourceConsensus * RANKING_V3_WEIGHT_SNAPSHOT.v3SourceConsensusScale) +
+        lineProximityBonus +
+        pathSpecificityBonus -
+        depthPenalty;
     }
 
     return {
@@ -381,6 +400,10 @@ export async function rerankCandidates(
   const heuristicRanked = rerankResults(results, options);
   const query = options.originalQuery?.trim() ?? '';
   if (!query) {
+    return heuristicRanked;
+  }
+
+  if (options.gateDecision && !options.gateDecision.shouldUseTransformerRerank) {
     return heuristicRanked;
   }
 

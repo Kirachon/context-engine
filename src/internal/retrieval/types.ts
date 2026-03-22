@@ -5,6 +5,16 @@ export type QuerySource = 'original' | 'expanded';
 export type RetrievalProfile = 'fast' | 'balanced' | 'rich';
 export type RetrievalRewriteMode = 'v1' | 'v2';
 export type RetrievalRankingMode = 'v1' | 'v2' | 'v3';
+export type RerankPath = 'heuristic' | 'transformer' | 'provider';
+export type RankingFallbackReason =
+  | 'none'
+  | 'empty_results'
+  | 'quality_guard'
+  | 'low_confidence'
+  | 'rerank_skipped'
+  | 'reranker_unavailable'
+  | 'rerank_timeout_or_empty'
+  | 'rerank_error';
 
 export interface ExpandedQuery {
   query: string;
@@ -67,4 +77,39 @@ export interface RetrievalOptions {
   signal?: AbortSignal;
   /** Optional shared flow context for cancellation and stage metadata. */
   flow?: RetrievalFlowContext;
+}
+
+export interface RankingGateSignals {
+  rankingMode: RetrievalRankingMode;
+  profile: RetrievalProfile;
+  candidateCount: number;
+  topScore: number;
+  secondScore: number;
+  top1Top2Gap: number;
+  topKScore: number;
+  topKSpread: number;
+  sourceConsensus: number;
+  sourceDiversity: number;
+}
+
+export interface RankingGateDecision {
+  shouldUseTransformerRerank: boolean;
+  reasons: string[];
+  signals: RankingGateSignals;
+}
+
+export interface RankingDiagnostics {
+  rankingMode: RetrievalRankingMode;
+  profile: RetrievalProfile;
+  candidateCount: number;
+  topScore: number;
+  secondScore: number;
+  top1Top2Gap: number;
+  topKScore: number;
+  topKSpread: number;
+  sourceConsensus: number;
+  sourceDiversity: number;
+  rerankPath: 'heuristic' | 'transformer' | 'provider';
+  fallbackReason: RankingFallbackReason;
+  gate: RankingGateDecision;
 }

@@ -377,6 +377,37 @@ describe('retrieve internal pipeline', () => {
     expect(results.map((item) => item.path).length).toBe(3);
   });
 
+  it('records skipped rerank gate diagnostics for easy fast-profile queries', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/clear.ts', content: 'clear', relevanceScore: 0.95, lines: '1-2', retrievalSource: 'semantic' },
+        { path: 'src/medium.ts', content: 'medium', relevanceScore: 0.45, lines: '1-2', retrievalSource: 'semantic' },
+        { path: 'src/low.ts', content: 'low', relevanceScore: 0.25, lines: '1-2', retrievalSource: 'semantic' },
+        { path: 'src/lower.ts', content: 'lower', relevanceScore: 0.1, lines: '1-2', retrievalSource: 'semantic' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    const response = await internalRetrieveCode('clear ranking', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      rankingMode: 'v3' as any,
+      profile: 'fast',
+      topK: 5,
+    });
+
+    expect(response.rankingDiagnostics).toMatchObject({
+      rankingMode: 'v3',
+      rerankGateState: 'skipped',
+      fallbackReason: 'none',
+    });
+    expect(response.flow?.metadata).toMatchObject({
+      rankingDiagnostics: response.rankingDiagnostics,
+    });
+  });
+
   it('keeps rewrite v2 guardrails for code-like queries and profile-aware variant caps', async () => {
     const codeLikeClient = {
       semanticSearch: jest.fn(async () => []),

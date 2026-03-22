@@ -32,6 +32,20 @@ interface GateRules {
   required_ids?: string[];
 }
 
+interface CalibrationWeightSnapshot {
+  ranking_mode: 'v3';
+  semantic_weight: number;
+  lexical_weight: number;
+  dense_weight: number;
+}
+
+interface CalibrationMetadata {
+  approved_baseline_report_path: string;
+  tuning_dataset_id: string;
+  holdout_dataset_id: string;
+  weight_snapshot: CalibrationWeightSnapshot;
+}
+
 interface BaseCheck {
   id: string;
   kind: Comparator;
@@ -82,6 +96,7 @@ type MetricCheck =
 interface FixturePack {
   schema_version?: number;
   generated_for?: string;
+  calibration?: CalibrationMetadata;
   checks?: MetricCheck[];
   gate_rules?: GateRules;
 }
@@ -113,6 +128,7 @@ interface OutputArtifact {
     min_pass_rate: number;
     required_ids: string[];
   };
+  calibration?: CalibrationMetadata;
   gate: {
     status: 'pass' | 'fail';
     reasons: string[];
@@ -207,6 +223,38 @@ function asFiniteNumber(value: unknown, field: string): number {
     throw new Error(`Invalid numeric field: ${field}`);
   }
   return value;
+}
+
+function asNonEmptyString(value: unknown, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new Error(`Invalid string field: ${field}`);
+  }
+  return value.trim();
+}
+
+function toCalibrationMetadata(raw: unknown): CalibrationMetadata | undefined {
+  if (raw === undefined) {
+    return undefined;
+  }
+  const obj = asObject(raw, 'Fixture pack calibration must be a JSON object');
+  const weightSnapshot = asObject(obj.weight_snapshot, 'Fixture pack calibration.weight_snapshot must be a JSON object');
+
+  const rankingMode = asNonEmptyString(weightSnapshot.ranking_mode, 'calibration.weight_snapshot.ranking_mode');
+  if (rankingMode !== 'v3') {
+    throw new Error('Invalid calibration.weight_snapshot.ranking_mode: must be "v3"');
+  }
+
+  return {
+    approved_baseline_report_path: asNonEmptyString(obj.approved_baseline_report_path, 'calibration.approved_baseline_report_path'),
+    tuning_dataset_id: asNonEmptyString(obj.tuning_dataset_id, 'calibration.tuning_dataset_id'),
+    holdout_dataset_id: asNonEmptyString(obj.holdout_dataset_id, 'calibration.holdout_dataset_id'),
+    weight_snapshot: {
+      ranking_mode: 'v3',
+      semantic_weight: asFiniteNumber(weightSnapshot.semantic_weight, 'calibration.weight_snapshot.semantic_weight'),
+      lexical_weight: asFiniteNumber(weightSnapshot.lexical_weight, 'calibration.weight_snapshot.lexical_weight'),
+      dense_weight: asFiniteNumber(weightSnapshot.dense_weight, 'calibration.weight_snapshot.dense_weight'),
+    },
+  };
 }
 
 function toMetricChecks(rawChecks: unknown): MetricCheck[] {
@@ -393,6 +441,7 @@ function run(): number {
     const fixtureRaw = readJsonFile(args.fixturePackPath);
     const fixtureObj = asObject(fixtureRaw, 'Fixture pack must be a JSON object') as FixturePack;
     const checks = toMetricChecks(fixtureObj.checks);
+    const calibration = toCalibrationMetadata(fixtureObj.calibration);
 
     const evaluations = checks.map(evaluateCheck);
     const pass = evaluations.filter((item) => item.status === 'pass').length;
@@ -487,6 +536,7 @@ function run(): number {
         pass_rate: passRate,
       },
       gate_rules: rules,
+      calibration,
       gate: {
         status: reasons.length === 0 ? 'pass' : 'fail',
         reasons,

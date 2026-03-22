@@ -2,7 +2,13 @@ import type { ContextServiceClient } from '../../mcp/serviceClient.js';
 import { featureEnabled } from '../../config/features.js';
 import { retrieve } from '../retrieval/retrieve.js';
 import { createRetrievalFlowContext, finalizeRetrievalFlow, noteRetrievalStage } from '../retrieval/flow.js';
-import type { InternalRetrieveOptions, InternalRetrieveResult } from './types.js';
+import type {
+  InternalRetrieveOptions,
+  InternalRetrieveResult,
+  RankingDiagnostics,
+  RetrievalRankingFallbackReason,
+  RetrievalRerankGateState,
+} from './types.js';
 import { getInternalCache } from './performance.js';
 
 const RETRIEVE_CACHE_KEY_VERSION = 'v2';
@@ -70,6 +76,81 @@ function summarizeSignals(results: Array<{ matchType?: string; retrievalSource?:
         ? 'keyword'
         : 'semantic';
   return { queryMode, hybridComponents: Array.from(components.values()) };
+}
+
+function getScoreValue(result: { relevanceScore?: number; score?: number }): number {
+  return result.relevanceScore ?? result.score ?? 0;
+}
+
+function computeScoreSpread(results: Array<{ relevanceScore?: number; score?: number }>): number {
+  if (results.length <= 1) {
+    return getScoreValue(results[0] ?? {});
+  }
+  const top = getScoreValue(results[0] ?? {});
+  const runnerUp = getScoreValue(results[1] ?? {});
+  return Math.max(0, top - runnerUp);
+}
+
+function normalizeRetrievalSource(source: string | undefined): 'semantic' | 'keyword' | 'dense' {
+  const normalized = (source ?? '').toLowerCase();
+  if (normalized === 'keyword' || normalized === 'lexical') {
+    return 'keyword';
+  }
+  if (normalized === 'dense') {
+    return 'dense';
+  }
+  return 'semantic';
+}
+
+function computeSourceConsensus(results: Array<{ matchType?: string; retrievalSource?: string }>): number {
+  const consensus = new Set<'semantic' | 'keyword' | 'dense'>();
+  for (const result of results.slice(0, 3)) {
+    const source = normalizeRetrievalSource(result.retrievalSource ?? result.matchType);
+    consensus.add(source);
+  }
+  return consensus.size;
+}
+
+function resolveRerankGateState(value: unknown): RetrievalRerankGateState {
+  if (value === 'disabled' || value === 'skipped' || value === 'invoked' || value === 'fail_open') {
+    return value;
+  }
+  return 'disabled';
+}
+
+function resolveFallbackReason(
+  fallbackState: 'active' | 'inactive',
+  rerankGateState: RetrievalRerankGateState,
+  rerankFallbackReason: unknown
+): RetrievalRankingFallbackReason {
+  if (fallbackState === 'active') {
+    return 'quality_guard';
+  }
+  if (rerankGateState === 'fail_open') {
+    return rerankFallbackReason === 'error' ? 'rerank_error' : 'rerank_timeout';
+  }
+  return 'none';
+}
+
+function buildRankingDiagnostics(
+  results: Array<{ relevanceScore?: number; score?: number; matchType?: string; retrievalSource?: string }>,
+  metadata: {
+    rankingMode?: string;
+    fallbackState?: 'active' | 'inactive';
+    rerankGateState?: unknown;
+    rerankFallbackReason?: unknown;
+  }
+): RankingDiagnostics {
+  const fallbackState = metadata.fallbackState ?? 'inactive';
+  const rerankGateState = resolveRerankGateState(metadata.rerankGateState);
+  return {
+    rankingMode: metadata.rankingMode === 'v2' || metadata.rankingMode === 'v3' ? metadata.rankingMode : 'v1',
+    scoreSpread: computeScoreSpread(results),
+    sourceConsensus: computeSourceConsensus(results),
+    fallbackState,
+    fallbackReason: resolveFallbackReason(fallbackState, rerankGateState, metadata.rerankFallbackReason),
+    rerankGateState,
+  };
 }
 
 function shouldTriggerQualityGuardFallback(
@@ -150,6 +231,17 @@ export async function internalRetrieveCode(
     }
 
     const signals = summarizeSignals(results as Array<{ matchType?: string; retrievalSource?: string }>);
+    const rankingDiagnostics = buildRankingDiagnostics(results as Array<{
+      relevanceScore?: number;
+      score?: number;
+      matchType?: string;
+      retrievalSource?: string;
+    }>, {
+      rankingMode: options?.rankingMode,
+      fallbackState,
+      rerankGateState: flow.metadata.rerankGateState,
+      rerankFallbackReason: flow.metadata.rerankFallbackReason,
+    });
     noteRetrievalStage(flow, 'handler:complete');
     return {
       query,
@@ -159,11 +251,13 @@ export async function internalRetrieveCode(
       hybridComponents: signals.hybridComponents,
       qualityGuardState: qualityGuardEnabled ? 'enabled' : 'disabled',
       fallbackState,
+      rankingDiagnostics,
       flow: finalizeRetrievalFlow(flow, {
         cacheHit: false,
         qualityGuardEnabled,
         fallbackState,
         queryMode: signals.queryMode,
+        rankingDiagnostics,
       }),
     };
   };

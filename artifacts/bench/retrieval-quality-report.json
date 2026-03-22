@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-13T10:30:21.568Z",
+  "generated_at": "2026-03-22T08:39:11.330Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
@@ -114,15 +114,26 @@
       "telemetry.reproducibility.config_keys_min"
     ]
   },
+  "calibration": {
+    "approved_baseline_report_path": "artifacts/bench/retrieval-quality-report.json",
+    "tuning_dataset_id": "train_v1",
+    "holdout_dataset_id": "holdout_v1",
+    "weight_snapshot": {
+      "ranking_mode": "v3",
+      "semantic_weight": 0.7,
+      "lexical_weight": 0.3,
+      "dense_weight": 0
+    }
+  },
   "gate": {
     "status": "pass",
     "reasons": []
   },
   "reproducibility_lock": {
-    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
+    "commit_sha": "5cc3f5ca7a585880446f172eb63ee6757bb81c91",
     "dataset_id": "holdout_v1",
     "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716",
-    "fixture_pack_hash": "198ce10f0a420000c97107ff63337864f3e0a87f46ba056fd208b4921f87127d",
+    "fixture_pack_hash": "662d3cc0e73ec99516309144a2c2222380c4b7a20a5c4493f38dc9858f46a142",
     "config_snapshot": {
       "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
       "telemetry_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-telemetry.json",

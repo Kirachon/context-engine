@@ -18,6 +18,7 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { featureEnabled } from '../../config/features.js';
+import type { RankingDiagnostics } from '../../internal/handlers/types.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateBoolean,
@@ -212,6 +213,16 @@ function formatResultTrace(result: ResultTraceCandidate): string {
   return parts.join('; ');
 }
 
+function formatRankingDiagnostics(diagnostics: RankingDiagnostics): string {
+  return [
+    `ranking_mode=${diagnostics.rankingMode}`,
+    `score_spread=${diagnostics.scoreSpread.toFixed(3)}`,
+    `source_consensus=${diagnostics.sourceConsensus}`,
+    `fallback_reason=${diagnostics.fallbackReason}`,
+    `rerank_gate_state=${diagnostics.rerankGateState}`,
+  ].join('; ');
+}
+
 type RetrievalProfile = 'fast' | 'balanced' | 'rich';
 
 type RetrievalProfileSettings = {
@@ -354,6 +365,9 @@ export async function handleSemanticSearch(
     output += `**Fallback Diagnostics:** filters_applied=${fallbackDiagnostics!.filtersApplied!.join(', ')}; `;
     output += `filtered_paths_count=${fallbackDiagnostics?.filteredPathsCount ?? 0}; `;
     output += `second_pass_used=${fallbackDiagnostics?.secondPassUsed ? 'true' : 'false'}\n\n`;
+  }
+  if (retrieval.rankingDiagnostics) {
+    output += `**Ranking Diagnostics:** ${formatRankingDiagnostics(retrieval.rankingDiagnostics as RankingDiagnostics)}\n\n`;
   }
 
   // Group results by file for better organization

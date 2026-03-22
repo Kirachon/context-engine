@@ -261,7 +261,7 @@ describe('semantic_search Tool', () => {
       const result = await handleSemanticSearch({ query: 'unhealthy' }, mockServiceClient as any);
 
       expect(result).toContain('index status is error');
-      expect(result).toContain('workspace appears unindexed');
+      expect(result).toContain('reindexing succeeds');
     });
 
     it('should include search results header', async () => {
@@ -277,6 +277,8 @@ describe('semantic_search Tool', () => {
       expect(result).toContain('**Query Mode:**');
       expect(result).toContain('**Hybrid Components:**');
       expect(result).toContain('**Fallback State:**');
+      expect(result).toContain('**Ranking Diagnostics:**');
+      expect(result).toContain('score_spread=');
     });
 
     it('should group results by file', async () => {
@@ -362,6 +364,7 @@ describe('semantic_search Tool', () => {
       expect(result).toContain('filtered_paths_count=4');
       expect(result).toContain('second_pass_used=true');
       expect(result).toContain('**Fallback State:** inactive');
+      expect(result).toContain('**Ranking Diagnostics:**');
     });
 
     it('should support legacy diagnostics getter with camelCase fields', async () => {

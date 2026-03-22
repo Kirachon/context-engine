@@ -11,6 +11,12 @@ Baseline rules:
 - User-visible retrieval-upgrade KPI contract (release stream):
   - `nDCG@10 >= +8%`, `MRR@10 >= +6%`, `Recall@50 >= +10%` vs approved baseline.
   - `p50 <= -20%`, `p95 <= -25%` vs approved baseline on large-dataset runs.
+- Freeze the calibration split in `config/ci/retrieval-quality-fixture-pack.json`:
+  - `holdout.datasets.train_v1` is tuning-only.
+  - `holdout.datasets.holdout_v1` is the gate/compare set.
+  - `calibration.approved_baseline_report_path` names the frozen baseline report artifact.
+  - `calibration.weight_snapshot` records the pre-tuning v3 heuristic weights.
+- The approved baseline report must keep its `reproducibility_lock` intact so the baseline commit SHA, fixture hash, and dataset hash remain auditably tied to the frozen split.
 
 ## PR Gates (must pass)
 
@@ -21,6 +27,10 @@ Fail the PR if any condition is true:
 - Retrieval quality overlap < 0.85.
 - `unique_files@k` drop > 10%.
 - Holdout quality checks fail required IDs (`nDCG@10`, `MRR@10`, `Recall@50`).
+- Retrieval ranking changes must also keep rerank diagnostics stable enough to explain the gate decision:
+  - rerank invocation rate should not regress for easy-query slices
+  - rerank timeout/fail-open rate should remain within the approved baseline
+  - ranking metadata must still report ranking mode, score spread, source consensus, and fallback reason
 
 ## Nightly Gates (must pass)
 

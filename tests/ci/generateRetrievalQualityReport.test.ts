@@ -55,6 +55,43 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it('surfaces calibration metadata when the fixture pack includes it', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-calibration-'));
+    const fixturePath = path.join(tmp, 'fixture.json');
+    const outPath = path.join(tmp, 'report.json');
+
+    const calibration = {
+      approved_baseline_report_path: 'artifacts/bench/retrieval-quality-report.json',
+      tuning_dataset_id: 'train_v1',
+      holdout_dataset_id: 'holdout_v1',
+      weight_snapshot: {
+        ranking_mode: 'v3',
+        semantic_weight: 0.7,
+        lexical_weight: 0.3,
+        dense_weight: 0,
+      },
+    };
+
+    writeJson(fixturePath, {
+      calibration,
+      checks: [
+        { id: 'quality.ndcg_at_10', kind: 'delta_pct_min', baseline: 0.5, candidate: 0.56, min_delta_pct: 10 },
+      ],
+      gate_rules: {
+        min_pass_rate: 0,
+        required_ids: [],
+      },
+    });
+
+    const result = runGenerator(['--fixture-pack', fixturePath, '--out', outPath]);
+    expect(result.status).toBe(0);
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, unknown>;
+    expect(artifact.calibration).toEqual(calibration);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it('creates a fail report when required metrics fail', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-fail-'));
     const fixturePath = path.join(tmp, 'fixture.json');

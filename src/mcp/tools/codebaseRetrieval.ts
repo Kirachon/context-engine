@@ -9,6 +9,7 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { featureEnabled } from '../../config/features.js';
+import type { RankingDiagnostics } from '../../internal/handlers/types.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateFiniteNumberInRange,
@@ -63,6 +64,7 @@ export interface CodebaseRetrievalOutput {
     hybrid_components?: Array<'semantic' | 'keyword' | 'dense'>;
     quality_guard_state?: 'enabled' | 'disabled';
     fallback_state?: 'active' | 'inactive';
+    ranking_diagnostics?: RankingDiagnostics;
   };
 }
 
@@ -341,6 +343,9 @@ export async function handleCodebaseRetrieval(
       hybrid_components: signalSummary.hybridComponents,
       quality_guard_state: signalSummary.qualityGuardState,
       fallback_state: signalSummary.fallbackState,
+      ranking_diagnostics: retrieval.rankingDiagnostics
+        ? (retrieval.rankingDiagnostics as RankingDiagnostics)
+        : undefined,
     },
   };
 

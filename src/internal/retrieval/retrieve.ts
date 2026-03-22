@@ -16,6 +16,7 @@ import {
   noteRetrievalStage,
   type RetrievalFlowContext,
 } from './flow.js';
+import { evaluateRankingGate } from './rankingCalibration.js';
 import { scoreLexicalCandidates } from './lexical.js';
 import { rerankCandidates, rerankResults } from './rerank.js';
 import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.js';
@@ -94,6 +95,8 @@ async function applyRerankStage(
   flow: RetrievalFlowContext
 ): Promise<InternalSearchResult[]> {
   if (!settings.enableRerank || candidates.length <= 1) {
+    flow.metadata.rerankGateState = settings.enableRerank ? 'skipped' : 'disabled';
+    flow.metadata.rerankFallbackReason = 'none';
     noteRetrievalStage(flow, 'rerank:skipped');
     return candidates;
   }
@@ -103,31 +106,69 @@ async function applyRerankStage(
   const tail = candidates.slice(topN);
   const stageStart = Date.now();
   noteRetrievalStage(flow, 'rerank:started');
+  const gateDecision = evaluateRankingGate(head, {
+    rankingMode: settings.rankingMode,
+    profile: settings.profile,
+  });
+  flow.metadata.rerankGateDecision = gateDecision;
+  flow.metadata.rerankPath = settings.reranker
+    ? 'provider'
+    : gateDecision.shouldUseTransformerRerank
+      ? 'transformer'
+      : 'heuristic';
 
   try {
     let rerankedHead: InternalSearchResult[];
     if (settings.reranker) {
-      const providerResult = await withTimeout<InternalSearchResult[] | null>(
+      const providerResult = await withTimeoutState<InternalSearchResult[] | null>(
         settings.reranker.rerank(query, head, { timeoutMs: settings.rerankTimeoutMs }),
         settings.rerankTimeoutMs,
         null
       );
-      if (!providerResult || providerResult.length === 0) {
+      if (!providerResult.value || providerResult.value.length === 0) {
         incCounter(
           'context_engine_retrieval_rerank_fail_open_total',
           { reason: 'timeout_or_empty', reranker: settings.reranker.id },
           1,
           'Rerank fail-open fallbacks.'
         );
-        return candidates;
+        flow.metadata.rerankGateState = 'fail_open';
+        flow.metadata.rerankFallbackReason = providerResult.timedOut
+          ? 'rerank_timeout_or_empty'
+          : 'rerank_error';
+        noteRetrievalStage(flow, 'rerank:fail_open');
+        rerankedHead = head;
+      } else {
+        rerankedHead = providerResult.value.slice(0, topN);
       }
-      rerankedHead = providerResult.slice(0, topN);
     } else {
-      rerankedHead = await withTimeout<InternalSearchResult[]>(
-        rerankCandidates(head, { originalQuery: query, mode: settings.rankingMode }),
-        settings.rerankTimeoutMs,
-        rerankResults(head, { originalQuery: query, mode: settings.rankingMode })
-      );
+      flow.metadata.rerankGateState = gateDecision.shouldUseTransformerRerank ? 'invoked' : 'skipped';
+      flow.metadata.rerankFallbackReason = gateDecision.shouldUseTransformerRerank ? 'none' : 'rerank_skipped';
+      flow.metadata.rerankGateReasons = gateDecision.reasons;
+      flow.metadata.rerankGateSignals = gateDecision.signals;
+
+      if (!gateDecision.shouldUseTransformerRerank) {
+        noteRetrievalStage(flow, 'rerank:skipped');
+        rerankedHead = rerankResults(head, { originalQuery: query, mode: settings.rankingMode });
+      } else {
+        const heuristicResult = await withTimeoutState<InternalSearchResult[]>(
+          rerankCandidates(head, { originalQuery: query, mode: settings.rankingMode, gateDecision }),
+          settings.rerankTimeoutMs,
+          rerankResults(head, { originalQuery: query, mode: settings.rankingMode })
+        );
+        rerankedHead = heuristicResult.value;
+        if (heuristicResult.timedOut) {
+          incCounter(
+            'context_engine_retrieval_rerank_fail_open_total',
+            { reason: 'timeout_or_empty', reranker: 'heuristic' },
+            1,
+            'Rerank fail-open fallbacks.'
+          );
+          flow.metadata.rerankGateState = 'fail_open';
+          flow.metadata.rerankFallbackReason = 'rerank_timeout_or_empty';
+          noteRetrievalStage(flow, 'rerank:fail_open');
+        }
+      }
     }
 
     observeDurationMs(
@@ -136,6 +177,10 @@ async function applyRerankStage(
       Date.now() - stageStart,
       { help: 'Retrieval rerank stage duration in seconds.' }
     );
+    if (flow.metadata.rerankGateState === undefined) {
+      flow.metadata.rerankGateState = 'invoked';
+      flow.metadata.rerankFallbackReason = 'none';
+    }
     noteRetrievalStage(flow, 'rerank:completed');
     return [...rerankedHead, ...tail];
   } catch {
@@ -145,6 +190,8 @@ async function applyRerankStage(
       1,
       'Rerank fail-open fallbacks.'
     );
+    flow.metadata.rerankGateState = 'fail_open';
+    flow.metadata.rerankFallbackReason = 'error';
     noteRetrievalStage(flow, 'rerank:fail_open');
     return candidates;
   }
@@ -163,6 +210,39 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: 
         resolve(value);
       })
       .catch((error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+  });
+}
+
+async function withTimeoutState<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T
+): Promise<{ value: T; timedOut: boolean }> {
+  if (!timeoutMs) {
+    return { value: await promise, timedOut: false };
+  }
+
+  return new Promise<{ value: T; timedOut: boolean }>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve({ value: fallback, timedOut: true });
+    }, timeoutMs);
+
+    promise
+      .then((value) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ value, timedOut: false });
+      })
+      .catch((error) => {
+        if (settled) return;
+        settled = true;
         clearTimeout(timer);
         reject(error);
       });

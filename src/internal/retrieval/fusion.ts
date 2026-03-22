@@ -25,6 +25,16 @@ function fusionKey(result: InternalSearchResult): string {
   return `${result.path}::${result.lines ?? ''}::${normalized}`;
 }
 
+const FUSION_CALIBRATION = {
+  chunkIdBonus: 0.02,
+  spanBonuses: [
+    { maxSpan: 8, bonus: 0.05 },
+    { maxSpan: 24, bonus: 0.03 },
+    { maxSpan: 60, bonus: 0.015 },
+  ],
+  maxChunkAffinityBonus: 0.08,
+} as const;
+
 function clampWeight(value: number | undefined, fallback: number): number {
   if (value === undefined || !Number.isFinite(value)) return fallback;
   return Math.max(0, Math.min(1, value));
@@ -33,19 +43,18 @@ function clampWeight(value: number | undefined, fallback: number): number {
 function chunkAffinityBonus(result: InternalSearchResult): number {
   let bonus = 0;
   if (typeof result.chunkId === 'string' && result.chunkId.trim().length > 0) {
-    bonus += 0.02;
+    bonus += FUSION_CALIBRATION.chunkIdBonus;
   }
   const span = parseLineSpan(result.lines);
   if (span !== null) {
-    if (span <= 8) {
-      bonus += 0.05;
-    } else if (span <= 24) {
-      bonus += 0.03;
-    } else if (span <= 60) {
-      bonus += 0.015;
+    for (const entry of FUSION_CALIBRATION.spanBonuses) {
+      if (span <= entry.maxSpan) {
+        bonus += entry.bonus;
+        break;
+      }
     }
   }
-  return Math.min(0.08, bonus);
+  return Math.min(FUSION_CALIBRATION.maxChunkAffinityBonus, bonus);
 }
 
 export interface FusionOptions {

@@ -69,6 +69,14 @@ npm run bench -- --mode retrieve --workspace . --dataset-id holdout_v1 --iterati
 npm run bench -- --mode search --workspace . --dataset-id holdout_v1 --iterations 25
 ```
 
+Calibration freeze metadata:
+- `config/ci/retrieval-quality-fixture-pack.json` is the source of truth for the offline split.
+- `holdout.datasets.train_v1` is the tuning slice.
+- `holdout.datasets.holdout_v1` is the benchmark holdout slice.
+- `calibration.approved_baseline_report_path` points at the frozen comparison artifact.
+- `calibration.weight_snapshot` captures the starting v3 heuristic weights used before any tuning.
+- The generated `artifacts/bench/retrieval-quality-report.json` mirrors this calibration block, while its `reproducibility_lock` captures the approved baseline commit SHA and fixture hashes.
+
 To measure worst-case behavior (no caches), use very small iteration counts:
 
 ```bash

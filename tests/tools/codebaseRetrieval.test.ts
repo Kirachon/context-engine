@@ -72,6 +72,17 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata).toHaveProperty('hybrid_components');
     expect(parsed.metadata).toHaveProperty('quality_guard_state');
     expect(parsed.metadata).toHaveProperty('fallback_state');
+    expect(parsed.metadata).toHaveProperty('ranking_diagnostics');
+    expect(parsed.metadata.ranking_diagnostics).toEqual(
+      expect.objectContaining({
+        rankingMode: expect.any(String),
+        scoreSpread: expect.any(Number),
+        sourceConsensus: expect.any(Number),
+        fallbackState: expect.any(String),
+        fallbackReason: expect.any(String),
+        rerankGateState: expect.any(String),
+      })
+    );
   });
 
   it('respects top_k parameter and delegates using default fast profile settings', async () => {
@@ -252,6 +263,7 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata.filteredPathsCount).toBe(9);
     expect(parsed.metadata.secondPassUsed).toBe(true);
     expect(parsed.metadata.fallback_state).toBe('active');
+    expect(parsed.metadata.ranking_diagnostics).toBeDefined();
   });
 
   it('supports legacy fallback diagnostics getter with camelCase fields', async () => {
@@ -343,7 +355,7 @@ describe('codebase_retrieval Tool', () => {
     const parsed = JSON.parse(result);
 
     expect(parsed.metadata.freshnessWarning).toMatch(/index status is error/i);
-    expect(parsed.metadata.freshnessWarning).toMatch(/workspace appears unindexed/i);
+    expect(parsed.metadata.freshnessWarning).toMatch(/reindexing succeeds/i);
     expect(parsed.metadata.indexStatus.status).toBe('error');
   });
 

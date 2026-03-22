@@ -64,6 +64,27 @@ function createRepoWithMultiAreaStagedChange(): string {
   return tmp;
 }
 
+function createRepoWithManySrcStagedChange(): string {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-auto-src-many-'));
+
+  sh('git', ['init'], tmp);
+  sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+  sh('git', ['config', 'user.name', 'CI'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+  writeFile(path.join(tmp, 'src/b.ts'), ['export const b = 1;', ''].join('\n'));
+  writeFile(path.join(tmp, 'src/c.ts'), ['export const c = 1;', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+  sh('git', ['commit', '-m', 'base'], tmp);
+
+  writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', 'export const a2 = 2;', ''].join('\n'));
+  writeFile(path.join(tmp, 'src/b.ts'), ['export const b = 1;', 'export const b2 = 2;', ''].join('\n'));
+  writeFile(path.join(tmp, 'src/c.ts'), ['export const c = 1;', 'export const c2 = 2;', ''].join('\n'));
+  sh('git', ['add', '.'], tmp);
+
+  return tmp;
+}
+
 function normalizeReviewAuto(result: any): any {
   const normalized = JSON.parse(JSON.stringify(result));
 
@@ -387,6 +408,41 @@ index 1234567..abcdefg 100644
       expect(parsed.chunked_execution.chunk_count).toBeGreaterThanOrEqual(2);
       expect(parsed.chunked_execution.completed_chunks).toBeGreaterThanOrEqual(2);
       expect(parsed.output.git_info.command).toContain('chunked_parallel_review');
+    } finally {
+      delete process.env.CE_REVIEW_AUTO_CHUNKED_PARALLEL;
+      delete process.env.CE_REVIEW_AUTO_CHUNK_MIN_FILES;
+      delete process.env.CE_REVIEW_AUTO_PARALLEL_WORKERS;
+    }
+  });
+
+  it('runs chunked parallel review_diff when enabled and diff spans many files', async () => {
+    const tmp = createRepoWithManySrcStagedChange();
+    const diff = sh('git', ['diff', '--cached'], tmp);
+    process.env.CE_REVIEW_AUTO_CHUNKED_PARALLEL = 'true';
+    process.env.CE_REVIEW_AUTO_CHUNK_MIN_FILES = '1';
+    process.env.CE_REVIEW_AUTO_PARALLEL_WORKERS = '2';
+
+    try {
+      const mockServiceClient = {
+        getWorkspacePath: () => tmp,
+        getFile: async () => '',
+        searchAndAsk: async () => '',
+      } as any;
+
+      const resultStr = await handleReviewAuto(
+        {
+          diff,
+          review_diff_options: {},
+        },
+        mockServiceClient
+      );
+
+      const parsed = JSON.parse(resultStr);
+      expect(parsed.selected_tool).toBe('review_diff');
+      expect(parsed.chunked_execution).toBeDefined();
+      expect(parsed.chunked_execution.enabled).toBe(true);
+      expect(parsed.chunked_execution.chunk_count).toBeGreaterThanOrEqual(2);
+      expect(parsed.chunked_execution.completed_chunks).toBeGreaterThanOrEqual(2);
     } finally {
       delete process.env.CE_REVIEW_AUTO_CHUNKED_PARALLEL;
       delete process.env.CE_REVIEW_AUTO_CHUNK_MIN_FILES;

@@ -5,13 +5,15 @@ import {
   rerankResults,
   type TransformerRerankOptions,
 } from '../../../src/internal/retrieval/rerank.js';
+import { evaluateRankingGate } from '../../../src/internal/retrieval/rankingCalibration.js';
 import type { InternalSearchResult } from '../../../src/internal/retrieval/types.js';
 
 function createResult(
   path: string,
   content: string,
   relevanceScore: number,
-  lines = '1-2'
+  lines = '1-2',
+  retrievalSource: InternalSearchResult['retrievalSource'] = 'semantic'
 ): InternalSearchResult {
   return {
     path,
@@ -21,6 +23,7 @@ function createResult(
     queryVariant: 'query',
     variantIndex: 0,
     variantWeight: 1,
+    retrievalSource,
   } as InternalSearchResult;
 }
 
@@ -56,19 +59,26 @@ describe('reranker', () => {
     clearRerankerRuntimeCacheForTests();
   });
 
-  it('uses transformer similarity ahead of heuristic score when available', async () => {
+  it('uses transformer similarity ahead of heuristic score for hard queries', async () => {
     const extractor = createVectorExtractor();
     const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor));
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+    expect(gateDecision.shouldUseTransformerRerank).toBe(true);
     const options: TransformerRerankOptions = {
       originalQuery: 'login handler',
       mode: 'v3',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/database/schema.ts', 'database schema', 0.99),
-      createResult('src/auth/login.ts', 'login handler', 0.1),
-      createResult('src/shared/alpha.ts', 'shared alpha', 0.5),
-    ];
 
     const ranked = await rerankCandidates(candidates, options);
 
@@ -77,22 +87,57 @@ describe('reranker', () => {
     expect(ranked.map((item) => item.path)).toEqual([
       'src/auth/login.ts',
       'src/shared/alpha.ts',
+      'src/shared/beta.ts',
       'src/database/schema.ts',
     ]);
     expect(ranked[0]?.combinedScore).toBeGreaterThanOrEqual(ranked[1]?.combinedScore ?? -Infinity);
   });
 
+  it('skips transformer rerank on easy balanced queries', async () => {
+    const extractor = createVectorExtractor();
+    const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor));
+    const candidates = [
+      createResult('src/clear.ts', 'clear result', 0.95, '1-2', 'semantic'),
+      createResult('src/medium.ts', 'medium result', 0.55, '1-2', 'semantic'),
+      createResult('src/low.ts', 'low result', 0.3, '1-2', 'semantic'),
+      createResult('src/lower.ts', 'lower result', 0.1, '1-2', 'semantic'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'balanced',
+    });
+    expect(gateDecision.shouldUseTransformerRerank).toBe(false);
+
+    const ranked = await rerankCandidates(candidates, {
+      originalQuery: 'clear result',
+      mode: 'v3',
+      loadTransformersModule,
+      gateDecision,
+    });
+
+    expect(loadTransformersModule).not.toHaveBeenCalled();
+    expect(extractor).not.toHaveBeenCalled();
+    expect(ranked.map((item) => item.path)).toEqual(rerankResults(candidates, { originalQuery: 'clear result', mode: 'v3' }).map((item) => item.path));
+  });
+
   it('reuses the lazy transformer runtime for repeated reranks', async () => {
     const extractor = createVectorExtractor();
     const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor));
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
     const options: TransformerRerankOptions = {
       originalQuery: 'login handler',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/auth/login.ts', 'login handler', 0.9),
-      createResult('src/database/schema.ts', 'database schema', 0.1),
-    ];
 
     await rerankCandidates(candidates, options);
     await rerankCandidates(candidates, options);
@@ -102,6 +147,16 @@ describe('reranker', () => {
   });
 
   it('falls back to the heuristic ranking when transformer loading fails', async () => {
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
     const loadTransformersModule = jest.fn(async () => {
       throw new Error('transformer unavailable');
     });
@@ -109,16 +164,13 @@ describe('reranker', () => {
       originalQuery: 'login handler',
       mode: 'v2',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/z.ts', 'z', 0.2),
-      createResult('src/a.ts', 'a', 0.9),
-      createResult('src/m.ts', 'm', 0.5),
-    ];
 
     const ranked = await rerankCandidates(candidates, options);
     const heuristic = rerankResults(candidates, options);
 
+    expect(loadTransformersModule).toHaveBeenCalledTimes(1);
     expect(ranked.map((item) => item.path)).toEqual(heuristic.map((item) => item.path));
   });
 
@@ -130,16 +182,22 @@ describe('reranker', () => {
       };
     });
     const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor as ReturnType<typeof createVectorExtractor>));
+    const candidates = [
+      createResult('src/beta.ts', 'shared beta', 0.6, '1-2', 'semantic'),
+      createResult('src/alpha.ts', 'shared alpha', 0.6, '1-2', 'lexical'),
+      createResult('src/gamma.ts', 'shared gamma', 0.6, '1-2', 'dense'),
+      createResult('src/delta.ts', 'shared delta', 0.6, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
     const options: TransformerRerankOptions = {
       originalQuery: 'shared alpha',
       mode: 'v3',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/beta.ts', 'shared beta', 0.6),
-      createResult('src/alpha.ts', 'shared alpha', 0.6),
-      createResult('src/gamma.ts', 'shared gamma', 0.6),
-    ];
 
     const ranked = await rerankCandidates(candidates, options);
     const heuristic = rerankResults(candidates, options);
@@ -172,16 +230,22 @@ describe('reranker', () => {
     const loadTransformersModule = jest.fn(async () => ({
       pipeline: jest.fn(async () => extractor),
     }) as never);
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
     const options: TransformerRerankOptions = {
       originalQuery: 'login handler',
       mode: 'v3',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/database/schema.ts', 'database schema', 0.99),
-      createResult('src/auth/login.ts', 'login handler', 0.1),
-      createResult('src/shared/alpha.ts', 'shared alpha', 0.5),
-    ];
 
     const firstRanked = await rerankCandidates(candidates, options);
     const secondRanked = await rerankCandidates(candidates, options);
@@ -192,6 +256,7 @@ describe('reranker', () => {
     expect(extractor).toHaveBeenCalledTimes(1);
     expect(extractor.mock.calls[0]?.[0]).toEqual([
       'login handler',
+      expect.any(String),
       expect.any(String),
       expect.any(String),
       expect.any(String),
@@ -211,16 +276,22 @@ describe('reranker', () => {
     const loadTransformersModule = jest.fn(async () => ({
       pipeline: jest.fn(async () => extractor),
     }) as never);
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
     const options: TransformerRerankOptions = {
       originalQuery: 'login handler',
       mode: 'v3',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/database/schema.ts', 'database schema', 0.99),
-      createResult('src/auth/login.ts', 'login handler', 0.1),
-      createResult('src/shared/alpha.ts', 'shared alpha', 0.5),
-    ];
 
     const firstRanked = await rerankCandidates(candidates, options);
     const secondRanked = await rerankCandidates(candidates, options);
@@ -238,16 +309,22 @@ describe('reranker', () => {
     const loadTransformersModule = jest.fn(async () => ({
       pipeline: jest.fn(async () => extractor),
     }) as never);
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
     const options: TransformerRerankOptions = {
       originalQuery: 'login handler',
       mode: 'v3',
       loadTransformersModule,
+      gateDecision,
     };
-    const candidates = [
-      createResult('src/database/schema.ts', 'database schema', 0.99),
-      createResult('src/auth/login.ts', 'login handler', 0.1),
-      createResult('src/shared/alpha.ts', 'shared alpha', 0.5),
-    ];
 
     const firstRanked = await rerankCandidates(candidates, options);
     const secondRanked = await rerankCandidates(candidates, options);
