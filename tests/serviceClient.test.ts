@@ -2130,6 +2130,207 @@ describe('ContextServiceClient', () => {
       expect(statusClient.getIndexStatus().lastError).toBeUndefined();
     });
 
+    it('should skip startup auto-index for healthy workspaces', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-healthy-'));
+      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 1,
+            updated_at: new Date().toISOString(),
+            files: {
+              'src/a.ts': { hash: 'abc', indexed_at: new Date().toISOString() },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      try {
+        const startupClient = new ContextServiceClient(tempDir);
+        const backgroundSpy = jest
+          .spyOn(startupClient as any, 'runBackgroundIndexingCore')
+          .mockResolvedValue(undefined);
+
+        const result = startupClient.startAutoIndexOnStartupIfNeeded();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(result.started).toBe(false);
+        expect(result.reason).toBe('healthy');
+        expect(backgroundSpy).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should start startup auto-index in the background for unindexed workspaces', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-unindexed-'));
+
+      try {
+        const startupClient = new ContextServiceClient(tempDir);
+        let release!: () => void;
+        const backgroundSpy = jest
+          .spyOn(startupClient as any, 'runBackgroundIndexingCore')
+          .mockImplementation(
+            () =>
+              new Promise<void>((resolve) => {
+                release = resolve;
+              })
+          );
+
+        const result = startupClient.startAutoIndexOnStartupIfNeeded();
+
+        expect(result.started).toBe(true);
+        expect(result.reason).toBe('unindexed');
+        expect(startupClient.getIndexStatus().status).toBe('indexing');
+        expect(backgroundSpy).not.toHaveBeenCalled();
+
+        await new Promise((resolve) => setImmediate(resolve));
+        expect(backgroundSpy).toHaveBeenCalledTimes(1);
+
+        release();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should start startup auto-index for stale workspaces', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-stale-'));
+      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.augment-index-state.json'),
+        JSON.stringify(
+          {
+            version: 1,
+            updated_at: '2020-01-01T00:00:00.000Z',
+            files: {
+              'src/a.ts': { hash: 'abc', indexed_at: '2020-01-01T00:00:00.000Z' },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+      const staleDate = new Date('2020-01-01T00:00:00.000Z');
+      fs.utimesSync(path.join(tempDir, '.augment-context-state.json'), staleDate, staleDate);
+
+      try {
+        const startupClient = new ContextServiceClient(tempDir);
+        const backgroundSpy = jest
+          .spyOn(startupClient as any, 'runBackgroundIndexingCore')
+          .mockResolvedValue(undefined);
+
+        const result = startupClient.startAutoIndexOnStartupIfNeeded();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(result.started).toBe(true);
+        expect(result.reason).toBe('stale');
+        expect(backgroundSpy).toHaveBeenCalledTimes(1);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should skip startup auto-index when indexing is already in progress', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-indexing-'));
+      const startupClient = new ContextServiceClient(tempDir);
+      const updateIndexStatus = (startupClient as any).updateIndexStatus.bind(startupClient) as
+        (partial: Record<string, unknown>) => void;
+      const backgroundSpy = jest
+        .spyOn(startupClient as any, 'runBackgroundIndexingCore')
+        .mockResolvedValue(undefined);
+
+      try {
+        updateIndexStatus({ status: 'indexing' });
+        const result = startupClient.startAutoIndexOnStartupIfNeeded();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(result.started).toBe(false);
+        expect(result.reason).toBe('indexing');
+        expect(backgroundSpy).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should skip startup auto-index when current status is error', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-error-'));
+      const startupClient = new ContextServiceClient(tempDir);
+      const updateIndexStatus = (startupClient as any).updateIndexStatus.bind(startupClient) as
+        (partial: Record<string, unknown>) => void;
+      const backgroundSpy = jest
+        .spyOn(startupClient as any, 'runBackgroundIndexingCore')
+        .mockResolvedValue(undefined);
+
+      try {
+        updateIndexStatus({ status: 'error', lastError: 'index worker failed' });
+        const result = startupClient.startAutoIndexOnStartupIfNeeded();
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(result.started).toBe(false);
+        expect(result.reason).toBe('error');
+        expect(backgroundSpy).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should respect the startup auto-index opt-out flag', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-disabled-'));
+      const startupClient = new ContextServiceClient(tempDir);
+      const backgroundSpy = jest
+        .spyOn(startupClient as any, 'runBackgroundIndexingCore')
+        .mockResolvedValue(undefined);
+
+      try {
+        const result = startupClient.startAutoIndexOnStartupIfNeeded({ enabled: false });
+        await new Promise((resolve) => setImmediate(resolve));
+
+        expect(result.started).toBe(false);
+        expect(result.reason).toBe('disabled');
+        expect(backgroundSpy).not.toHaveBeenCalled();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should not start a duplicate background index when startup auto-index is already scheduled', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-duplicate-'));
+      try {
+        const startupClient = new ContextServiceClient(tempDir);
+        let release!: () => void;
+        const indexWorkspaceSpy = jest
+          .spyOn(startupClient, 'indexWorkspace')
+          .mockImplementation(
+            () =>
+              new Promise<any>((resolve) => {
+                release = () =>
+                  resolve({
+                    indexed: 1,
+                    skipped: 0,
+                    errors: [],
+                    duration: 1,
+                  });
+              })
+          );
+
+        const first = startupClient.startAutoIndexOnStartupIfNeeded();
+        expect(first.started).toBe(true);
+        await new Promise((resolve) => setImmediate(resolve));
+
+        await startupClient.indexWorkspaceInBackground();
+
+        expect(indexWorkspaceSpy).toHaveBeenCalledTimes(1);
+        release();
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should use deterministic local_native fallback for indexFiles without legacy runtime calls', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       FEATURE_FLAGS.index_state_store = true;

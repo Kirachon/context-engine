@@ -18,17 +18,15 @@
 command = "node"
 
 # Arguments for the server
-# Replace /path/to/context-engine with the actual path to this project
-# Replace /path/to/your/workspace with the path to your code repository
 args = [
     "/path/to/context-engine/dist/index.js",
-    "--workspace",
-    "/path/to/your/workspace"
+    "--watch"
 ]
 
 # Environment variables for the server (OpenAI session first)
 [mcp_servers.context-engine.env]
 CE_AI_PROVIDER = "openai_session"
+CE_AUTO_INDEX_ON_STARTUP = "true"
 CE_OPENAI_SESSION_CMD = "codex"
 CE_OPENAI_SESSION_ARGS_JSON = "[]"
 CE_OPENAI_SESSION_REFRESH_MODE = "per_call"
@@ -47,6 +45,10 @@ CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 # enabled_tools = ["semantic_search", "get_file", "get_context_for_prompt"]
 # disabled_tools = []
 
+# Repo-aware note:
+# The server now resolves the workspace from the repo it is launched in.
+# Add --workspace only if you need to force a specific repo.
+
 # ==============================================================================
 # WINDOWS EXAMPLE
 # ==============================================================================
@@ -56,8 +58,7 @@ CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 # command = "node"
 # args = [
 #     "D:\\GitProjects\\context-engine\\dist\\index.js",
-#     "--workspace",
-#     "D:\\GitProjects\\your-project"
+#     "--watch"
 # ]
 
 # ==============================================================================
@@ -66,7 +67,7 @@ CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 #
 # Instead of editing config.toml directly, you can use the Codex CLI:
 #
-# codex mcp add context-engine -- node /path/to/context-engine/dist/index.js --workspace /path/to/your/workspace
+# codex mcp add context-engine -- node /path/to/context-engine/dist/index.js
 #
 # This will automatically add the MCP server configuration to your config.toml
 
@@ -98,8 +99,7 @@ CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 #
 # 1. Make sure to build the project first: npm run build
 # 2. Ensure you're authenticated with Codex session: codex login
-# 3. Index your workspace before first use:
-#    node dist/index.js --workspace /your/project --index
+# 3. Open the repo you want to inspect before first use
 # 4. Use absolute paths for reliability
 # 5. After modifying config.toml, restart Codex CLI
 #

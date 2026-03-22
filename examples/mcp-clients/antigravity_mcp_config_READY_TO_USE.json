@@ -4,12 +4,8 @@
       "command": "node",
       "args": [
         "D:\\GitProjects\\context-engine\\dist\\index.js",
-        "--workspace",
-        "D:\\GitProjects\\YOUR-PROJECT-NAME",
-        "--index",
         "--watch"
       ]
     }
   }
 }
-

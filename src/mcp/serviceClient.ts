@@ -25,6 +25,7 @@ import type { WorkerMessage } from '../worker/messages.js';
 import { featureEnabled } from '../config/features.js';
 import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
+import { evaluateStartupAutoIndex } from './tooling/indexFreshness.js';
 import {
   JsonIndexStateStore,
   type IndexStateFile,
@@ -95,6 +96,12 @@ export interface IndexResult {
   totalIndexable?: number;
   /** Number of files skipped because they were unchanged (when enabled). */
   unchangedSkipped?: number;
+}
+
+export interface StartupAutoIndexResult {
+  started: boolean;
+  reason: 'healthy' | 'indexing' | 'unindexed' | 'stale' | 'error' | 'disabled';
+  summary: string;
 }
 
 export interface WatcherStatus {
@@ -1104,6 +1111,7 @@ export class ContextServiceClient {
 
   /** Index status metadata */
   private indexStatus: IndexStatus;
+  private startupAutoIndexScheduled = false;
 
   /** Whether lightweight disk hydration has already been attempted for this process. */
   private indexStatusDiskHydrated = false;
@@ -2895,9 +2903,67 @@ export class ContextServiceClient {
   }
 
   /**
-   * Run workspace indexing in a background worker thread
+   * Run workspace indexing in a background worker thread.
    */
   async indexWorkspaceInBackground(): Promise<void> {
+    const currentStatus = this.getIndexStatus();
+    if (currentStatus.status === 'indexing') {
+      return;
+    }
+    this.updateIndexStatus({ status: 'indexing', lastError: undefined });
+    return this.runBackgroundIndexingCore();
+  }
+
+  startAutoIndexOnStartupIfNeeded(options?: {
+    enabled?: boolean;
+    log?: (message: string) => void;
+  }): StartupAutoIndexResult {
+    const enabled = options?.enabled ?? true;
+    const log = options?.log ?? console.error;
+
+    if (!enabled) {
+      return {
+        started: false,
+        reason: 'disabled',
+        summary: 'Startup auto-index is disabled.',
+      };
+    }
+
+    const decision = evaluateStartupAutoIndex(this.getIndexStatus());
+    if (!decision.shouldAutoIndex) {
+      return {
+        started: false,
+        reason: decision.freshness.code,
+        summary: decision.freshness.summary,
+      };
+    }
+
+    if (this.indexStatus.status === 'indexing' || this.startupAutoIndexScheduled) {
+      return {
+        started: false,
+        reason: 'indexing',
+        summary: 'Startup auto-index skipped because indexing is already in progress.',
+      };
+    }
+
+    this.startupAutoIndexScheduled = true;
+    this.updateIndexStatus({ status: 'indexing', lastError: undefined });
+    setImmediate(() => {
+      this.startupAutoIndexScheduled = false;
+      void this.runBackgroundIndexingCore().catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        log(`[startup] Background indexing failed: ${message}`);
+      });
+    });
+
+    return {
+      started: true,
+      reason: decision.freshness.code,
+      summary: decision.freshness.summary,
+    };
+  }
+
+  private async runBackgroundIndexingCore(): Promise<void> {
     if (this.isOfflineMode()) {
       const message = 'Background indexing is disabled while CONTEXT_ENGINE_OFFLINE_ONLY is enabled.';
       console.error(message);
@@ -2918,7 +2984,6 @@ export class ContextServiceClient {
     }
 
     return new Promise((resolve, reject) => {
-      this.updateIndexStatus({ status: 'indexing', lastError: undefined });
       const worker = new Worker(workerSpec.url, {
         execArgv: workerSpec.execArgv,
         workerData: {

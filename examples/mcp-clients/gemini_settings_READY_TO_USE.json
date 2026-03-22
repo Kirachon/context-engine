@@ -9,7 +9,7 @@
   "_comment_8": "1. Copy this entire file content (you can keep or remove _comment lines)",
   "_comment_9": "2. Create directory: mkdir -Force $env:USERPROFILE\\.gemini",
   "_comment_10": "3. Paste into: C:\\Users\\preda\\.gemini\\settings.json",
-  "_comment_11": "4. Replace 'YOUR-PROJECT-NAME' with your actual project folder name",
+  "_comment_11": "4. The default setup is repo-aware; use --workspace only if you need an override",
   "_comment_12": "5. If you use AI-assisted flows, ensure your provider session is active (codex login)",
   "_comment_13": "6. Save and restart Gemini CLI",
   "_comment_14": "",
@@ -20,13 +20,11 @@
       "command": "node",
       "args": [
         "D:\\GitProjects\\context-engine\\dist\\index.js",
-        "--workspace",
-        "D:\\GitProjects\\YOUR-PROJECT-NAME",
-        "--index",
         "--watch"
       ],
       "env": {
-        "DEBUG": "true"
+        "DEBUG": "true",
+        "CE_AUTO_INDEX_ON_STARTUP": "true"
       },
       "timeout": 30000,
       "trust": false,
@@ -35,11 +33,11 @@
   },
   
   "_comment_workspace": "============================================================================",
-  "_comment_workspace_note": "⚠️  IMPORTANT: Replace 'YOUR-PROJECT-NAME' above with your actual project",
+  "_comment_workspace_note": "⚠️  IMPORTANT: The default setup is repo-aware and does not need --workspace",
   "_comment_workspace_example_1": "",
-  "_comment_workspace_example_2": "Example: If your project is at D:\\Projects\\my-website",
-  "_comment_workspace_example_3": "Change the line to:",
-  "_comment_workspace_example_4": "  \"D:\\\\GitProjects\\\\my-website\",",
+  "_comment_workspace_example_2": "Example: If Gemini launches from the wrong folder, add --workspace as an override",
+  "_comment_workspace_example_3": "  \"--workspace\",",
+  "_comment_workspace_example_4": "  \"D:\\\\Projects\\\\my-website\",",
   "_comment_workspace_example_5": "",
   "_comment_workspace_example_6": "Note: Use double backslashes (\\\\) in JSON for Windows paths",
 
@@ -64,9 +62,9 @@
 
   "_comment_flags": "============================================================================",
   "_comment_flags_title": "What Each Flag Does:",
-  "_comment_flags_1": "--workspace D:\\path\\to\\project  → Specifies which codebase to index (REQUIRED)",
-  "_comment_flags_2": "--index                          → Indexes all files when server starts (RECOMMENDED)",
-  "_comment_flags_3": "--watch                          → Auto-reindexes when files change (RECOMMENDED)",
+  "_comment_flags_1": "--workspace D:\\path\\to\\project  → Optional override when you need a fixed repo",
+  "_comment_flags_2": "--index                          → Force a full index on startup (optional)",
+  "_comment_flags_3": "--watch                          → Auto-reindexes when files change (recommended)",
   
   "_comment_multiple": "============================================================================",
   "_comment_multiple_title": "EXAMPLE: Multiple Projects",
@@ -78,9 +76,6 @@
       "command": "node",
       "args": [
         "D:\\GitProjects\\context-engine\\dist\\index.js",
-        "--workspace",
-        "D:\\Projects\\my-first-project",
-        "--index",
         "--watch"
       ],
       "cwd": "D:\\GitProjects\\context-engine",
@@ -91,9 +86,6 @@
       "command": "node",
       "args": [
         "D:\\GitProjects\\context-engine\\dist\\index.js",
-        "--workspace",
-        "D:\\Projects\\my-second-project",
-        "--index",
         "--watch"
       ],
       "cwd": "D:\\GitProjects\\context-engine",

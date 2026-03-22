@@ -7,25 +7,23 @@
 # Instructions:
 # 1. Copy this entire file content
 # 2. Paste it into C:\Users\preda\.codex\config.toml
-# 3. Replace "YOUR-PROJECT-NAME" with your actual project folder name
-# 4. Save and restart Codex CLI
+# 3. Save and restart Codex CLI
+# 4. Open the repo you want to inspect before running MCP queries
 #
 # ============================================================================
 
-# Context Engine MCP Server with Automatic File Watching
+# Context Engine MCP Server with repo-aware startup
 [mcp_servers.context-engine]
 command = "node"
 args = [
     "D:\\GitProjects\\context-engine\\dist\\index.js",
-    "--workspace",
-    "D:\\GitProjects\\YOUR-PROJECT-NAME",    # ← CHANGE THIS to your project path
-    "--index",                                # Indexes all files on startup
     "--watch"                                 # Auto-reindexes when files change
 ]
 
 # Environment variables (OpenAI session first)
 [mcp_servers.context-engine.env]
 CE_AI_PROVIDER = "openai_session"
+CE_AUTO_INDEX_ON_STARTUP = "true"
 # Windows-safe launch to avoid PATH/PATHEXT issues in MCP subprocesses.
 CE_OPENAI_SESSION_CMD = "cmd"
 CE_OPENAI_SESSION_ARGS_JSON = "[\"/d\",\"/s\",\"/c\",\"D:\\\\npm-global\\\\codex.cmd\"]"
@@ -44,7 +42,6 @@ CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 #     "D:\\GitProjects\\context-engine\\dist\\index.js",
 #     "--workspace",
 #     "D:\\Projects\\my-first-project",
-#     "--index",
 #     "--watch"
 # ]
 
@@ -54,7 +51,6 @@ CE_OPENAI_SESSION_HEALTHCHECK_TIMEOUT_MS = "10000"
 #     "D:\\GitProjects\\context-engine\\dist\\index.js",
 #     "--workspace",
 #     "D:\\Projects\\my-second-project",
-#     "--index",
 #     "--watch"
 # ]
 

@@ -19,7 +19,7 @@ Windows PC
              C:\path\to\context-engine\dist\index.js
 ```
 
-You’ll install prerequisites, build the server, start it on Windows, and connect it to Codex CLI.
+You’ll install prerequisites, build the server, register it once with Codex CLI, and then reuse that setup across repos.
 
 ---
 
@@ -30,9 +30,9 @@ You’ll install prerequisites, build the server, start it on Windows, and conne
 3. `npm install`
 4. `npm run build`
 5. Set `CE_AI_PROVIDER=openai_session` and run `codex login`
-6. `.\manage-server.bat start`
-7. `codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" --workspace "C:\path\to\your-project"`
-8. Start Codex CLI → `/mcp` → run a test query
+6. `codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js"`
+7. Open Codex CLI from the repo you want to inspect
+8. Start Codex CLI -> `/mcp` -> run a test query
 
 If any step fails, follow the detailed walkthrough below.
 
@@ -96,7 +96,7 @@ cd context-engine
 
 ## 5.1) Find Your Absolute Path (One-Time)
 
-You’ll need the full path to this folder and to the project you want to index.
+You’ll need the full path to this folder.
 
 ```powershell
 pwd
@@ -162,7 +162,35 @@ node dist\index.js --help
 
 ---
 
-## 10) Start the Server (Windows Script)
+## 10) Repo-Aware Startup
+
+Context Engine now chooses its workspace at startup like this:
+- explicit `--workspace` wins
+- otherwise it uses the current working directory
+- if you launch from a nested folder inside a git repo, it falls back to the nearest git root
+- if no git root exists, it stays on the current folder and logs a warning
+
+That means the normal day-to-day flow is:
+1. register the MCP server once
+2. open the repo you want to work in
+3. let the server resolve the workspace automatically
+
+Use `--workspace "C:\path\to\repo"` only when you want to force a specific repo.
+
+If startup auto-index is enabled:
+- missing or stale workspaces start background indexing automatically
+- the server still starts first
+- the first query may be slower until indexing finishes
+
+You can disable startup auto-index with:
+
+```powershell
+$env:CE_AUTO_INDEX_ON_STARTUP = "false"
+```
+
+---
+
+## 11) Start the Server Manually (Windows Script)
 
 ```powershell
 .\manage-server.bat start
@@ -192,11 +220,18 @@ For full script usage and log tips, see `docs/WINDOWS_SERVER_MANAGEMENT.md`.
 
 ---
 
-## 11) Configure Codex CLI (MCP Client)
+## 12) Configure Codex CLI (MCP Client)
 
 ### Option A: Add via CLI (Recommended)
 ```powershell
-codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" --workspace "C:\path\to\your-project"
+codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js"
+```
+This registers Context Engine once. After that, open any repo and let the server resolve the workspace automatically. Use `--workspace "C:\path\to\your-project"` only when you want to force a specific repo.
+
+If startup auto-index feels too heavy on a large repo, add this to the client environment block later:
+
+```toml
+CE_AUTO_INDEX_ON_STARTUP = "false"
 ```
 
 ### Option B: Edit config.toml directly
@@ -210,9 +245,7 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
    [mcp_servers.context-engine]
    command = "node"
    args = [
-       "C:\\path\\to\\context-engine\\dist\\index.js",
-       "--workspace",
-       "C:\\path\\to\\your-project"
+       "C:\\path\\to\\context-engine\\dist\\index.js"
    ]
    ```
 3. (Optional) Add environment settings under the same block:
@@ -230,6 +263,9 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
    # Auth (replace with real values)
    CE_AI_PROVIDER = "openai_session"
    CE_OPENAI_SESSION_CMD = "codex"
+
+   # Startup behavior
+   CE_AUTO_INDEX_ON_STARTUP = "true"
 
    # Reactive Review Configuration
    REACTIVE_ENABLED = "true"
@@ -256,6 +292,8 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
 4. Save the file.
 > Note: If you set `CE_HTTP_METRICS = "true"`, you must also start the server with `--http` to expose metrics. See `README.md` for details.
 
+> If you want to force a specific workspace from this one-time setup, add `--workspace "C:\\path\\to\\your-project"` once. Do not create separate per-repo config entries.
+
 ### Quick Explanation of the Optional Settings
 
 | Setting | What it does | Beginner note |
@@ -269,6 +307,7 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
 | `CE_HASH_NORMALIZE_EOL` | Normalizes CRLF/LF when hashing | Helpful on mixed Windows/Linux teams |
 | `CE_AI_PROVIDER` | Active AI provider | Set to `openai_session` |
 | `CE_OPENAI_SESSION_CMD` | Command used for session provider | Default is `codex` |
+| `CE_AUTO_INDEX_ON_STARTUP` | Background-index missing or stale workspaces on startup | Set to `false` to opt out |
 | `REACTIVE_ENABLED` | Turns on reactive review features | Required for reactive review tools |
 | `REACTIVE_PARALLEL_EXEC` | Runs reactive steps in parallel | Faster on multi-core CPUs |
 | `REACTIVE_COMMIT_CACHE` | Caches by commit hash | Better cache consistency |
@@ -290,7 +329,7 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
 
 ---
 
-## 12) Verify MCP Connection
+## 13) Verify MCP Connection
 
 1. Start Codex CLI:
    ```powershell
@@ -304,20 +343,21 @@ codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" -
    - `semantic_search`
    - `get_file`
    - `get_context_for_prompt`
+4. Open the repo you want to inspect before running queries so the server can resolve the workspace automatically.
 
 ---
 
-## 13) First Test Query
+## 14) First Test Query
 
 In Codex CLI, try:
 ```
 Search for authentication logic in the codebase
 ```
-If results appear, your deployment works.
+If startup says indexing is running, wait for it to finish or trigger `index_workspace`. If results appear after that, your deployment works.
 
 ---
 
-## 14) Ongoing Use (Updates & Maintenance)
+## 15) Ongoing Use (Updates & Maintenance)
 
 ### Update the Project
 ```powershell
@@ -340,7 +380,7 @@ Get-Content .server.log -Tail 50
 
 ---
 
-## 15) Uninstall / Cleanup (Optional)
+## 16) Uninstall / Cleanup (Optional)
 
 ```powershell
 .\manage-server.bat stop
@@ -354,7 +394,7 @@ npm uninstall -g @openai/codex
 
 ---
 
-## 16) Troubleshooting (Beginner-Friendly)
+## 17) Troubleshooting (Beginner-Friendly)
 
 ### “node” or “npm” not found
 ```powershell
@@ -389,19 +429,37 @@ Get-Content .server.log -Tail 50
 ```
 
 ### Tools don’t show in Codex CLI
-1. Verify `config.toml` paths are correct and absolute.
-2. Restart Codex CLI.
-3. Run:
+1. If you used `codex mcp add`, run:
    ```powershell
    codex mcp list
    ```
+2. If you edited `config.toml` manually, verify the paths are correct and absolute.
+3. Restart Codex CLI.
+4. Run:
+   ```powershell
+   codex mcp list
+   ```
+
+### Server starts but searches are empty
+1. Confirm you opened Codex inside the repo you want to inspect.
+2. If the repo is large, give startup indexing time to finish.
+3. Check whether startup auto-index was disabled with `CE_AUTO_INDEX_ON_STARTUP=false`.
+4. Run `index_workspace` manually if you want to force the first build.
+
+### Wrong repo was selected
+1. Start Codex from the correct repo folder.
+2. If you want a fixed workspace every time, register with:
+   ```powershell
+   codex mcp add context-engine -- node "C:\path\to\context-engine\dist\index.js" --workspace "C:\path\to\your-project"
+   ```
+3. Restart Codex CLI.
 
 ### Firewall or permission prompts
 Allow Node.js when prompted. This server uses **stdio** (no open ports), but Windows may still prompt.
 
 ---
 
-## 17) Glossary (Beginner Terms)
+## 18) Glossary (Beginner Terms)
 
 - **MCP Server**: A local process that provides tools to your coding assistant.
 - **stdio**: Standard input/output; how MCP clients talk to servers.
@@ -409,7 +467,7 @@ Allow Node.js when prompted. This server uses **stdio** (no open ports), but Win
 
 ---
 
-## 18) See Also
+## 19) See Also
 
 - `docs/archive/QUICKSTART.md` — Quick overview
 - `docs/archive/GET_STARTED.md` — Full setup checklist

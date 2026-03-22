@@ -4,13 +4,11 @@
       "command": "D:\\GitProjects\\context-engine\\node_modules\\.bin\\tsx.cmd",
       "args": [
         "D:\\GitProjects\\context-engine\\src\\index.ts",
-        "--workspace",
-        "D:\\GitProjects\\YOUR-PROJECT-NAME",
-        "--index",
         "--watch"
       ],
       "env": {
-        "DEBUG": "true"
+        "DEBUG": "true",
+        "CE_AUTO_INDEX_ON_STARTUP": "true"
       },
       "cwd": "D:\\GitProjects\\context-engine",
       "timeout": 30000,

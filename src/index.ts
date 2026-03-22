@@ -20,6 +20,8 @@
 
 import { ContextEngineMCPServer } from './mcp/server.js';
 import { ContextEngineHttpServer } from './http/index.js';
+import { envBool } from './config/env.js';
+import { resolveWorkspacePath } from './workspace/resolveWorkspace.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -41,18 +43,20 @@ async function main() {
   // Get workspace path from command line args or use current directory
   const args = process.argv.slice(2);
   let workspacePath = process.cwd();
+  let explicitWorkspacePath: string | undefined;
   let shouldIndex = false;
   let enableWatcher = false;
   let enableHttp = false;
   let httpPort = 3333;
   let httpOnly = false;
+  const autoIndexOnStartup = envBool('CE_AUTO_INDEX_ON_STARTUP', true);
 
   // Parse command line arguments
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
 
     if (arg === '--workspace' || arg === '-w') {
-      workspacePath = path.resolve(args[i + 1]);
+      explicitWorkspacePath = args[i + 1];
       i++;
     } else if (arg === '--index' || arg === '-i') {
       shouldIndex = true;
@@ -77,7 +81,7 @@ Context Engine MCP Server
 Usage: context-engine-mcp [options]
 
 Options:
-  --workspace, -w <path>   Workspace directory to index (default: current directory)
+  --workspace, -w <path>   Workspace directory to index (default: current directory with git-root fallback)
   --index, -i              Index the workspace before starting server
   --watch, -W              Enable filesystem watcher for incremental indexing
   --http                   Enable HTTP server (in addition to stdio)
@@ -89,6 +93,7 @@ Environment Variables:
   CE_RETRIEVAL_PROVIDER    Retrieval provider preference: local_native (default)
   CE_AI_PROVIDER           AI provider for ask calls: openai_session
   CE_OPENAI_SESSION_CMD    Command for session-based provider (default: codex)
+  CE_AUTO_INDEX_ON_STARTUP Automatically background-index missing or stale workspaces on startup (default: true)
 
 Examples:
   # Start stdio server with current directory
@@ -120,10 +125,18 @@ codex mcp add context-engine -- node /absolute/path/to/dist/index.js --workspace
     }
   }
 
+  const workspaceResolution = await resolveWorkspacePath({
+    explicitWorkspace: explicitWorkspacePath,
+    cwd: process.cwd(),
+    logWarning: (message) => console.error(message),
+  });
+  workspacePath = workspaceResolution.workspacePath;
+
   console.error('='.repeat(80));
   console.error('Context Engine MCP Server');
   console.error('='.repeat(80));
   console.error(`Workspace: ${workspacePath}`);
+  console.error(`Workspace source: ${workspaceResolution.source}`);
   console.error(`Watcher: ${enableWatcher ? 'enabled' : 'disabled'}`);
   console.error(`HTTP: ${enableHttp ? `enabled (port ${httpPort})` : 'disabled'}`);
   console.error(`Mode: ${httpOnly ? 'HTTP only' : enableHttp ? 'stdio + HTTP' : 'stdio only'}`);
@@ -133,6 +146,32 @@ codex mcp add context-engine -- node /absolute/path/to/dist/index.js --workspace
     const server = new ContextEngineMCPServer(workspacePath, 'context-engine', {
       enableWatcher,
     });
+    const serviceClient = server.getServiceClient();
+
+    const maybeStartAutoIndex = (): void => {
+      if (shouldIndex) {
+        return;
+      }
+
+      const result = serviceClient.startAutoIndexOnStartupIfNeeded({
+        enabled: autoIndexOnStartup,
+        log: (message) => console.error(message),
+      });
+
+      if (result.started) {
+        console.error(`[startup] Background indexing scheduled (${result.reason}).`);
+        return;
+      }
+
+      if (result.reason === 'disabled') {
+        console.error('[startup] Startup auto-index disabled via CE_AUTO_INDEX_ON_STARTUP=false.');
+        return;
+      }
+
+      if (result.reason !== 'healthy') {
+        console.error(`[startup] Startup auto-index skipped (${result.reason}).`);
+      }
+    };
 
     // Index workspace if requested
     if (shouldIndex) {
@@ -170,8 +209,11 @@ codex mcp add context-engine -- node /absolute/path/to/dist/index.js --workspace
     // Start stdio MCP server unless http-only mode
     if (!httpOnly) {
       console.error('Starting MCP server (stdio)...');
-      await server.run();
+      const runPromise = server.run();
+      maybeStartAutoIndex();
+      await runPromise;
     } else {
+      maybeStartAutoIndex();
       console.error('Running in HTTP-only mode. Press Ctrl+C to stop.');
       // Keep process running with proper signal handling
       await new Promise<void>(resolve => {

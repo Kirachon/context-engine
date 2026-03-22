@@ -31,7 +31,7 @@ Fastest demo path:
 ```bash
 npm install
 npm run build
-codex mcp add context-engine -- node dist/index.js --workspace /path/to/your/project
+codex mcp add context-engine -- node dist/index.js
 ```
 
 Then in Codex, confirm the tools are visible and try:
@@ -64,28 +64,45 @@ npm run build
 npm run verify
 ```
 
-6. Start the MCP server for the workspace you want it to inspect:
+6. Start the MCP server:
 
 ```bash
-node dist/index.js --workspace .
+node dist/index.js
 ```
 
-Replace `.` with the absolute path to the project you want to inspect.
+By default, Context Engine now resolves the workspace like this:
+- explicit `--workspace` wins
+- otherwise it uses the current folder
+- if you launched from a nested folder inside a git repo, it falls back to the nearest git root
+- if no git root exists, it stays on the current folder and logs a warning
+
+On first run, if the index is missing or stale, startup can kick off background indexing automatically. The server still starts first, but the first query may be slower until indexing finishes.
 
 ### Connect It To Your MCP Client
 
 The server speaks MCP over `stdio`, so most clients can launch it with the same command.
 
+### First-Time Setup vs Daily Use
+
+Use this mental model:
+
+1. First-time setup:
+   Register the MCP server once in your client.
+2. Daily use:
+   Open any repo and let the server resolve the workspace automatically.
+3. Override only when needed:
+   Pass `--workspace <absolute-path>` if the client launches from the wrong folder or you want a different repo on purpose.
+
 **Codex CLI**
 
 ```bash
-codex mcp add context-engine -- node dist/index.js --workspace /path/to/your/project
+codex mcp add context-engine -- node dist/index.js
 ```
 
 **Windows example**
 
 ```powershell
-codex mcp add context-engine -- node "D:\GitProjects\context-engine\dist\index.js" --workspace "D:\GitProjects\your-project"
+codex mcp add context-engine -- node "D:\GitProjects\context-engine\dist\index.js"
 ```
 
 **Claude Code, Claude Desktop, Cursor, Antigravity**
@@ -102,15 +119,29 @@ Paste this into the agent if you want it to do the setup for you:
 > Set up Context Engine MCP for this workspace.
 >
 > 1. Run `npm install` and `npm run build`.
-> 2. Pick the workspace path I want you to inspect.
-> 3. Start the server with `node dist/index.js --workspace <absolute-path-to-workspace>`.
-> 4. Register that exact command in the target MCP client.
+> 2. Register the MCP server once with `node dist/index.js`.
+> 3. Confirm the client launches the MCP server from the repo I am working in.
+> 4. If the client launches from the wrong folder, add `--workspace <absolute-path-to-workspace>` as an override.
 > 5. Confirm the server appears in the client and that `tool_manifest()` or an equivalent tool list works.
 > 6. Run one quick retrieval test, for example `semantic_search`, to confirm the connection is working.
+> 7. If startup says the workspace is unindexed or stale, let the background indexing finish or run `index_workspace` manually.
 >
 > If the client is Codex CLI, use:
 >
-> `codex mcp add context-engine -- node dist/index.js --workspace <absolute-path-to-workspace>`
+> `codex mcp add context-engine -- node dist/index.js`
+
+### Startup Behavior
+
+When the server starts without `--workspace`, it tries to be repo-aware:
+- repo root launch: uses that repo
+- nested repo folder launch: upgrades to the nearest git root
+- non-git folder launch: stays on the current folder and warns clearly
+
+If startup auto-index is enabled, missing or stale workspaces start background indexing automatically.
+
+Operator override:
+- disable startup auto-index with `CE_AUTO_INDEX_ON_STARTUP=false`
+- force a specific workspace with `--workspace "D:\path\to\repo"`
 
 ## Architecture
 
@@ -181,7 +212,7 @@ Use `tool_manifest()` in the MCP server to inspect the current tool inventory di
 npm install
 npm run build
 npm run verify
-node dist/index.js --workspace .
+node dist/index.js
 ```
 
 Optional validation commands:
