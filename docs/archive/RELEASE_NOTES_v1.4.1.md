@@ -49,7 +49,7 @@ All planning services now include comprehensive null/undefined handling to preve
 
 #### New Documents
 
-1. **PLANNING_WORKFLOW.md** - Complete planning workflow guide
+1. **docs\archive\PLANNING_WORKFLOW.md** - Complete planning workflow guide
    - Quick start guide
    - Complete workflow (Planning → Approval → Execution → Versioning)
    - Plan structure reference
@@ -64,12 +64,12 @@ All planning services now include comprehensive null/undefined handling to preve
    - Listed all test additions
    - Documented new files
 
-2. **EXAMPLES.md**
+2. **docs\archive\EXAMPLES.md**
    - Added 6 new planning workflow examples (Examples 7-12)
    - Complete tool call examples with expected outputs
    - Planning workflow best practices section
 
-3. **QUICKSTART.md**
+3. **docs\archive\QUICKSTART.md**
    - Added planning and execution examples
    - New use cases for implementation planning and execution tracking
 
@@ -160,7 +160,7 @@ Thanks to the Augment Code team for the excellent Auggie SDK that powers this pr
 
 For complete details, see:
 - [CHANGELOG.md](CHANGELOG.md) - Full version history
-- [PLANNING_WORKFLOW.md](PLANNING_WORKFLOW.md) - Planning workflow guide
-- [EXAMPLES.md](EXAMPLES.md) - Usage examples
+- [docs\archive\PLANNING_WORKFLOW.md](docs\archive\PLANNING_WORKFLOW.md) - Planning workflow guide
+- [docs\archive\EXAMPLES.md](docs\archive\EXAMPLES.md) - Usage examples
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical architecture
 

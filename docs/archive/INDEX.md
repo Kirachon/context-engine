@@ -6,7 +6,7 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 
 **New to this project?** Start here:
 
-1. **[QUICKSTART.md](QUICKSTART.md)** - Get running in 5 minutes
+1. **[docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md)** - Get running in 5 minutes
    - Installation steps
    - Authentication setup
    - Codex CLI configuration
@@ -28,20 +28,20 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 
 ### For Users
 
-- **[QUICKSTART.md](QUICKSTART.md)** - Fast setup guide
+- **[docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md)** - Fast setup guide
 - **[docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)** - Client-by-client setup (Codex, Claude Code, Antigravity, Claude Desktop, Cursor)
 - **[README.md](README.md)** - Complete user guide
 - **[docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)** - Full Windows deployment manual
 - **[docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md)** - Memory quality, cleanup, and release health checks
-- **[EXAMPLES.md](EXAMPLES.md)** - Real-world usage examples
-- **[TROUBLESHOOTING.md](TROUBLESHOOTING.md)** - Common issues and solutions
-- **[TESTING.md](TESTING.md)** - How to test the server
+- **[docs\archive\EXAMPLES.md](docs\archive\EXAMPLES.md)** - Real-world usage examples
+- **[docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md)** - Common issues and solutions
+- **[docs\archive\TESTING.md](docs\archive\TESTING.md)** - How to test the server
 
 ### For Developers
 
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** - Detailed architecture documentation
-- **[plan.md](plan.md)** - Original architectural plan
-- **[PROJECT_SUMMARY.md](PROJECT_SUMMARY.md)** - Implementation summary
+- **[docs\archive\plan.md](docs\archive\plan.md)** - Original architectural plan
+- **[docs\archive\PROJECT_SUMMARY.md](docs\archive\PROJECT_SUMMARY.md)** - Implementation summary
 - **[CHANGELOG.md](CHANGELOG.md)** - Version history
 
 ## 🎯 Quick Navigation
@@ -49,16 +49,16 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 ### I want to...
 
 #### Install and Run
-→ [QUICKSTART.md](QUICKSTART.md) - Steps 1-4
+→ [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) - Steps 1-4
 
 #### Deploy on Windows (Beginner-Friendly)
 → [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md) - Full walkthrough
 
 #### Configure Codex CLI
-→ [QUICKSTART.md](QUICKSTART.md) - Step 5
+→ [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) - Step 5
 
 #### Configure Other MCP Clients (Claude Code, Antigravity, Claude Desktop, Cursor)
-→ [QUICKSTART.md](QUICKSTART.md) - Step 5B
+→ [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) - Step 5B
 → [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) - Full client guide
 
 #### Understand the Architecture
@@ -66,37 +66,37 @@ Welcome to the Context Engine MCP Server! This index will help you find the righ
 → [README.md](README.md) - Quick overview
 
 #### Fix a Problem
-→ [TROUBLESHOOTING.md](TROUBLESHOOTING.md) - Common issues
-→ [TESTING.md](TESTING.md) - Debugging strategies
+→ [docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md) - Common issues
+→ [docs\archive\TESTING.md](docs\archive\TESTING.md) - Debugging strategies
 
 #### Add New Features
 → [ARCHITECTURE.md](ARCHITECTURE.md) - Extension points
-→ [plan.md](plan.md) - Design principles
+→ [docs\archive\plan.md](docs\archive\plan.md) - Design principles
 
 #### Test the Server
-→ [TESTING.md](TESTING.md) - Testing guide
+→ [docs\archive\TESTING.md](docs\archive\TESTING.md) - Testing guide
 → Run `npm run verify` - Setup verification
 
 #### See Usage Examples
-→ [EXAMPLES.md](EXAMPLES.md) - Real-world examples
-→ [QUICKSTART.md](QUICKSTART.md) - Step 8
+→ [docs\archive\EXAMPLES.md](docs\archive\EXAMPLES.md) - Real-world examples
+→ [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) - Step 8
 
 ## 📖 Documentation Files
 
 | File | Purpose | Audience |
 |------|---------|----------|
 | [README.md](README.md) | Project overview and usage | Everyone |
-| [QUICKSTART.md](QUICKSTART.md) | 5-minute setup guide | New users |
+| [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) | 5-minute setup guide | New users |
 | [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md) | MCP client setup by platform/client | New users |
 | [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md) | Full Windows deployment manual | Windows users |
 | [docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md) | Memory governance and maintenance | Operators & Maintainers |
-| [EXAMPLES.md](EXAMPLES.md) | Real-world usage examples | Users |
+| [docs\archive\EXAMPLES.md](docs\archive\EXAMPLES.md) | Real-world usage examples | Users |
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Detailed architecture | Developers |
-| [TESTING.md](TESTING.md) | Testing strategies | Users & Developers |
-| [TROUBLESHOOTING.md](TROUBLESHOOTING.md) | Problem solving | Users |
-| [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) | Implementation status | Project managers |
+| [docs\archive\TESTING.md](docs\archive\TESTING.md) | Testing strategies | Users & Developers |
+| [docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md) | Problem solving | Users |
+| [docs\archive\PROJECT_SUMMARY.md](docs\archive\PROJECT_SUMMARY.md) | Implementation status | Project managers |
 | [CHANGELOG.md](CHANGELOG.md) | Version history | Everyone |
-| [plan.md](plan.md) | Original design plan | Architects |
+| [docs\archive\plan.md](docs\archive\plan.md) | Original design plan | Architects |
 
 ## 🛠️ Configuration Files
 
@@ -177,19 +177,19 @@ node dist/index.js --workspace . --index
 
 ### Beginner
 1. Read [README.md](README.md) - Understand what this does
-2. Follow [QUICKSTART.md](QUICKSTART.md) - Get it running
+2. Follow [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) - Get it running
 3. Try example queries in Codex CLI
-4. Read [TROUBLESHOOTING.md](TROUBLESHOOTING.md) if issues arise
+4. Read [docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md) if issues arise
 
 ### Intermediate
 1. Read [ARCHITECTURE.md](ARCHITECTURE.md) - Understand the design
 2. Review source code in `src/`
-3. Read [TESTING.md](TESTING.md) - Learn testing strategies
+3. Read [docs\archive\TESTING.md](docs\archive\TESTING.md) - Learn testing strategies
 4. Experiment with MCP Inspector
 
 ### Advanced
-1. Study [plan.md](plan.md) - Understand design decisions
-2. Review [PROJECT_SUMMARY.md](PROJECT_SUMMARY.md) - See what's implemented
+1. Study [docs\archive\plan.md](docs\archive\plan.md) - Understand design decisions
+2. Review [docs\archive\PROJECT_SUMMARY.md](docs\archive\PROJECT_SUMMARY.md) - See what's implemented
 3. Extend with new tools (see ARCHITECTURE.md - Extension Points)
 4. Contribute improvements
 
@@ -201,7 +201,7 @@ node dist/index.js --workspace . --index
 
 ## 💡 Tips
 
-- **Start with QUICKSTART.md** - Don't skip the basics
+- **Start with docs\archive\QUICKSTART.md** - Don't skip the basics
 - **Use `npm run verify`** - Check your setup anytime
 - **Check logs first** - Most issues show up in logs
 - **Test with MCP Inspector** - Debug tool calls interactively
@@ -209,8 +209,8 @@ node dist/index.js --workspace . --index
 
 ## 📞 Getting Help
 
-1. Check [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-2. Review [TESTING.md](TESTING.md) for debugging
+1. Check [docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md)
+2. Review [docs\archive\TESTING.md](docs\archive\TESTING.md) for debugging
 3. Run `npm run verify` to check setup
 4. Run `codex mcp list` to verify configuration
 5. Test with MCP Inspector
@@ -227,8 +227,8 @@ Before asking for help, verify:
 
 ---
 
-**Ready to start?** → [QUICKSTART.md](QUICKSTART.md)
+**Ready to start?** → [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md)
 
-**Need help?** → [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+**Need help?** → [docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md)
 
 **Want to understand?** → [ARCHITECTURE.md](ARCHITECTURE.md)

@@ -2,7 +2,7 @@
 
 This is a complete, step-by-step Windows deployment manual for the Context Engine MCP Server. It is written for beginners and covers installation, configuration, verification, and maintenance.
 
-> **Shorter references:** `QUICKSTART.md`, `GET_STARTED.md`, and `docs/WINDOWS_SERVER_MANAGEMENT.md`.
+> **Shorter references:** `docs/archive/QUICKSTART.md`, `docs/archive/GET_STARTED.md`, and `docs/WINDOWS_SERVER_MANAGEMENT.md`.
 
 ---
 
@@ -411,7 +411,7 @@ Allow Node.js when prompted. This server uses **stdio** (no open ports), but Win
 
 ## 18) See Also
 
-- `QUICKSTART.md` — Quick overview
-- `GET_STARTED.md` — Full setup checklist
+- `docs/archive/QUICKSTART.md` — Quick overview
+- `docs/archive/GET_STARTED.md` — Full setup checklist
 - `docs/WINDOWS_SERVER_MANAGEMENT.md` — Server start/stop/logs
-- `TROUBLESHOOTING.md` — Common issues
+- `docs/archive/TROUBLESHOOTING.md` — Common issues

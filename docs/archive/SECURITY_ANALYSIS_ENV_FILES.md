@@ -2,7 +2,7 @@
 
 ## 🚨 Executive Summary
 
-**ISSUE IDENTIFIED**: The file extension recommendations in `INDEXABLE_EXTENSIONS_ANALYSIS.md` and related documents **incorrectly recommend indexing environment files** (`.env.local`, `.env.development`, `.env.production`) that typically contain sensitive credentials.
+**ISSUE IDENTIFIED**: The file extension recommendations in `docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md` and related documents **incorrectly recommend indexing environment files** (`.env.local`, `.env.development`, `.env.production`) that typically contain sensitive credentials.
 
 **SEVERITY**: HIGH - This contradicts existing security practices and could lead to credential exposure.
 
@@ -71,7 +71,7 @@ secrets.yaml
 secrets.json
 ```
 
-#### Evidence from `AI_INDEXING_BEST_PRACTICES.md` (Lines 329-342)
+#### Evidence from `docs\archive\AI_INDEXING_BEST_PRACTICES.md` (Lines 329-342)
 ```markdown
 #### Environment & Secrets
 
@@ -132,20 +132,20 @@ File Discovery → shouldIgnorePath() → Checks DEFAULT_EXCLUDED_PATTERNS + .co
 
 ### Where the Error Occurred
 
-#### ❌ INDEXABLE_EXTENSIONS_ANALYSIS.md (Lines 60-62)
+#### ❌ docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md (Lines 60-62)
 ```markdown
 #### Environment & Config
 - **.env.local, .env.development, .env.production** - Environment-specific configs
 ```
 
-#### ❌ EXTENSION_RECOMMENDATIONS_SUMMARY.md (Lines 40-42)
+#### ❌ docs\archive\EXTENSION_RECOMMENDATIONS_SUMMARY.md (Lines 40-42)
 ```markdown
 ### Build Systems (9 extensions)
 ...
 .env.local, .env.development, .env.production  # Environment-specific configs
 ```
 
-#### ❌ QUICK_REFERENCE_EXTENSIONS.md (Line 38)
+#### ❌ docs\archive\QUICK_REFERENCE_EXTENSIONS.md (Line 38)
 ```typescript
 // Environment-specific configs
 '.env.local', '.env.development', '.env.production',
@@ -309,15 +309,15 @@ private async discoverFiles(dirPath: string, relativeTo: string = dirPath): Prom
 
 ### Files to Update
 
-1. **`INDEXABLE_EXTENSIONS_ANALYSIS.md`**
+1. **`docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`**
    - Remove `.env.local`, `.env.development`, `.env.production` from recommendations
    - Add security warning about environment files
    
-2. **`EXTENSION_RECOMMENDATIONS_SUMMARY.md`**
+2. **`docs\archive\EXTENSION_RECOMMENDATIONS_SUMMARY.md`**
    - Remove environment-specific configs from Medium Priority list
    - Reduce count from 27 to 24 extensions in Phase 2
    
-3. **`QUICK_REFERENCE_EXTENSIONS.md`**
+3. **`docs\archive\QUICK_REFERENCE_EXTENSIONS.md`**
    - Remove the 3 environment file extensions from Phase 2
    - Update total count from 27 to 24
 

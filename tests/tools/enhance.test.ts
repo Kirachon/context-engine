@@ -344,7 +344,7 @@ Here is an enhanced version of the original instruction that is more specific an
       process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
       mockServiceClient.localKeywordSearch = jest.fn(async () => [
         {
-          path: 'docs/QUICKSTART.md',
+          path: 'docs/archive/QUICKSTART.md',
           content: 'Quickstart instructions for Codex.',
           relevanceScore: 0.95,
         },

@@ -201,7 +201,7 @@ async function runPlanningMode(task: string, contextEngine: YourContextEngine) {
 
   // Save raw JSON + markdown
   // await fs.writeFile('latest_plan.json', JSON.stringify(plan, null, 2));
-  // await fs.writeFile('latest_plan.md', markdown);
+  // await fs.writeFile('latest_docs/archive/plan.md', markdown);
 
   // Approval flow
   const approved = await askUserApproval("Approve this plan? (y/n/edit)");

@@ -140,7 +140,7 @@ Four MCP tools refactored to use internal handlers while preserving exact output
 
 1. **ARCHITECTURE.md** - Added Layer 2.5 documentation, updated tool count to 28
 2. **README.md** - Updated test count to 213, added quieter test command
-3. **TESTING.md** - Added snapshot testing documentation
+3. **docs\archive\TESTING.md** - Added snapshot testing documentation
 
 ## Test Coverage
 

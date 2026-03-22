@@ -3,7 +3,7 @@
 > **Document Version**: 2.0
 > **Created**: 2025-12-22
 > **Status**: ✅ APPROVED - READY FOR IMPLEMENTATION
-> **Related Documents**: `INDEXABLE_EXTENSIONS_ANALYSIS.md`, `SECURITY_ANALYSIS_ENV_FILES.md`, `CORRECTED_RECOMMENDATIONS_SUMMARY.md`
+> **Related Documents**: `docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`, `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md`, `docs\archive\CORRECTED_RECOMMENDATIONS_SUMMARY.md`
 
 ---
 
@@ -250,7 +250,7 @@ Security: Verified exclusion of sensitive .env files
 Performance: <15% indexing time impact expected
 
 Resolves: File extension coverage gap analysis
-See: INDEXABLE_EXTENSIONS_ANALYSIS.md for detailed research"
+See: docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md for detailed research"
 ```
 
 #### Create PR
@@ -276,8 +276,8 @@ Expands language support from 72 to 116 file extensions (+61%).
 - ✅ Performance impact <15%
 
 ## Documentation
-- See \`INDEXABLE_EXTENSIONS_ANALYSIS.md\` for research
-- See \`SECURITY_ANALYSIS_ENV_FILES.md\` for security review"
+- See \`docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md\` for research
+- See \`docs\archive\SECURITY_ANALYSIS_ENV_FILES.md\` for security review"
 ```
 
 ---
@@ -664,11 +664,11 @@ npm test
 
 | Document | Purpose |
 |----------|---------|
-| `INDEXABLE_EXTENSIONS_ANALYSIS.md` | Comprehensive research and justification |
-| `SECURITY_ANALYSIS_ENV_FILES.md` | Security review of environment files |
-| `CORRECTED_RECOMMENDATIONS_SUMMARY.md` | Final corrected recommendations |
-| `QUICK_REFERENCE_EXTENSIONS.md` | Copy-paste ready code |
-| `COMPLETENESS_ASSESSMENT.md` | Coverage analysis |
+| `docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md` | Comprehensive research and justification |
+| `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md` | Security review of environment files |
+| `docs\archive\CORRECTED_RECOMMENDATIONS_SUMMARY.md` | Final corrected recommendations |
+| `docs\archive\QUICK_REFERENCE_EXTENSIONS.md` | Copy-paste ready code |
+| `docs\archive\COMPLETENESS_ASSESSMENT.md` | Coverage analysis |
 
 ### B. Key Contacts
 

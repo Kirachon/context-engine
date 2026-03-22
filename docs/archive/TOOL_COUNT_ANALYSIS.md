@@ -10,7 +10,7 @@
 
 **Status**: ❌ Documentation is outdated and needs correction.
 
-**Impact**: The promotional materials (REDDIT_POST.md and NOTEBOOKLM_PROMPT.md) created today also contain the incorrect count of 28 tools.
+**Impact**: The promotional materials (docs\archive\REDDIT_POST.md and docs\archive\NOTEBOOKLM_PROMPT.md) created today also contain the incorrect count of 28 tools.
 
 ---
 
@@ -176,8 +176,8 @@ The `execute_plan` tool was implemented and registered in the server, but was ne
 ### Documentation Files Affected
 
 1. **README.md** - Claims 28 tools, missing `execute_plan` documentation
-2. **REDDIT_POST.md** (created today) - States "28 tools" in the TL;DR
-3. **NOTEBOOKLM_PROMPT.md** (created today) - States "28 MCP tools" in feature highlights
+2. **docs\archive\REDDIT_POST.md** (created today) - States "28 tools" in the TL;DR
+3. **docs\archive\NOTEBOOKLM_PROMPT.md** (created today) - States "28 MCP tools" in feature highlights
 
 ### Promotional Materials Impact
 
@@ -211,14 +211,14 @@ The promotional materials created today contain the incorrect tool count. This n
 
 **Renumber subsequent tools**: Tools 14-28 become 15-29
 
-### 2. Update REDDIT_POST.md (HIGH PRIORITY)
+### 2. Update docs\archive\REDDIT_POST.md (HIGH PRIORITY)
 
 **Changes needed**:
 - Line 1 (title): Keep as is (doesn't mention specific count)
 - Line 145: Change "28 MCP tools" to "29 MCP tools"
 - Line 158: Change "TL;DR" from "28 tools" to "29 tools"
 
-### 3. Update NOTEBOOKLM_PROMPT.md (HIGH PRIORITY)
+### 3. Update docs\archive\NOTEBOOKLM_PROMPT.md (HIGH PRIORITY)
 
 **Changes needed**:
 - Line 21: Change "28 tools" to "29 tools"
@@ -228,11 +228,11 @@ The promotional materials created today contain the incorrect tool count. This n
 ### 4. Verify Other Documentation Files (MEDIUM PRIORITY)
 
 Check these files for tool count references:
-- PROJECT_SUMMARY.md
-- IMPLEMENTATION_COMPLETE.md
+- docs\archive\PROJECT_SUMMARY.md
+- docs\archive\IMPLEMENTATION_COMPLETE.md
 - CHANGELOG.md
 - RELEASE_NOTES_v1.4.0.md (if it exists)
-- RELEASE_NOTES_v1.5.0.md (if it exists)
+- docs\archive\RELEASE_NOTES_v1.5.0.md (if it exists)
 
 ### 5. Add to Planning Workflow Examples (LOW PRIORITY)
 
@@ -266,7 +266,7 @@ The README.md has a "Planning Workflow" section (lines 171-224) that shows examp
 ## Next Steps
 
 1. ✅ **Immediate**: Update README.md to add `execute_plan` and change count to 29
-2. ✅ **Immediate**: Update REDDIT_POST.md and NOTEBOOKLM_PROMPT.md with correct count
+2. ✅ **Immediate**: Update docs\archive\REDDIT_POST.md and docs\archive\NOTEBOOKLM_PROMPT.md with correct count
 3. ⏳ **Soon**: Verify and update other documentation files
 4. ⏳ **Soon**: Add `execute_plan` usage examples to the Planning Workflow section
 5. ⏳ **Future**: Consider adding a tool count verification test to prevent this in the future

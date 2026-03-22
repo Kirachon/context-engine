@@ -32,7 +32,7 @@ Current state that this plan builds on:
 - Confirm the current retrieval contract still passes existing tests
 
 ### Task 1.1: Define V2 Artifact and Store Contracts
-- **Location**: `docs/context-engine-improvement-plan.md`, `docs/archive/retrieval-backend-migration-plan.md`
+- **Location**: `docs/context-engine-improvement-docs\archive\plan.md`, `docs/archive/retrieval-backend-migration-docs\archive\plan.md`
 - **Description**: Freeze the versioned artifact fields for parser, chunk, lexical, vector, and rerank stages.
 - **Dependencies**: None
 - **Acceptance Criteria**:
@@ -72,7 +72,7 @@ Current state that this plan builds on:
 - Chunk IDs remain stable across unchanged content
 
 ### Task 2.1: Integrate Tree-sitter Parsing
-- **Location**: `src/internal/retrieval/`, `package.json`, `docs/context-engine-improvement-plan.md`
+- **Location**: `src/internal/retrieval/`, `package.json`, `docs/context-engine-improvement-docs\archive\plan.md`
 - **Description**: Add parser-driven chunk extraction and metadata generation for supported file types.
 - **Dependencies**: Sprint 1 complete
 - **Acceptance Criteria**:
@@ -111,7 +111,7 @@ Current state that this plan builds on:
 - Confirm refreshes only touch changed documents
 
 ### Task 3.1: Design FTS5 Schema and Refresh Flow
-- **Location**: `src/internal/retrieval/`, `docs/context-engine-improvement-plan.md`
+- **Location**: `src/internal/retrieval/`, `docs/context-engine-improvement-docs\archive\plan.md`
 - **Description**: Define the lexical index schema, tokenization approach, and incremental update path.
 - **Dependencies**: Sprint 1 complete
 - **Acceptance Criteria**:
@@ -148,7 +148,7 @@ Current state that this plan builds on:
 - The vector backend uses the LanceDB-first path only
 
 ### Task 4.1: Add Embedding Runtime Adapter
-- **Location**: `src/internal/retrieval/`, `docs/context-engine-improvement-plan.md`
+- **Location**: `src/internal/retrieval/`, `docs/context-engine-improvement-docs\archive\plan.md`
 - **Description**: Add a local embedding runtime adapter that can power index-time embeddings for the vector store.
 - **Dependencies**: Sprint 1 complete
 - **Acceptance Criteria**:
@@ -280,7 +280,7 @@ Current state that this plan builds on:
   - Shadow compare reports and parity checks
 
 ### Task 7.2: Add Canary Promotion and Rollback Rules
-- **Location**: `docs/ROLLOUT_RUNBOOK.md`, `docs/context-engine-improvement-plan.md`
+- **Location**: `docs/ROLLOUT_RUNBOOK.md`, `docs/context-engine-improvement-docs\archive\plan.md`
 - **Description**: Define promotion, rollback, and kill-switch rules for the new backend path.
 - **Dependencies**: Task 7.1
 - **Acceptance Criteria**:

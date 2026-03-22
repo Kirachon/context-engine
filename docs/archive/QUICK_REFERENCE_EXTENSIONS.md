@@ -1,6 +1,6 @@
 # Quick Reference: File Extensions to Add
 
-⚠️ **SECURITY NOTICE**: This document was corrected to remove `.env.local`, `.env.development`, and `.env.production` which contain sensitive credentials. See `SECURITY_ANALYSIS_ENV_FILES.md` for full details.
+⚠️ **SECURITY NOTICE**: This document was corrected to remove `.env.local`, `.env.development`, and `.env.production` which contain sensitive credentials. See `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md` for full details.
 
 ## Copy-Paste Ready Lists
 

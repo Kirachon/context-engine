@@ -230,23 +230,23 @@ Check progress:
 
 ### For Users
 
-1. **Start Here**: `QUICKSTART.md` - 5-minute setup
+1. **Start Here**: `docs\archive\QUICKSTART.md` - 5-minute setup
 2. **Learn More**: `README.md` - Overview and features
-3. **Troubleshooting**: `TROUBLESHOOTING.md` - Common issues
-4. **API Reference**: `API_REFERENCE.md` - Complete tool specifications
+3. **Troubleshooting**: `docs\archive\TROUBLESHOOTING.md` - Common issues
+4. **API Reference**: `docs\archive\API_REFERENCE.md` - Complete tool specifications
 
 ### For Developers
 
-1. **Architecture**: `TECHNICAL_ARCHITECTURE.md` - Deep technical dive
-2. **Testing**: `TESTING.md` - Testing strategies
+1. **Architecture**: `docs\archive\TECHNICAL_ARCHITECTURE.md` - Deep technical dive
+2. **Testing**: `docs\archive\TESTING.md` - Testing strategies
 3. **Contributing**: Follow existing code patterns
-4. **Project Status**: `PROJECT_SUMMARY.md` - Implementation status
+4. **Project Status**: `docs\archive\PROJECT_SUMMARY.md` - Implementation status
 
 ### For Decision Makers
 
-1. **Discovery Summary**: `DISCOVERY_SUMMARY.md` - Comprehensive analysis
+1. **Discovery Summary**: `docs\archive\DISCOVERY_SUMMARY.md` - Comprehensive analysis
 2. **Changelog**: `CHANGELOG.md` - Version history
-3. **Architecture Blueprint**: `ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md`
+3. **Architecture Blueprint**: `docs\archive\ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md`
 
 ## Common Use Cases
 
@@ -405,7 +405,7 @@ For PRs with 100+ files:
 ## Next Steps
 
 1. ✅ **Complete Quick Start** (above)
-2. 📖 **Read API Reference** (`API_REFERENCE.md`)
+2. 📖 **Read API Reference** (`docs\archive\API_REFERENCE.md`)
 3. 🔧 **Configure Invariants** (`.review-invariants.yml`)
 4. 🧪 **Run Tests** (`npm test`)
 5. 🚀 **Integrate with CI/CD**
@@ -413,9 +413,9 @@ For PRs with 100+ files:
 ## Support & Resources
 
 - **Documentation**: See `docs/` directory
-- **Issues**: Check `TROUBLESHOOTING.md`
-- **Architecture**: See `TECHNICAL_ARCHITECTURE.md`
-- **API**: See `API_REFERENCE.md`
+- **Issues**: Check `docs\archive\TROUBLESHOOTING.md`
+- **Architecture**: See `docs\archive\TECHNICAL_ARCHITECTURE.md`
+- **API**: See `docs\archive\API_REFERENCE.md`
 
 ## Success Metrics
 
@@ -432,8 +432,8 @@ Found an issue? Have a suggestion? Check the documentation or create an issue!
 
 ---
 
-**Ready to dive deeper?** Check out `TECHNICAL_ARCHITECTURE.md` for a comprehensive technical overview.
+**Ready to dive deeper?** Check out `docs\archive\TECHNICAL_ARCHITECTURE.md` for a comprehensive technical overview.
 
-**Want to contribute?** Read `PROJECT_SUMMARY.md` to understand the implementation status.
+**Want to contribute?** Read `docs\archive\PROJECT_SUMMARY.md` to understand the implementation status.
 
-**Need help?** See `TROUBLESHOOTING.md` for common issues and solutions.
+**Need help?** See `docs\archive\TROUBLESHOOTING.md` for common issues and solutions.

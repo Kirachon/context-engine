@@ -177,7 +177,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 ### Documentation
 - **README.md**: Updated with code review tools documentation
 - **Tool Manifest**: Added `code_review` capability with feature list
-- **Examples**: Code review usage examples (see EXAMPLES.md)
+- **Examples**: Code review usage examples (see docs/archive/EXAMPLES.md)
 
 ### Performance
 - **Timeout Protection**: 120-second timeout for AI review operations
@@ -357,7 +357,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
    - Updated test count from 186 to 213 tests passing
    - Added alternative test command for quieter ESM runs
 
-3. **TESTING.md**
+3. **docs/archive/TESTING.md**
    - Added automated testing section with commands
    - Documented Phase 2 snapshot baseline verification
    - Added quieter test run option for stream/pipe error avoidance
@@ -599,7 +599,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 ### Added
 
 #### Core Architecture
-- Implemented 5-layer architecture as specified in plan.md
+- Implemented 5-layer architecture as specified in docs/archive/plan.md
 - Layer 1: Auggie SDK integration for core context engine
 - Layer 2: Context Service Layer (serviceClient.ts) for orchestration
 - Layer 3: MCP Interface Layer with three tools
@@ -621,8 +621,8 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 
 #### Documentation
 - README.md with architecture overview and usage instructions
-- QUICKSTART.md for 5-minute setup guide
-- TESTING.md with comprehensive testing strategies
+- docs/archive/QUICKSTART.md for 5-minute setup guide
+- docs/archive/TESTING.md with comprehensive testing strategies
 - Example configuration files for Codex CLI
 - Inline code documentation following architectural principles
 
@@ -658,7 +658,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 
 ### Future Enhancements (Planned)
 
-As outlined in plan.md, these can be added without architectural changes:
+As outlined in docs/archive/plan.md, these can be added without architectural changes:
 - ~~File watchers for automatic re-indexing~~ ✅ Implemented in v1.1.0
 - ~~Incremental indexing for faster updates~~ ✅ Implemented in v1.1.0
 - Multi-repo support

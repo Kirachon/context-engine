@@ -90,22 +90,22 @@ The Context Engine MCP Server is a **production-ready**, **local-first** semanti
 
 ### User Documentation ✅
 - `README.md` - Quick start guide
-- `QUICKSTART.md` - Step-by-step setup
-- `GET_STARTED.md` - Beginner guide
-- `EXAMPLES.md` - Usage examples
-- `TROUBLESHOOTING.md` - Common issues
+- `docs\archive\QUICKSTART.md` - Step-by-step setup
+- `docs\archive\GET_STARTED.md` - Beginner guide
+- `docs\archive\EXAMPLES.md` - Usage examples
+- `docs\archive\TROUBLESHOOTING.md` - Common issues
 
 ### Developer Documentation ✅
 - `ARCHITECTURE.md` - System architecture
-- `PLANNING_WORKFLOW.md` - Planning features
-- `TESTING.md` - Testing guide
-- `DEVELOPER_QUICK_REFERENCE.md` - Quick reference
-- `COMPREHENSIVE_PROJECT_SUMMARY.md` - Complete overview
+- `docs\archive\PLANNING_WORKFLOW.md` - Planning features
+- `docs\archive\TESTING.md` - Testing guide
+- `docs\archive\DEVELOPER_QUICK_REFERENCE.md` - Quick reference
+- `COMPREHENSIVE_docs\archive\PROJECT_SUMMARY.md` - Complete overview
 
 ### Technical Documentation ✅
-- `INDEX.md` - Documentation index
-- `TOOL_COUNT_ANALYSIS.md` - Tool inventory
-- `IMPLEMENTATION_PLAN.md` - Implementation details
+- `docs\archive\INDEX.md` - Documentation index
+- `docs\archive\TOOL_COUNT_ANALYSIS.md` - Tool inventory
+- `docs\archive\IMPLEMENTATION_PLAN.md` - Implementation details
 - `RELEASE_NOTES_*.md` - Version history
 
 ## Production Readiness Checklist
@@ -206,19 +206,19 @@ All core features are complete, tested, and documented. The system is stable, pe
 ## Recommendations
 
 ### For Users
-1. Start with the `QUICKSTART.md` guide
+1. Start with the `docs\archive\QUICKSTART.md` guide
 2. Use `verify-setup.js` to check installation
 3. Try the planning workflow with a simple task
 4. Install the VS Code extension for enhanced experience
 
 ### For Developers
 1. Read `ARCHITECTURE.md` for system overview
-2. Use `DEVELOPER_QUICK_REFERENCE.md` for common tasks
+2. Use `docs\archive\DEVELOPER_QUICK_REFERENCE.md` for common tasks
 3. Run tests before making changes
 4. Follow the layer boundaries
 
 ### For Contributors
-1. Check `TESTING.md` for testing guidelines
+1. Check `docs\archive\TESTING.md` for testing guidelines
 2. Update documentation when adding features
 3. Maintain test coverage
 4. Follow TypeScript best practices

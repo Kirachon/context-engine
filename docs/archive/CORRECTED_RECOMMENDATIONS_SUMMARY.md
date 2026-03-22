@@ -127,22 +127,22 @@ These contain **real secrets** and are properly excluded:
 
 All recommendation documents have been corrected:
 
-1. ✅ **`INDEXABLE_EXTENSIONS_ANALYSIS.md`**
+1. ✅ **`docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`**
    - Removed 3 dangerous environment file extensions
    - Updated counts: 47 → 44 extensions
    - Added security warnings
 
-2. ✅ **`EXTENSION_RECOMMENDATIONS_SUMMARY.md`**
+2. ✅ **`docs\archive\EXTENSION_RECOMMENDATIONS_SUMMARY.md`**
    - Removed environment files from Medium Priority
    - Updated Phase 2: 27 → 24 extensions
    - Added security notice
 
-3. ✅ **`QUICK_REFERENCE_EXTENSIONS.md`**
+3. ✅ **`docs\archive\QUICK_REFERENCE_EXTENSIONS.md`**
    - Removed `.env.local`, `.env.development`, `.env.production`
    - Updated copy-paste arrays
    - Added security warning
 
-4. ✅ **`SECURITY_ANALYSIS_ENV_FILES.md`** (NEW)
+4. ✅ **`docs\archive\SECURITY_ANALYSIS_ENV_FILES.md`** (NEW)
    - Comprehensive security analysis
    - Detailed explanation of the issue
    - Verification of existing protections
@@ -169,10 +169,10 @@ All recommendation documents have been corrected:
 
 ## 📚 Reference Documents
 
-- **Security Analysis**: `SECURITY_ANALYSIS_ENV_FILES.md`
-- **Detailed Analysis**: `INDEXABLE_EXTENSIONS_ANALYSIS.md`
-- **Quick Summary**: `EXTENSION_RECOMMENDATIONS_SUMMARY.md`
-- **Copy-Paste Reference**: `QUICK_REFERENCE_EXTENSIONS.md`
+- **Security Analysis**: `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md`
+- **Detailed Analysis**: `docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`
+- **Quick Summary**: `docs\archive\EXTENSION_RECOMMENDATIONS_SUMMARY.md`
+- **Copy-Paste Reference**: `docs\archive\QUICK_REFERENCE_EXTENSIONS.md`
 
 ---
 

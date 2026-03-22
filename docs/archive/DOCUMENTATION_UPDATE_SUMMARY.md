@@ -33,7 +33,7 @@ The Context Engine MCP Server documentation incorrectly stated there were **28 M
 
 ---
 
-### 2. REDDIT_POST.md ✅
+### 2. docs\archive\REDDIT_POST.md ✅
 
 **Changes Made**:
 - Line 122: Updated from "28 MCP tools" to "29 MCP tools"
@@ -46,7 +46,7 @@ The Context Engine MCP Server documentation incorrectly stated there were **28 M
 
 ---
 
-### 3. NOTEBOOKLM_PROMPT.md ✅
+### 3. docs\archive\NOTEBOOKLM_PROMPT.md ✅
 
 **Changes Made**:
 - Line 23: Updated Layer 3 description from "28 tools" to "29 tools"
@@ -100,6 +100,6 @@ The Context Engine MCP Server documentation incorrectly stated there were **28 M
 
 ## Files Created During This Process
 
-1. **TOOL_COUNT_ANALYSIS.md** - Comprehensive analysis of the tool count discrepancy
-2. **DOCUMENTATION_UPDATE_SUMMARY.md** (this file) - Summary of changes made
+1. **docs\archive\TOOL_COUNT_ANALYSIS.md** - Comprehensive analysis of the tool count discrepancy
+2. **docs\archive\DOCUMENTATION_UPDATE_SUMMARY.md** (this file) - Summary of changes made
 

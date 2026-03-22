@@ -6,7 +6,7 @@
 **Recommended Additions**: 44
 **New Total**: 116 extensions
 
-⚠️ **SECURITY CORRECTION**: This document was updated to remove `.env.local`, `.env.development`, and `.env.production` which contain sensitive credentials. See `SECURITY_ANALYSIS_ENV_FILES.md` for details.
+⚠️ **SECURITY CORRECTION**: This document was updated to remove `.env.local`, `.env.development`, and `.env.production` which contain sensitive credentials. See `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md` for details.
 
 ---
 
@@ -191,7 +191,7 @@ Blockchain & specialized languages - add only if targeting these domains:
 
 ## Next Steps
 
-1. Review the detailed analysis in `INDEXABLE_EXTENSIONS_ANALYSIS.md`
+1. Review the detailed analysis in `docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`
 2. Decide on implementation phases
 3. Update `src/mcp/serviceClient.ts` with selected extensions
 4. Test with repositories using the new languages
@@ -202,7 +202,7 @@ Blockchain & specialized languages - add only if targeting these domains:
 
 ## References
 
-- **Detailed Analysis**: See `INDEXABLE_EXTENSIONS_ANALYSIS.md`
+- **Detailed Analysis**: See `docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`
 - **GitHub Linguist**: https://github.com/github-linguist/linguist
 - **Current Implementation**: `src/mcp/serviceClient.ts` (lines 572-645)
 

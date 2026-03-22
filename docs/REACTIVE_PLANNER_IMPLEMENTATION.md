@@ -1343,7 +1343,7 @@ Week 9:    GA Release
 
 - [Reactive_Planner.md](./Reactive_Planner.md) - Original specification
 - [ARCHITECTURE.md](../ARCHITECTURE.md) - System architecture
-- [PLANNING_WORKFLOW.md](../PLANNING_WORKFLOW.md) - Existing planning tools
+- [docs/archive/PLANNING_WORKFLOW.md](../docs/archive/PLANNING_WORKFLOW.md) - Existing planning tools
 - Industry Research:
   - Airflow/Dagster for DAG orchestration patterns
   - CodeRabbit/Codex for review automation

@@ -259,10 +259,10 @@ See `codex_config.example.toml` for MCP client setup
 
 - `README.md` - Overview and quick start
 - `ARCHITECTURE.md` - Detailed architecture
-- `PLANNING_WORKFLOW.md` - Planning feature guide
-- `TESTING.md` - Testing guide
-- `TROUBLESHOOTING.md` - Common issues
-- `COMPREHENSIVE_PROJECT_SUMMARY.md` - Complete project summary
+- `docs\archive\PLANNING_WORKFLOW.md` - Planning feature guide
+- `docs\archive\TESTING.md` - Testing guide
+- `docs\archive\TROUBLESHOOTING.md` - Common issues
+- `COMPREHENSIVE_docs\archive\PROJECT_SUMMARY.md` - Complete project summary
 
 ## 🎯 Best Practices
 

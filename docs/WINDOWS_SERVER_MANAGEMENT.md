@@ -287,6 +287,5 @@ dev.bat
 ## See Also
 
 - [README.md](../README.md) - Main project documentation
-- [QUICKSTART.md](../QUICKSTART.md) - Quick start guide
+- [docs/archive/QUICKSTART.md](../docs/archive/QUICKSTART.md) - Quick start guide
 - [CHANGELOG.md](../CHANGELOG.md) - Version history
-

@@ -524,7 +524,7 @@ Use the planning tools directly in your IDE for seamless development.
 
 ## See Also
 
-- [EXAMPLES.md](EXAMPLES.md) - Complete examples with expected outputs
+- [docs\archive\EXAMPLES.md](docs\archive\EXAMPLES.md) - Complete examples with expected outputs
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Technical architecture details
 - [README.md](README.md) - General documentation
 - [CHANGELOG.md](CHANGELOG.md) - Version history and changes

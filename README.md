@@ -2,13 +2,13 @@
 
 A local-first, agent-agnostic Model Context Protocol (MCP) server for workspace indexing, retrieval, planning, and review workflows.
 
-> New here? Check out [INDEX.md](INDEX.md) for a complete documentation guide.
+> New here? Check out [docs/archive/INDEX.md](docs/archive/INDEX.md) for a complete documentation guide.
 >
-> Quick Start: [QUICKSTART.md](QUICKSTART.md) -> [GET_STARTED.md](GET_STARTED.md) -> [API_REFERENCE.md](API_REFERENCE.md)
+> Quick Start: [docs/archive/QUICKSTART.md](docs/archive/QUICKSTART.md) -> [docs/archive/GET_STARTED.md](docs/archive/GET_STARTED.md) -> [docs/archive/API_REFERENCE.md](docs/archive/API_REFERENCE.md)
 >
 > Windows Deployment: [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)
 >
-> Architecture: [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md) for deep technical dive
+> Architecture: [docs/archive/TECHNICAL_ARCHITECTURE.md](docs/archive/TECHNICAL_ARCHITECTURE.md) for deep technical dive
 
 ## Architecture
 
@@ -92,14 +92,14 @@ npm run ci:check:legacy-capability-parity:strict
 
 ## Documentation Quick Links
 
-- Setup: [QUICKSTART.md](QUICKSTART.md)
+- Setup: [docs/archive/QUICKSTART.md](docs/archive/QUICKSTART.md)
 - MCP Clients: [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)
-- Getting Started: [GET_STARTED.md](GET_STARTED.md)
-- Troubleshooting: [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
-- Testing: [TESTING.md](TESTING.md)
+- Getting Started: [docs/archive/GET_STARTED.md](docs/archive/GET_STARTED.md)
+- Troubleshooting: [docs/archive/TROUBLESHOOTING.md](docs/archive/TROUBLESHOOTING.md)
+- Testing: [docs/archive/TESTING.md](docs/archive/TESTING.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Memory Operations: [docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md)
-- All Docs: [INDEX.md](INDEX.md)
+- All Docs: [docs/archive/INDEX.md](docs/archive/INDEX.md)
 
 ## Current Status
 
@@ -107,5 +107,3 @@ npm run ci:check:legacy-capability-parity:strict
 - Planning and review use the OpenAI session path
 - Legacy-provider references that remain are historical docs, tests, or migration guardrails
 - Current hardening focuses on fast paths, cancellation, and prompt efficiency rather than provider replacement
-
-

@@ -316,7 +316,7 @@ Set `trust: true` in your configuration:
 - [Gemini CLI MCP Server Integration](https://github.com/google-gemini/gemini-cli/blob/main/docs/tools/mcp-server.md)
 - [Gemini CLI Configuration Guide](https://github.com/google-gemini/gemini-cli/blob/main/docs/get-started/configuration.md)
 - [Context Engine Documentation](./README.md)
-- [Context Engine Examples](./EXAMPLES.md)
+- [Context Engine Examples](./docs\archive\EXAMPLES.md)
 
 ---
 

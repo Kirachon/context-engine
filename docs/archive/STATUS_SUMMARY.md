@@ -168,42 +168,42 @@
 
 ### Analysis Documents (8 files)
 
-1. **`INDEXABLE_EXTENSIONS_ANALYSIS.md`** (373 lines)
+1. **`docs\archive\INDEXABLE_EXTENSIONS_ANALYSIS.md`** (373 lines)
    - Comprehensive research and justification
    - Industry standards comparison
    - Complete code implementation example
 
-2. **`EXTENSION_RECOMMENDATIONS_SUMMARY.md`** (150 lines)
+2. **`docs\archive\EXTENSION_RECOMMENDATIONS_SUMMARY.md`** (150 lines)
    - Executive summary
    - Priority-based recommendations
    - Key findings
 
-3. **`QUICK_REFERENCE_EXTENSIONS.md`** (150 lines)
+3. **`docs\archive\QUICK_REFERENCE_EXTENSIONS.md`** (150 lines)
    - Copy-paste ready code snippets
    - Verification checklist
    - Testing commands
 
-4. **`SECURITY_ANALYSIS_ENV_FILES.md`** (150 lines)
+4. **`docs\archive\SECURITY_ANALYSIS_ENV_FILES.md`** (150 lines)
    - Critical security issue analysis
    - Detailed explanation of the problem
    - Verification of existing protections
 
-5. **`CORRECTED_RECOMMENDATIONS_SUMMARY.md`** (150 lines)
+5. **`docs\archive\CORRECTED_RECOMMENDATIONS_SUMMARY.md`** (150 lines)
    - Final corrected recommendations
    - Security verification checklist
    - Implementation guidance
 
-6. **`COMPLETENESS_ASSESSMENT.md`** (150 lines)
+6. **`docs\archive\COMPLETENESS_ASSESSMENT.md`** (150 lines)
    - Coverage analysis by paradigm
    - Gap analysis
    - Phase 4 recommendations
 
-7. **`FILE_EXTENSIONS_IMPLEMENTATION_PLAN.md`** (150 lines)
+7. **`FILE_EXTENSIONS_docs\archive\IMPLEMENTATION_PLAN.md`** (150 lines)
    - Step-by-step implementation guide
    - Testing procedures
    - Rollback plan
 
-8. **`STATUS_SUMMARY.md`** (this file)
+8. **`docs\archive\STATUS_SUMMARY.md`** (this file)
    - Overall status and next steps
 
 ---

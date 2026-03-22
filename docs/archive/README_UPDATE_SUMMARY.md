@@ -48,14 +48,14 @@ All high and medium priority updates have been successfully applied to README.md
 
 #### 5. Documentation Links Added (Lines 5-9)
 **Added Links:**
-- Quick Start path: QUICKSTART.md → GETTING_STARTED.md → API_REFERENCE.md
-- Architecture deep dive: TECHNICAL_ARCHITECTURE.md
+- Quick Start path: docs\archive\QUICKSTART.md → docs\archive\GETTING_STARTED.md → docs\archive\API_REFERENCE.md
+- Architecture deep dive: docs\archive\TECHNICAL_ARCHITECTURE.md
 
 **Format:**
 ```markdown
-> 🚀 **Quick Start**: [QUICKSTART.md](QUICKSTART.md) → [GETTING_STARTED.md](GETTING_STARTED.md) → [API_REFERENCE.md](API_REFERENCE.md)
+> 🚀 **Quick Start**: [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) → [docs\archive\GETTING_STARTED.md](docs\archive\GETTING_STARTED.md) → [docs\archive\API_REFERENCE.md](docs\archive\API_REFERENCE.md)
 > 
-> 🏗️ **Architecture**: [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md) for deep technical dive
+> 🏗️ **Architecture**: [docs\archive\TECHNICAL_ARCHITECTURE.md](docs\archive\TECHNICAL_ARCHITECTURE.md) for deep technical dive
 ```
 
 #### 6. Key Characteristics Updated (Lines 146-148)

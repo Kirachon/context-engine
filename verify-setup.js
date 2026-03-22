@@ -174,12 +174,12 @@ async function main() {
     console.log('\nNext steps:');
     console.log('  1. node dist/index.js --help');
     console.log('  2. node dist/index.js --workspace /path/to/project --index');
-    console.log('  3. Configure Codex CLI (see QUICKSTART.md)');
+    console.log('  3. Configure Codex CLI (see docs/archive/QUICKSTART.md)');
   } else {
     log('Some checks failed. Please fix the issues above.', 'error');
     console.log('\nFor help, see:');
-    console.log('  - QUICKSTART.md for setup instructions');
-    console.log('  - TROUBLESHOOTING.md for common issues');
+    console.log('  - docs/archive/QUICKSTART.md for setup instructions');
+    console.log('  - docs/archive/TROUBLESHOOTING.md for common issues');
   }
   
   console.log('');

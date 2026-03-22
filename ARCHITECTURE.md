@@ -586,10 +586,10 @@ These can be added **without architectural changes**:
 
 ## Testing Strategy
 
-See [TESTING.md](TESTING.md) for comprehensive testing guide.
+See [docs/archive/TESTING.md](docs/archive/TESTING.md) for comprehensive testing guide.
 
 ## References
 
-- [plan.md](plan.md) - Original architecture plan
+- [docs/archive/plan.md](docs/archive/plan.md) - Original architecture plan
 - [MCP Documentation](https://modelcontextprotocol.io/)
-- [Context Engine docs index](INDEX.md)
+- [Context Engine docs index](docs/archive/INDEX.md)

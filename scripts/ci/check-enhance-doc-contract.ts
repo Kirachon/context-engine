@@ -2,7 +2,7 @@
 /**
  * Deterministic docs-governance checker for enhance_prompt examples.
  *
- * Validates EXAMPLES.md contract expectations for enhance_prompt docs.
+ * Validates docs/archive/EXAMPLES.md contract expectations for enhance_prompt docs.
  *
  * Exit codes:
  * - 0: all checks pass
@@ -23,7 +23,7 @@ interface CheckResult {
   detail: string;
 }
 
-const DEFAULT_EXAMPLES_PATH = 'EXAMPLES.md';
+const DEFAULT_EXAMPLES_PATH = 'docs/archive/EXAMPLES.md';
 const ENHANCE_HEADING = '### enhance_prompt Tool';
 
 function printHelpAndExit(code: number): never {
@@ -33,7 +33,7 @@ Usage:
   node --import tsx scripts/ci/check-enhance-doc-contract.ts [options]
 
 Options:
-  --examples <path>   Path to EXAMPLES.md (default: EXAMPLES.md)
+  --examples <path>   Path to docs/archive/EXAMPLES.md (default: docs/archive/EXAMPLES.md)
 `);
   process.exit(code);
 }

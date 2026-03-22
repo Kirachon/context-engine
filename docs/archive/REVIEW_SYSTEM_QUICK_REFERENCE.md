@@ -240,10 +240,10 @@ cat artifacts/review_diff.sarif
 
 ## 📚 Related Documentation
 
-- **Full Assessment**: `IMPLEMENTATION_STATUS_ASSESSMENT.md`
-- **Executive Summary**: `ASSESSMENT_EXECUTIVE_SUMMARY.md`
-- **Architecture Blueprint**: `ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md`
-- **Developer Guide**: `DEVELOPER_QUICK_REFERENCE.md`
+- **Full Assessment**: `docs\archive\IMPLEMENTATION_STATUS_ASSESSMENT.md`
+- **Executive Summary**: `docs\archive\ASSESSMENT_EXECUTIVE_SUMMARY.md`
+- **Architecture Blueprint**: `docs\archive\ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md`
+- **Developer Guide**: `docs\archive\DEVELOPER_QUICK_REFERENCE.md`
 
 ---
 

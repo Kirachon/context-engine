@@ -117,20 +117,20 @@ Tests:       397 passed, 397 total
 
 **Documentation Files**:
 1. `README.md` - Overview and quick start
-2. `QUICKSTART.md` - 5-minute setup guide
+2. `docs\archive\QUICKSTART.md` - 5-minute setup guide
 3. `ARCHITECTURE.md` - Detailed architecture
-4. `TESTING.md` - Testing strategies
-5. `TROUBLESHOOTING.md` - Common issues
+4. `docs\archive\TESTING.md` - Testing strategies
+5. `docs\archive\TROUBLESHOOTING.md` - Common issues
 6. `CHANGELOG.md` - Version history
-7. `PROJECT_SUMMARY.md` - Implementation status
-8. `ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md` - Enhancement plans
+7. `docs\archive\PROJECT_SUMMARY.md` - Implementation status
+8. `docs\archive\ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md` - Enhancement plans
 9. `REACTIVE_PLANNER_IMPLEMENTATION.md` - Reactive system design
-10. `plan.md` - Original architecture plan
+10. `docs\archive\plan.md` - Original architecture plan
 
 **New Documentation** (created during discovery):
-- `TECHNICAL_ARCHITECTURE.md` - Deep technical dive
-- `API_REFERENCE.md` - Complete API specifications
-- `DISCOVERY_SUMMARY.md` - This document
+- `docs\archive\TECHNICAL_ARCHITECTURE.md` - Deep technical dive
+- `docs\archive\API_REFERENCE.md` - Complete API specifications
+- `docs\archive\DISCOVERY_SUMMARY.md` - This document
 
 ### 7. **Code Quality: High** ✅
 
@@ -270,7 +270,7 @@ security:
 
 ### For Users
 
-1. **Start with Quick Start**: Follow `QUICKSTART.md` for 5-minute setup
+1. **Start with Quick Start**: Follow `docs\archive\QUICKSTART.md` for 5-minute setup
 2. **Enable Static Analysis**: Add `enable_static_analysis: true` for TypeScript projects
 3. **Configure Invariants**: Create `.review-invariants.yml` for custom rules
 4. **Use Reactive Reviews**: For large PRs (100+ files)
@@ -278,7 +278,7 @@ security:
 
 ### For Developers
 
-1. **Read Architecture Docs**: Start with `ARCHITECTURE.md` and `TECHNICAL_ARCHITECTURE.md`
+1. **Read Architecture Docs**: Start with `ARCHITECTURE.md` and `docs\archive\TECHNICAL_ARCHITECTURE.md`
 2. **Run Tests**: `npm test` to verify setup
 3. **Add Custom Tools**: Follow patterns in `src/mcp/tools/`
 4. **Extend Analyzers**: Add new analyzers in `src/reviewer/checks/adapters/`

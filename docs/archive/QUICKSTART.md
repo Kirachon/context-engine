@@ -489,7 +489,7 @@ node dist/index.js --workspace /path/to/project --index
 ## Next Steps
 
 - Read [README.md](README.md) for detailed documentation
-- Review [plan.md](plan.md) for architecture details
+- Review [docs\archive\plan.md](docs\archive\plan.md) for architecture details
 - Explore the source code in `src/mcp/`
 
 ## Common Use Cases

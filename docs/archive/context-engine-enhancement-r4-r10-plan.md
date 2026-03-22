@@ -39,7 +39,7 @@ T2,T4,T6,T8,T10,T12 -> T13a -> T13b -> T14 -> T15 -> T16
 - **files edited/created**:
   - `artifacts/governance/t0-prereq-evidence-freeze-manifest-2026-03-12.json` (created)
   - `docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md` (edited)
-  - `context-engine-enhancement-r4-r10-plan.md` (edited)
+  - `docs/archive/context-engine-enhancement-r4-r10-plan.md` (edited)
 
 ### T1: R4 Trend Contract Design
 - **depends_on**: [T0]
@@ -269,7 +269,7 @@ T2,T4,T6,T8,T10,T12 -> T13a -> T13b -> T14 -> T15 -> T16
   - Preserved unknowns register items that remain not specified in codebase.
 - **files edited/created**:
   - `docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md` (edited)
-  - `context-engine-enhancement-r4-r10-plan.md` (edited)
+  - `docs/archive/context-engine-enhancement-r4-r10-plan.md` (edited)
 
 ## Parallel Execution Groups
 

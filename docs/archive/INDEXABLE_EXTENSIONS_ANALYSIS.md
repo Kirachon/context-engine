@@ -8,7 +8,7 @@ Based on research of industry-leading code search tools (GitHub Linguist, Source
 **Recommended Additions**: 44 extensions
 **New Total**: 116 extensions
 
-⚠️ **SECURITY NOTE**: This analysis initially included `.env.local`, `.env.development`, and `.env.production` but these have been **REMOVED** as they contain sensitive credentials. See `SECURITY_ANALYSIS_ENV_FILES.md` for details.
+⚠️ **SECURITY NOTE**: This analysis initially included `.env.local`, `.env.development`, and `.env.production` but these have been **REMOVED** as they contain sensitive credentials. See `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md` for details.
 
 ---
 
@@ -328,7 +328,7 @@ const INDEXABLE_EXTENSIONS = new Set([
 
 **Total**: 72 (current) + 44 (new) = **116 extensions**
 
-⚠️ **SECURITY CORRECTION**: Originally recommended 47 extensions including `.env.local`, `.env.development`, `.env.production`. These 3 have been **REMOVED** as they contain sensitive credentials. See `SECURITY_ANALYSIS_ENV_FILES.md` for full analysis.
+⚠️ **SECURITY CORRECTION**: Originally recommended 47 extensions including `.env.local`, `.env.development`, `.env.production`. These 3 have been **REMOVED** as they contain sensitive credentials. See `docs\archive\SECURITY_ANALYSIS_ENV_FILES.md` for full analysis.
 
 ---
 

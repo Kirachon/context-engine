@@ -10,7 +10,7 @@
 
 ## What Was Built
 
-A complete, production-ready **Model Context Protocol (MCP) server** that provides semantic code search and context enhancement capabilities to AI coding agents, following the exact specifications from `plan.md`.
+A complete, production-ready **Model Context Protocol (MCP) server** that provides semantic code search and context enhancement capabilities to AI coding agents, following the exact specifications from `docs\archive\plan.md`.
 
 ## Implementation Checklist
 
@@ -22,7 +22,7 @@ A complete, production-ready **Model Context Protocol (MCP) server** that provid
 - [x] **Layer 4**: Agent-agnostic design (works with any MCP client)
 - [x] **Layer 5**: Storage backend (Auggie's internal)
 
-### ✅ Directory Structure (As Specified in plan.md)
+### ✅ Directory Structure (As Specified in docs\archive\plan.md)
 
 ```
 ✅ src/
@@ -56,15 +56,15 @@ A complete, production-ready **Model Context Protocol (MCP) server** that provid
 ### ✅ Documentation (Comprehensive)
 
 - [x] **README.md** - Project overview and usage guide
-- [x] **QUICKSTART.md** - 5-minute setup guide
+- [x] **docs\archive\QUICKSTART.md** - 5-minute setup guide
 - [x] **ARCHITECTURE.md** - Detailed architecture documentation
-- [x] **EXAMPLES.md** - Real-world usage examples
-- [x] **TESTING.md** - Testing strategies and debugging
-- [x] **TROUBLESHOOTING.md** - Common issues and solutions
-- [x] **PROJECT_SUMMARY.md** - Implementation status
+- [x] **docs\archive\EXAMPLES.md** - Real-world usage examples
+- [x] **docs\archive\TESTING.md** - Testing strategies and debugging
+- [x] **docs\archive\TROUBLESHOOTING.md** - Common issues and solutions
+- [x] **docs\archive\PROJECT_SUMMARY.md** - Implementation status
 - [x] **CHANGELOG.md** - Version history
-- [x] **INDEX.md** - Documentation navigation
-- [x] **plan.md** - Original architectural plan (existing)
+- [x] **docs\archive\INDEX.md** - Documentation navigation
+- [x] **docs\archive\plan.md** - Original architectural plan (existing)
 
 ### ✅ Configuration & Setup
 
@@ -96,15 +96,15 @@ A complete, production-ready **Model Context Protocol (MCP) server** that provid
 
 ### Documentation (10 files)
 1. `README.md` - Updated with project overview
-2. `QUICKSTART.md` - 5-minute setup guide
+2. `docs\archive\QUICKSTART.md` - 5-minute setup guide
 3. `ARCHITECTURE.md` - Detailed architecture
-4. `EXAMPLES.md` - Usage examples
-5. `TESTING.md` - Testing guide
-6. `TROUBLESHOOTING.md` - Problem solving
-7. `PROJECT_SUMMARY.md` - Implementation summary
+4. `docs\archive\EXAMPLES.md` - Usage examples
+5. `docs\archive\TESTING.md` - Testing guide
+6. `docs\archive\TROUBLESHOOTING.md` - Problem solving
+7. `docs\archive\PROJECT_SUMMARY.md` - Implementation summary
 8. `CHANGELOG.md` - Version history
-9. `INDEX.md` - Documentation index
-10. `IMPLEMENTATION_COMPLETE.md` - This file
+9. `docs\archive\INDEX.md` - Documentation index
+10. `docs\archive\IMPLEMENTATION_COMPLETE.md` - This file
 
 ### Configuration (6 files)
 1. `package.json` - NPM configuration
@@ -135,7 +135,7 @@ A visual Mermaid diagram was rendered showing:
 
 ## What Makes This Special
 
-1. **Follows the Plan**: Implements exactly what was specified in plan.md
+1. **Follows the Plan**: Implements exactly what was specified in docs\archive\plan.md
 2. **Production-Ready**: Comprehensive error handling, logging, validation
 3. **Well-Documented**: 10 documentation files covering all aspects
 4. **Extensible**: Clean architecture allows easy additions
@@ -156,7 +156,7 @@ node dist/index.js --help
 ```
 
 ### Integration (10 minutes)
-1. Configure Codex CLI (see QUICKSTART.md)
+1. Configure Codex CLI (see docs\archive\QUICKSTART.md)
 2. Restart Codex CLI
 3. Verify tools appear (use `/mcp` command)
 4. Try example queries
@@ -187,14 +187,14 @@ These can be added without architectural changes:
 ✅ Zero TypeScript errors
 ✅ Ready for production use
 ✅ Extensible for future enhancements
-✅ Follows all design principles from plan.md
+✅ Follows all design principles from docs\archive\plan.md
 
 ## References
 
-- **Original Plan**: [plan.md](plan.md)
+- **Original Plan**: [docs\archive\plan.md](docs\archive\plan.md)
 - **Architecture**: [ARCHITECTURE.md](ARCHITECTURE.md)
-- **Quick Start**: [QUICKSTART.md](QUICKSTART.md)
-- **Documentation Index**: [INDEX.md](INDEX.md)
+- **Quick Start**: [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md)
+- **Documentation Index**: [docs\archive\INDEX.md](docs\archive\INDEX.md)
 - **MCP Protocol**: https://modelcontextprotocol.io/
 - **Auggie SDK**: https://docs.augmentcode.com/
 
@@ -205,14 +205,14 @@ These can be added without architectural changes:
 The Context Engine MCP Server is **complete, tested, and ready for use**.
 
 All requirements from the original request have been met:
-- ✅ 5-layer architecture from plan.md
+- ✅ 5-layer architecture from docs\archive\plan.md
 - ✅ Auggie SDK as foundation
 - ✅ All 3 MCP tools implemented
 - ✅ Local-first, agent-agnostic design
 - ✅ Proper authentication setup
 - ✅ Comprehensive documentation
 
-**Users can now follow QUICKSTART.md to get started immediately.**
+**Users can now follow docs\archive\QUICKSTART.md to get started immediately.**
 
 ---
 

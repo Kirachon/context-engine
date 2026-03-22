@@ -14,7 +14,7 @@
   },
   "source_of_truth": {
     "decision_package": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md",
-    "plan_tracker": "context-engine-enhancement-r4-r10-plan.md"
+    "plan_tracker": "docs/archive/context-engine-enhancement-r4-r10-plan.md"
   },
   "recommendation_state_baseline": [
     {

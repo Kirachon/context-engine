@@ -315,7 +315,7 @@ export async function handleReviewDiff(
 - `src/reviewer/checks/adapters/tsc.ts` - TypeScript compiler integration
 
 **Blueprint Specification**:
-<augment_code_snippet path="ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md" mode="EXCERPT">
+<augment_code_snippet path="docs\archive\ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md" mode="EXCERPT">
 ````typescript
 interface StaticAnalyzerAdapter {
   name: string;
@@ -340,7 +340,7 @@ interface StaticAnalyzerAdapter {
 - `check_invariants` - Standalone invariant checking tool
 
 **Blueprint Specification**:
-<augment_code_snippet path="ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md" mode="EXCERPT">
+<augment_code_snippet path="docs\archive\ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md" mode="EXCERPT">
 ````typescript
 const ecosystemTools = [
   {

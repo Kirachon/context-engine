@@ -75,11 +75,11 @@ The README.md file is **mostly accurate** but is **missing critical v1.9.0 featu
 
 **Should Add (after line 5):**
 ```markdown
-> 📚 **New here?** Check out [INDEX.md](INDEX.md) for a complete documentation guide!
+> 📚 **New here?** Check out [docs\archive\INDEX.md](docs\archive\INDEX.md) for a complete documentation guide!
 > 
-> 🚀 **Quick Start**: [QUICKSTART.md](QUICKSTART.md) → [GETTING_STARTED.md](GETTING_STARTED.md) → [API_REFERENCE.md](API_REFERENCE.md)
+> 🚀 **Quick Start**: [docs\archive\QUICKSTART.md](docs\archive\QUICKSTART.md) → [docs\archive\GETTING_STARTED.md](docs\archive\GETTING_STARTED.md) → [docs\archive\API_REFERENCE.md](docs\archive\API_REFERENCE.md)
 > 
-> 🏗️ **Architecture**: [TECHNICAL_ARCHITECTURE.md](TECHNICAL_ARCHITECTURE.md) for deep technical dive
+> 🏗️ **Architecture**: [docs\archive\TECHNICAL_ARCHITECTURE.md](docs\archive\TECHNICAL_ARCHITECTURE.md) for deep technical dive
 ```
 
 #### 6. Code Review Section Needs Expansion
@@ -196,7 +196,7 @@ invariants:
 
 ### 🟡 **Medium Priority** (Should Fix)
 
-5. **Add documentation links**: Link to new docs (GETTING_STARTED.md, API_REFERENCE.md, etc.)
+5. **Add documentation links**: Link to new docs (docs\archive\GETTING_STARTED.md, docs\archive\API_REFERENCE.md, etc.)
 6. **Update Key Characteristics**: Add v1.9.0 features to the list
 
 ### 🟢 **Low Priority** (Nice to Have)
@@ -226,7 +226,7 @@ When making updates, reference these files for accuracy:
 4. **src/mcp/tools/reviewDiff.ts** - review_diff tool implementation
 5. **src/mcp/tools/checkInvariants.ts** - check_invariants tool
 6. **src/mcp/tools/staticAnalysis.ts** - run_static_analysis tool
-7. **API_REFERENCE.md** - Complete API documentation for all tools
+7. **docs\archive\API_REFERENCE.md** - Complete API documentation for all tools
 
 ## Conclusion
 

@@ -384,7 +384,7 @@ This opens a web interface for interactive debugging.
 
 ## Still Having Issues?
 
-1. Check the [TESTING.md](TESTING.md) guide
+1. Check the [docs\archive\TESTING.md](docs\archive\TESTING.md) guide
 2. Review [ARCHITECTURE.md](ARCHITECTURE.md) for design details
 3. Check `~/.codex/config.toml` for syntax errors
 4. Test with MCP Inspector

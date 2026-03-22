@@ -6,8 +6,8 @@ function readUtf8(path: string): string {
 }
 
 describe('documentation contracts', () => {
-  it('API_REFERENCE.md matches current MCP tool names (no legacy tool drift)', () => {
-    const text = readUtf8('API_REFERENCE.md');
+  it('docs/archive/API_REFERENCE.md matches current MCP tool names (no legacy tool drift)', () => {
+    const text = readUtf8('docs/archive/API_REFERENCE.md');
 
     // Must mention the current tool names
     expect(text).toContain('`review_changes`');
@@ -32,8 +32,8 @@ describe('documentation contracts', () => {
     expect(text).not.toContain('llm_risk_threshold');
   });
 
-  it('TECHNICAL_ARCHITECTURE.md matches current tool names', () => {
-    const text = readUtf8('TECHNICAL_ARCHITECTURE.md');
+  it('docs/archive/TECHNICAL_ARCHITECTURE.md matches current tool names', () => {
+    const text = readUtf8('docs/archive/TECHNICAL_ARCHITECTURE.md');
 
     expect(text).toContain('reactive_review_pr');
     expect(text).toContain('get_review_status');
@@ -47,4 +47,3 @@ describe('documentation contracts', () => {
     expect(text).not.toContain('generate_plan');
   });
 });
-

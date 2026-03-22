@@ -95,7 +95,7 @@ For your convenience, we've created these files:
    - Clean minimal configuration without comments
    - Copy this if you prefer a simpler config
 
-3. SETUP_GEMINI_CLI.md
+3. docs\archive\SETUP_GEMINI_CLI.md
    - Complete setup guide with troubleshooting
    - Read this for detailed instructions
 
@@ -140,8 +140,8 @@ NEED MORE HELP?
 ================================================================================
 
 See the full documentation:
-   - SETUP_GEMINI_CLI.md (detailed setup guide)
+   - docs\archive\SETUP_GEMINI_CLI.md (detailed setup guide)
    - README.md (Context Engine documentation)
-   - TROUBLESHOOTING.md (common issues and solutions)
+   - docs\archive\TROUBLESHOOTING.md (common issues and solutions)
 
 ================================================================================

@@ -128,7 +128,7 @@ If something does not work:
 - [ ] Check `npm run verify`
 - [ ] Check `npm run build`
 - [ ] Confirm MCP configuration
-- [ ] Review [TROUBLESHOOTING.md](TROUBLESHOOTING.md)
+- [ ] Review [docs\archive\TROUBLESHOOTING.md](docs\archive\TROUBLESHOOTING.md)
 
 ## Success Criteria
 

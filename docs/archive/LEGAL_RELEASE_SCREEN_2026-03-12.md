@@ -20,21 +20,21 @@ These are mostly non-runtime materials:
 
 - Historical architecture and plan docs:
   - `ARCHITECTURE.md`
-  - `ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md`
-  - `IMPLEMENTATION_PLAN.md`
-  - `plan.md`
-  - `CODEBASE_RETRIEVAL_PLAN.md`
+  - `docs\archive\ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md`
+  - `docs\archive\IMPLEMENTATION_PLAN.md`
+  - `docs\archive\plan.md`
+  - `docs\archive\CODEBASE_RETRIEVAL_PLAN.md`
 - Historical release/report docs:
   - `CHANGELOG.md`
-  - `PROJECT_STATUS_REPORT.md`
-  - `RELEASE_NOTES_v1.4.1.md`
-  - `RELEASE_NOTES_v1.5.0.md`
-  - `DISCOVERY_SUMMARY.md`
-  - `IMPLEMENTATION_STATUS_ASSESSMENT.md`
+  - `docs\archive\PROJECT_STATUS_REPORT.md`
+  - `docs\archive\RELEASE_NOTES_v1.4.1.md`
+  - `docs\archive\RELEASE_NOTES_v1.5.0.md`
+  - `docs\archive\DISCOVERY_SUMMARY.md`
+  - `docs\archive\IMPLEMENTATION_STATUS_ASSESSMENT.md`
 - Setup templates/snippets not in active runtime:
   - `gemini_settings_READY_TO_USE.json`
   - `gemini_settings_MINIMAL.json`
-  - `GEMINI_CLI_QUICK_SETUP.txt`
+  - `docs\archive\GEMINI_CLI_QUICK_SETUP.txt`
   - `.gemini/settings.json`
 - Test/guardrail references (intentional for boundary checks):
   - `tests/ci/checkLegacyProviderReferences.test.ts`

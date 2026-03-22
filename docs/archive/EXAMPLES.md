@@ -1199,4 +1199,4 @@ Timeout note: `review_changes` and `review_git_diff` use a default AI timeout of
 
 ---
 
-For more examples and use cases, see the [TESTING.md](TESTING.md) guide.
+For more examples and use cases, see the [docs\archive\TESTING.md](docs\archive\TESTING.md) guide.
