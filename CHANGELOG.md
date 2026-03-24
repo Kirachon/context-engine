@@ -331,7 +331,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
   - Suppresses diagnostic warnings (codes 1343, 1378)
 
 - **Git Ignore**: Updated `.gitignore`
-  - Excludes `.augment-plans/` (runtime plan storage)
+  - Excludes `.context-engine-plans/` (runtime plan storage)
   - Excludes `plan/` (personal planning notes)
 
 ### Documentation
@@ -382,7 +382,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 #### Cross-Session Memory System
 - **New MCP Tools**: `add_memory` and `list_memories` for persistent memory management
   - Store preferences, architecture decisions, and project facts across sessions
-  - Memories are indexed by Auggie and retrieved via semantic search
+  - Memories are indexed locally and retrieved via semantic search
   - Human-editable markdown files in `.memories/` directory
   - Version-controllable via Git for team sharing
 
@@ -564,7 +564,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 - **`enhance_prompt` tool now always uses AI mode**: Removed `use_ai` and `max_files` parameters
   - The tool now exclusively uses AI-powered enhancement via `searchAndAsk()`
   - Template-based enhancement mode has been removed
-  - Requires authentication (`auggie login`) for all uses
+  - Requires authentication (`context-engine login`) for all uses
   - Migration: Remove `use_ai` and `max_files` parameters from tool calls; only `prompt` is now accepted
 
 ### Removed
@@ -600,11 +600,11 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 
 #### Core Architecture
 - Implemented 5-layer architecture as specified in docs/archive/plan.md
-- Layer 1: Auggie SDK integration for core context engine
+- Layer 1: Core context engine integration
 - Layer 2: Context Service Layer (serviceClient.ts) for orchestration
 - Layer 3: MCP Interface Layer with three tools
 - Layer 4: Agent-agnostic design for any MCP client
-- Layer 5: Auggie's internal storage backend
+- Layer 5: Internal storage backend
 
 #### MCP Tools
 - `semantic_search(query, top_k)` - Semantic code search across codebase
@@ -614,7 +614,7 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 #### Features
 - Local-first operation (no cloud dependencies)
 - Agent-agnostic implementation (works with any MCP client)
-- Authentication via Auggie CLI or environment variables
+- Authentication via the supported CLI or environment variables
 - Workspace indexing support
 - Comprehensive error handling
 - Detailed logging for debugging
@@ -646,12 +646,12 @@ Version 1.8.0 represents a **major milestone** in the Context Engine MCP Server,
 - TypeScript 5.3+
 - Node.js 18+
 - @modelcontextprotocol/sdk for MCP protocol
-- @augmentcode/auggie for context engine
+- Legacy context-engine backend for context engine
 - stdio transport for local communication
 
 ### Known Limitations
 
-- Requires Auggie CLI to be installed and in PATH
+- Requires the supported CLI to be installed and in PATH
 - Requires authentication setup before use
 - Search quality depends on workspace indexing
 - Large codebases may require initial indexing time

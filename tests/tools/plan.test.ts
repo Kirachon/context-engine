@@ -428,6 +428,45 @@ describe('Planning MCP Tools', () => {
         expect(typeof parsed._meta?.duration_ms).toBe('number');
       });
 
+      it('should load plans from legacy augment-named storage for compatibility', async () => {
+        const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-plan-legacy-'));
+        const plan: EnhancedPlanOutput = {
+          id: 'legacy_plan',
+          version: 1,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          goal: 'Legacy plan',
+          scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+          mvp_features: [],
+          nice_to_have_features: [],
+          architecture: { notes: '', patterns_used: [], diagrams: [] },
+          risks: [],
+          milestones: [],
+          steps: [],
+          dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [] },
+          testing_strategy: { unit: '', integration: '', coverage_target: '80%' },
+          acceptance_criteria: [],
+          confidence_score: 0.5,
+          questions_for_clarification: [],
+          context_files: [],
+          codebase_insights: [],
+        };
+        const persistence = new PlanPersistenceService(tempDir);
+        await persistence.savePlan(plan, { overwrite: true });
+        fs.renameSync(
+          path.join(tempDir, '.context-engine-plans'),
+          path.join(tempDir, '.augment-plans')
+        );
+
+        const legacyPersistence = new PlanPersistenceService(tempDir);
+        const loaded = await legacyPersistence.loadPlan(plan.id);
+
+        expect(loaded?.id).toBe(plan.id);
+        expect(loaded?.goal).toBe(plan.goal);
+
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      });
+
       it('should reject single_step mode without step_number', async () => {
         const validPlan = JSON.stringify({ id: 'test', version: 1, steps: [] });
         await expect(

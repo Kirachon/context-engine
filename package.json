@@ -27,6 +27,7 @@
     "bench:ci:release": "node --import tsx scripts/ci/release-bench.ts",
     "ci:matrix:migrated-families": "node --import tsx scripts/ci/run-migrated-family-matrix.ts",
     "ci:check:stale-cache-guards": "node --import tsx scripts/ci/check-stale-cache-guards.ts",
+    "ci:check:brand-detachment": "node --import tsx scripts/ci/check-brand-detachment.ts --allowlist config/ci/brand-compat-allowlist.txt",
     "ci:check:retrieval-dependency-boundary": "node --import tsx scripts/ci/check-retrieval-provider-boundary.ts",
     "ci:check:legacy-capability-parity": "npm run -s ci:generate:legacy-capability-parity-report && node --import tsx scripts/ci/check-legacy-capability-parity.ts --report artifacts/bench/retrieval-parity-pr.json --matrix config/ci/legacy-capability-matrix.json --out artifacts/bench/legacy-capability-parity-gate.json",
     "ci:check:no-legacy-provider": "node --import tsx scripts/ci/check-legacy-provider-references.ts --allowlist config/ci/legacy-provider-no-legacy-allowlist.txt",

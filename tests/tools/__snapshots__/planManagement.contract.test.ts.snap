@@ -62,7 +62,7 @@ exports[`plan management contract snapshots captures end-to-end management handl
     "success": true,
   },
   "delete_plan": {
-    "file_path": "<workspace>/.augment-plans/plan_contract.plan.json",
+    "file_path": "<workspace>/.context-engine-plans/plan_contract.plan.json",
     "plan_id": "plan_contract",
     "success": true,
   },
@@ -94,7 +94,7 @@ exports[`plan management contract snapshots captures end-to-end management handl
     "plans": [
       {
         "created_at": "<fixed-time>",
-        "file_path": "<workspace>/.augment-plans/plan_contract.plan.json",
+        "file_path": "<workspace>/.context-engine-plans/plan_contract.plan.json",
         "goal": "Plan v2",
         "id": "plan_contract",
         "name": "Plan V2",
@@ -357,12 +357,12 @@ Start contract flow
     "success": true,
   },
   "save_plan_v1": {
-    "file_path": "<workspace>/.augment-plans/plan_contract.plan.json",
+    "file_path": "<workspace>/.context-engine-plans/plan_contract.plan.json",
     "plan_id": "plan_contract",
     "success": true,
   },
   "save_plan_v2": {
-    "file_path": "<workspace>/.augment-plans/plan_contract.plan.json",
+    "file_path": "<workspace>/.context-engine-plans/plan_contract.plan.json",
     "plan_id": "plan_contract",
     "success": true,
   },

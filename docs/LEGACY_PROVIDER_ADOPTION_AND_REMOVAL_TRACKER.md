@@ -165,7 +165,7 @@ Wave date: `2026-03-11`
 Wave status: `Completed`
 
 Scope for this wave:
-- [x] Remove the last active `augment_legacy` compatibility identifiers from provider source files.
+- [x] Remove the last active legacy-provider compatibility identifiers from provider source files.
 - [x] Tighten provider env/factory behavior so only `local_native` is accepted in active runtime code.
 - [x] Update tests and CI assertions to validate removed-provider rejection as invalid config.
 - [x] Shrink [`config/ci/legacy-provider-no-legacy-allowlist.txt`](/D:/GitProjects/context-engine/config/ci/legacy-provider-no-legacy-allowlist.txt) again so active provider files are no longer allowlisted.
@@ -259,8 +259,8 @@ Wave status: `Completed`
 Scope for this wave:
 - [x] Add embedding and dense index scaffolding interfaces.
 - [x] Add optional dense retrieval candidate scoring path behind `enableDense`.
-- [x] Add persisted workspace dense index file path (`.augment-dense-index.json`).
-- [x] Link dense index incremental refresh to index-state hashes (`.augment-index-state.json`).
+- [x] Add persisted workspace dense index file path (`.context-engine-dense-index.json`).
+- [x] Link dense index incremental refresh to index-state hashes (`.context-engine-index-state.json`).
 - [x] Add dense refresh performance hardening (refresh-doc cap + embed batch sizing).
 - [x] Add dense refresh telemetry counters/duration metrics.
 - [x] Extend fusion to handle semantic + lexical + dense weighting.

@@ -26,8 +26,8 @@ describe('createWorkspaceDenseRetriever', () => {
     fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
     fs.writeFileSync(fileB, 'export const beta = "database schema";', 'utf8');
 
-    const indexStatePath = path.join(tmp, '.augment-index-state.json');
-    const denseIndexPath = path.join(tmp, '.augment-dense-index.json');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const denseIndexPath = path.join(tmp, '.context-engine-dense-index.json');
 
     writeJson(indexStatePath, {
       files: {
@@ -83,8 +83,8 @@ describe('createWorkspaceDenseRetriever', () => {
 
   it('respects refresh-doc cap and embedding batch size', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-index-cap-'));
-    const indexStatePath = path.join(tmp, '.augment-index-state.json');
-    const denseIndexPath = path.join(tmp, '.augment-dense-index.json');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const denseIndexPath = path.join(tmp, '.context-engine-dense-index.json');
     const files: Record<string, { hash: string; indexed_at: string }> = {};
 
     for (let i = 0; i < 5; i += 1) {
@@ -141,8 +141,8 @@ describe('createWorkspaceDenseRetriever', () => {
     fs.mkdirSync(path.dirname(fileA), { recursive: true });
     fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
 
-    const indexStatePath = path.join(tmp, '.augment-index-state.json');
-    const denseIndexPath = path.join(tmp, '.augment-dense-index.json');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const denseIndexPath = path.join(tmp, '.context-engine-dense-index.json');
 
     writeJson(indexStatePath, {
       files: {

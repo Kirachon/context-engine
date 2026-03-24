@@ -4,14 +4,20 @@ import * as path from 'path';
 import { featureEnabled } from '../../config/features.js';
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import {
+  getPreferredWorkspacePath,
+  getReadableWorkspacePath,
+} from '../../runtime/compatPaths.js';
+import {
   createHeuristicChunkParser,
   type ChunkParser,
   type ChunkRecord,
 } from './chunking.js';
 import { createTreeSitterChunkParser } from './treeSitterChunkParser.js';
 
-const CHUNK_INDEX_FILE_NAME = '.augment-chunk-index.json';
-const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const CHUNK_INDEX_FILE_NAME = '.context-engine-chunk-index.json';
+const LEGACY_CHUNK_INDEX_FILE_NAME = '.augment-chunk-index.json';
+const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
+const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const CHUNK_INDEX_VERSION = 1;
 const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
@@ -556,15 +562,25 @@ export function createWorkspaceChunkSearchIndex(
   options: WorkspaceChunkSearchIndexOptions
 ): WorkspaceChunkSearchIndex {
   const workspacePath = options.workspacePath;
-  const indexStatePath = options.indexStatePath ?? path.join(workspacePath, INDEX_STATE_FILE_NAME);
-  const chunkIndexPath = options.chunkIndexPath ?? path.join(workspacePath, CHUNK_INDEX_FILE_NAME);
+  const indexStatePath = options.indexStatePath ?? getReadableWorkspacePath(workspacePath, {
+    preferred: INDEX_STATE_FILE_NAME,
+    legacy: LEGACY_INDEX_STATE_FILE_NAME,
+  });
+  const chunkIndexReadPath = options.chunkIndexPath ?? getReadableWorkspacePath(workspacePath, {
+    preferred: CHUNK_INDEX_FILE_NAME,
+    legacy: LEGACY_CHUNK_INDEX_FILE_NAME,
+  });
+  const chunkIndexWritePath = options.chunkIndexPath ?? getPreferredWorkspacePath(workspacePath, {
+    preferred: CHUNK_INDEX_FILE_NAME,
+    legacy: LEGACY_CHUNK_INDEX_FILE_NAME,
+  });
   const maxChunkLines = Math.max(1, Math.min(400, options.maxChunkLines ?? DEFAULT_MAX_CHUNK_LINES));
   const maxChunkChars = Math.max(64, Math.min(50_000, options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS));
   const parser = resolveChunkParser(options);
   const workspaceFingerprint = buildWorkspaceFingerprint(workspacePath);
 
   let currentIndex = readChunkIndex(
-    chunkIndexPath,
+    chunkIndexReadPath,
     workspaceFingerprint,
     { id: parser.id, version: parser.version },
     maxChunkLines,
@@ -635,7 +651,7 @@ export function createWorkspaceChunkSearchIndex(
       || existingIndex.version !== CHUNK_INDEX_VERSION
       || existingIndex.chunking.maxChunkLines !== maxChunkLines
       || existingIndex.chunking.maxChunkChars !== maxChunkChars
-      || !fs.existsSync(chunkIndexPath)
+      || !fs.existsSync(chunkIndexWritePath)
     ) {
       currentIndex = {
         version: CHUNK_INDEX_VERSION,
@@ -649,7 +665,7 @@ export function createWorkspaceChunkSearchIndex(
         },
         docs: nextDocs,
       };
-      safeWriteJson(chunkIndexPath, currentIndex);
+      safeWriteJson(chunkIndexWritePath, currentIndex);
       return {
         refreshedFiles,
         reusedFiles,

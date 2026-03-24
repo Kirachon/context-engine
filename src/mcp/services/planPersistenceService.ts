@@ -20,7 +20,8 @@ import {
 // Constants
 // ============================================================================
 
-const DEFAULT_PLANS_DIR = '.augment-plans';
+const DEFAULT_PLANS_DIR = '.context-engine-plans';
+const LEGACY_PLANS_DIR = '.augment-plans';
 const PLAN_FILE_EXTENSION = '.plan.json';
 const INDEX_FILE = 'plans-index.json';
 
@@ -40,11 +41,13 @@ interface PlansIndex {
 
 export class PlanPersistenceService {
   private plansDir: string;
+  private legacyPlansDir: string;
   private indexPath: string;
   private cachedIndex: PlansIndex | null = null;
 
   constructor(workspaceRoot: string, plansDir?: string) {
     this.plansDir = path.join(workspaceRoot, plansDir || DEFAULT_PLANS_DIR);
+    this.legacyPlansDir = path.join(workspaceRoot, LEGACY_PLANS_DIR);
     this.indexPath = path.join(this.plansDir, INDEX_FILE);
   }
 
@@ -88,8 +91,16 @@ export class PlanPersistenceService {
     }
 
     try {
-      if (fs.existsSync(this.indexPath)) {
-        const content = fs.readFileSync(this.indexPath, 'utf-8');
+      const preferredIndexPath = this.indexPath;
+      const legacyIndexPath = path.join(this.legacyPlansDir, INDEX_FILE);
+      const activeIndexPath = fs.existsSync(preferredIndexPath)
+        ? preferredIndexPath
+        : fs.existsSync(legacyIndexPath)
+          ? legacyIndexPath
+          : preferredIndexPath;
+
+      if (fs.existsSync(activeIndexPath)) {
+        const content = fs.readFileSync(activeIndexPath, 'utf-8');
         this.cachedIndex = JSON.parse(content) as PlansIndex;
         return this.cachedIndex;
       }
@@ -114,6 +125,14 @@ export class PlanPersistenceService {
     index.last_updated = new Date().toISOString();
     fs.writeFileSync(this.indexPath, JSON.stringify(index, null, 2));
     this.cachedIndex = index;
+  }
+
+  /**
+   * Resolve the legacy file path for a plan.
+   */
+  private getLegacyPlanFilePath(planId: string): string {
+    const safeId = planId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    return path.join(this.legacyPlansDir, `${safeId}${PLAN_FILE_EXTENSION}`);
   }
 
   /**
@@ -210,11 +229,19 @@ export class PlanPersistenceService {
         return null;
       }
 
-      if (!fs.existsSync(metadata.file_path)) {
+      const preferredPath = metadata.file_path;
+      const legacyPath = this.getLegacyPlanFilePath(planId);
+      const filePath = fs.existsSync(preferredPath)
+        ? preferredPath
+        : fs.existsSync(legacyPath)
+          ? legacyPath
+          : preferredPath;
+
+      if (!fs.existsSync(filePath)) {
         return null;
       }
 
-      const content = fs.readFileSync(metadata.file_path, 'utf-8');
+      const content = fs.readFileSync(filePath, 'utf-8');
       return JSON.parse(content) as EnhancedPlanOutput;
     } catch {
       return null;
@@ -262,8 +289,11 @@ export class PlanPersistenceService {
       const metadata = index.plans[existingIdx];
 
       // Delete plan file
-      if (fs.existsSync(metadata.file_path)) {
-        fs.unlinkSync(metadata.file_path);
+      const legacyPath = this.getLegacyPlanFilePath(planId);
+      for (const filePath of [metadata.file_path, legacyPath]) {
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
+        }
       }
 
       // Update index

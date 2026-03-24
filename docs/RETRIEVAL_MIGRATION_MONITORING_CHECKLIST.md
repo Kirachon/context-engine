@@ -8,15 +8,15 @@ Last updated: 2026-03-04
 
 ## A. Core Provider Migration
 
-- [x] Added retrieval provider ID/type scaffolding (`augment_legacy`, `local_native`).
+- [x] Added retrieval provider ID/type scaffolding (`legacy_provider`, `local_native`).
 - [x] Added retrieval env resolver (`CE_RETRIEVAL_PROVIDER`, `CE_RETRIEVAL_FORCE_LEGACY`, shadow flags).
-- [x] Added provider wrapper classes (augment legacy/local native).
+- [x] Added provider wrapper classes (legacy provider/local native).
 - [x] Added `getActiveRetrievalProviderId()` in `ContextServiceClient`.
 - [x] Switched semantic-search cache key namespace to retrieval provider ID.
 - [x] Added non-blocking sampled shadow compare path in semantic search.
 - [x] Added deterministic `local_native` fallback for indexing lifecycle paths (`indexWorkspace`, `indexFiles`) to avoid DirectContext dependency when selected.
-- [x] Removed direct `@augmentcode/auggie-sdk` import ownership from `ContextServiceClient`; legacy SDK loading now lives under provider runtime ownership.
-- [x] Extract remaining DirectContext lifecycle/orchestration logic fully out of `ContextServiceClient` into `augmentLegacyProvider`/legacy runtime implementation.
+- [x] Removed direct legacy SDK import ownership from `ContextServiceClient`; legacy loading now lives under provider runtime ownership.
+- [x] Extract remaining direct-context lifecycle/orchestration logic fully out of `ContextServiceClient` into the legacy runtime implementation.
 - [x] Route all index lifecycle/search through a single provider factory/registry (no provider branching in `ContextServiceClient` except factory call).
 
 ## B. State/Cache Safety
@@ -29,7 +29,7 @@ Last updated: 2026-03-04
 ## C. CI Safety Gates
 
 - [x] Add dependency leak gate script:
-  - fail if runtime retrieval code references `@augmentcode/auggie-sdk` outside legacy provider boundary.
+  - fail if runtime retrieval code references the legacy SDK boundary outside the allowlisted provider runtime.
 - [x] Add retrieval config precedence contract tests/gate:
   - `CE_RETRIEVAL_FORCE_LEGACY` precedence and invalid value behavior.
 - [x] Add scoped dist/source parity check for retrieval/provider modules.
@@ -39,10 +39,10 @@ Last updated: 2026-03-04
 
 ## D. Benchmark/Perf and Workflow Alignment
 
-- [x] Bench script no longer hard-requires `AUGMENT_API_TOKEN` in all modes.
+- [x] Bench script no longer hard-requires a legacy API token in all modes.
 - [x] Bench suite mode selection not solely token-gated.
 - [x] Added retrieval provider label in bench output/provenance.
-- [x] Add provider matrix lanes in perf workflows (`local_native` required, `augment_legacy` optional when secrets present).
+- [x] Add provider matrix lanes in perf workflows (`local_native` required, legacy provider optional when secrets present).
 - [x] Add parity artifact generation + CI threshold gates (overlap/reliability/perf deltas).
 
 ## E. Metadata/Docs
@@ -92,6 +92,6 @@ Last updated: 2026-03-04
 - `node --import tsx scripts/ci/check-rollout-readiness.ts docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log docs/rollout-evidence/2026-03-04/freeze-rollback-triggers.json` -> PASS
 
 Boundary ownership note:
-- `src/mcp/serviceClient.ts` no longer directly imports `@augmentcode/auggie-sdk`.
+- `src/mcp/serviceClient.ts` no longer directly imports the legacy SDK.
 - Legacy SDK/`DirectContext` ownership boundary is scoped to provider runtime modules and currently allowlisted at `src/retrieval/providers/legacyRuntime.ts`.
 - `ContextServiceClient` delegates legacy runtime initialization/orchestration through `ensureLegacyRuntimeContext(...)` in `src/retrieval/providers/legacyRuntime.ts`; lifecycle ownership now resides at the provider runtime boundary.

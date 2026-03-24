@@ -1,7 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { getPreferredWorkspacePath, getReadableWorkspacePath } from '../runtime/compatPaths.js';
 
-const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
+const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const DEFAULT_INDEX_STATE_VERSION = 1;
 const DEFAULT_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
@@ -42,7 +44,17 @@ export class JsonIndexStateStore {
   }
 
   private getPath(): string {
-    return path.join(this.workspacePath, INDEX_STATE_FILE_NAME);
+    return getPreferredWorkspacePath(this.workspacePath, {
+      preferred: INDEX_STATE_FILE_NAME,
+      legacy: LEGACY_INDEX_STATE_FILE_NAME,
+    });
+  }
+
+  private getReadablePath(): string {
+    return getReadableWorkspacePath(this.workspacePath, {
+      preferred: INDEX_STATE_FILE_NAME,
+      legacy: LEGACY_INDEX_STATE_FILE_NAME,
+    });
   }
 
   private getDefaultState(): IndexStateFile {
@@ -60,7 +72,7 @@ export class JsonIndexStateStore {
   }
 
   loadWithMetadata(): IndexStateLoadResult {
-    const p = this.getPath();
+    const p = this.getReadablePath();
     if (!fs.existsSync(p)) {
       return {
         state: this.getDefaultState(),

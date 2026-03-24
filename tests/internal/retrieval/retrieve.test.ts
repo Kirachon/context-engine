@@ -104,7 +104,7 @@ describe('retrieve internal pipeline', () => {
     const sampleFile = path.join(tmp, 'src', 'dense.ts');
     fs.mkdirSync(path.dirname(sampleFile), { recursive: true });
     fs.writeFileSync(sampleFile, 'export const dense = "vector retrieval";', 'utf8');
-    fs.writeFileSync(path.join(tmp, '.augment-index-state.json'), JSON.stringify({
+    fs.writeFileSync(path.join(tmp, '.context-engine-index-state.json'), JSON.stringify({
       files: {
         'src/dense.ts': { hash: 'hdense1', indexed_at: new Date().toISOString() },
       },
@@ -127,7 +127,7 @@ describe('retrieve internal pipeline', () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect((results[0] as any).retrievalSource).toBe('dense');
-    expect(fs.existsSync(path.join(tmp, '.augment-dense-index.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmp, '.context-engine-dense-index.json'))).toBe(true);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
@@ -139,7 +139,7 @@ describe('retrieve internal pipeline', () => {
     fs.mkdirSync(path.dirname(sampleFile), { recursive: true });
     fs.writeFileSync(sampleFile, 'export const vector = "vector retrieval";', 'utf8');
     fs.writeFileSync(secondaryFile, 'export const schema = "database schema";', 'utf8');
-    fs.writeFileSync(path.join(tmp, '.augment-index-state.json'), JSON.stringify({
+    fs.writeFileSync(path.join(tmp, '.context-engine-index-state.json'), JSON.stringify({
       files: {
         'src/vector.ts': { hash: 'hvector1', indexed_at: new Date().toISOString() },
         'src/schema.ts': { hash: 'hschema1', indexed_at: new Date().toISOString() },
@@ -170,7 +170,7 @@ describe('retrieve internal pipeline', () => {
 
     expect(results.length).toBeGreaterThan(0);
     expect((results[0] as any).retrievalSource).toBe('dense');
-    expect(fs.existsSync(path.join(tmp, '.augment-lancedb-index.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tmp, '.context-engine-lancedb-index.json'))).toBe(true);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

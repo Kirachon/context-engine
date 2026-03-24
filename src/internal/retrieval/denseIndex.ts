@@ -3,11 +3,17 @@ import * as path from 'path';
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import { envInt } from '../../config/env.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
+import {
+  getPreferredWorkspacePath,
+  getReadableWorkspacePath,
+} from '../../runtime/compatPaths.js';
 import type { DenseRetriever } from './embeddingProvider.js';
 import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
-const DENSE_INDEX_FILE_NAME = '.augment-dense-index.json';
-const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const DENSE_INDEX_FILE_NAME = '.context-engine-dense-index.json';
+const LEGACY_DENSE_INDEX_FILE_NAME = '.augment-dense-index.json';
+const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
+const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const INDEX_VERSION = 1;
 const DEFAULT_DENSE_REFRESH_MAX_DOCS = 500;
 const DEFAULT_DENSE_EMBED_BATCH_SIZE = 64;
@@ -268,22 +274,32 @@ async function refreshDenseIndex(
 }
 
 export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOptions): DenseRetriever {
-  const denseIndexPath = options.denseIndexPath ?? path.join(options.workspacePath, DENSE_INDEX_FILE_NAME);
-  const indexStatePath = options.indexStatePath ?? path.join(options.workspacePath, INDEX_STATE_FILE_NAME);
+  const denseIndexReadPath = options.denseIndexPath ?? getReadableWorkspacePath(options.workspacePath, {
+    preferred: DENSE_INDEX_FILE_NAME,
+    legacy: LEGACY_DENSE_INDEX_FILE_NAME,
+  });
+  const denseIndexWritePath = options.denseIndexPath ?? getPreferredWorkspacePath(options.workspacePath, {
+    preferred: DENSE_INDEX_FILE_NAME,
+    legacy: LEGACY_DENSE_INDEX_FILE_NAME,
+  });
+  const indexStatePath = options.indexStatePath ?? getReadableWorkspacePath(options.workspacePath, {
+    preferred: INDEX_STATE_FILE_NAME,
+    legacy: LEGACY_INDEX_STATE_FILE_NAME,
+  });
 
   return {
     id: `dense:${options.embeddingRuntime.id}`,
     async search(query: string, topK: number): Promise<SearchResult[]> {
       const safeTopK = clampTopK(topK);
       const indexState = readIndexState(indexStatePath);
-      const existingDense = readDenseIndex(denseIndexPath, options.embeddingRuntime);
+      const existingDense = readDenseIndex(denseIndexReadPath, options.embeddingRuntime);
       const refreshedDense = await refreshDenseIndex(
         options.workspacePath,
         existingDense,
         indexState,
         options.embeddingRuntime
       );
-      safeWriteJson(denseIndexPath, refreshedDense);
+      safeWriteJson(denseIndexWritePath, refreshedDense);
 
       const queryEmbedding = await options.embeddingRuntime.embedQuery(query);
       const ranked = Object.values(refreshedDense.docs)

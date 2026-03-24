@@ -18,7 +18,7 @@ function createTempWorkspace(): string {
 
 function writeIndexState(workspacePath: string, files: IndexStateFile['files']): void {
   fs.writeFileSync(
-    path.join(workspacePath, '.augment-index-state.json'),
+    path.join(workspacePath, '.context-engine-index-state.json'),
     JSON.stringify({ files }, null, 2),
     'utf8'
   );
@@ -81,7 +81,6 @@ describe('chunking', () => {
     expect(chunks[2].content).toContain('class Example');
   });
 });
-
 describe('workspace chunk search index', () => {
   let tempDir: string | null = null;
 
@@ -130,7 +129,7 @@ describe('workspace chunk search index', () => {
       wroteIndex: true,
     });
     expect(first.totalChunks).toBeGreaterThan(0);
-    expect(fs.existsSync(path.join(tempDir, '.augment-chunk-index.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tempDir, '.context-engine-chunk-index.json'))).toBe(true);
 
     const snapshot = index.getSnapshot();
     expect(snapshot).toMatchObject({
@@ -172,7 +171,7 @@ describe('workspace chunk search index', () => {
     });
 
     const persisted = JSON.parse(
-      fs.readFileSync(path.join(tempDir, '.augment-chunk-index.json'), 'utf8')
+      fs.readFileSync(path.join(tempDir, '.context-engine-chunk-index.json'), 'utf8')
     ) as {
       docs: Record<string, { chunks: Array<{ content: string }> }>;
       parser: { id: string; version: number };
@@ -235,7 +234,7 @@ describe('workspace chunk search index', () => {
     }));
 
     const persisted = JSON.parse(
-      fs.readFileSync(path.join(tempDir, '.augment-chunk-index.json'), 'utf8')
+      fs.readFileSync(path.join(tempDir, '.context-engine-chunk-index.json'), 'utf8')
     ) as {
       parser: { id: string; version: number };
       docs: Record<string, unknown>;
@@ -391,13 +390,13 @@ describe('workspace chunk search index', () => {
       'src/recover.ts': { hash: 'hash-recover-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
     });
 
-    fs.writeFileSync(path.join(tempDir, '.augment-chunk-index.json'), 'corrupt-chunk-json', 'utf8');
+    fs.writeFileSync(path.join(tempDir, '.context-engine-chunk-index.json'), 'corrupt-chunk-json', 'utf8');
 
     const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
     const results = await index.search('needle target', 5);
 
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].path).toBe('src/recover.ts');
-    expect(fs.existsSync(path.join(tempDir, '.augment-chunk-index.json'))).toBe(true);
+    expect(fs.existsSync(path.join(tempDir, '.context-engine-chunk-index.json'))).toBe(true);
   });
 });

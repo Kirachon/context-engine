@@ -1,0 +1,19 @@
+# Temporary compatibility and archive-only surfaces allowed during brand detachment.
+docs/archive/**
+docs/archive/brand-detachment-migration-plan.md
+scripts/ci/bench-provenance.ts
+scripts/ci/check-brand-detachment.ts
+scripts/ci/check-legacy-provider-references.ts
+scripts/ci/check-retrieval-config-precedence.ts
+scripts/ci/check-retrieval-provider-boundary.ts
+src/mcp/serviceClient.ts
+src/mcp/indexStateStore.ts
+src/internal/retrieval/chunkIndex.ts
+src/internal/retrieval/denseIndex.ts
+src/internal/retrieval/lancedbVectorIndex.ts
+src/internal/retrieval/sqliteLexicalIndex.ts
+src/mcp/services/planPersistenceService.ts
+src/mcp/services/planHistoryService.ts
+tests/ci/checkLegacyProviderReferences.test.ts
+tests/ci/checkRetrievalProviderBoundary.test.ts
+tests/retrieval/providers/**

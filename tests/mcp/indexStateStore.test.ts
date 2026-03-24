@@ -19,9 +19,9 @@ describe('JsonIndexStateStore', () => {
     }
   });
 
-  it('loads legacy state files without provider metadata', () => {
+  it('loads neutral state files without provider metadata', () => {
     const workspace = makeTempDir();
-    const statePath = path.join(workspace, '.augment-index-state.json');
+    const statePath = path.join(workspace, '.context-engine-index-state.json');
     const legacyUpdatedAt = '2026-03-04T00:00:00.000Z';
     const legacyIndexedAt = '2026-03-03T00:00:00.000Z';
 
@@ -53,6 +53,40 @@ describe('JsonIndexStateStore', () => {
     });
   });
 
+  it('loads legacy augment-named state files for compatibility', () => {
+    const workspace = makeTempDir();
+    const legacyStatePath = path.join(workspace, '.augment-index-state.json');
+    const legacyUpdatedAt = '2026-03-04T00:00:00.000Z';
+    const legacyIndexedAt = '2026-03-03T00:00:00.000Z';
+
+    fs.writeFileSync(
+      legacyStatePath,
+      JSON.stringify({
+        version: 8,
+        updated_at: legacyUpdatedAt,
+        files: {
+          'src/legacy.ts': {
+            hash: 'legacy123',
+            indexed_at: legacyIndexedAt,
+          },
+        },
+      }),
+      'utf-8'
+    );
+
+    const store = new JsonIndexStateStore(workspace);
+    const loaded = store.load();
+
+    expect(loaded.version).toBe(8);
+    expect(loaded.schema_version).toBe(1);
+    expect(loaded.provider_id).toBe('local_native');
+    expect(loaded.updated_at).toBe(legacyUpdatedAt);
+    expect(loaded.files['src/legacy.ts']).toEqual({
+      hash: 'legacy123',
+      indexed_at: legacyIndexedAt,
+    });
+  });
+
   it('persists provider metadata for callers using legacy save shape', () => {
     const workspace = makeTempDir();
     const store = new JsonIndexStateStore(workspace);
@@ -68,7 +102,7 @@ describe('JsonIndexStateStore', () => {
       },
     });
 
-    const statePath = path.join(workspace, '.augment-index-state.json');
+    const statePath = path.join(workspace, '.context-engine-index-state.json');
     expect(fs.existsSync(statePath)).toBe(true);
 
     const persisted = JSON.parse(fs.readFileSync(statePath, 'utf-8')) as {
@@ -89,7 +123,7 @@ describe('JsonIndexStateStore', () => {
 
   it('fails safe with empty default state when schema_version is unsupported', () => {
     const workspace = makeTempDir();
-    const statePath = path.join(workspace, '.augment-index-state.json');
+    const statePath = path.join(workspace, '.context-engine-index-state.json');
 
     fs.writeFileSync(
       statePath,

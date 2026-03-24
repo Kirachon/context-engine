@@ -2032,7 +2032,7 @@ describe('ContextServiceClient', () => {
       const indexingClient = new ContextServiceClient(tempDir);
       await indexingClient.indexWorkspace();
 
-      expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(true);
+      expect(fs.existsSync(path.join(tempDir, '.context-engine-index-state.json'))).toBe(true);
       expect(mockContextInstance.exportToFile).not.toHaveBeenCalled();
 
       fs.rmSync(tempDir, { recursive: true, force: true });
@@ -2069,8 +2069,8 @@ describe('ContextServiceClient', () => {
       await localClient.indexWorkspace();
       await localClient.clearIndex();
 
-      expect(fs.existsSync(path.join(tempDir, '.augment-context-state.json'))).toBe(false);
-      expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(false);
+      expect(fs.existsSync(path.join(tempDir, '.context-engine-context-state.json'))).toBe(false);
+      expect(fs.existsSync(path.join(tempDir, '.context-engine-index-state.json'))).toBe(false);
 
       const status = localClient.getIndexStatus();
       expect(status.status).toBe('idle');
@@ -2132,7 +2132,7 @@ describe('ContextServiceClient', () => {
 
     it('should preserve error status during disk hydration when restart metadata exists', () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-hydrate-error-'));
-      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       const statusClient = new ContextServiceClient(tempDir);
       const updateIndexStatus = (statusClient as any).updateIndexStatus.bind(statusClient) as
         (partial: Record<string, unknown>) => void;
@@ -2153,11 +2153,28 @@ describe('ContextServiceClient', () => {
       }
     });
 
+    it('should hydrate from legacy augment-named context state files for compatibility', () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-hydrate-legacy-'));
+      const legacyStatePath = path.join(tempDir, '.augment-context-state.json');
+      fs.writeFileSync(legacyStatePath, '{}', 'utf-8');
+      const legacyMtime = fs.statSync(legacyStatePath).mtime.toISOString();
+
+      try {
+        const statusClient = new ContextServiceClient(tempDir);
+        const hydrated = statusClient.getIndexStatus();
+
+        expect(hydrated.status).toBe('idle');
+        expect(hydrated.lastIndexed).toBe(legacyMtime);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('should skip startup auto-index for healthy workspaces', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-healthy-'));
-      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 1,
@@ -2222,9 +2239,9 @@ describe('ContextServiceClient', () => {
 
     it('should start startup auto-index for stale workspaces', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-stale-'));
-      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 1,
@@ -2239,7 +2256,7 @@ describe('ContextServiceClient', () => {
         'utf-8'
       );
       const staleDate = new Date('2020-01-01T00:00:00.000Z');
-      fs.utimesSync(path.join(tempDir, '.augment-context-state.json'), staleDate, staleDate);
+      fs.utimesSync(path.join(tempDir, '.context-engine-context-state.json'), staleDate, staleDate);
 
       try {
         const startupClient = new ContextServiceClient(tempDir);
@@ -2368,7 +2385,7 @@ describe('ContextServiceClient', () => {
       expect(result.indexed).toBe(1);
       expect(localIndexFilesSpy).toHaveBeenCalledWith(['a.ts']);
       expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
-      expect(fs.existsSync(path.join(tempDir, '.augment-index-state.json'))).toBe(true);
+      expect(fs.existsSync(path.join(tempDir, '.context-engine-index-state.json'))).toBe(true);
 
       const status = localClient.getIndexStatus();
       expect(status.status).toBe('idle');
@@ -2384,7 +2401,7 @@ describe('ContextServiceClient', () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-change-delete-only-'));
       fs.writeFileSync(path.join(tempDir, 'keep.ts'), 'export const keep = true;\n', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 3,
@@ -2409,7 +2426,7 @@ describe('ContextServiceClient', () => {
       await localClient.applyWorkspaceChanges([{ type: 'unlink', path: 'deleted.ts' }]);
 
       const parsedState = JSON.parse(
-        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+        fs.readFileSync(path.join(tempDir, '.context-engine-index-state.json'), 'utf-8')
       ) as {
         version: number;
         files: Record<string, { hash: string; indexed_at: string }>;
@@ -2433,7 +2450,7 @@ describe('ContextServiceClient', () => {
       fs.writeFileSync(path.join(tempDir, 'changed.ts'), 'export const changed = 2;\n', 'utf-8');
       fs.writeFileSync(path.join(tempDir, 'keep.ts'), 'export const keep = true;\n', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 7,
@@ -2462,7 +2479,7 @@ describe('ContextServiceClient', () => {
       ]);
 
       const parsedState = JSON.parse(
-        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+        fs.readFileSync(path.join(tempDir, '.context-engine-index-state.json'), 'utf-8')
       ) as {
         files: Record<string, { hash: string; indexed_at: string }>;
       };
@@ -2486,7 +2503,7 @@ describe('ContextServiceClient', () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-provider-mismatch-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\\n', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 5,
@@ -2517,7 +2534,7 @@ describe('ContextServiceClient', () => {
       expect(warnSpy.mock.calls[0]?.[0]).toMatch(/Ignoring index state entries for provider/i);
 
       const parsedState = JSON.parse(
-        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+        fs.readFileSync(path.join(tempDir, '.context-engine-index-state.json'), 'utf-8')
       ) as {
         provider_id: string;
         files: Record<string, { hash: string; indexed_at: string }>;
@@ -2538,7 +2555,7 @@ describe('ContextServiceClient', () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-unsupported-schema-'));
       fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\\n', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 5,
@@ -2568,7 +2585,7 @@ describe('ContextServiceClient', () => {
       expect(warnSpy.mock.calls[0]?.[0]).toMatch(/Unsupported index state schema_version/i);
 
       const parsedState = JSON.parse(
-        fs.readFileSync(path.join(tempDir, '.augment-index-state.json'), 'utf-8')
+        fs.readFileSync(path.join(tempDir, '.context-engine-index-state.json'), 'utf-8')
       ) as {
         schema_version: number;
         provider_id: string;
@@ -2595,7 +2612,7 @@ describe('ContextServiceClient', () => {
       // a legacy runtime context file first.
       const crypto = await import('crypto');
       const hash = crypto.createHash('sha256').update('export const a = 1;\n').digest('hex');
-      const indexStatePath = path.join(tempDir, '.augment-index-state.json');
+      const indexStatePath = path.join(tempDir, '.context-engine-index-state.json');
       fs.writeFileSync(
         indexStatePath,
         JSON.stringify(
@@ -2631,7 +2648,7 @@ describe('ContextServiceClient', () => {
       const result = await indexingClient.indexWorkspace();
       expect(result.indexed).toBeGreaterThan(0);
 
-      const indexStatePath = path.join(tempDir, '.augment-index-state.json');
+      const indexStatePath = path.join(tempDir, '.context-engine-index-state.json');
       expect(fs.existsSync(indexStatePath)).toBe(true);
 
       const rawState = fs.readFileSync(indexStatePath, 'utf-8');
@@ -2660,7 +2677,7 @@ describe('ContextServiceClient', () => {
       const crypto = await import('crypto');
       const hash = crypto.createHash('sha256').update('export const a = 1;\n').digest('hex');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 1,
@@ -2690,9 +2707,9 @@ describe('ContextServiceClient', () => {
     it('should hydrate index status fileCount from persisted index state on restore', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-restore-'));
 
-      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 1,
@@ -2720,9 +2737,9 @@ describe('ContextServiceClient', () => {
     it('should hydrate lastIndexed on restore even when persisted index state has zero files', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-restore-empty-'));
 
-      fs.writeFileSync(path.join(tempDir, '.augment-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       fs.writeFileSync(
-        path.join(tempDir, '.augment-index-state.json'),
+        path.join(tempDir, '.context-engine-index-state.json'),
         JSON.stringify(
           {
             version: 1,

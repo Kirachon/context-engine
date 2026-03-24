@@ -376,16 +376,20 @@ function resolveSearchQueueRejectMode(raw: string | undefined): SearchQueueRejec
 }
 
 /** State file name for persisting index state */
-const STATE_FILE_NAME = '.augment-context-state.json';
+const STATE_FILE_NAME = '.context-engine-context-state.json';
+const LEGACY_STATE_FILE_NAME = '.augment-context-state.json';
 
 /** Separate fingerprint file (stable across restarts; only changes when we save a new index). */
-const INDEX_FINGERPRINT_FILE_NAME = '.augment-index-fingerprint.json';
+const INDEX_FINGERPRINT_FILE_NAME = '.context-engine-index-fingerprint.json';
+const LEGACY_INDEX_FINGERPRINT_FILE_NAME = '.augment-index-fingerprint.json';
 
 /** File name for persisting semantic search cache (safe to delete). */
-const SEARCH_CACHE_FILE_NAME = '.augment-search-cache.json';
+const SEARCH_CACHE_FILE_NAME = '.context-engine-search-cache.json';
+const LEGACY_SEARCH_CACHE_FILE_NAME = '.augment-search-cache.json';
 
 /** File name for persisting context bundle cache (safe to delete). */
-const CONTEXT_CACHE_FILE_NAME = '.augment-context-cache.json';
+const CONTEXT_CACHE_FILE_NAME = '.context-engine-context-cache.json';
+const LEGACY_CONTEXT_CACHE_FILE_NAME = '.augment-context-cache.json';
 
 /** Persistent cache TTL (7 days). */
 const PERSISTENT_CACHE_TTL_MS = envMs('CE_PERSISTENT_CACHE_TTL_MS', 7 * 24 * 60 * 60 * 1000, { min: 0 });
@@ -793,6 +797,7 @@ const DEFAULT_EXCLUDED_PATTERNS = [
   '*~',                // Backup files
 
   // === Context Engine Cache/State ===
+  '.context-engine-search-cache.json',
   '.augment-search-cache.json',
 
   // === Compiled Python ===
@@ -1534,7 +1539,7 @@ export class ContextServiceClient {
       }
     }
 
-    // Try to load context ignore files (.contextignore or .augment-ignore)
+    // Try to load context ignore files (.contextignore plus the legacy compatibility alias)
     for (const ignoreFileName of CONTEXT_IGNORE_FILES) {
       const contextIgnorePath = path.join(this.workspacePath, ignoreFileName);
       if (fs.existsSync(contextIgnorePath)) {
@@ -1667,10 +1672,34 @@ export class ContextServiceClient {
   // ==========================================================================
 
   /**
-   * Get the state file path for this workspace
+   * Preferred write path for workspace state.
    */
   private getStateFilePath(): string {
-    return path.join(this.workspacePath, STATE_FILE_NAME);
+    return this.getPreferredWorkspaceArtifactPath(STATE_FILE_NAME);
+  }
+
+  private getPreferredWorkspaceArtifactPath(fileName: string): string {
+    return path.join(this.workspacePath, fileName);
+  }
+
+  private resolveWorkspaceArtifactPath(preferredFileName: string, legacyFileName?: string): string {
+    const preferredPath = this.getPreferredWorkspaceArtifactPath(preferredFileName);
+    if (fs.existsSync(preferredPath)) {
+      return preferredPath;
+    }
+
+    if (legacyFileName) {
+      const legacyPath = path.join(this.workspacePath, legacyFileName);
+      if (fs.existsSync(legacyPath)) {
+        return legacyPath;
+      }
+    }
+
+    return preferredPath;
+  }
+
+  private getReadableStateFilePath(): string {
+    return this.resolveWorkspaceArtifactPath(STATE_FILE_NAME, LEGACY_STATE_FILE_NAME);
   }
 
   /**
@@ -1687,7 +1716,7 @@ export class ContextServiceClient {
     const nextStatus: Partial<IndexStatus> = {};
 
     try {
-      const stateFilePath = this.getStateFilePath();
+      const stateFilePath = this.getReadableStateFilePath();
       if (fs.existsSync(stateFilePath)) {
         const stats = fs.statSync(stateFilePath);
         const restoredAt = stats.mtime.toISOString();
@@ -2091,8 +2120,8 @@ export class ContextServiceClient {
 
   private buildChunkSearchEngineFromModule(moduleExports: Record<string, unknown>): ChunkSearchEngine | null {
     const workspacePath = this.workspacePath;
-    const indexStatePath = path.join(this.workspacePath, '.augment-index-state.json');
-    const chunkIndexPath = path.join(this.workspacePath, '.augment-chunk-index.json');
+    const indexStatePath = path.join(this.workspacePath, '.context-engine-index-state.json');
+    const chunkIndexPath = path.join(this.workspacePath, '.context-engine-chunk-index.json');
     const moduleOptions = { workspacePath, indexStatePath, chunkIndexPath };
 
     const factoryCandidates = [
@@ -2151,8 +2180,8 @@ export class ContextServiceClient {
 
   private buildLexicalSqliteSearchEngineFromModule(moduleExports: Record<string, unknown>): LexicalSearchEngine | null {
     const workspacePath = this.workspacePath;
-    const indexStatePath = path.join(this.workspacePath, '.augment-index-state.json');
-    const sqliteIndexPath = path.join(this.workspacePath, '.augment-lexical-index.sqlite');
+    const indexStatePath = path.join(this.workspacePath, '.context-engine-index-state.json');
+    const sqliteIndexPath = path.join(this.workspacePath, '.context-engine-lexical-index.sqlite');
     const moduleOptions = { workspacePath, indexStatePath, sqliteIndexPath };
 
     const factoryCandidates = [
@@ -2293,8 +2322,8 @@ export class ContextServiceClient {
     return !(normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off');
   }
 
-  private getPersistentCachePath(): string {
-    return path.join(this.workspacePath, SEARCH_CACHE_FILE_NAME);
+  private getReadablePersistentCachePath(): string {
+    return this.resolveWorkspaceArtifactPath(SEARCH_CACHE_FILE_NAME, LEGACY_SEARCH_CACHE_FILE_NAME);
   }
 
   private loadPersistentCacheIfNeeded(): void {
@@ -2302,7 +2331,7 @@ export class ContextServiceClient {
     if (this.persistentCacheLoaded) return;
     this.persistentCacheLoaded = true;
 
-    const cachePath = this.getPersistentCachePath();
+    const cachePath = this.getReadablePersistentCachePath();
     if (!fs.existsSync(cachePath)) return;
 
     try {
@@ -2338,7 +2367,7 @@ export class ContextServiceClient {
 
   private async writePersistentCacheToDisk(): Promise<void> {
     try {
-      const cachePath = this.getPersistentCachePath();
+      const cachePath = this.getPreferredWorkspaceArtifactPath(SEARCH_CACHE_FILE_NAME);
       const tmpPath = `${cachePath}.tmp`;
 
       const entries: Record<string, CacheEntry<SearchResult[]>> = {};
@@ -2355,7 +2384,7 @@ export class ContextServiceClient {
   }
 
   private writeIndexFingerprintFile(fingerprint: string): void {
-    const fingerprintPath = path.join(this.workspacePath, INDEX_FINGERPRINT_FILE_NAME);
+    const fingerprintPath = this.getPreferredWorkspaceArtifactPath(INDEX_FINGERPRINT_FILE_NAME);
     try {
       const tmpPath = `${fingerprintPath}.tmp`;
       const payload: IndexFingerprintFile = {
@@ -2372,10 +2401,13 @@ export class ContextServiceClient {
 
   private getIndexFingerprint(): string {
     try {
-      const statePath = this.getStateFilePath();
+      const statePath = this.getReadableStateFilePath();
       if (!fs.existsSync(statePath)) return 'no-state';
 
-      const fingerprintPath = path.join(this.workspacePath, INDEX_FINGERPRINT_FILE_NAME);
+      const fingerprintPath = this.resolveWorkspaceArtifactPath(
+        INDEX_FINGERPRINT_FILE_NAME,
+        LEGACY_INDEX_FINGERPRINT_FILE_NAME
+      );
       if (fs.existsSync(fingerprintPath)) {
         try {
           const raw = fs.readFileSync(fingerprintPath, 'utf-8');
@@ -2440,8 +2472,8 @@ export class ContextServiceClient {
     return !(normalized === '0' || normalized === 'false' || normalized === 'no' || normalized === 'off');
   }
 
-  private getPersistentContextCachePath(): string {
-    return path.join(this.workspacePath, CONTEXT_CACHE_FILE_NAME);
+  private getReadablePersistentContextCachePath(): string {
+    return this.resolveWorkspaceArtifactPath(CONTEXT_CACHE_FILE_NAME, LEGACY_CONTEXT_CACHE_FILE_NAME);
   }
 
   private loadPersistentContextCacheIfNeeded(): void {
@@ -2449,7 +2481,7 @@ export class ContextServiceClient {
     if (this.persistentContextCacheLoaded) return;
     this.persistentContextCacheLoaded = true;
 
-    const cachePath = this.getPersistentContextCachePath();
+    const cachePath = this.getReadablePersistentContextCachePath();
     if (!fs.existsSync(cachePath)) return;
 
     try {
@@ -2485,7 +2517,7 @@ export class ContextServiceClient {
 
   private async writePersistentContextCacheToDisk(): Promise<void> {
     try {
-      const cachePath = this.getPersistentContextCachePath();
+      const cachePath = this.getPreferredWorkspaceArtifactPath(CONTEXT_CACHE_FILE_NAME);
       const tmpPath = `${cachePath}.tmp`;
 
       const entries: Record<string, CacheEntry<ContextBundle>> = {};
@@ -3204,8 +3236,14 @@ export class ContextServiceClient {
       }
     }
 
-    const stateStorePath = path.join(this.workspacePath, '.augment-index-state.json');
-    if (fs.existsSync(stateStorePath)) {
+    const stateStorePaths = [
+      path.join(this.workspacePath, '.context-engine-index-state.json'),
+      path.join(this.workspacePath, '.augment-index-state.json'),
+    ];
+    for (const stateStorePath of stateStorePaths) {
+      if (!fs.existsSync(stateStorePath)) {
+        continue;
+      }
       try {
         fs.unlinkSync(stateStorePath);
         console.error(`Deleted index state store file: ${stateStorePath}`);
@@ -3214,8 +3252,14 @@ export class ContextServiceClient {
       }
     }
 
-    const stateFilePath = this.getStateFilePath();
-    if (fs.existsSync(stateFilePath)) {
+    const stateFilePaths = [
+      this.getStateFilePath(),
+      this.getReadableStateFilePath(),
+    ];
+    for (const stateFilePath of stateFilePaths) {
+      if (!fs.existsSync(stateFilePath)) {
+        continue;
+      }
       try {
         fs.unlinkSync(stateFilePath);
         console.error(`Deleted retrieval state marker file: ${stateFilePath}`);
@@ -3727,8 +3771,8 @@ export class ContextServiceClient {
       const lexicalSearchEngine = this.getLexicalSqliteSearchEngine();
       if (lexicalSearchEngine) {
         try {
-          const indexStatePath = path.join(this.workspacePath, '.augment-index-state.json');
-          const sqliteIndexPath = path.join(this.workspacePath, '.augment-lexical-index.sqlite');
+          const indexStatePath = path.join(this.workspacePath, '.context-engine-index-state.json');
+          const sqliteIndexPath = path.join(this.workspacePath, '.context-engine-lexical-index.sqlite');
           const lexicalResults = await lexicalSearchEngine.search(rawQuery, topK, {
             bypassCache,
             workspacePath: this.workspacePath,

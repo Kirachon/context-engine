@@ -4,12 +4,21 @@ import * as lancedb from '@lancedb/lancedb';
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import { envInt } from '../../config/env.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
+import {
+  getPreferredWorkspaceDirectory,
+  getPreferredWorkspacePath,
+  getReadableWorkspaceDirectory,
+  getReadableWorkspacePath,
+} from '../../runtime/compatPaths.js';
 import type { DenseRetriever } from './embeddingProvider.js';
 import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
-const VECTOR_DB_DIR_NAME = '.augment-lancedb';
-const VECTOR_INDEX_STATE_FILE_NAME = '.augment-lancedb-index.json';
-const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const VECTOR_DB_DIR_NAME = '.context-engine-lancedb';
+const LEGACY_VECTOR_DB_DIR_NAME = '.augment-lancedb';
+const VECTOR_INDEX_STATE_FILE_NAME = '.context-engine-lancedb-index.json';
+const LEGACY_VECTOR_INDEX_STATE_FILE_NAME = '.augment-lancedb-index.json';
+const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
+const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const TABLE_NAME = 'retrieval_vectors';
 const INDEX_VERSION = 1;
 const DEFAULT_REFRESH_MAX_DOCS = 500;
@@ -180,6 +189,21 @@ function removeVectorArtifacts(vectorDbPath: string): void {
   } catch {
     // ignore delete failures; callers will retry with a fresh path if possible
   }
+}
+
+function migrateLegacyVectorDbPath(preferredPath: string, legacyPath: string): string {
+  if (fs.existsSync(preferredPath) || !fs.existsSync(legacyPath)) {
+    return preferredPath;
+  }
+
+  try {
+    fs.mkdirSync(path.dirname(preferredPath), { recursive: true });
+    fs.cpSync(legacyPath, preferredPath, { recursive: true, force: false });
+  } catch {
+    // Best-effort migration only; fall back to the legacy path if copying fails.
+  }
+
+  return fs.existsSync(preferredPath) ? preferredPath : legacyPath;
 }
 
 async function hasTable(connection: lancedb.Connection, tableName: string): Promise<boolean> {
@@ -496,9 +520,27 @@ async function refreshVectorIndex(
 }
 
 export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbVectorRetrieverOptions): DenseRetriever {
-  const vectorDbPath = options.vectorDbPath ?? path.join(options.workspacePath, VECTOR_DB_DIR_NAME);
-  const indexStatePath = options.indexStatePath ?? path.join(options.workspacePath, INDEX_STATE_FILE_NAME);
-  const vectorIndexPath = path.join(options.workspacePath, VECTOR_INDEX_STATE_FILE_NAME);
+  const vectorDbReadPath = options.vectorDbPath ?? getReadableWorkspaceDirectory(options.workspacePath, {
+    preferred: VECTOR_DB_DIR_NAME,
+    legacy: LEGACY_VECTOR_DB_DIR_NAME,
+  });
+  const vectorDbWritePath = options.vectorDbPath ?? getPreferredWorkspaceDirectory(options.workspacePath, {
+    preferred: VECTOR_DB_DIR_NAME,
+    legacy: LEGACY_VECTOR_DB_DIR_NAME,
+  });
+  const vectorDbPath = options.vectorDbPath ? options.vectorDbPath : migrateLegacyVectorDbPath(vectorDbWritePath, vectorDbReadPath);
+  const indexStatePath = options.indexStatePath ?? getReadableWorkspacePath(options.workspacePath, {
+    preferred: INDEX_STATE_FILE_NAME,
+    legacy: LEGACY_INDEX_STATE_FILE_NAME,
+  });
+  const vectorIndexReadPath = getReadableWorkspacePath(options.workspacePath, {
+    preferred: VECTOR_INDEX_STATE_FILE_NAME,
+    legacy: LEGACY_VECTOR_INDEX_STATE_FILE_NAME,
+  });
+  const vectorIndexWritePath = getPreferredWorkspacePath(options.workspacePath, {
+    preferred: VECTOR_INDEX_STATE_FILE_NAME,
+    legacy: LEGACY_VECTOR_INDEX_STATE_FILE_NAME,
+  });
 
   return {
     id: `lancedb:${options.embeddingRuntime.id}`,
@@ -506,7 +548,7 @@ export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbV
       const safeTopK = clampTopK(topK);
       const runSearch = async (): Promise<SearchResult[]> => {
         const indexState = readIndexState(indexStatePath);
-        const existingVectorIndex = readVectorIndex(vectorIndexPath, options.embeddingRuntime);
+        const existingVectorIndex = readVectorIndex(vectorIndexReadPath, options.embeddingRuntime);
         const refreshedVectorIndex = await refreshVectorIndex(
           options.workspacePath,
           vectorDbPath,
@@ -514,7 +556,7 @@ export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbV
           indexState,
           options.embeddingRuntime
         );
-        safeWriteJson(vectorIndexPath, refreshedVectorIndex);
+        safeWriteJson(vectorIndexWritePath, refreshedVectorIndex);
 
         const connection = await getConnection(vectorDbPath);
         if (!(await hasTable(connection, TABLE_NAME))) {

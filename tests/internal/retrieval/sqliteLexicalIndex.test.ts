@@ -164,7 +164,7 @@ describe('sqlite lexical index', () => {
     workspacePath = createTempWorkspace();
     writeWorkspaceFile(workspacePath, 'src/alpha.ts', 'const alpha = "needle";');
 
-    const dbPath = path.join(workspacePath, '.augment-lexical-index.sqlite');
+    const dbPath = path.join(workspacePath, '.context-engine-lexical-index.sqlite');
 
     const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
     activeIndex = index;

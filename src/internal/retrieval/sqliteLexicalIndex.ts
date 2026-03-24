@@ -4,13 +4,19 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import {
+  getPreferredWorkspacePath,
+  getReadableWorkspacePath,
+} from '../../runtime/compatPaths.js';
+import {
   createHeuristicChunkParser,
   type ChunkParser,
   type ChunkRecord,
 } from './chunking.js';
 
-const SQLITE_INDEX_FILE_NAME = '.augment-lexical-index.sqlite';
-const INDEX_STATE_FILE_NAME = '.augment-index-state.json';
+const SQLITE_INDEX_FILE_NAME = '.context-engine-lexical-index.sqlite';
+const LEGACY_SQLITE_INDEX_FILE_NAME = '.augment-lexical-index.sqlite';
+const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
+const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const INDEX_SCHEMA_VERSION = 1;
 const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
@@ -37,6 +43,7 @@ const DEFAULT_EXCLUDED_DIRS = new Set([
   '.idea',
   '.vscode',
   '.vs',
+  '.context-engine',
   '.augment',
   'tmp',
   'temp',
@@ -260,7 +267,7 @@ async function discoverFiles(workspacePath: string, relativeTo: string = workspa
         continue;
       }
     }
-    if (entry.name.startsWith('.augment-')) {
+    if (entry.name.startsWith('.context-engine-') || entry.name.startsWith('.augment-')) {
       continue;
     }
     const ext = path.extname(entry.name).toLowerCase();
@@ -321,26 +328,22 @@ function createSchema(db: DatabaseSyncInstance): void {
   `);
 }
 
-function buildIndexStatePath(workspacePath: string, override?: string): string {
-  if (override && override.trim().length > 0) {
-    return override;
-  }
-  return path.join(workspacePath, INDEX_STATE_FILE_NAME);
-}
-
-function buildSqlitePath(workspacePath: string, override?: string): string {
-  if (override && override.trim().length > 0) {
-    return override;
-  }
-  return path.join(workspacePath, SQLITE_INDEX_FILE_NAME);
-}
-
 export function createWorkspaceLexicalSearchIndex(
   options: WorkspaceSqliteLexicalIndexOptions
 ): WorkspaceSqliteLexicalIndex {
   const workspacePath = path.resolve(options.workspacePath);
-  const indexStatePath = buildIndexStatePath(workspacePath, options.indexStatePath);
-  const sqlitePath = buildSqlitePath(workspacePath, options.sqlitePath ?? options.sqliteIndexPath);
+  const indexStatePath = options.indexStatePath ?? getReadableWorkspacePath(workspacePath, {
+    preferred: INDEX_STATE_FILE_NAME,
+    legacy: LEGACY_INDEX_STATE_FILE_NAME,
+  });
+  const sqlitePath = options.sqlitePath ?? options.sqliteIndexPath ?? getPreferredWorkspacePath(workspacePath, {
+    preferred: SQLITE_INDEX_FILE_NAME,
+    legacy: LEGACY_SQLITE_INDEX_FILE_NAME,
+  });
+  const readableSqlitePath = options.sqlitePath ?? options.sqliteIndexPath ?? getReadableWorkspacePath(workspacePath, {
+    preferred: SQLITE_INDEX_FILE_NAME,
+    legacy: LEGACY_SQLITE_INDEX_FILE_NAME,
+  });
   const chunkParser = resolveChunkParser(options);
   const workspaceFingerprint = buildWorkspaceFingerprint(workspacePath);
   const maxChunkLines = options.maxChunkLines ?? DEFAULT_MAX_CHUNK_LINES;
@@ -427,6 +430,19 @@ export function createWorkspaceLexicalSearchIndex(
         };
 
         try {
+          if (
+            !options.sqlitePath &&
+            !options.sqliteIndexPath &&
+            readableSqlitePath !== sqlitePath &&
+            fs.existsSync(readableSqlitePath)
+          ) {
+            try {
+              fs.mkdirSync(path.dirname(sqlitePath), { recursive: true });
+              fs.copyFileSync(readableSqlitePath, sqlitePath);
+            } catch {
+              // Best-effort migration only; fall through to the readable path if copy fails.
+            }
+          }
           return openDb();
         } catch {
           recoverFromCorruptDb();

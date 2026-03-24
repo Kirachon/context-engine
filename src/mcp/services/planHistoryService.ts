@@ -41,12 +41,14 @@ const MAX_VERSIONS_PER_HISTORY = 20;
 export class PlanHistoryService {
   private histories: Map<string, PlanHistory> = new Map();
   private historyDir: string;
+  private legacyHistoryDir: string;
 
   /** Track last access time for LRU eviction */
   private lastAccessTime: Map<string, number> = new Map();
 
   constructor(workspaceRoot: string, historyDir?: string) {
-    this.historyDir = path.join(workspaceRoot, historyDir || '.augment-plans', 'history');
+    this.historyDir = path.join(workspaceRoot, historyDir || '.context-engine-plans', 'history');
+    this.legacyHistoryDir = path.join(workspaceRoot, '.augment-plans', 'history');
   }
 
   // ============================================================================
@@ -410,7 +412,13 @@ export class PlanHistoryService {
   }
 
   private loadHistory(planId: string): PlanHistory | null {
-    const filePath = this.getHistoryFilePath(planId);
+    const preferredPath = this.getHistoryFilePath(planId);
+    const legacyPath = path.join(this.legacyHistoryDir, `${planId.replace(/[^a-zA-Z0-9_-]/g, '_')}${HISTORY_FILE_SUFFIX}`);
+    const filePath = fs.existsSync(preferredPath)
+      ? preferredPath
+      : fs.existsSync(legacyPath)
+        ? legacyPath
+        : preferredPath;
     if (!fs.existsSync(filePath)) return null;
 
     try {
@@ -426,12 +434,20 @@ export class PlanHistoryService {
    */
   deleteHistory(planId: string): boolean {
     this.histories.delete(planId);
-    const filePath = this.getHistoryFilePath(planId);
-    if (fs.existsSync(filePath)) {
+    const preferredPath = this.getHistoryFilePath(planId);
+    const legacyPath = path.join(
+      this.legacyHistoryDir,
+      `${planId.replace(/[^a-zA-Z0-9_-]/g, '_')}${HISTORY_FILE_SUFFIX}`
+    );
+    let removed = false;
+    for (const filePath of [preferredPath, legacyPath]) {
+      if (!fs.existsSync(filePath)) {
+        continue;
+      }
       fs.unlinkSync(filePath);
-      return true;
+      removed = true;
     }
-    return false;
+    return removed;
   }
 
   // ============================================================================

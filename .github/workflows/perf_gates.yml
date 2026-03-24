@@ -36,6 +36,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check brand detachment guard
+        run: npm run ci:check:brand-detachment
+
       - name: Run benchmark suite and compare (PR mode)
         run: npm run bench:ci:pr
 
@@ -72,6 +75,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Check brand detachment guard
+        run: npm run ci:check:brand-detachment
 
       - name: Run benchmark suite and compare (Nightly mode)
         run: npm run bench:ci:nightly

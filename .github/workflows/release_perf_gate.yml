@@ -62,6 +62,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Check brand detachment guard
+        run: npm run ci:check:brand-detachment
+
       - name: Validate release gate prerequisites
         shell: bash
         run: |

@@ -125,7 +125,7 @@ that enables fast, meaning-based code search.
 - Files over 1MB (typically generated or data files)
 - Secrets (.env, *.key, *.pem)
 
-The index is saved to .augment-context-state.json in the workspace root
+The index is saved to .context-engine-context-state.json in the workspace root
 and will be automatically restored on future server starts.`,
   inputSchema: {
     type: 'object',

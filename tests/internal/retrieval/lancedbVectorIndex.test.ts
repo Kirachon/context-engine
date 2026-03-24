@@ -26,8 +26,8 @@ describe('createWorkspaceLanceDbVectorRetriever', () => {
     fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
     fs.writeFileSync(fileB, 'export const beta = "database schema";', 'utf8');
 
-    const indexStatePath = path.join(tmp, '.augment-index-state.json');
-    const vectorIndexPath = path.join(tmp, '.augment-lancedb-index.json');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const vectorIndexPath = path.join(tmp, '.context-engine-lancedb-index.json');
 
     writeJson(indexStatePath, {
       files: {
@@ -45,7 +45,7 @@ describe('createWorkspaceLanceDbVectorRetriever', () => {
     const first = await retriever.search('auth', 5);
     expect(first.length).toBeGreaterThan(0);
     expect(fs.existsSync(vectorIndexPath)).toBe(true);
-    expect(fs.existsSync(path.join(tmp, '.augment-lancedb'))).toBe(true);
+    expect(fs.existsSync(path.join(tmp, '.context-engine-lancedb'))).toBe(true);
 
     const firstIndex = JSON.parse(fs.readFileSync(vectorIndexPath, 'utf8')) as {
       embedding_model_id: string;
@@ -85,9 +85,9 @@ describe('createWorkspaceLanceDbVectorRetriever', () => {
     fs.mkdirSync(path.dirname(fileA), { recursive: true });
     fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
 
-    const indexStatePath = path.join(tmp, '.augment-index-state.json');
-    const vectorIndexPath = path.join(tmp, '.augment-lancedb-index.json');
-    const vectorDbPath = path.join(tmp, '.augment-lancedb');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const vectorIndexPath = path.join(tmp, '.context-engine-lancedb-index.json');
+    const vectorDbPath = path.join(tmp, '.context-engine-lancedb');
 
     writeJson(indexStatePath, {
       files: {
@@ -116,8 +116,8 @@ describe('createWorkspaceLanceDbVectorRetriever', () => {
     fs.mkdirSync(path.dirname(fileA), { recursive: true });
     fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
 
-    const indexStatePath = path.join(tmp, '.augment-index-state.json');
-    const vectorIndexPath = path.join(tmp, '.augment-lancedb-index.json');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const vectorIndexPath = path.join(tmp, '.context-engine-lancedb-index.json');
 
     writeJson(indexStatePath, {
       files: {

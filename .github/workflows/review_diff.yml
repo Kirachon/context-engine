@@ -28,6 +28,9 @@ jobs:
 
       - run: npm run build
 
+      - name: Check brand detachment guard
+        run: npm run ci:check:brand-detachment
+
       - name: Check version literal consistency
         run: node --import tsx scripts/ci/check-version-literals.ts
 

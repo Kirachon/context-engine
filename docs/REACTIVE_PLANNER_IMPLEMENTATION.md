@@ -1276,7 +1276,7 @@ export interface HealthStatus {
     cache: ComponentHealth;
     workers: ComponentHealth;
     database: ComponentHealth;
-    auggie_sdk: ComponentHealth;
+    legacy_sdk: ComponentHealth;
   };
   timestamp: string;
 }
