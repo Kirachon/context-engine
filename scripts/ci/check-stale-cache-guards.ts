@@ -32,7 +32,7 @@ const GUARDED_TARGETS: GuardTarget[] = [
     requiredSnippets: [
       "it('should include freshness warning in no-results output when index is stale'",
       "it('should include freshness warning when index is unhealthy'",
-      "expect(result).toContain('workspace appears unindexed');",
+      "expect(result).toContain('index is stale');",
     ],
   },
   {
