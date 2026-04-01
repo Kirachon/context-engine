@@ -9,4 +9,6 @@ tests/ci/checkLegacyProviderReferences.test.ts
 scripts/ci/check-retrieval-config-precedence.ts
 scripts/ci/check-retrieval-provider-boundary.ts
 scripts/ci/check-legacy-provider-references.ts
+scripts/ci/check-brand-detachment.ts
+tests/ci/checkBrandDetachment.test.ts
 
