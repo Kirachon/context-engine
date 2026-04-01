@@ -170,4 +170,28 @@ describe('scripts/ci/bench-compare.ts', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('allows identical commit_sha in CI mode for nightly suite comparisons', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-bench-compare-nightly-'));
+    const baselinePath = path.join(tmp, 'bench-baseline.json');
+    const candidatePath = path.join(tmp, 'bench-candidate.json');
+
+    writeJson(baselinePath, makeFixture(100, 'same-sha'));
+    writeJson(candidatePath, makeFixture(102, 'same-sha'));
+
+    const result = runBenchCompare(
+      [
+        '--baseline', baselinePath,
+        '--candidate', candidatePath,
+        '--metric', 'payload.timing.p95_ms',
+        '--suite-mode', 'nightly',
+      ],
+      { CI: 'true' }
+    );
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('Benchmark comparison passed.');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });

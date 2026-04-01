@@ -19,6 +19,7 @@ interface CompareArgs {
   maxRegressionAbs?: number;
   higherIsBetter: boolean;
   requireSameMode: boolean;
+  suiteMode: 'pr' | 'nightly';
 }
 
 interface BenchPayload {
@@ -74,6 +75,7 @@ function parseArgs(argv: string[]): CompareArgs {
     candidatePath: '',
     higherIsBetter: false,
     requireSameMode: true,
+    suiteMode: 'pr',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -113,6 +115,15 @@ function parseArgs(argv: string[]): CompareArgs {
       args.requireSameMode = false;
       continue;
     }
+    if (a === '--suite-mode' && next()) {
+      const suiteMode = next();
+      if (suiteMode !== 'pr' && suiteMode !== 'nightly') {
+        throw new Error(`Invalid suite mode: ${suiteMode}`);
+      }
+      args.suiteMode = suiteMode;
+      i++;
+      continue;
+    }
     if (a === '--help' || a === '-h') {
       printHelpAndExit(0);
     }
@@ -142,6 +153,7 @@ Options:
   --max-regression-abs <n>    Allowed regression absolute units (ms for latency metrics)
   --higher-is-better          Use for throughput metrics (e.g., files_per_sec)
   --no-require-same-mode      Allow comparison even if payload.mode differs
+  --suite-mode <pr|nightly>   Controls provenance checks in CI (default: pr)
 
 Examples:
   --metric payload.timing.repeat_avg_ms
@@ -237,7 +249,7 @@ function readRequiredProvenanceField(
   return value.trim();
 }
 
-function assertProvenanceIntegrity(baseline: BenchOutput, candidate: BenchOutput): void {
+function assertProvenanceIntegrity(baseline: BenchOutput, candidate: BenchOutput, suiteMode: 'pr' | 'nightly'): void {
   readRequiredProvenanceField(baseline.provenance, 'timestamp_utc', 'baseline');
   readRequiredProvenanceField(candidate.provenance, 'timestamp_utc', 'candidate');
   const baselineMode = readRequiredProvenanceField(baseline.provenance, 'bench_mode', 'baseline');
@@ -267,7 +279,7 @@ function assertProvenanceIntegrity(baseline: BenchOutput, candidate: BenchOutput
   readRequiredProvenanceField(candidate.provenance, 'env_fingerprint', 'candidate');
 
   const isCi = String(process.env.CI ?? '').toLowerCase() === 'true';
-  if (isCi && baselineCommit === candidateCommit) {
+  if (isCi && suiteMode === 'pr' && baselineCommit === candidateCommit) {
     throw new Error('Invalid baseline: baseline and candidate commit_sha must differ in CI mode.');
   }
 
@@ -299,9 +311,9 @@ function assertProvenanceIntegrity(baseline: BenchOutput, candidate: BenchOutput
 export function compareBenchmarks(
   baseline: BenchOutput,
   candidate: BenchOutput,
-  args: Pick<CompareArgs, 'metricPath' | 'maxRegressionPct' | 'maxRegressionAbs' | 'higherIsBetter' | 'requireSameMode'>
+  args: Pick<CompareArgs, 'metricPath' | 'maxRegressionPct' | 'maxRegressionAbs' | 'higherIsBetter' | 'requireSameMode' | 'suiteMode'>
 ): BenchComparisonResult {
-  assertProvenanceIntegrity(baseline, candidate);
+  assertProvenanceIntegrity(baseline, candidate, args.suiteMode);
 
   if (args.requireSameMode) {
     const baselineMode = baseline.payload?.mode ?? baseline.provenance?.bench_mode;

@@ -569,6 +569,7 @@ function runCompare(
     '--metric', metricPath,
     '--max-regression-pct', String(thresholds.maxRegressionPct),
     '--max-regression-abs', String(thresholds.maxRegressionAbs),
+    '--suite-mode', mode,
   ];
 
   const timeoutMs = parseTimeoutMs(process.env.BENCH_SUITE_COMPARE_TIMEOUT_MS, 60_000, 2_000, 180_000);
