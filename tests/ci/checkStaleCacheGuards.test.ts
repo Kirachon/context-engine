@@ -42,7 +42,7 @@ function seedGuardFixture(tmpRoot: string, options: { omitServiceClientAnchor?: 
     [
       "it('should include freshness warning in no-results output when index is stale', async () => {});",
       "it('should include freshness warning when index is unhealthy', async () => {});",
-      "expect(result).toContain('workspace appears unindexed');",
+      "expect(result).toContain('index is stale');",
       '',
     ].join('\n')
   );
@@ -52,7 +52,7 @@ function seedGuardFixture(tmpRoot: string, options: { omitServiceClientAnchor?: 
     [
       "it('should include freshness warning when index is stale', async () => {});",
       "it('should include freshness warning when index is unhealthy', async () => {});",
-      "expect(result).toContain('workspace appears unindexed');",
+      "expect(result).toContain('reindexing succeeds');",
       '',
     ].join('\n')
   );

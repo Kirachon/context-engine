@@ -154,7 +154,7 @@ describe('get_context_for_prompt Tool', () => {
       const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
 
       expect(result).toContain('index status is error');
-      expect(result).toContain('workspace appears unindexed');
+      expect(result).toContain('reindexing succeeds');
     });
 
     it('should include file overview table', async () => {
