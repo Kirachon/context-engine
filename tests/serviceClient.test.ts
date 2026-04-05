@@ -30,6 +30,7 @@ const mockContextInstance: Record<string, jest.Mock<any>> = {
 const { ContextServiceClient } = await import('../src/mcp/serviceClient.js');
 const { FEATURE_FLAGS, getFeatureFlagsFromEnv } = await import('../src/config/features.js');
 const { renderPrometheusMetrics } = await import('../src/metrics/metrics.js');
+const { snapshotRetrievalV2FeatureFlags } = await import('../src/internal/retrieval/v2Contracts.js');
 
 describe('ContextServiceClient', () => {
   let client: InstanceType<typeof ContextServiceClient>;
@@ -2397,6 +2398,7 @@ describe('ContextServiceClient', () => {
     it('should prune deleted entries via applyWorkspaceChanges without triggering full reindex', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       FEATURE_FLAGS.index_state_store = true;
+      const featureFlagsSnapshot = JSON.stringify(snapshotRetrievalV2FeatureFlags());
 
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-change-delete-only-'));
       fs.writeFileSync(path.join(tempDir, 'keep.ts'), 'export const keep = true;\n', 'utf-8');
@@ -2407,6 +2409,7 @@ describe('ContextServiceClient', () => {
             version: 3,
             schema_version: 2,
             provider_id: 'local_native',
+            feature_flags_snapshot: featureFlagsSnapshot,
             updated_at: '2026-03-21T00:00:00.000Z',
             files: {
               'keep.ts': { hash: 'a'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
@@ -2445,6 +2448,7 @@ describe('ContextServiceClient', () => {
     it('should prune deletes and keep incremental indexFiles path for mixed workspace changes', async () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       FEATURE_FLAGS.index_state_store = true;
+      const featureFlagsSnapshot = JSON.stringify(snapshotRetrievalV2FeatureFlags());
 
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-change-mixed-'));
       fs.writeFileSync(path.join(tempDir, 'changed.ts'), 'export const changed = 2;\n', 'utf-8');
@@ -2456,6 +2460,7 @@ describe('ContextServiceClient', () => {
             version: 7,
             schema_version: 2,
             provider_id: 'local_native',
+            feature_flags_snapshot: featureFlagsSnapshot,
             updated_at: '2026-03-21T00:00:00.000Z',
             files: {
               'changed.ts': { hash: 'c'.repeat(64), indexed_at: '2026-03-21T00:00:00.000Z' },
@@ -2541,6 +2546,62 @@ describe('ContextServiceClient', () => {
       };
 
       expect(parsedState.provider_id).toBe('local_native');
+      expect(parsedState.files['a.ts']).toBeDefined();
+      expect(parsedState.files['stale.ts']).toBeUndefined();
+
+      warnSpy.mockRestore();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should rebuild when index-state feature flags snapshot is incompatible', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-feature-flag-mismatch-'));
+      fs.writeFileSync(path.join(tempDir, 'a.ts'), 'export const a = 1;\n', 'utf-8');
+      fs.writeFileSync(
+        path.join(tempDir, '.context-engine-index-state.json'),
+        JSON.stringify(
+          {
+            version: 5,
+            schema_version: 2,
+            provider_id: 'local_native',
+            workspace_fingerprint: 'deadbeefdeadbeef',
+            feature_flags_snapshot: JSON.stringify({
+              ...snapshotRetrievalV2FeatureFlags(),
+              retrieval_chunk_search_v1: !snapshotRetrievalV2FeatureFlags().retrieval_chunk_search_v1,
+            }),
+            updated_at: '2026-03-04T03:30:00.000Z',
+            files: {
+              'stale.ts': {
+                hash: 'abc',
+                indexed_at: '2026-03-04T03:30:00.000Z',
+              },
+            },
+          },
+          null,
+          2
+        ),
+        'utf-8'
+      );
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+      const localClient = new ContextServiceClient(tempDir);
+      const result = await localClient.indexFiles(['a.ts']);
+
+      expect(result.indexed).toBe(1);
+      expect(warnSpy).toHaveBeenCalledTimes(1);
+      expect(warnSpy.mock.calls[0]?.[0]).toMatch(/incompatible workspace\/feature-flags snapshot/i);
+
+      const parsedState = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.context-engine-index-state.json'), 'utf-8')
+      ) as {
+        feature_flags_snapshot: string;
+        files: Record<string, { hash: string; indexed_at: string }>;
+      };
+
+      expect(parsedState.feature_flags_snapshot).toMatch(/retrieval_chunk_search_v1/);
       expect(parsedState.files['a.ts']).toBeDefined();
       expect(parsedState.files['stale.ts']).toBeUndefined();
 

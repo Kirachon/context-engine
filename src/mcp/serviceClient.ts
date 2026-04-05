@@ -1091,6 +1091,7 @@ export class ContextServiceClient {
   private indexStateStore: JsonIndexStateStore | null = null;
   private indexStateProviderMismatchWarned = false;
   private indexStateSchemaWarningWarned = false;
+  private indexStateCompatibilityWarned = false;
 
   /** LRU cache for search results */
   private searchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
@@ -1390,6 +1391,14 @@ export class ContextServiceClient {
     console.warn(`[ContextServiceClient] ${metadata.warnings[0]}`);
   }
 
+  private getCurrentIndexStateWorkspaceFingerprint(): string {
+    return crypto.createHash('sha256').update(path.resolve(this.workspacePath).replace(/\\/g, '/')).digest('hex').slice(0, 16);
+  }
+
+  private getCurrentIndexStateFeatureFlagsSnapshot(): string {
+    return JSON.stringify(snapshotRetrievalV2FeatureFlags());
+  }
+
   private loadIndexStateForActiveProvider(store: JsonIndexStateStore): IndexStateFile {
     const loaded = store.loadWithMetadata();
     this.warnIndexStateLoadMetadata(loaded.metadata);
@@ -1403,7 +1412,26 @@ export class ContextServiceClient {
     }
 
     if (loaded.state.provider_id === this.retrievalProviderId) {
-      return loaded.state;
+      const workspaceMatches = loaded.state.workspace_fingerprint === this.getCurrentIndexStateWorkspaceFingerprint();
+      const featureFlagsMatch =
+        typeof loaded.state.feature_flags_snapshot !== 'string'
+        || loaded.state.feature_flags_snapshot === this.getCurrentIndexStateFeatureFlagsSnapshot();
+      if (workspaceMatches && featureFlagsMatch) {
+        return loaded.state;
+      }
+
+      if (!this.indexStateCompatibilityWarned) {
+        this.indexStateCompatibilityWarned = true;
+        console.warn(
+          `[ContextServiceClient] Ignoring index state entries for incompatible workspace/feature-flags snapshot while active provider is "${this.retrievalProviderId}".`
+        );
+      }
+
+      return {
+        ...loaded.state,
+        provider_id: this.retrievalProviderId,
+        files: {},
+      };
     }
 
     if (!this.indexStateProviderMismatchWarned) {
@@ -2813,6 +2841,7 @@ export class ContextServiceClient {
         version: typeof prior?.version === 'number' ? prior.version + 1 : 2,
         provider_id: this.retrievalProviderId,
         updated_at: indexedAtIso,
+        feature_flags_snapshot: this.getCurrentIndexStateFeatureFlagsSnapshot(),
         files: nextFiles,
       });
     }
@@ -2902,6 +2931,7 @@ export class ContextServiceClient {
         version: typeof prior.version === 'number' ? prior.version + 1 : 2,
         provider_id: this.retrievalProviderId,
         updated_at: indexedAtIso,
+        feature_flags_snapshot: this.getCurrentIndexStateFeatureFlagsSnapshot(),
         files: nextFiles,
       });
     }
@@ -3207,6 +3237,7 @@ export class ContextServiceClient {
       version: typeof prior.version === 'number' ? prior.version + 1 : 2,
       provider_id: this.retrievalProviderId,
       updated_at: updatedAtIso,
+      feature_flags_snapshot: this.getCurrentIndexStateFeatureFlagsSnapshot(),
       files: nextFiles,
     });
     this.writeLocalNativeStateMarker(updatedAtIso);

@@ -21,6 +21,7 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
+import { normalizeIgnoredPatterns } from '../watcher/ignoreRules.js';
 
 import { ContextServiceClient } from './serviceClient.js';
 import { semanticSearchTool, handleSemanticSearch } from './tools/search.js';
@@ -221,30 +222,7 @@ export class ContextEngineMCPServer {
       const ignorePatterns = this.serviceClient.getIgnorePatterns();
       const excludedDirs = this.serviceClient.getExcludedDirectories();
 
-      // Normalize workspace path for pattern matching (use forward slashes)
-      const normalizedWorkspacePath = workspacePath.replace(/\\/g, '/');
-
-      // Convert patterns to chokidar-compatible format
-      // Chokidar accepts strings, RegExp, or functions
-      const watcherIgnored: (string | RegExp)[] = [
-        // Exclude directories (match anywhere in path)
-        ...excludedDirs.map(dir => `**/${dir}/**`),
-        // Include gitignore/contextignore patterns
-        ...ignorePatterns.map(pattern => {
-          // Handle root-anchored patterns (e.g., /.env should match only at workspace root)
-          if (pattern.startsWith('/')) {
-            // For root-anchored patterns, prepend workspace path for absolute matching
-            // Chokidar uses absolute paths, so we need to match against workspace root
-            return `${normalizedWorkspacePath}${pattern}`;
-          }
-          // Handle directory-only patterns
-          if (pattern.endsWith('/')) {
-            return `**/${pattern}**`;
-          }
-          // Match anywhere in path
-          return `**/${pattern}`;
-        }),
-      ];
+      const watcherIgnored = normalizeIgnoredPatterns(workspacePath, ignorePatterns, excludedDirs);
 
       console.error(`[watcher] Loaded ${watcherIgnored.length} ignore patterns`);
 

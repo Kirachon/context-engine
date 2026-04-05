@@ -19,6 +19,7 @@ describe('FileWatcher', () => {
     watcher.handleEvent('add', path.join(root, 'a.ts'));
     watcher.handleEvent('change', path.join(root, 'a.ts')); // should replace add with change
     watcher.handleEvent('add', path.join(root, 'b.ts'));
+    watcher.handleEvent('unlink', path.join(root, 'b.ts')); // last event should win for the path
 
     jest.advanceTimersByTime(60);
     await Promise.resolve();
@@ -29,6 +30,8 @@ describe('FileWatcher', () => {
 
     const aChange = batch.find((c) => c.path === 'a.ts');
     expect(aChange?.type).toBe('change');
+    const bChange = batch.find((c) => c.path === 'b.ts');
+    expect(bChange?.type).toBe('unlink');
   });
 
   it('splits batches when exceeding maxBatchSize', async () => {

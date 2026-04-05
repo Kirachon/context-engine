@@ -81,6 +81,29 @@ describe('sqlite lexical index', () => {
     expect(results[0].path).toBe('src/alpha.ts');
   });
 
+  it('prefers exact identifier matches for camelCase queries', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(
+      workspacePath,
+      'src/loginService.ts',
+      'export function resolveAIProviderId() { return "match"; }'
+    );
+    writeWorkspaceFile(
+      workspacePath,
+      'src/noise.ts',
+      'export function resolveAiProvider() { return "near-miss"; }'
+    );
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const results = await index.search('resolveAIProviderId', 5);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe('src/loginService.ts');
+    expect(results[0].content).toContain('resolveAIProviderId');
+  });
+
   it('applies incremental workspace changes without rebuilding the whole index', async () => {
     workspacePath = createTempWorkspace();
     writeWorkspaceFile(

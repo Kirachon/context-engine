@@ -22,6 +22,7 @@ import { ContextEngineMCPServer } from './mcp/server.js';
 import { ContextEngineHttpServer } from './http/index.js';
 import { envBool } from './config/env.js';
 import { resolveWorkspacePath, type WorkspaceResolutionResult } from './workspace/resolveWorkspace.js';
+import { acquireWorkspaceStartupLock } from './runtime/workspaceLock.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -165,6 +166,12 @@ Examples:
   console.error('');
 
   try {
+    const startupLock = acquireWorkspaceStartupLock(workspacePath);
+    if (startupLock.warning) {
+      console.warn(startupLock.warning);
+    }
+    process.once('exit', startupLock.release);
+
     const server = new ContextEngineMCPServer(workspacePath, 'context-engine', {
       enableWatcher,
     });

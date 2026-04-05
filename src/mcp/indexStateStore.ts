@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { getPreferredWorkspacePath, getReadableWorkspacePath } from '../runtime/compatPaths.js';
@@ -20,6 +21,8 @@ export interface IndexStateFile {
   schema_version: number;
   provider_id: string;
   updated_at: string;
+  workspace_fingerprint?: string;
+  feature_flags_snapshot?: string;
   files: Record<string, IndexStateFileEntry>;
 }
 
@@ -33,8 +36,8 @@ export interface IndexStateLoadResult {
   metadata: IndexStateLoadMetadata;
 }
 
-type IndexStateSaveInput = Omit<IndexStateFile, 'schema_version' | 'provider_id'> &
-  Partial<Pick<IndexStateFile, 'schema_version' | 'provider_id'>>;
+type IndexStateSaveInput = Omit<IndexStateFile, 'schema_version' | 'provider_id' | 'workspace_fingerprint' | 'feature_flags_snapshot'> &
+  Partial<Pick<IndexStateFile, 'schema_version' | 'provider_id' | 'workspace_fingerprint' | 'feature_flags_snapshot'>>;
 
 export class JsonIndexStateStore {
   private workspacePath: string;
@@ -63,8 +66,14 @@ export class JsonIndexStateStore {
       schema_version: DEFAULT_SCHEMA_VERSION,
       provider_id: DEFAULT_PROVIDER_ID,
       updated_at: EPOCH_ISO,
+      workspace_fingerprint: this.buildWorkspaceFingerprint(),
       files: {},
     };
+  }
+
+  private buildWorkspaceFingerprint(): string {
+    const normalizedWorkspacePath = path.resolve(this.workspacePath).replace(/\\/g, '/');
+    return crypto.createHash('sha256').update(normalizedWorkspacePath).digest('hex').slice(0, 16);
   }
 
   load(): IndexStateFile {
@@ -111,6 +120,14 @@ export class JsonIndexStateStore {
               ? parsed.provider_id
               : DEFAULT_PROVIDER_ID,
           updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : EPOCH_ISO,
+          workspace_fingerprint:
+            typeof parsed.workspace_fingerprint === 'string' && parsed.workspace_fingerprint.trim().length > 0
+              ? parsed.workspace_fingerprint
+              : this.buildWorkspaceFingerprint(),
+          feature_flags_snapshot:
+            typeof parsed.feature_flags_snapshot === 'string' && parsed.feature_flags_snapshot.trim().length > 0
+              ? parsed.feature_flags_snapshot
+              : undefined,
           files,
         },
         metadata: { warnings: [] },
@@ -134,6 +151,11 @@ export class JsonIndexStateStore {
           ? data.provider_id
           : DEFAULT_PROVIDER_ID,
       updated_at: data.updated_at ?? new Date().toISOString(),
+      workspace_fingerprint: data.workspace_fingerprint ?? this.buildWorkspaceFingerprint(),
+      feature_flags_snapshot:
+        typeof data.feature_flags_snapshot === 'string' && data.feature_flags_snapshot.trim().length > 0
+          ? data.feature_flags_snapshot
+          : undefined,
       files: data.files ?? {},
     };
     try {

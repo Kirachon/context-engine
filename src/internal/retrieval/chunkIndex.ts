@@ -13,6 +13,11 @@ import {
   type ChunkRecord,
 } from './chunking.js';
 import { createTreeSitterChunkParser } from './treeSitterChunkParser.js';
+import {
+  computeExactMatchBoost,
+  normalizeSearchText,
+  tokenizeSearchInput,
+} from './searchHeuristics.js';
 
 const CHUNK_INDEX_FILE_NAME = '.context-engine-chunk-index.json';
 const LEGACY_CHUNK_INDEX_FILE_NAME = '.augment-chunk-index.json';
@@ -23,29 +28,6 @@ const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
 const DEFAULT_SNIPPET_WINDOW_LINES = 5;
 const DEFAULT_SNIPPET_MAX_CHARS = 1_200;
-const STOPWORDS = new Set([
-  'and',
-  'the',
-  'for',
-  'with',
-  'from',
-  'that',
-  'this',
-  'where',
-  'what',
-  'when',
-  'why',
-  'how',
-  'is',
-  'are',
-  'of',
-  'to',
-  'in',
-  'on',
-  'at',
-  'by',
-]);
-
 interface IndexStateEntry {
   hash: string;
   indexed_at?: string;
@@ -287,18 +269,6 @@ function readDocumentContent(workspacePath: string, relativePath: string): strin
   }
 }
 
-function tokenize(input: string): string[] {
-  return input
-    .toLowerCase()
-    .split(/[^a-z0-9_./-]+/g)
-    .map((token) => token.trim())
-    .filter((token) => token.length >= 2 && !STOPWORDS.has(token));
-}
-
-function normalizeSearchText(input: string): string {
-  return input.toLowerCase().replace(/\s+/g, ' ').trim();
-}
-
 function countOccurrences(haystack: string, needle: string): number {
   if (!haystack || !needle) return 0;
   let count = 0;
@@ -449,11 +419,11 @@ type ChunkSearchContext = {
 
 function buildSearchContext(query: string, options?: ChunkSearchOptions): ChunkSearchContext {
   const normalizedQuery = normalizeSearchText(options?.normalizedQuery ?? query);
-  const queryTokens = Array.from(new Set((options?.queryTokens ?? tokenize(query)).map((token) => token.trim().toLowerCase()).filter(Boolean)));
+  const queryTokens = Array.from(new Set((options?.queryTokens ?? tokenizeSearchInput(query)).map((token) => token.trim().toLowerCase()).filter(Boolean)));
   const symbolTokens = Array.from(new Set((options?.symbolTokens ?? []).map((token) => token.trim().toLowerCase()).filter(Boolean)));
 
   const cleanedQuery = query.trim();
-  const identifierLikeToken = cleanedQuery
+  const identifierLikeToken = queryTokens.length === 1 || cleanedQuery
     .split(/[^A-Za-z0-9_./-]+/g)
     .map((token) => token.trim())
     .filter(Boolean)
@@ -490,6 +460,14 @@ function scoreChunk(chunk: ChunkRecord, context: ChunkSearchContext): number {
   if (context.normalizedQuery && haystack.includes(context.normalizedQuery)) {
     score += 6;
   }
+
+  score += computeExactMatchBoost({
+    query: context.normalizedQuery || chunk.path,
+    path: chunk.path,
+    content: chunk.content,
+    lines: chunk.lines,
+    chunkId: chunk.chunkId,
+  });
 
   let matchedTokens = 0;
   for (const token of context.queryTokens) {

@@ -12,6 +12,11 @@ import {
   type ChunkParser,
   type ChunkRecord,
 } from './chunking.js';
+import {
+  computeExactMatchBoost,
+  normalizeSearchText,
+  tokenizeSearchInput,
+} from './searchHeuristics.js';
 
 const SQLITE_INDEX_FILE_NAME = '.context-engine-lexical-index.sqlite';
 const LEGACY_SQLITE_INDEX_FILE_NAME = '.augment-lexical-index.sqlite';
@@ -303,6 +308,39 @@ function computeScore(rawScore: unknown): number {
     return 1;
   }
   return 1 / (1 + rawScore);
+}
+
+function computeLexicalRank(params: {
+  query: string;
+  path: string;
+  content: string;
+  lines?: string;
+  chunkId?: string;
+  rawScore?: number;
+}): number {
+  const baseScore = typeof params.rawScore === 'number' ? computeScore(params.rawScore) : 0;
+  const exactBoost = computeExactMatchBoost({
+    query: params.query,
+    path: params.path,
+    content: params.content,
+    lines: params.lines,
+    chunkId: params.chunkId,
+  });
+  const queryTokens = tokenizeSearchInput(params.query);
+  const normalizedContent = normalizeSearchText(params.content);
+  const normalizedPath = params.path.toLowerCase();
+
+  let tokenBoost = 0;
+  for (const token of queryTokens) {
+    if (normalizedPath.includes(token)) {
+      tokenBoost += 0.8;
+    }
+    if (normalizedContent.includes(token)) {
+      tokenBoost += 0.5;
+    }
+  }
+
+  return baseScore + exactBoost + tokenBoost;
 }
 
 function createSchema(db: DatabaseSyncInstance): void {
@@ -783,21 +821,39 @@ export function createWorkspaceLexicalSearchIndex(
         score?: number;
       }>;
 
-      return rows.map((row) => {
+      return rows
+        .map((row) => {
         const snippet = (row.snippet ?? '').trim();
         const content = snippet || buildSnippetFallback(row.content, DEFAULT_SNIPPET_MAX_CHARS);
-        const score = computeScore(row.score);
         return {
           path: row.path,
           content,
           lines: row.lines,
           chunkId: row.chunk_id,
-          matchType: 'keyword',
-          score,
-          relevanceScore: score,
+          matchType: 'keyword' as const,
+          score: computeLexicalRank({
+            query: normalizedQuery,
+            path: row.path,
+            content,
+            lines: row.lines,
+            chunkId: row.chunk_id,
+            rawScore: row.score,
+          }),
+          relevanceScore: 0,
           retrievedAt: new Date().toISOString(),
         };
-      });
+      })
+        .sort((a, b) => {
+          if ((b.score ?? 0) !== (a.score ?? 0)) {
+            return (b.score ?? 0) - (a.score ?? 0);
+          }
+          return a.path.localeCompare(b.path);
+        })
+        .map((result) => ({
+          ...result,
+          score: Math.max(0, Math.min(1, result.score ?? 0)),
+          relevanceScore: Math.max(0, Math.min(1, result.score ?? 0)),
+        }));
     };
 
     try {

@@ -284,6 +284,43 @@ describe('workspace chunk search index', () => {
     expect(results[0].relevanceScore ?? 0).toBeGreaterThan((results[1]?.relevanceScore ?? 0));
   });
 
+  it('prefers exact identifier chunk matches for camelCase queries', async () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/login.ts',
+      [
+        'export function resolveAIProviderId() {',
+        '  return "exact";',
+        '}',
+      ].join('\n')
+    );
+    writeWorkspaceFile(
+      tempDir,
+      'src/noise.ts',
+      [
+        'export function resolveAiProvider() {',
+        '  return "near";',
+        '}',
+      ].join('\n')
+    );
+
+    writeIndexState(tempDir, {
+      'src/login.ts': { hash: 'hash-login-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+      'src/noise.ts': { hash: 'hash-noise-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+    await index.refresh();
+
+    const results = await index.search('resolveAIProviderId', 5);
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe('src/login.ts');
+    expect(results[0].content).toContain('resolveAIProviderId');
+  });
+
   it('returns a tight snippet window around the best matching lines', async () => {
     tempDir = createTempWorkspace();
 

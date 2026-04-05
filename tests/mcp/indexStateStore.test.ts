@@ -109,12 +109,14 @@ describe('JsonIndexStateStore', () => {
       version: number;
       schema_version: number;
       provider_id: string;
+      workspace_fingerprint: string;
       files: Record<string, { hash: string; indexed_at: string }>;
     };
 
     expect(persisted.version).toBe(2);
     expect(persisted.schema_version).toBe(2);
     expect(persisted.provider_id).toBe('local_native');
+    expect(persisted.workspace_fingerprint).toMatch(/^[a-f0-9]{16}$/);
     expect(persisted.files['src/b.ts']).toEqual({
       hash: 'def456',
       indexed_at: '2026-03-04T01:00:00.000Z',
