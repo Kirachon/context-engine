@@ -52,7 +52,7 @@ function collectToolConstantNamesFromToolFiles(): Map<string, string> {
   const files = fs.readdirSync(toolDirPath).filter((file) => file.endsWith('.ts'));
   for (const file of files) {
     const source = fs.readFileSync(path.join(toolDirPath, file), 'utf8');
-    const matches = [...source.matchAll(/export const\s+([A-Za-z0-9_]+)\s*=\s*\{[\s\S]*?name:\s*'([^']+)'/g)];
+    const matches = [...source.matchAll(/export const\s+([A-Za-z0-9_]*Tool)\s*=\s*\{[\s\S]*?name:\s*'([^']+)'/g)];
     for (const match of matches) {
       toolNameByConst.set(match[1], match[2]);
     }
@@ -69,9 +69,19 @@ function extractRuntimeToolNames(serverSource: string): string[] {
     .filter((constName) => constName !== 'findToolByName');
 
   const toolNameByConst = collectToolConstantNamesFromToolFiles();
-  const fromDirectConsts = directToolConsts
-    .map((constName) => toolNameByConst.get(constName))
-    .filter((name): name is string => Boolean(name));
+  const fromDirectConsts = directToolConsts.map((constName) => {
+    const resolved = toolNameByConst.get(constName);
+    if (resolved) {
+      return resolved;
+    }
+
+    const declarationPattern = new RegExp(
+      `(?:const|let|var)\\s+${constName}\\s*=\\s*\\{[\\s\\S]*?name:\\s*['"]([^'"]+)['"]`,
+      'm'
+    );
+    const declarationMatch = serverSource.match(declarationPattern);
+    return declarationMatch?.[1];
+  }).filter((name): name is string => Boolean(name));
 
   return [...fromFindToolByName, ...fromDirectConsts];
 }
