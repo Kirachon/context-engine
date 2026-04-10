@@ -52,6 +52,9 @@ jobs:
       - name: Run migrated-family targeted matrix gate
         run: npm run ci:matrix:migrated-families
 
+      - name: Run MCP smoke harness
+        run: npm run ci:check:mcp-smoke
+
       - name: Check WS owner assignment lock (WS13-WS21)
         run: npm run ci:check:ws-owner-assignment-lock
 

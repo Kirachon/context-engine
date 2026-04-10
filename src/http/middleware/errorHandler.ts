@@ -5,6 +5,7 @@
  */
 
 import type { Request, Response, NextFunction } from 'express';
+import { formatRequestLogPrefix } from '../../telemetry/requestContext.js';
 
 /**
  * HTTP error with status code
@@ -50,7 +51,7 @@ export function errorHandler(
     res: Response,
     _next: NextFunction
 ): void {
-    console.error(`[HTTP] Error: ${err.message}`);
+    console.error(`${formatRequestLogPrefix()} [HTTP] Error: ${err.message}`);
 
     if (err instanceof HttpError) {
         res.status(err.statusCode).json({

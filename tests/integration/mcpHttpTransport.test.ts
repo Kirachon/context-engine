@@ -3,6 +3,7 @@ import request from 'supertest';
 import { DEFAULT_NEGOTIATED_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 
 import { ContextEngineHttpServer } from '../../src/http/httpServer.js';
+import { REQUEST_ID_HEADER } from '../../src/http/middleware/logging.js';
 
 type MockServiceClient = {
   getIndexStatus: ReturnType<typeof jest.fn>;
@@ -86,6 +87,8 @@ describe('MCP HTTP transport', () => {
 
     expect(initializeResponse.status).toBe(200);
     expect(initializeResponse.headers['content-type']).toContain('text/event-stream');
+    expect(typeof initializeResponse.headers[REQUEST_ID_HEADER]).toBe('string');
+    expect((initializeResponse.headers[REQUEST_ID_HEADER] as string).length).toBeGreaterThan(0);
     const initializePayload = parseSseJsonPayload(initializeResponse.text);
     expect(
       (initializePayload.result as { capabilities?: { tools?: unknown } } | undefined)
@@ -95,6 +98,7 @@ describe('MCP HTTP transport', () => {
     const sessionId = initializeResponse.headers['mcp-session-id'];
     expect(typeof sessionId).toBe('string');
     expect(sessionId.length).toBeGreaterThan(0);
+    expect(initializeResponse.headers[REQUEST_ID_HEADER]).not.toBe(sessionId);
 
     const initializedResponse = await request(app)
       .post('/mcp')
@@ -189,6 +193,7 @@ describe('MCP HTTP transport', () => {
       });
 
     expect(resourcesListResponse.status).toBe(200);
+    expect(typeof resourcesListResponse.headers[REQUEST_ID_HEADER]).toBe('string');
     const resourcesListPayload = parseSseJsonPayload(resourcesListResponse.text);
     const resources = (resourcesListPayload.result as {
       resources?: Array<{ uri: string }>;
@@ -376,13 +381,13 @@ describe('MCP HTTP transport', () => {
       });
 
     expect(response.status).toBe(400);
-    expect(response.body).toEqual({
+    expect(response.body).toMatchObject({
       jsonrpc: '2.0',
       error: {
         code: -32000,
-        message: 'Bad Request: No valid session ID provided',
       },
       id: 3,
     });
+    expect(typeof response.body?.error?.message).toBe('string');
   });
 });

@@ -25,6 +25,7 @@ import type { WorkerMessage } from '../worker/messages.js';
 import { featureEnabled } from '../config/features.js';
 import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
+import { formatRequestLogPrefix } from '../telemetry/requestContext.js';
 import { evaluateStartupAutoIndex } from './tooling/indexFreshness.js';
 import {
   filterEntriesByPathScope,
@@ -393,6 +394,10 @@ const FALLBACK_SEARCH_READ_CONCURRENCY = envInt('CE_FALLBACK_SEARCH_READ_CONCURR
   max: 16,
 });
 type SearchAndAskPriority = 'interactive' | 'background';
+
+function formatScopedLog(message: string): string {
+  return `${formatRequestLogPrefix()} ${message}`;
+}
 type SearchQueueRejectMode = 'observe' | 'shadow' | 'enforce';
 
 function resolveSearchQueueRejectMode(raw: string | undefined): SearchQueueRejectMode {
@@ -630,7 +635,7 @@ class SearchQueue {
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      console.error(`[SearchQueue] Request failed: ${errorMessage}`);
+      console.error(formatScopedLog(`[SearchQueue] Request failed: ${errorMessage}`));
       if (!item.settled) {
         item.settled = true;
         clearTimeout(item.timer);
@@ -1435,7 +1440,11 @@ export class ContextServiceClient {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`[ContextServiceClient] Failed to initialize AI provider (${this.aiProviderId}): ${message}`);
+        console.error(
+          formatScopedLog(
+            `[ContextServiceClient] Failed to initialize AI provider (${this.aiProviderId}): ${message}`
+          )
+        );
         throw new Error(`AI provider initialization failed (${this.aiProviderId}): ${message}`);
       }
     }
@@ -1457,7 +1466,7 @@ export class ContextServiceClient {
       return;
     }
     this.indexStateSchemaWarningWarned = true;
-    console.warn(`[ContextServiceClient] ${metadata.warnings[0]}`);
+    console.warn(formatScopedLog(`[ContextServiceClient] ${metadata.warnings[0]}`));
   }
 
   private getCurrentIndexStateWorkspaceFingerprint(): string {
@@ -1492,7 +1501,9 @@ export class ContextServiceClient {
       if (!this.indexStateCompatibilityWarned) {
         this.indexStateCompatibilityWarned = true;
         console.warn(
-          `[ContextServiceClient] Ignoring index state entries for incompatible workspace/feature-flags snapshot while active provider is "${this.retrievalProviderId}".`
+          formatScopedLog(
+            `[ContextServiceClient] Ignoring index state entries for incompatible workspace/feature-flags snapshot while active provider is "${this.retrievalProviderId}".`
+          )
         );
       }
 
@@ -1506,7 +1517,9 @@ export class ContextServiceClient {
     if (!this.indexStateProviderMismatchWarned) {
       this.indexStateProviderMismatchWarned = true;
       console.warn(
-        `[ContextServiceClient] Ignoring index state entries for provider "${loaded.state.provider_id}" while active provider is "${this.retrievalProviderId}".`
+        formatScopedLog(
+          `[ContextServiceClient] Ignoring index state entries for provider "${loaded.state.provider_id}" while active provider is "${this.retrievalProviderId}".`
+        )
       );
     }
 
@@ -3428,7 +3441,7 @@ export class ContextServiceClient {
           { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
         );
         if (debugSearch) {
-          console.error(`[semanticSearch] Cache hit for query: ${query}`);
+          console.error(formatScopedLog(`[semanticSearch] Cache hit for query: ${query}`));
         }
         return cached;
       }
@@ -3527,7 +3540,7 @@ export class ContextServiceClient {
           );
           return searchResults;
         } catch (error) {
-          console.error('Search failed:', error);
+          console.error(formatScopedLog('Search failed:'), error);
           this.cacheMisses++;
           incCounter(
             'context_engine_semantic_search_total',
@@ -3661,8 +3674,10 @@ export class ContextServiceClient {
 
       const queryHash = crypto.createHash('sha1').update(query).digest('hex').slice(0, 10);
       console.error(
-        `[retrieval_shadow_compare] provider=${this.getActiveRetrievalProviderId()} sample_rate=${sampleRate.toFixed(2)} ` +
-        `query_hash=${queryHash} primary=${primaryResults.length} shadow=${shadowResults.length} overlap=${overlap}`
+        formatScopedLog(
+          `[retrieval_shadow_compare] provider=${this.getActiveRetrievalProviderId()} sample_rate=${sampleRate.toFixed(2)} ` +
+          `query_hash=${queryHash} primary=${primaryResults.length} shadow=${shadowResults.length} overlap=${overlap}`
+        )
       );
     } catch {
       // Shadow compare is best-effort only and must not affect primary retrieval.
@@ -3726,7 +3741,9 @@ export class ContextServiceClient {
         try {
           const queueLength = searchQueue.length;
           console.error(
-            `[searchAndAsk] Provider=${providerId}; lane=${priority}; query=${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
+            formatScopedLog(
+              `[searchAndAsk] Provider=${providerId}; lane=${priority}; query=${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
+            )
           );
 
           const provider = this.getAIProvider();
@@ -3741,10 +3758,10 @@ export class ContextServiceClient {
               `AI provider (${provider.id}) returned invalid response: expected object with string text property`
             );
           }
-          console.error(`[searchAndAsk] Response length: ${innerResponse.text.length}`);
+          console.error(formatScopedLog(`[searchAndAsk] Response length: ${innerResponse.text.length}`));
           return innerResponse.text;
         } catch (error) {
-          console.error('[searchAndAsk] Failed:', error);
+          console.error(formatScopedLog('[searchAndAsk] Failed:'), error);
           throw error;
         } finally {
           observeDurationMs(

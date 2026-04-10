@@ -19,7 +19,14 @@ import {
 import { evaluateRankingGate } from './rankingCalibration.js';
 import { scoreLexicalCandidates } from './lexical.js';
 import { rerankCandidates, rerankResults } from './rerank.js';
-import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.js';
+import {
+  ExpandedQuery,
+  InternalSearchResult,
+  RetrievalOptions,
+  type RankingGateDecision,
+  type RankingGateSignals,
+  type RankingFallbackReason,
+} from './types.js';
 
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disable', 'disabled']);
 
@@ -32,6 +39,30 @@ type NormalizedRetrievalOptions =
     includePaths?: string[];
     excludePaths?: string[];
   };
+
+type RerankAppliedPath = 'heuristic' | 'transformer' | 'provider' | 'original_order';
+type RerankSelectionReason =
+  | 'rerank_disabled'
+  | 'insufficient_candidates'
+  | 'external_provider'
+  | 'gate_transformer'
+  | 'gate_skipped';
+
+type RerankDiagnosticsUpdate = {
+  selectedPath: 'heuristic' | 'transformer' | 'provider';
+  appliedPath: RerankAppliedPath;
+  gateState: 'disabled' | 'skipped' | 'invoked' | 'fail_open';
+  fallbackReason: RankingFallbackReason;
+  selectionReason: RerankSelectionReason;
+  candidateCount: number;
+  headCount: number;
+  tailCount: number;
+  gateDecision?: RankingGateDecision;
+  providerId?: string;
+  reasonCode?: string;
+  runtimeId?: string;
+  modelId?: string;
+};
 
 export function isRetrievalPipelineEnabled(): boolean {
   if (featureEnabled('rollout_kill_switch')) {
@@ -92,34 +123,100 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
   };
 }
 
+function noteRerankPathStages(flow: RetrievalFlowContext, diagnostics: RerankDiagnosticsUpdate): void {
+  noteRetrievalStage(flow, `rerank:selected:${diagnostics.selectedPath}`);
+  noteRetrievalStage(flow, `rerank:applied:${diagnostics.appliedPath}`);
+  noteRetrievalStage(flow, `rerank:state:${diagnostics.gateState}`);
+  noteRetrievalStage(flow, `rerank:reason:${diagnostics.selectionReason}`);
+  if (diagnostics.gateState === 'fail_open') {
+    noteRetrievalStage(flow, `rerank:fallback:${diagnostics.fallbackReason}`);
+  }
+}
+
+function updateRerankDiagnostics(
+  flow: RetrievalFlowContext,
+  diagnostics: RerankDiagnosticsUpdate
+): void {
+  flow.metadata.rerankPath = diagnostics.selectedPath;
+  flow.metadata.rerankSelectedPath = diagnostics.selectedPath;
+  flow.metadata.rerankAppliedPath = diagnostics.appliedPath;
+  flow.metadata.rerankGateState = diagnostics.gateState;
+  flow.metadata.rerankFallbackReason = diagnostics.fallbackReason;
+  flow.metadata.rerankSelectionReason = diagnostics.selectionReason;
+  flow.metadata.rerankCandidateCount = diagnostics.candidateCount;
+  flow.metadata.rerankHeadCount = diagnostics.headCount;
+  flow.metadata.rerankTailCount = diagnostics.tailCount;
+  flow.metadata.rerankReasonCode = diagnostics.reasonCode;
+  flow.metadata.rerankProviderId = diagnostics.providerId;
+  flow.metadata.rerankRuntimeId = diagnostics.runtimeId;
+  flow.metadata.rerankModelId = diagnostics.modelId;
+  if (diagnostics.gateDecision) {
+    flow.metadata.rerankGateDecision = diagnostics.gateDecision;
+    flow.metadata.rerankGateReasons = diagnostics.gateDecision.reasons;
+    flow.metadata.rerankGateSignals = diagnostics.gateDecision.signals as RankingGateSignals;
+  }
+  noteRerankPathStages(flow, diagnostics);
+}
+
 async function applyRerankStage(
   query: string,
   candidates: InternalSearchResult[],
   settings: NormalizedRetrievalOptions,
   flow: RetrievalFlowContext
 ): Promise<InternalSearchResult[]> {
+  const topN = Math.min(settings.rerankTopN, candidates.length);
+  const head = candidates.slice(0, topN);
+  const tail = candidates.slice(topN);
+
   if (!settings.enableRerank || candidates.length <= 1) {
-    flow.metadata.rerankGateState = settings.enableRerank ? 'skipped' : 'disabled';
-    flow.metadata.rerankFallbackReason = 'none';
+    updateRerankDiagnostics(flow, {
+      selectedPath: 'heuristic',
+      appliedPath: 'original_order',
+      gateState: settings.enableRerank ? 'skipped' : 'disabled',
+      fallbackReason: 'none',
+      selectionReason: settings.enableRerank ? 'insufficient_candidates' : 'rerank_disabled',
+      candidateCount: candidates.length,
+      headCount: head.length,
+      tailCount: tail.length,
+      providerId: settings.reranker?.id,
+      reasonCode: settings.enableRerank ? 'single_candidate' : 'rerank_disabled',
+    });
     noteRetrievalStage(flow, 'rerank:skipped');
     return candidates;
   }
 
-  const topN = Math.min(settings.rerankTopN, candidates.length);
-  const head = candidates.slice(0, topN);
-  const tail = candidates.slice(topN);
   const stageStart = Date.now();
   noteRetrievalStage(flow, 'rerank:started');
   const gateDecision = evaluateRankingGate(head, {
     rankingMode: settings.rankingMode,
     profile: settings.profile,
   });
-  flow.metadata.rerankGateDecision = gateDecision;
-  flow.metadata.rerankPath = settings.reranker
-    ? 'provider'
+  const baseSelectionReason: RerankSelectionReason = settings.reranker
+    ? 'external_provider'
     : gateDecision.shouldUseTransformerRerank
-      ? 'transformer'
-      : 'heuristic';
+      ? 'gate_transformer'
+      : 'gate_skipped';
+  updateRerankDiagnostics(flow, {
+    selectedPath: settings.reranker
+      ? 'provider'
+      : gateDecision.shouldUseTransformerRerank
+        ? 'transformer'
+        : 'heuristic',
+    appliedPath: settings.reranker
+      ? 'provider'
+      : gateDecision.shouldUseTransformerRerank
+        ? 'transformer'
+        : 'heuristic',
+    gateState: gateDecision.shouldUseTransformerRerank || settings.reranker ? 'invoked' : 'skipped',
+    fallbackReason: gateDecision.shouldUseTransformerRerank || settings.reranker ? 'none' : 'rerank_skipped',
+    selectionReason: baseSelectionReason,
+    candidateCount: candidates.length,
+    headCount: head.length,
+    tailCount: tail.length,
+    gateDecision,
+    providerId: settings.reranker?.id,
+    reasonCode: baseSelectionReason,
+  });
 
   try {
     let rerankedHead: InternalSearchResult[];
@@ -136,27 +233,64 @@ async function applyRerankStage(
           1,
           'Rerank fail-open fallbacks.'
         );
-        flow.metadata.rerankGateState = 'fail_open';
-        flow.metadata.rerankFallbackReason = providerResult.timedOut
-          ? 'rerank_timeout_or_empty'
-          : 'rerank_error';
+        updateRerankDiagnostics(flow, {
+          selectedPath: 'provider',
+          appliedPath: 'original_order',
+          gateState: 'fail_open',
+          fallbackReason: providerResult.timedOut ? 'rerank_timeout_or_empty' : 'rerank_error',
+          selectionReason: 'external_provider',
+          candidateCount: candidates.length,
+          headCount: head.length,
+          tailCount: tail.length,
+          gateDecision,
+          providerId: settings.reranker.id,
+          reasonCode: providerResult.timedOut ? 'provider_timeout' : 'provider_empty',
+        });
         noteRetrievalStage(flow, 'rerank:fail_open');
         rerankedHead = head;
       } else {
+        updateRerankDiagnostics(flow, {
+          selectedPath: 'provider',
+          appliedPath: 'provider',
+          gateState: 'invoked',
+          fallbackReason: 'none',
+          selectionReason: 'external_provider',
+          candidateCount: candidates.length,
+          headCount: head.length,
+          tailCount: tail.length,
+          gateDecision,
+          providerId: settings.reranker.id,
+          reasonCode: 'provider_applied',
+        });
         rerankedHead = providerResult.value.slice(0, topN);
       }
     } else {
-      flow.metadata.rerankGateState = gateDecision.shouldUseTransformerRerank ? 'invoked' : 'skipped';
-      flow.metadata.rerankFallbackReason = gateDecision.shouldUseTransformerRerank ? 'none' : 'rerank_skipped';
-      flow.metadata.rerankGateReasons = gateDecision.reasons;
-      flow.metadata.rerankGateSignals = gateDecision.signals;
-
       if (!gateDecision.shouldUseTransformerRerank) {
         noteRetrievalStage(flow, 'rerank:skipped');
         rerankedHead = rerankResults(head, { originalQuery: query, mode: settings.rankingMode });
       } else {
         const heuristicResult = await withTimeoutState<InternalSearchResult[]>(
-          rerankCandidates(head, { originalQuery: query, mode: settings.rankingMode, gateDecision }),
+          rerankCandidates(head, {
+            originalQuery: query,
+            mode: settings.rankingMode,
+            gateDecision,
+            onTrace: (trace) => {
+              updateRerankDiagnostics(flow, {
+                selectedPath: trace.selectedPath,
+                appliedPath: trace.appliedPath,
+                gateState: trace.state,
+                fallbackReason: trace.fallbackReason,
+                selectionReason: trace.selectedPath === 'transformer' ? 'gate_transformer' : 'gate_skipped',
+                candidateCount: candidates.length,
+                headCount: head.length,
+                tailCount: tail.length,
+                gateDecision,
+                reasonCode: trace.reasonCode,
+                runtimeId: trace.runtimeId,
+                modelId: trace.modelId,
+              });
+            },
+          }),
           settings.rerankTimeoutMs,
           rerankResults(head, { originalQuery: query, mode: settings.rankingMode })
         );
@@ -168,8 +302,18 @@ async function applyRerankStage(
             1,
             'Rerank fail-open fallbacks.'
           );
-          flow.metadata.rerankGateState = 'fail_open';
-          flow.metadata.rerankFallbackReason = 'rerank_timeout_or_empty';
+          updateRerankDiagnostics(flow, {
+            selectedPath: 'transformer',
+            appliedPath: 'heuristic',
+            gateState: 'fail_open',
+            fallbackReason: 'rerank_timeout_or_empty',
+            selectionReason: 'gate_transformer',
+            candidateCount: candidates.length,
+            headCount: head.length,
+            tailCount: tail.length,
+            gateDecision,
+            reasonCode: 'transformer_timeout',
+          });
           noteRetrievalStage(flow, 'rerank:fail_open');
         }
       }
@@ -181,10 +325,6 @@ async function applyRerankStage(
       Date.now() - stageStart,
       { help: 'Retrieval rerank stage duration in seconds.' }
     );
-    if (flow.metadata.rerankGateState === undefined) {
-      flow.metadata.rerankGateState = 'invoked';
-      flow.metadata.rerankFallbackReason = 'none';
-    }
     noteRetrievalStage(flow, 'rerank:completed');
     return [...rerankedHead, ...tail];
   } catch {
@@ -194,8 +334,19 @@ async function applyRerankStage(
       1,
       'Rerank fail-open fallbacks.'
     );
-    flow.metadata.rerankGateState = 'fail_open';
-    flow.metadata.rerankFallbackReason = 'error';
+    updateRerankDiagnostics(flow, {
+      selectedPath: settings.reranker ? 'provider' : gateDecision.shouldUseTransformerRerank ? 'transformer' : 'heuristic',
+      appliedPath: settings.reranker ? 'original_order' : gateDecision.shouldUseTransformerRerank ? 'heuristic' : 'heuristic',
+      gateState: 'fail_open',
+      fallbackReason: 'rerank_error',
+      selectionReason: settings.reranker ? 'external_provider' : gateDecision.shouldUseTransformerRerank ? 'gate_transformer' : 'gate_skipped',
+      candidateCount: candidates.length,
+      headCount: head.length,
+      tailCount: tail.length,
+      gateDecision,
+      providerId: settings.reranker?.id,
+      reasonCode: settings.reranker ? 'provider_error' : 'unexpected_error',
+    });
     noteRetrievalStage(flow, 'rerank:fail_open');
     return candidates;
   }

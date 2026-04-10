@@ -114,7 +114,14 @@ import {
   getCreatePlanPromptArguments,
   getEnhanceRequestPromptArguments,
 } from './prompts/planning.js';
+import {
+  applyPromptDiscoverability,
+  applyResourceDiscoverability,
+  applyToolDiscoverability,
+  getDefaultDiscoverabilityTitle,
+} from './tooling/discoverability.js';
 import { validateExternalSources, validatePathScopeGlobs } from './tooling/validation.js';
+import { formatRequestLogPrefix } from '../telemetry/requestContext.js';
 
 type ToolRegistryEntry = {
   tool: { name: string };
@@ -143,13 +150,12 @@ type PromptDescriptor = Prompt & {
 };
 
 export const PROMPT_DEFINITIONS: PromptDescriptor[] = [
-  {
+  applyPromptDiscoverability({
     name: 'create-plan',
-    title: 'Create Plan',
     description: 'Build a planning request using the repo planning templates.',
     arguments: getCreatePlanPromptArguments(),
-  },
-  {
+  }),
+  applyPromptDiscoverability({
     name: 'refine-plan',
     description: 'Build a plan-refinement request using the repo refinement templates.',
     arguments: [
@@ -157,8 +163,8 @@ export const PROMPT_DEFINITIONS: PromptDescriptor[] = [
       { name: 'feedback', description: 'Optional refinement feedback text.' },
       { name: 'clarifications', description: 'Optional JSON object string of clarification answers.' },
     ],
-  },
-  {
+  }),
+  applyPromptDiscoverability({
     name: 'review-diff',
     description: 'Build a code-review request for a diff using the repo review templates.',
     arguments: [
@@ -166,12 +172,12 @@ export const PROMPT_DEFINITIONS: PromptDescriptor[] = [
       { name: 'categories', description: 'Optional comma-separated category list.' },
       { name: 'custom_instructions', description: 'Optional extra review instructions.' },
     ],
-  },
-  {
+  }),
+  applyPromptDiscoverability({
     name: 'enhance-request',
     description: 'Build a request-enhancement prompt using the repo prompt-enhancement templates.',
     arguments: getEnhanceRequestPromptArguments(),
-  },
+  }),
 ];
 
 export function createServerCapabilities(options?: ServerCapabilityOptions): Record<string, unknown> {
@@ -230,7 +236,7 @@ async function executeToolCallWithSignal(params: {
   const log = params.log ?? console.error;
   const startTime = now();
 
-  log(`[${new Date().toISOString()}] Tool: ${name}`);
+  log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool: ${name}`);
 
   try {
     const handler = toolHandlers.get(name);
@@ -240,7 +246,7 @@ async function executeToolCallWithSignal(params: {
 
     const result = await handler(args, signal);
     const elapsedMs = now() - startTime;
-    log(`[${new Date().toISOString()}] Tool ${name} completed in ${elapsedMs}ms`);
+    log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool ${name} completed in ${elapsedMs}ms`);
 
     return {
       response: formatToolExecutionResponse(result).response,
@@ -251,7 +257,7 @@ async function executeToolCallWithSignal(params: {
     const elapsedMs = now() - startTime;
     const errorMessage = error instanceof Error ? error.message : String(error);
 
-    log(`[${new Date().toISOString()}] Tool ${name} failed after ${elapsedMs}ms: ${errorMessage}`);
+    log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool ${name} failed after ${elapsedMs}ms: ${errorMessage}`);
 
     return {
       response: {
@@ -448,28 +454,31 @@ export async function buildResourceList(): Promise<Resource[]> {
   });
 
   const resources: Resource[] = [
-    {
+    applyResourceDiscoverability({
       uri: TOOL_MANIFEST_RESOURCE_URI,
       name: 'tool-manifest',
+      title: getDefaultDiscoverabilityTitle('tool-manifest'),
       description: 'JSON tool manifest for the current Context Engine server.',
       mimeType: 'application/json',
-    },
+    }),
   ];
 
   for (const plan of knownPlans) {
     resources.push(
-      {
+      applyResourceDiscoverability({
         uri: buildPlanResourceUri(plan.id),
         name: `plan:${plan.id}`,
+        title: getDefaultDiscoverabilityTitle('saved-plan'),
         description: `Saved plan ${plan.id}.`,
         mimeType: 'application/json',
-      },
-      {
+      }),
+      applyResourceDiscoverability({
         uri: buildPlanHistoryResourceUri(plan.id),
         name: `plan-history:${plan.id}`,
+        title: getDefaultDiscoverabilityTitle('plan-history'),
         description: `Version history for saved plan ${plan.id}.`,
         mimeType: 'application/json',
-      }
+      })
     );
   }
 
@@ -625,37 +634,37 @@ function findToolByName(tools: Array<{ name: string }>, name: string): { name: s
 
 export function buildToolRegistryEntries(serviceClient: ContextServiceClient): ToolRegistryEntry[] {
   return [
-    { tool: indexWorkspaceTool, handler: (args) => handleIndexWorkspace(args as any, serviceClient) },
-    { tool: codebaseRetrievalTool, handler: (args) => handleCodebaseRetrieval(args as any, serviceClient) },
-    { tool: semanticSearchTool, handler: (args) => handleSemanticSearch(args as any, serviceClient) },
-    { tool: getFileTool, handler: (args) => handleGetFile(args as any, serviceClient) },
-    { tool: getContextTool, handler: (args) => handleGetContext(args as any, serviceClient) },
-    { tool: enhancePromptTool, handler: (args, signal) => handleEnhancePrompt(args as any, serviceClient, signal) },
-    { tool: indexStatusTool, handler: (args) => handleIndexStatus(args as any, serviceClient) },
-    { tool: reindexWorkspaceTool, handler: (args) => handleReindexWorkspace(args as any, serviceClient) },
-    { tool: clearIndexTool, handler: (args) => handleClearIndex(args as any, serviceClient) },
-    { tool: toolManifestTool, handler: (args) => handleToolManifest(args as any, serviceClient) },
-    { tool: addMemoryTool, handler: (args) => handleAddMemory(args as any, serviceClient) },
-    { tool: listMemoriesTool, handler: (args) => handleListMemories(args as any, serviceClient) },
-    { tool: createPlanTool, handler: (args, signal) => handleCreatePlan(args as any, serviceClient, signal) },
-    { tool: refinePlanTool, handler: (args, signal) => handleRefinePlan(args as any, serviceClient, signal) },
-    { tool: visualizePlanTool, handler: (args) => handleVisualizePlan(args as any, serviceClient) },
-    { tool: executePlanTool, handler: (args, signal) => handleExecutePlan(args as any, serviceClient, signal) },
-    { tool: findToolByName(planManagementTools, 'save_plan'), handler: (args) => handleSavePlan(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'load_plan'), handler: (args) => handleLoadPlan(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'list_plans'), handler: (args) => handleListPlans(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'delete_plan'), handler: (args) => handleDeletePlan(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'request_approval'), handler: (args) => handleRequestApproval(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'respond_approval'), handler: (args) => handleRespondApproval(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'start_step'), handler: (args) => handleStartStep(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'complete_step'), handler: (args) => handleCompleteStep(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'fail_step'), handler: (args) => handleFailStep(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'view_progress'), handler: (args) => handleViewProgress(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'view_history'), handler: (args) => handleViewHistory(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'compare_plan_versions'), handler: (args) => handleComparePlanVersions(args as Record<string, unknown>) },
-    { tool: findToolByName(planManagementTools, 'rollback_plan'), handler: (args) => handleRollbackPlan(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(indexWorkspaceTool), handler: (args) => handleIndexWorkspace(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(codebaseRetrievalTool), handler: (args) => handleCodebaseRetrieval(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(semanticSearchTool), handler: (args) => handleSemanticSearch(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(getFileTool), handler: (args) => handleGetFile(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(getContextTool), handler: (args) => handleGetContext(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(enhancePromptTool), handler: (args, signal) => handleEnhancePrompt(args as any, serviceClient, signal) },
+    { tool: applyToolDiscoverability(indexStatusTool), handler: (args) => handleIndexStatus(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(reindexWorkspaceTool), handler: (args) => handleReindexWorkspace(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(clearIndexTool), handler: (args) => handleClearIndex(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(toolManifestTool), handler: (args) => handleToolManifest(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(addMemoryTool), handler: (args) => handleAddMemory(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(listMemoriesTool), handler: (args) => handleListMemories(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(createPlanTool), handler: (args, signal) => handleCreatePlan(args as any, serviceClient, signal) },
+    { tool: applyToolDiscoverability(refinePlanTool), handler: (args, signal) => handleRefinePlan(args as any, serviceClient, signal) },
+    { tool: applyToolDiscoverability(visualizePlanTool), handler: (args) => handleVisualizePlan(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(executePlanTool), handler: (args, signal) => handleExecutePlan(args as any, serviceClient, signal) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'save_plan')), handler: (args) => handleSavePlan(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'load_plan')), handler: (args) => handleLoadPlan(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'list_plans')), handler: (args) => handleListPlans(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'delete_plan')), handler: (args) => handleDeletePlan(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'request_approval')), handler: (args) => handleRequestApproval(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'respond_approval')), handler: (args) => handleRespondApproval(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'start_step')), handler: (args) => handleStartStep(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'complete_step')), handler: (args) => handleCompleteStep(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'fail_step')), handler: (args) => handleFailStep(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'view_progress')), handler: (args) => handleViewProgress(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'view_history')), handler: (args) => handleViewHistory(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'compare_plan_versions')), handler: (args) => handleComparePlanVersions(args as Record<string, unknown>) },
+    { tool: applyToolDiscoverability(findToolByName(planManagementTools, 'rollback_plan')), handler: (args) => handleRollbackPlan(args as Record<string, unknown>) },
     {
-      tool: reviewChangesTool,
+      tool: applyToolDiscoverability(reviewChangesTool),
       handler: (args, signal) =>
         (handleReviewChanges as unknown as (
           args: unknown,
@@ -664,7 +673,7 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
         ) => Promise<string>)(args as any, serviceClient, signal),
     },
     {
-      tool: reviewGitDiffTool,
+      tool: applyToolDiscoverability(reviewGitDiffTool),
       handler: (args, signal) =>
         (handleReviewGitDiff as unknown as (
           args: unknown,
@@ -673,7 +682,7 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
         ) => Promise<string>)(args as any, serviceClient, signal),
     },
     {
-      tool: reviewDiffTool,
+      tool: applyToolDiscoverability(reviewDiffTool),
       handler: (args, signal) =>
         (handleReviewDiff as unknown as (
           args: unknown,
@@ -682,7 +691,7 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
         ) => Promise<string>)(args as any, serviceClient, signal),
     },
     {
-      tool: reviewAutoTool,
+      tool: applyToolDiscoverability(reviewAutoTool),
       handler: (args, signal) =>
         (handleReviewAuto as unknown as (
           args: unknown,
@@ -690,15 +699,15 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
           signal?: AbortSignal
         ) => Promise<string>)(args as any, serviceClient, signal),
     },
-    { tool: checkInvariantsTool, handler: (args) => handleCheckInvariants(args as any, serviceClient) },
-    { tool: runStaticAnalysisTool, handler: (args) => handleRunStaticAnalysis(args as any, serviceClient) },
-    { tool: findToolByName(reactiveReviewTools, 'reactive_review_pr'), handler: (args) => handleReactiveReviewPR(args as any, serviceClient) },
-    { tool: findToolByName(reactiveReviewTools, 'get_review_status'), handler: (args) => handleGetReviewStatus(args as any, serviceClient) },
-    { tool: findToolByName(reactiveReviewTools, 'pause_review'), handler: (args) => handlePauseReview(args as any, serviceClient) },
-    { tool: findToolByName(reactiveReviewTools, 'resume_review'), handler: (args) => handleResumeReview(args as any, serviceClient) },
-    { tool: findToolByName(reactiveReviewTools, 'get_review_telemetry'), handler: (args) => handleGetReviewTelemetry(args as any, serviceClient) },
-    { tool: findToolByName(reactiveReviewTools, 'scrub_secrets'), handler: (args) => handleScrubSecrets(args as any) },
-    { tool: findToolByName(reactiveReviewTools, 'validate_content'), handler: (args) => handleValidateContent(args as any) },
+    { tool: applyToolDiscoverability(checkInvariantsTool), handler: (args) => handleCheckInvariants(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(runStaticAnalysisTool), handler: (args) => handleRunStaticAnalysis(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'reactive_review_pr')), handler: (args) => handleReactiveReviewPR(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'get_review_status')), handler: (args) => handleGetReviewStatus(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'pause_review')), handler: (args) => handlePauseReview(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'resume_review')), handler: (args) => handleResumeReview(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'get_review_telemetry')), handler: (args) => handleGetReviewTelemetry(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'scrub_secrets')), handler: (args) => handleScrubSecrets(args as any) },
+    { tool: applyToolDiscoverability(findToolByName(reactiveReviewTools, 'validate_content')), handler: (args) => handleValidateContent(args as any) },
   ];
 }
 

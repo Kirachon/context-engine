@@ -3,8 +3,11 @@ import {
   clearRerankerRuntimeCacheForTests,
   rerankCandidates,
   rerankResults,
+  type TransformerRerankTrace,
   type TransformerRerankOptions,
 } from '../../../src/internal/retrieval/rerank.js';
+import { retrieve } from '../../../src/internal/retrieval/retrieve.js';
+import { createRetrievalFlowContext } from '../../../src/internal/retrieval/flow.js';
 import { evaluateRankingGate } from '../../../src/internal/retrieval/rankingCalibration.js';
 import type { InternalSearchResult } from '../../../src/internal/retrieval/types.js';
 
@@ -120,6 +123,41 @@ describe('reranker', () => {
     expect(ranked.map((item) => item.path)).toEqual(rerankResults(candidates, { originalQuery: 'clear result', mode: 'v3' }).map((item) => item.path));
   });
 
+  it('reports skipped heuristic trace when the ranking gate stays conservative', async () => {
+    const extractor = createVectorExtractor();
+    const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor));
+    const trace = jest.fn<(trace: TransformerRerankTrace) => void>();
+    const candidates = [
+      createResult('src/clear.ts', 'clear result', 0.95, '1-2', 'semantic'),
+      createResult('src/medium.ts', 'medium result', 0.55, '1-2', 'semantic'),
+      createResult('src/low.ts', 'low result', 0.3, '1-2', 'semantic'),
+      createResult('src/lower.ts', 'lower result', 0.1, '1-2', 'semantic'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'balanced',
+    });
+
+    await rerankCandidates(candidates, {
+      originalQuery: 'clear result',
+      mode: 'v3',
+      loadTransformersModule,
+      gateDecision,
+      onTrace: trace,
+    });
+
+    expect(trace).toHaveBeenCalledWith(expect.objectContaining({
+      candidateCount: 4,
+      selectedPath: 'heuristic',
+      appliedPath: 'heuristic',
+      state: 'skipped',
+      fallbackReason: 'rerank_skipped',
+      reasonCode: 'gate_skipped',
+      gateDecision,
+    }));
+    expect(loadTransformersModule).not.toHaveBeenCalled();
+  });
+
   it('reuses the lazy transformer runtime for repeated reranks', async () => {
     const extractor = createVectorExtractor();
     const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor));
@@ -172,6 +210,40 @@ describe('reranker', () => {
 
     expect(loadTransformersModule).toHaveBeenCalledTimes(1);
     expect(ranked.map((item) => item.path)).toEqual(heuristic.map((item) => item.path));
+  });
+
+  it('reports fail-open transformer trace when runtime loading is unavailable', async () => {
+    const trace = jest.fn<(trace: TransformerRerankTrace) => void>();
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+
+    await rerankCandidates(candidates, {
+      originalQuery: 'login handler',
+      mode: 'v3',
+      loadTransformersModule: jest.fn(async () => {
+        throw new Error('transformer unavailable');
+      }),
+      gateDecision,
+      onTrace: trace,
+    });
+
+    expect(trace).toHaveBeenCalledWith(expect.objectContaining({
+      candidateCount: 4,
+      selectedPath: 'transformer',
+      appliedPath: 'heuristic',
+      state: 'fail_open',
+      fallbackReason: 'reranker_unavailable',
+      reasonCode: 'runtime_unavailable',
+      gateDecision,
+    }));
   });
 
   it('keeps deterministic ordering when transformer scores tie', async () => {
@@ -333,5 +405,52 @@ describe('reranker', () => {
     expect(firstRanked.map((item) => item.path)).toEqual(heuristic.map((item) => item.path));
     expect(secondRanked.map((item) => item.path)).toEqual(heuristic.map((item) => item.path));
     expect(extractor).toHaveBeenCalledTimes(1);
+  });
+
+  it('records provider path selection and fail-open details on retrieval flow metadata', async () => {
+    const flow = createRetrievalFlowContext('xy');
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/x.ts', content: 'x', relevanceScore: 0.9, lines: '1-2' },
+        { path: 'src/y.ts', content: 'y', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+
+    await retrieve('xy', serviceClient, {
+      flow,
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      reranker: {
+        id: 'failing-reranker',
+        rerank: jest.fn(async () => {
+          throw new Error('boom');
+        }),
+      },
+      rerankTopN: 2,
+      topK: 5,
+    });
+
+    expect(flow.metadata).toMatchObject({
+      rerankPath: 'provider',
+      rerankSelectedPath: 'provider',
+      rerankAppliedPath: 'original_order',
+      rerankGateState: 'fail_open',
+      rerankFallbackReason: 'rerank_error',
+      rerankSelectionReason: 'external_provider',
+      rerankCandidateCount: 2,
+      rerankHeadCount: 2,
+      rerankTailCount: 0,
+      rerankProviderId: 'failing-reranker',
+    });
+    expect(flow.stages).toEqual(expect.arrayContaining([
+      'rerank:selected:provider',
+      'rerank:applied:original_order',
+      'rerank:state:fail_open',
+      'rerank:reason:external_provider',
+      'rerank:fallback:rerank_error',
+    ]));
   });
 });

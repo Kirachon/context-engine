@@ -42,6 +42,7 @@ import {
     loggingMiddleware,
     errorHandler,
 } from './middleware/index.js';
+import { updateRequestContext } from '../telemetry/requestContext.js';
 import {
     createHealthRouter,
     createStatusRouter,
@@ -278,6 +279,10 @@ export class ContextEngineHttpServer {
     ): Promise<void> {
         const requestSessionId = req.headers['mcp-session-id'];
         const sessionId = Array.isArray(requestSessionId) ? requestSessionId[0] : requestSessionId;
+        updateRequestContext({
+            transport: 'mcp',
+            sessionId,
+        });
 
         if (sessionId) {
             const session = this.mcpSessions.get(sessionId);
@@ -316,6 +321,10 @@ export class ContextEngineHttpServer {
                 if (session) {
                     this.mcpSessions.set(initializedSessionId, session);
                 }
+                updateRequestContext({
+                    transport: 'mcp',
+                    sessionId: initializedSessionId,
+                });
             },
         });
         const server = createHttpMcpServer(this.serviceClient);
@@ -332,6 +341,15 @@ export class ContextEngineHttpServer {
         };
 
         await server.connect(transport);
+        if (transport.sessionId) {
+            updateRequestContext({
+                transport: 'mcp',
+                sessionId: transport.sessionId,
+            });
+        }
         await transport.handleRequest(req, res, req.body);
+        updateRequestContext({
+            sessionId: transport.sessionId,
+        });
     }
 }

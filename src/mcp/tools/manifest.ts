@@ -5,6 +5,7 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
+import { buildManifestDiscoverability } from '../tooling/discoverability.js';
 
 export interface ToolManifestArgs {
   // No arguments
@@ -89,6 +90,7 @@ export const toolManifest = {
     'scrub_secrets',
     'validate_content',
   ],
+  discoverability: buildManifestDiscoverability(),
   features: {
     planning: {
       description: 'AI-powered implementation planning with DAG analysis',

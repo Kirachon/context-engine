@@ -2,6 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import request from 'supertest';
 
 import { ContextEngineHttpServer } from '../../src/http/httpServer.js';
+import { REQUEST_ID_HEADER } from '../../src/http/middleware/logging.js';
 
 type MockSearchResult = {
   path: string;
@@ -124,6 +125,8 @@ describe('HTTP compatibility harness', () => {
     const response = await request(app).get('/api/v1/status');
 
     expect(response.status).toBe(200);
+    expect(typeof response.headers[REQUEST_ID_HEADER]).toBe('string');
+    expect((response.headers[REQUEST_ID_HEADER] as string).length).toBeGreaterThan(0);
     expect(response.body).toEqual(serviceClient.getIndexStatus.mock.results[0]?.value);
   });
 

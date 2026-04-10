@@ -19,6 +19,26 @@ export interface TransformerRerankOptions extends RerankOptions {
   loadTransformersModule?: TransformersLoader;
   modelId?: string;
   gateDecision?: RankingGateDecision;
+  onTrace?: (trace: TransformerRerankTrace) => void;
+}
+
+export interface TransformerRerankTrace {
+  candidateCount: number;
+  selectedPath: 'heuristic' | 'transformer';
+  appliedPath: 'heuristic' | 'transformer';
+  state: 'skipped' | 'invoked' | 'fail_open';
+  fallbackReason: 'none' | 'rerank_skipped' | 'reranker_unavailable' | 'rerank_error';
+  reasonCode:
+    | 'single_candidate'
+    | 'empty_query'
+    | 'gate_skipped'
+    | 'transformer_applied'
+    | 'runtime_unavailable'
+    | 'embedding_mismatch'
+    | 'transformer_error';
+  gateDecision?: RankingGateDecision;
+  runtimeId?: string;
+  modelId?: string;
 }
 
 interface TransformerRuntime {
@@ -279,6 +299,18 @@ async function resolveTransformerRuntime(options: TransformerRerankOptions): Pro
   return runtimePromise;
 }
 
+function emitTransformerTrace(
+  results: InternalSearchResult[],
+  options: TransformerRerankOptions,
+  trace: Omit<TransformerRerankTrace, 'candidateCount' | 'gateDecision'>
+): void {
+  options.onTrace?.({
+    candidateCount: results.length,
+    gateDecision: options.gateDecision,
+    ...trace,
+  });
+}
+
 export function rerankResults(
   results: InternalSearchResult[],
   options: RerankOptions = {}
@@ -394,21 +426,53 @@ export async function rerankCandidates(
   options: TransformerRerankOptions = {}
 ): Promise<InternalSearchResult[]> {
   if (results.length <= 1) {
+    emitTransformerTrace(results, options, {
+      selectedPath: 'heuristic',
+      appliedPath: 'heuristic',
+      state: 'skipped',
+      fallbackReason: 'none',
+      reasonCode: 'single_candidate',
+      modelId: normalizeModelId(options.modelId),
+    });
     return results;
   }
 
   const heuristicRanked = rerankResults(results, options);
   const query = options.originalQuery?.trim() ?? '';
   if (!query) {
+    emitTransformerTrace(results, options, {
+      selectedPath: 'heuristic',
+      appliedPath: 'heuristic',
+      state: 'skipped',
+      fallbackReason: 'none',
+      reasonCode: 'empty_query',
+      modelId: normalizeModelId(options.modelId),
+    });
     return heuristicRanked;
   }
 
   if (options.gateDecision && !options.gateDecision.shouldUseTransformerRerank) {
+    emitTransformerTrace(results, options, {
+      selectedPath: 'heuristic',
+      appliedPath: 'heuristic',
+      state: 'skipped',
+      fallbackReason: 'rerank_skipped',
+      reasonCode: 'gate_skipped',
+      modelId: normalizeModelId(options.modelId),
+    });
     return heuristicRanked;
   }
 
   const runtime = await resolveTransformerRuntime(options);
   if (!runtime) {
+    emitTransformerTrace(results, options, {
+      selectedPath: 'transformer',
+      appliedPath: 'heuristic',
+      state: 'fail_open',
+      fallbackReason: 'reranker_unavailable',
+      reasonCode: 'runtime_unavailable',
+      modelId: normalizeModelId(options.modelId),
+    });
     return heuristicRanked;
   }
 
@@ -419,6 +483,15 @@ export async function rerankCandidates(
     const queryVector = embeddings[0] ?? [];
     const candidateVectors = embeddings.slice(1);
     if (queryVector.length === 0 || candidateVectors.length !== results.length) {
+      emitTransformerTrace(results, options, {
+        selectedPath: 'transformer',
+        appliedPath: 'heuristic',
+        state: 'fail_open',
+        fallbackReason: 'rerank_error',
+        reasonCode: 'embedding_mismatch',
+        runtimeId: runtime.id,
+        modelId: runtime.modelId,
+      });
       return heuristicRanked;
     }
 
@@ -458,11 +531,30 @@ export async function rerankCandidates(
       return a.index - b.index;
     });
 
-    return scored.map(({ result, transformerScore }) => ({
+    const reranked = scored.map(({ result, transformerScore }) => ({
       ...result,
       combinedScore: transformerScore,
     }));
+    emitTransformerTrace(results, options, {
+      selectedPath: 'transformer',
+      appliedPath: 'transformer',
+      state: 'invoked',
+      fallbackReason: 'none',
+      reasonCode: 'transformer_applied',
+      runtimeId: runtime.id,
+      modelId: runtime.modelId,
+    });
+    return reranked;
   } catch {
+    emitTransformerTrace(results, options, {
+      selectedPath: 'transformer',
+      appliedPath: 'heuristic',
+      state: 'fail_open',
+      fallbackReason: 'rerank_error',
+      reasonCode: 'transformer_error',
+      runtimeId: runtime.id,
+      modelId: runtime.modelId,
+    });
     return heuristicRanked;
   }
 }
