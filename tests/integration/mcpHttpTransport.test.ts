@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import request from 'supertest';
 import { DEFAULT_NEGOTIATED_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/types.js';
 
-import { ContextEngineHttpServer } from '../../src/http/httpServer.js';
+import { ContextEngineHttpServer, type HttpServerOptions } from '../../src/http/httpServer.js';
 import { REQUEST_ID_HEADER } from '../../src/http/middleware/logging.js';
 
 type MockServiceClient = {
@@ -39,10 +39,14 @@ function createMockServiceClient(): MockServiceClient {
   };
 }
 
-function createApp(serviceClient = createMockServiceClient()) {
+function createApp(
+  serviceClient = createMockServiceClient(),
+  options: HttpServerOptions = {}
+) {
   const server = new ContextEngineHttpServer(serviceClient as never, {
     port: 0,
     version: '9.9.9',
+    ...options,
   });
 
   return {
@@ -389,5 +393,344 @@ describe('MCP HTTP transport', () => {
       id: 3,
     });
     expect(typeof response.body?.error?.message).toBe('string');
+  });
+
+  it('returns 403 for denied-origin POST /mcp requests', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .post('/mcp')
+      .set('origin', 'https://evil.example')
+      .set('accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 4,
+        method: 'initialize',
+        params: {
+          protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: 'http-test-client',
+            version: '1.0.0',
+          },
+        },
+      });
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      error: 'Origin not allowed: https://evil.example',
+      statusCode: 403,
+    });
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('returns 403 for denied-origin preflight OPTIONS /mcp requests', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .options('/mcp')
+      .set('origin', 'https://evil.example')
+      .set('access-control-request-method', 'POST');
+
+    expect(response.status).toBe(403);
+    expect(response.body).toEqual({
+      error: 'Origin not allowed: https://evil.example',
+      statusCode: 403,
+    });
+    expect(response.headers['access-control-allow-origin']).toBeUndefined();
+  });
+
+  it('accepts valid preflight OPTIONS /mcp requests from allowed local origins', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .options('/mcp')
+      .set('origin', 'http://localhost:3000')
+      .set('access-control-request-method', 'POST');
+
+    expect(response.status).toBe(204);
+    expect(response.text).toBe('');
+    expect(response.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+    expect(response.headers['access-control-allow-methods']).toBe('GET,POST,DELETE,OPTIONS');
+    expect(response.headers['access-control-allow-headers']).toBe('Content-Type,Authorization,Mcp-Session-Id');
+    expect(response.headers['access-control-expose-headers']).toBe('Mcp-Session-Id');
+    expect(response.headers['vary']).toContain('Origin');
+  });
+
+  it('accepts IPv6 loopback origins for local MCP clients', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .options('/mcp')
+      .set('origin', 'http://[::1]:3000')
+      .set('access-control-request-method', 'POST')
+      .set('access-control-request-headers', 'content-type,mcp-session-id');
+
+    expect(response.status).toBe(204);
+    expect(response.headers['access-control-allow-origin']).toBe('http://[::1]:3000');
+  });
+
+  it('supports tools/list over additive GET /mcp with an initialized session', async () => {
+    const { app } = createApp();
+
+    const initializeResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 20,
+        method: 'initialize',
+        params: {
+          protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: 'http-test-client',
+            version: '1.0.0',
+          },
+        },
+      });
+
+    expect(initializeResponse.status).toBe(200);
+    const sessionId = initializeResponse.headers['mcp-session-id'];
+    expect(typeof sessionId).toBe('string');
+
+    const initializedResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', sessionId as string)
+      .send({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      });
+
+    expect([200, 202, 204]).toContain(initializedResponse.status);
+
+    const listener = app.listen(0);
+
+    try {
+      const address = listener.address();
+      if (!address || typeof address === 'string') {
+        throw new Error('Failed to bind test HTTP listener');
+      }
+
+      const controller = new AbortController();
+      const streamResponse = await fetch(`http://127.0.0.1:${address.port}/mcp`, {
+        method: 'GET',
+        headers: {
+          accept: 'text/event-stream',
+          'mcp-session-id': sessionId as string,
+        },
+        signal: controller.signal,
+      });
+
+      expect(streamResponse.status).toBe(200);
+      expect(streamResponse.headers.get('content-type')).toContain('text/event-stream');
+      await streamResponse.body?.cancel();
+      controller.abort();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        listener.close((error) => {
+          if (error) {
+            reject(error);
+            return;
+          }
+          resolve();
+        });
+      });
+    }
+  });
+
+  it('returns session-not-found JSON for additive GET /mcp with an unknown session', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .get('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', 'missing-session');
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({
+      jsonrpc: '2.0',
+      error: {
+        code: -32001,
+        message: 'MCP session not found: missing-session',
+      },
+      id: null,
+    });
+  });
+
+  it('terminates an initialized session with DELETE /mcp and rejects stale reuse afterward', async () => {
+    const { app } = createApp();
+
+    const initializeResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 30,
+        method: 'initialize',
+        params: {
+          protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: 'http-test-client',
+            version: '1.0.0',
+          },
+        },
+      });
+
+    expect(initializeResponse.status).toBe(200);
+    const sessionId = initializeResponse.headers['mcp-session-id'];
+    expect(typeof sessionId).toBe('string');
+
+    const deleteResponse = await request(app)
+      .delete('/mcp')
+      .set('mcp-session-id', sessionId as string);
+
+    expect(deleteResponse.status).toBe(204);
+    expect(deleteResponse.text).toBe('');
+
+    const staleResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', sessionId as string)
+      .send({
+        jsonrpc: '2.0',
+        id: 31,
+        method: 'tools/list',
+        params: {},
+      });
+
+    expect(staleResponse.status).toBe(404);
+    expect(staleResponse.body).toMatchObject({
+      jsonrpc: '2.0',
+      error: {
+        code: -32001,
+        message: `MCP session not found: ${sessionId as string}`,
+      },
+      id: 31,
+    });
+  });
+
+  it('returns session-not-found JSON for DELETE /mcp with an unknown session', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .delete('/mcp')
+      .set('mcp-session-id', 'missing-session');
+
+    expect(response.status).toBe(404);
+    expect(response.body).toMatchObject({
+      jsonrpc: '2.0',
+      error: {
+        code: -32001,
+        message: 'MCP session not found: missing-session',
+      },
+      id: null,
+    });
+  });
+
+  it('keeps the auth hook inert by default for allowed local clients', async () => {
+    const { app } = createApp();
+
+    const response = await request(app)
+      .post('/mcp')
+      .set('origin', 'http://localhost:3000')
+      .set('accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 40,
+        method: 'initialize',
+        params: {
+          protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: 'http-test-client',
+            version: '1.0.0',
+          },
+        },
+      });
+
+    expect(response.status).toBe(200);
+  });
+
+  it('applies the optional auth hook across MCP transport verbs when configured', async () => {
+    const { app } = createApp(createMockServiceClient(), {
+      authHook: (req) => {
+        if (req.headers.authorization === 'Bearer allow') {
+          return { authorized: true };
+        }
+        return {
+          authorized: false,
+          statusCode: 401,
+          message: 'Missing or invalid authorization',
+        };
+      },
+    });
+
+    const unauthorizedPost = await request(app)
+      .post('/mcp')
+      .set('origin', 'http://localhost:3000')
+      .set('accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 41,
+        method: 'initialize',
+        params: {
+          protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: 'http-test-client',
+            version: '1.0.0',
+          },
+        },
+      });
+
+    expect(unauthorizedPost.status).toBe(401);
+    expect(unauthorizedPost.body).toEqual({
+      error: 'Missing or invalid authorization',
+      statusCode: 401,
+    });
+
+    const unauthorizedDelete = await request(app)
+      .delete('/mcp')
+      .set('origin', 'http://localhost:3000')
+      .set('mcp-session-id', 'missing-session');
+
+    expect(unauthorizedDelete.status).toBe(401);
+    expect(unauthorizedDelete.body).toEqual({
+      error: 'Missing or invalid authorization',
+      statusCode: 401,
+    });
+
+    const preflightResponse = await request(app)
+      .options('/mcp')
+      .set('origin', 'http://localhost:3000')
+      .set('access-control-request-method', 'DELETE')
+      .set('access-control-request-headers', 'authorization,mcp-session-id');
+
+    expect(preflightResponse.status).toBe(204);
+    expect(preflightResponse.headers['access-control-allow-origin']).toBe('http://localhost:3000');
+
+    const authorizedPost = await request(app)
+      .post('/mcp')
+      .set('origin', 'http://localhost:3000')
+      .set('authorization', 'Bearer allow')
+      .set('accept', 'application/json, text/event-stream')
+      .send({
+        jsonrpc: '2.0',
+        id: 42,
+        method: 'initialize',
+        params: {
+          protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+          capabilities: {},
+          clientInfo: {
+            name: 'http-test-client',
+            version: '1.0.0',
+          },
+        },
+      });
+
+    expect(authorizedPost.status).toBe(200);
   });
 });

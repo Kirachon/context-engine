@@ -39,8 +39,10 @@ import { initializePlanManagementServices } from '../mcp/tools/planManagement.js
 import { renderPrometheusMetrics } from '../metrics/metrics.js';
 import {
     createCorsMiddleware,
+    validateAllowedOrigin,
     loggingMiddleware,
     errorHandler,
+    HttpError,
 } from './middleware/index.js';
 import { updateRequestContext } from '../telemetry/requestContext.js';
 import {
@@ -50,10 +52,18 @@ import {
 } from './routes/index.js';
 
 type SignalAwareToolHandler = (args: unknown, signal?: AbortSignal) => Promise<string>;
+type HttpAuthDecision = {
+    authorized: boolean;
+    statusCode?: number;
+    message?: string;
+};
+type HttpAuthHook = (req: express.Request) => HttpAuthDecision | Promise<HttpAuthDecision>;
 
 type McpHttpSession = {
     server: McpServer;
     transport: StreamableHTTPServerTransport;
+    closed: boolean;
+    closeServerPromise?: Promise<void>;
 };
 
 function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
@@ -113,6 +123,8 @@ export interface HttpServerOptions {
     port?: number;
     /** Server version for health endpoint */
     version?: string;
+    /** Optional auth hook for HTTP MCP routes. Disabled by default. */
+    authHook?: HttpAuthHook;
 }
 
 /**
@@ -126,6 +138,7 @@ export class ContextEngineHttpServer {
     private server: Server | null = null;
     private readonly port: number;
     private readonly version: string;
+    private readonly authHook?: HttpAuthHook;
     private readonly mcpSessions = new Map<string, McpHttpSession>();
 
     constructor(
@@ -139,6 +152,7 @@ export class ContextEngineHttpServer {
         initializePlanManagementServices(workspacePath);
         this.port = options.port || 3333;
         this.version = options.version || '1.0.0';
+        this.authHook = options.authHook;
         this.app = this.createApp();
     }
 
@@ -172,9 +186,26 @@ export class ContextEngineHttpServer {
         // API routes under /api/v1
         app.use('/api/v1', createStatusRouter(this.serviceClient));
         app.use('/api/v1', createToolsRouter(this.serviceClient));
-        app.post('/mcp', async (req, res, next) => {
+        app.use('/mcp', async (req, _res, next) => {
+            try {
+                await this.enforceMcpTransportPolicy(req);
+                next();
+            } catch (error) {
+                next(error);
+            }
+        });
+        const mcpHandler = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
             try {
                 await this.handleMcpRequest(req, res);
+            } catch (error) {
+                next(error);
+            }
+        };
+        app.get('/mcp', mcpHandler);
+        app.post('/mcp', mcpHandler);
+        app.delete('/mcp', async (req, res, next) => {
+            try {
+                await this.handleMcpSessionDelete(req, res);
             } catch (error) {
                 next(error);
             }
@@ -298,7 +329,11 @@ export class ContextEngineHttpServer {
                 return;
             }
 
-            await session.transport.handleRequest(req, res, req.body);
+            if (req.method === 'GET') {
+                await session.transport.handleRequest(req, res);
+            } else {
+                await session.transport.handleRequest(req, res, req.body);
+            }
             return;
         }
 
@@ -328,16 +363,22 @@ export class ContextEngineHttpServer {
             },
         });
         const server = createHttpMcpServer(this.serviceClient);
-        session = { server, transport };
+        session = { server, transport, closed: false };
 
         transport.onclose = () => {
             const activeSessionId = transport.sessionId;
+            if (!session || session.closed) {
+                return;
+            }
+            session.closed = true;
             if (activeSessionId) {
                 this.mcpSessions.delete(activeSessionId);
             }
-            void server.close().catch((error) => {
-                console.error('[HTTP] Failed to close MCP session server:', error);
-            });
+            if (!session.closeServerPromise) {
+                session.closeServerPromise = server.close().catch((error) => {
+                    console.error('[HTTP] Failed to close MCP session server:', error);
+                });
+            }
         };
 
         await server.connect(transport);
@@ -351,5 +392,78 @@ export class ContextEngineHttpServer {
         updateRequestContext({
             sessionId: transport.sessionId,
         });
+    }
+
+    private async handleMcpSessionDelete(
+        req: express.Request,
+        res: express.Response
+    ): Promise<void> {
+        const requestSessionId = req.headers['mcp-session-id'];
+        const sessionId = Array.isArray(requestSessionId) ? requestSessionId[0] : requestSessionId;
+        updateRequestContext({
+            transport: 'mcp',
+            sessionId,
+        });
+
+        if (!sessionId) {
+            res.status(404).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32001,
+                    message: 'MCP session not found',
+                },
+                id: null,
+            });
+            return;
+        }
+
+        const session = this.mcpSessions.get(sessionId);
+        if (!session) {
+            res.status(404).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32001,
+                    message: `MCP session not found: ${sessionId}`,
+                },
+                id: null,
+            });
+            return;
+        }
+
+        if (!session.closed) {
+            session.closed = true;
+            this.mcpSessions.delete(sessionId);
+            await session.transport.close();
+            if (!session.closeServerPromise) {
+                session.closeServerPromise = session.server.close().catch((error) => {
+                    console.error('[HTTP] Failed to close MCP session server:', error);
+                });
+            }
+            await session.closeServerPromise;
+        }
+
+        res.status(204).end();
+    }
+
+    private async enforceMcpTransportPolicy(req: express.Request): Promise<void> {
+        const requestOrigin = req.headers.origin;
+        const origin = Array.isArray(requestOrigin) ? requestOrigin[0] : requestOrigin;
+        validateAllowedOrigin(origin);
+
+        if (req.method === 'OPTIONS') {
+            return;
+        }
+
+        if (!this.authHook) {
+            return;
+        }
+
+        const decision = await this.authHook(req);
+        if (!decision.authorized) {
+            throw new HttpError(
+                decision.statusCode ?? 401,
+                decision.message ?? 'Unauthorized MCP transport request'
+            );
+        }
     }
 }
