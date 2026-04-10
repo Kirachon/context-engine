@@ -18,12 +18,14 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { ContextServiceClient } from '../serviceClient.js';
+import { getCreatePlanToolFieldDescription } from '../prompts/planning.js';
 import { PlanningService } from '../services/planningService.js';
 import { createClientBoundFactory } from '../tooling/serviceFactory.js';
 import {
   parseJsonString,
   validateBoolean,
   validateFiniteNumberInRange,
+  validatePathScopeGlobs,
   validateNonEmptyString,
   validateOneOf,
   validateRequiredNumber,
@@ -70,6 +72,8 @@ function buildToolMeta(tool: string, duration_ms: number, status?: string): Tool
 export interface CreatePlanArgs {
   /** The task or goal to plan for */
   task: string;
+  /** Automatically infer likely include paths when no explicit scope is provided (default: true) */
+  auto_scope?: boolean;
   /** Maximum files to include in context (default: 8) */
   max_context_files?: number;
   /** Token budget for context retrieval (default: 8000) */
@@ -78,6 +82,10 @@ export interface CreatePlanArgs {
   generate_diagrams?: boolean;
   /** Focus on MVP only (default: false) */
   mvp_only?: boolean;
+  /** Optional workspace-relative glob filters to include matching paths only. */
+  include_paths?: string[];
+  /** Optional workspace-relative glob filters to exclude matching paths after include filtering. */
+  exclude_paths?: string[];
   /** Persist the generated plan for later use (default: true) */
   auto_save?: boolean;
   /** Optional custom name for saved plan */
@@ -140,10 +148,13 @@ export async function handleCreatePlan(
   const startTime = Date.now();
   const {
     task,
+    auto_scope = true,
     max_context_files,
     context_token_budget,
     generate_diagrams,
     mvp_only,
+    include_paths,
+    exclude_paths,
     auto_save = true,
     save_name,
     save_tags,
@@ -151,6 +162,9 @@ export async function handleCreatePlan(
   } = args;
 
   const validatedTask = validateTrimmedNonEmptyString(task, 'Task is required and must be a non-empty string');
+  validateBoolean(auto_scope, 'auto_scope must be a boolean when provided');
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
 
   const planningService = getPlanningService(serviceClient);
 
@@ -159,6 +173,9 @@ export async function handleCreatePlan(
     context_token_budget,
     generate_diagrams,
     mvp_only,
+    auto_scope,
+    include_paths: normalizedIncludePaths,
+    exclude_paths: normalizedExcludePaths,
   };
 
   console.error(`[create_plan] Generating plan for: "${validatedTask.substring(0, 100)}..."`);
@@ -977,7 +994,11 @@ function formatPlanResult(
   persistence?: { saved: boolean; plan_id?: string; file_path?: string; error?: string }
 ): string {
   const fullPlanJson = result.plan
-    ? (result._meta ? { ...result.plan, _meta: result._meta } : result.plan)
+    ? {
+        ...result.plan,
+        ...(result.planning_context ? { planning_context: result.planning_context } : {}),
+        ...(result._meta ? { _meta: result._meta } : {}),
+      }
     : undefined;
 
   if (!result.plan) {
@@ -986,6 +1007,7 @@ function formatPlanResult(
       status: result.status,
       error: result.error,
       duration_ms: result.duration_ms,
+      ...(result.planning_context ? { planning_context: result.planning_context } : {}),
       ...(result._meta ? { _meta: result._meta } : {}),
     }, null, 2);
   }
@@ -1020,6 +1042,32 @@ function formatPlanResult(
     output += '\n';
   } else {
     output += '\n';
+  }
+
+  if (result.planning_context) {
+    output += `## Planning Context\n`;
+    output += `- **Prompt Profile:** ${result.planning_context.prompt_profile}\n`;
+    output += `- **Scope Applied:** ${result.planning_context.scope_applied ? 'yes' : 'no'}\n`;
+    output += `- **Scope Source:** ${result.planning_context.scope_source ?? 'none'}\n`;
+    output += `- **Scope Confidence:** ${result.planning_context.scope_confidence ?? 'none'}\n`;
+    if ((result.planning_context.applied_include_paths?.length ?? 0) > 0) {
+      output += `- **Applied Include Paths:** ${result.planning_context.applied_include_paths?.join(', ')}\n`;
+    }
+    if ((result.planning_context.candidate_include_paths?.length ?? 0) > 0) {
+      output += `- **Candidate Areas:** ${result.planning_context.candidate_include_paths?.join(', ')}\n`;
+    }
+    output += `- **Context Files Retrieved:** ${result.planning_context.context_file_count}\n`;
+    output += `- **Token Budget:** ${result.planning_context.token_budget}\n`;
+    output += `- **Clarification Triggered:** ${result.planning_context.clarification_triggered ? 'yes' : 'no'}\n\n`;
+
+    if (result.planning_context.scope_source === 'auto' && result.planning_context.scope_applied) {
+      output += `Planning auto-focused on the most likely code area before generating the plan.\n\n`;
+    } else if (
+      result.planning_context.scope_source === 'none' &&
+      (result.planning_context.candidate_include_paths?.length ?? 0) > 0
+    ) {
+      output += `Planning stayed broad because the inferred code area was not confident enough to narrow automatically.\n\n`;
+    }
   }
 
   output += `## Goal\n${plan.goal || 'No goal specified'}\n\n`;
@@ -1203,16 +1251,21 @@ By default, plans are persisted so they can be executed later via plan_id.`,
     properties: {
       task: {
         type: 'string',
-        description: 'The task or goal to plan for. Be specific about what you want to accomplish.',
+        description: getCreatePlanToolFieldDescription('task'),
+      },
+      auto_scope: {
+        type: 'boolean',
+        description: getCreatePlanToolFieldDescription('auto_scope'),
+        default: true,
       },
       max_context_files: {
         type: 'number',
-        description: 'Maximum number of files to include in context analysis (default: 8)',
+        description: getCreatePlanToolFieldDescription('max_context_files'),
         default: 8,
       },
       context_token_budget: {
         type: 'number',
-        description: 'Token budget for context retrieval (default: 8000)',
+        description: getCreatePlanToolFieldDescription('context_token_budget'),
         default: 8000,
       },
       generate_diagrams: {
@@ -1222,8 +1275,18 @@ By default, plans are persisted so they can be executed later via plan_id.`,
       },
       mvp_only: {
         type: 'boolean',
-        description: 'Focus on MVP features only, excluding nice-to-have (default: false)',
+        description: getCreatePlanToolFieldDescription('mvp_only'),
         default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: getCreatePlanToolFieldDescription('include_paths'),
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: getCreatePlanToolFieldDescription('exclude_paths'),
       },
       auto_save: {
         type: 'boolean',

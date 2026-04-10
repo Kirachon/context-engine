@@ -7,6 +7,7 @@
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { PlanningService } from '../../src/mcp/services/planningService.js';
+import { resolveAutoScopeDecision } from '../../src/mcp/tooling/autoScope.js';
 import { EnhancedPlanStep, DependencyGraph } from '../../src/mcp/types/planning.js';
 
 describe('PlanningService', () => {
@@ -18,6 +19,7 @@ describe('PlanningService', () => {
     mockServiceClient = {
       getContextForPrompt: jest.fn(),
       searchAndAsk: jest.fn(),
+      semanticSearch: jest.fn(async () => []),
     };
     planningService = new PlanningService(mockServiceClient);
   });
@@ -400,6 +402,17 @@ describe('PlanningService', () => {
       );
       expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
       expect(result.plan?.steps.length).toBe(3);
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'compact',
+        scope_applied: false,
+        scope_source: 'none',
+        scope_confidence: 'none',
+        applied_include_paths: [],
+        candidate_include_paths: [],
+        context_file_count: 2,
+        token_budget: 1800,
+        clarification_triggered: false,
+      });
     });
 
     it('switches to a deep planning prompt for complex tasks', async () => {
@@ -421,6 +434,198 @@ describe('PlanningService', () => {
       expect(mockServiceClient.searchAndAsk.mock.calls[0][2]).toEqual(
         expect.objectContaining({ priority: 'background' })
       );
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'deep',
+        scope_applied: false,
+        scope_source: 'none',
+        scope_confidence: 'none',
+        applied_include_paths: [],
+        candidate_include_paths: [],
+        context_file_count: 7,
+        token_budget: 9200,
+        clarification_triggered: false,
+      });
+    });
+
+    it('forwards scoped path filters into planning context retrieval without changing compact/deep heuristics', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(7, 9200));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Deep scoped plan'));
+
+      const result = await planningService.generatePlan(
+        'Perform a multi-step architecture migration with rollout and reliability work',
+        {
+          include_paths: ['src/mcp/**'],
+          exclude_paths: ['tests/**'],
+        }
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+        'Perform a multi-step architecture migration with rollout and reliability work',
+        expect.objectContaining({
+          includePaths: ['src/mcp/**'],
+          excludePaths: ['tests/**'],
+          maxFiles: 4,
+          tokenBudget: 6000,
+        })
+      );
+      const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
+      expect(prompt).toContain('## Deep Planning Guidance');
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'deep',
+        scope_applied: true,
+        scope_source: 'manual',
+        scope_confidence: 'high',
+        applied_include_paths: ['src/mcp/**'],
+        candidate_include_paths: ['src/mcp/**'],
+        context_file_count: 7,
+        token_budget: 9200,
+        clarification_triggered: false,
+      });
+    });
+
+    it('keeps scoped retrieval strict and raises clarification signals when the scoped context is too thin', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(0, 0));
+
+      const result = await planningService.generatePlan('Implement a login form', {
+        include_paths: ['src/auth/**'],
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+      expect(result.plan?.questions_for_clarification).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Scoped planning context returned limited results'),
+        ])
+      );
+      expect(result.plan?.codebase_insights).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('did not widen retrieval automatically'),
+        ])
+      );
+      expect(result.plan?.confidence_score).toBeLessThanOrEqual(0.4);
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'compact',
+        scope_applied: true,
+        scope_source: 'manual',
+        scope_confidence: 'high',
+        applied_include_paths: ['src/auth/**'],
+        candidate_include_paths: ['src/auth/**'],
+        context_file_count: 0,
+        token_budget: 0,
+        clarification_triggered: true,
+      });
+    });
+
+    it('auto-applies a high-confidence inferred scope when search results cluster in one area', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([
+        { path: 'src/auth/login.ts', content: '' },
+        { path: 'src/auth/session.ts', content: '' },
+        { path: 'src/auth/guards.ts', content: '' },
+        { path: 'src/auth/index.ts', content: '' },
+      ]);
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(3, 2400));
+
+      const result = await planningService.generatePlan('Plan the auth update');
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+        'Plan the auth update',
+        expect.objectContaining({
+          includePaths: ['src/auth/**'],
+        })
+      );
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'compact',
+        scope_applied: true,
+        scope_source: 'auto',
+        scope_confidence: 'high',
+        applied_include_paths: ['src/auth/**'],
+        candidate_include_paths: ['src/auth/**'],
+        context_file_count: 3,
+        token_budget: 2400,
+        clarification_triggered: false,
+      });
+    });
+
+    it('uses the shared auto-scope helper contract for planning diagnostics', async () => {
+      const clusteredResults = [
+        { path: 'src/auth/login.ts', content: '' },
+        { path: 'src/auth/session.ts', content: '' },
+        { path: 'src/auth/guards.ts', content: '' },
+        { path: 'src/auth/index.ts', content: '' },
+      ];
+      mockServiceClient.semanticSearch.mockResolvedValue(clusteredResults);
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(3, 2400));
+
+      const helperDecision = await resolveAutoScopeDecision({
+        query: 'Plan the auth update',
+        autoScope: true,
+        search: async () => clusteredResults,
+      });
+      const result = await planningService.generatePlan('Plan the auth update');
+
+      expect(result.success).toBe(true);
+      expect(result.planning_context).toEqual(
+        expect.objectContaining({
+          scope_source: helperDecision.source,
+          scope_confidence: helperDecision.confidence,
+          applied_include_paths: helperDecision.appliedIncludePaths,
+          candidate_include_paths: helperDecision.candidateIncludePaths,
+        })
+      );
+    });
+
+    it('keeps planning broad when inferred scope confidence is not high enough', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([
+        { path: 'src/auth/login.ts', content: '' },
+        { path: 'src/session/store.ts', content: '' },
+        { path: 'src/ui/login.tsx', content: '' },
+      ]);
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(3, 2400));
+
+      const result = await planningService.generatePlan('Plan the login update');
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+        'Plan the login update',
+        expect.not.objectContaining({
+          includePaths: expect.anything(),
+        })
+      );
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'compact',
+        scope_applied: false,
+        scope_source: 'none',
+        scope_confidence: 'low',
+        applied_include_paths: [],
+        candidate_include_paths: ['src/auth/**', 'src/session/**', 'src/ui/**'],
+        context_file_count: 3,
+        token_budget: 2400,
+        clarification_triggered: false,
+      });
+    });
+
+    it('skips scope inference entirely when auto_scope is false', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+
+      const result = await planningService.generatePlan('Implement a login form', {
+        auto_scope: false,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.semanticSearch).not.toHaveBeenCalled();
+      expect(result.planning_context).toEqual({
+        prompt_profile: 'compact',
+        scope_applied: false,
+        scope_source: 'none',
+        scope_confidence: 'none',
+        applied_include_paths: [],
+        candidate_include_paths: [],
+        context_file_count: 2,
+        token_budget: 1800,
+        clarification_triggered: false,
+      });
     });
 
     it('forwards the abort signal through plan refinement and step execution', async () => {

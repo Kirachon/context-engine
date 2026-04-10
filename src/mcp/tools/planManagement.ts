@@ -41,6 +41,10 @@ function getPersistenceService(): PlanPersistenceService {
   return persistenceService;
 }
 
+export function getPlanPersistenceService(): PlanPersistenceService {
+  return getPersistenceService();
+}
+
 function getApprovalService(): ApprovalWorkflowService {
   if (!approvalService) throw new Error('Plan management services not initialized');
   return approvalService;
@@ -54,6 +58,10 @@ function getExecutionService(): ExecutionTrackingService {
 function getHistoryService(): PlanHistoryService {
   if (!historyService) throw new Error('Plan management services not initialized');
   return historyService;
+}
+
+export function getPlanHistoryService(): PlanHistoryService {
+  return getHistoryService();
 }
 
 function operationFailureResponse(error: string, retryGuidance: string): string {

@@ -30,6 +30,7 @@ describe('Planning MCP Tools', () => {
     mockServiceClient = {
       getContextForPrompt: jest.fn(),
       searchAndAsk: jest.fn(),
+      semanticSearch: jest.fn(async () => []),
     };
   });
 
@@ -150,6 +151,18 @@ describe('Planning MCP Tools', () => {
         ).rejects.toThrow(/task is required/i);
       });
 
+      it('should reject invalid include_paths', async () => {
+        await expect(
+          handleCreatePlan({ task: 'plan auth', include_paths: ['C:/secret/**'] as any }, mockServiceClient)
+        ).rejects.toThrow(/include_paths/i);
+      });
+
+      it('should reject invalid auto_scope values', async () => {
+        await expect(
+          handleCreatePlan({ task: 'plan auth', auto_scope: 'yes' as any }, mockServiceClient)
+        ).rejects.toThrow(/auto_scope/i);
+      });
+
       it('should forward an abort signal to the planning service', async () => {
         const controller = new AbortController();
         mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
@@ -164,6 +177,68 @@ describe('Planning MCP Tools', () => {
       expect(result).toContain('Implementation Plan');
       expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
     });
+
+      it('should normalize scoped paths, forward them to context retrieval, and include diagnostics', async () => {
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 320));
+
+        const result = await handleCreatePlan(
+          {
+            task: 'Plan the auth update',
+            include_paths: ['./src/auth/', 'src\\auth\\**'],
+            exclude_paths: ['src/auth/legacy/', './src/auth/legacy/**'],
+            auto_save: false,
+          },
+          mockServiceClient
+        );
+
+        expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+          'Plan the auth update',
+          expect.objectContaining({
+            includePaths: ['src/auth/**'],
+            excludePaths: ['src/auth/legacy/**'],
+          })
+        );
+
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({
+            prompt_profile: 'compact',
+            scope_applied: true,
+            scope_source: 'manual',
+            scope_confidence: 'high',
+            context_file_count: 1,
+            token_budget: 320,
+            clarification_triggered: true,
+          })
+        );
+      });
+
+      it('should expose auto scope in the response diagnostics when it infers a focused area', async () => {
+        mockServiceClient.semanticSearch.mockResolvedValue([
+          { path: 'src/auth/login.ts', content: '', relevanceScore: 0.9 },
+          { path: 'src/auth/session.ts', content: '', relevanceScore: 0.85 },
+          { path: 'src/auth/guards.ts', content: '', relevanceScore: 0.82 },
+          { path: 'src/auth/index.ts', content: '', relevanceScore: 0.8 },
+        ]);
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 2200));
+
+        const result = await handleCreatePlan(
+          { task: 'Plan the auth update', auto_save: false },
+          mockServiceClient
+        );
+
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({
+            scope_applied: true,
+            scope_source: 'auto',
+            scope_confidence: 'high',
+            applied_include_paths: ['src/auth/**'],
+            candidate_include_paths: ['src/auth/**'],
+          })
+        );
+        expect(result).toContain('Planning auto-focused on the most likely code area');
+      });
     });
 
     describe('Tool Schema', () => {
@@ -185,6 +260,15 @@ describe('Planning MCP Tools', () => {
         expect(props.max_context_files).toBeDefined();
         expect(props.generate_diagrams).toBeDefined();
         expect(props.mvp_only).toBeDefined();
+        expect(props.auto_scope).toBeDefined();
+        expect(props.include_paths).toBeDefined();
+        expect(props.exclude_paths).toBeDefined();
+      });
+
+      it('should describe scoped path parameters using the shared contract', () => {
+        const props = createPlanTool.inputSchema.properties;
+        expect(props.include_paths.description).toMatch(/workspace-relative glob filters to include/i);
+        expect(props.exclude_paths.description).toMatch(/workspace-relative glob filters to exclude/i);
       });
     });
   });

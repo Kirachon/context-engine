@@ -12,7 +12,7 @@ export interface ToolManifestArgs {
 
 export const MCP_SERVER_VERSION = '1.9.0';
 
-const manifest = {
+export const toolManifest = {
   version: MCP_SERVER_VERSION,
   capabilities: [
     'semantic_search',
@@ -30,6 +30,8 @@ const manifest = {
     'code_review',
     'enterprise_review',
     'static_analysis',
+    'resources',
+    'prompts',
   ],
   tools: [
     // Core Context Tools
@@ -173,11 +175,15 @@ const manifest = {
   },
 };
 
+export function getToolManifest(): typeof toolManifest {
+  return toolManifest;
+}
+
 export async function handleToolManifest(
   _args: ToolManifestArgs,
   _serviceClient: ContextServiceClient
 ): Promise<string> {
-  return JSON.stringify(manifest, null, 2);
+  return JSON.stringify(toolManifest, null, 2);
 }
 
 export const toolManifestTool = {

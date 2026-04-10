@@ -24,6 +24,7 @@ import {
   validateBoolean,
   validateFiniteNumberInRange,
   validateMaxLength,
+  validatePathScopeGlobs,
   validateTrimmedNonEmptyString,
   validateOneOf,
 } from '../tooling/validation.js';
@@ -39,6 +40,8 @@ export interface SemanticSearchArgs {
   bypass_cache?: boolean;
   /** Max time to spend on retrieval pipeline (ms). 0/undefined means no timeout. */
   timeout_ms?: number;
+  include_paths?: string[];
+  exclude_paths?: string[];
 }
 
 type FallbackDiagnostics = {
@@ -276,7 +279,16 @@ export async function handleSemanticSearch(
   args: SemanticSearchArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const { query, top_k = 10, mode = 'fast', profile, bypass_cache = false, timeout_ms } = args;
+  const {
+    query,
+    top_k = 10,
+    mode = 'fast',
+    profile,
+    bypass_cache = false,
+    timeout_ms,
+    include_paths,
+    exclude_paths,
+  } = args;
 
   // Validate inputs
   const validQuery = validateTrimmedNonEmptyString(query, 'Invalid query parameter: must be a non-empty string');
@@ -297,6 +309,8 @@ export async function handleSemanticSearch(
     120000,
     'Invalid timeout_ms parameter: must be a number between 0 and 120000'
   );
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
 
   const effectiveTimeoutMs = timeout_ms ?? (bypass_cache ? 10000 : 0);
   const effectiveProfile = resolveSearchProfile(mode, profile);
@@ -324,6 +338,8 @@ export async function handleSemanticSearch(
     enableRerank: profileSettings.enableRerank,
     rerankTopN,
     rerankTimeoutMs: profileSettings.rerankTimeoutMs,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
   };
 
   const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);
@@ -488,6 +504,16 @@ For comprehensive context with file summaries and related files, use get_context
         type: 'number',
         description: 'Max time to spend on the retrieval pipeline in milliseconds. 0/undefined means no timeout.',
         default: 0,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
       },
     },
     required: ['query'],

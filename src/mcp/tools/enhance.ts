@@ -24,11 +24,17 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalPromptEnhancerDetailed } from '../../internal/handlers/enhancement.js';
 import { EnhancePromptError } from '../../internal/handlers/enhancement.js';
-import { validateMaxLength, validateNonEmptyString } from '../tooling/validation.js';
+import { getEnhanceRequestToolFieldDescription } from '../prompts/planning.js';
+import { validateBoolean, validateExternalSources, validateMaxLength, validateNonEmptyString, validatePathScopeGlobs } from '../tooling/validation.js';
 
 export interface EnhancePromptArgs {
   /** The raw user prompt to enhance */
   prompt: string;
+  /** Automatically infer likely include paths when no explicit scope is provided (default: true) */
+  auto_scope?: boolean;
+  include_paths?: string[];
+  exclude_paths?: string[];
+  external_sources?: Array<{ type: 'github_url' | 'docs_url'; url: string; label?: string }>;
 }
 
 const MAX_PROMPT_LENGTH = 10000;
@@ -51,7 +57,7 @@ export async function handleEnhancePrompt(
   serviceClient: ContextServiceClient,
   signal?: AbortSignal
 ): Promise<string> {
-  const { prompt } = args;
+  const { prompt, auto_scope = true, include_paths, exclude_paths, external_sources } = args;
   const normalizedPrompt = typeof prompt === 'string' ? prompt.trim() : prompt;
 
   // Validate inputs (preserve existing external error messages)
@@ -64,6 +70,10 @@ export async function handleEnhancePrompt(
     MAX_PROMPT_LENGTH,
     `Prompt too long: maximum ${MAX_PROMPT_LENGTH} characters`
   );
+  validateBoolean(auto_scope, 'auto_scope must be a boolean when provided');
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
+  const normalizedExternalSources = validateExternalSources(external_sources, 'external_sources');
 
   // Always use AI-powered enhancement
   console.error('[enhance_prompt] Using AI-powered enhancement mode');
@@ -71,7 +81,12 @@ export async function handleEnhancePrompt(
   const normalizedResponseFormat = ENHANCE_RESPONSE_FORMATS.has(responseFormat) ? responseFormat : 'text';
 
   try {
-    const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient, signal);
+    const enhancement = await internalPromptEnhancerDetailed(validatedPrompt, serviceClient, signal, {
+      autoScope: auto_scope,
+      includePaths: normalizedIncludePaths,
+      excludePaths: normalizedExcludePaths,
+      externalSources: normalizedExternalSources,
+    });
     if (normalizedResponseFormat === 'json') {
       return JSON.stringify(
         {
@@ -80,6 +95,23 @@ export async function handleEnhancePrompt(
           enhanced_prompt: enhancement.enhancedPrompt,
           source: enhancement.source,
           reason_code: enhancement.reasonCode,
+          context_files: enhancement.contextFiles,
+          mode: enhancement.mode,
+          scope_applied: enhancement.scopeApplied,
+          scope_source: enhancement.scopeSource,
+          scope_confidence: enhancement.scopeConfidence,
+          applied_include_paths: enhancement.appliedIncludePaths,
+          candidate_include_paths: enhancement.candidateIncludePaths,
+          grounding_strategy: enhancement.groundingStrategy,
+          grounding_applied: enhancement.groundingApplied,
+          grounding_summary: enhancement.groundingSummary,
+          grounding_sources_requested: enhancement.groundingSourcesRequested,
+          grounding_sources_used: enhancement.groundingSourcesUsed,
+          grounding_source_statuses: enhancement.groundingSourceStatuses,
+          grounding_warnings: enhancement.groundingWarnings,
+          grounding_truncated: enhancement.groundingTruncated,
+          ...(enhancement.includePaths ? { include_paths: enhancement.includePaths } : {}),
+          ...(enhancement.excludePaths ? { exclude_paths: enhancement.excludePaths } : {}),
         },
         null,
         2
@@ -136,7 +168,34 @@ The tool automatically searches for relevant code context and uses AI to rewrite
     properties: {
       prompt: {
         type: 'string',
-        description: 'The simple prompt to enhance (e.g., "fix the login bug")',
+        description: getEnhanceRequestToolFieldDescription('prompt'),
+      },
+      auto_scope: {
+        type: 'boolean',
+        description: getEnhanceRequestToolFieldDescription('auto_scope'),
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: getEnhanceRequestToolFieldDescription('include_paths'),
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: getEnhanceRequestToolFieldDescription('exclude_paths'),
+      },
+      external_sources: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['github_url', 'docs_url'] },
+            url: { type: 'string' },
+            label: { type: 'string' },
+          },
+          required: ['type', 'url'],
+        },
+        description: getEnhanceRequestToolFieldDescription('external_sources'),
       },
     },
     required: ['prompt'],

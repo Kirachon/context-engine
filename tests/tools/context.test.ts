@@ -89,6 +89,12 @@ describe('get_context_for_prompt Tool', () => {
         .rejects.toThrow(/invalid min_relevance/i);
     });
 
+    it('should reject invalid include_paths', async () => {
+      await expect(
+        handleGetContext({ query: 'test', include_paths: ['C:/tmp/**'] as any }, mockServiceClient as any)
+      ).rejects.toThrow(/invalid include_paths/i);
+    });
+
     it('should accept valid parameters', async () => {
       const mockBundle: ContextBundle = createMockContextBundle();
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
@@ -108,6 +114,28 @@ describe('get_context_for_prompt Tool', () => {
 
       const result = await handleGetContext({ query: '   test query   ' }, mockServiceClient as any);
       expect(result).toContain('**Query:** "test query"');
+    });
+
+    it('should pass normalized scoped path filters to getContextForPrompt', async () => {
+      const mockBundle: ContextBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      await handleGetContext(
+        {
+          query: 'test query',
+          include_paths: ['./src/', 'src\\**'],
+          exclude_paths: ['dist/', './dist/**'],
+        },
+        mockServiceClient as any
+      );
+
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+        'test query',
+        expect.objectContaining({
+          includePaths: ['src/**'],
+          excludePaths: ['dist/**'],
+        })
+      );
     });
   });
 
@@ -186,6 +214,31 @@ describe('get_context_for_prompt Tool', () => {
 
       expect(result).toContain('```typescript');
       expect(result).toContain('```');
+    });
+
+    it('renders a dedicated external references section when external references are present', async () => {
+      const mockBundle = createMockContextBundle();
+      mockBundle.externalReferences = [
+        {
+          type: 'docs_url',
+          url: 'https://example.com/docs',
+          host: 'example.com',
+          excerpt: 'External auth guidance',
+          fetched_at: '2026-04-10T00:00:00.000Z',
+          status: 'used',
+        } as any,
+      ];
+      mockBundle.metadata.externalSourcesRequested = 1;
+      mockBundle.metadata.externalSourcesUsed = 1;
+      mockBundle.metadata.externalWarnings = [];
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+
+      expect(result).toContain('## 🌐 External References');
+      expect(result).toContain('not part of the indexed local codebase');
+      expect(result).toContain('https://example.com/docs');
+      expect(result).toContain('External auth guidance');
     });
 
     it('should render higher-relevance files first in overview and detailed context', async () => {

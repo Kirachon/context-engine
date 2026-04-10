@@ -14,6 +14,8 @@
  */
 
 import { ContextServiceClient, ContextBundle } from '../serviceClient.js';
+import { scopeApplied } from '../tooling/pathScope.js';
+import { resolveAutoScopeDecision, type AutoScopeConfidence, type AutoScopeDecision } from '../tooling/autoScope.js';
 import {
   EnhancedPlanOutput,
   EnhancedPlanStep,
@@ -51,7 +53,20 @@ import { envMs } from '../../config/env.js';
 const MAX_PARSE_RETRIES = 2;
 
 /** Default options for plan generation */
-const DEFAULT_OPTIONS: Required<PlanGenerationOptions> = {
+type ResolvedPlanGenerationOptions = Omit<
+  Required<PlanGenerationOptions>,
+  'include_paths' | 'exclude_paths' | 'auto_scope'
+> &
+  Pick<PlanGenerationOptions, 'include_paths' | 'exclude_paths' | 'auto_scope'>;
+
+interface PlanningScopeDecision {
+  source: 'manual' | 'auto' | 'none';
+  confidence: AutoScopeConfidence;
+  appliedIncludePaths: string[];
+  candidateIncludePaths: string[];
+}
+
+const DEFAULT_OPTIONS: ResolvedPlanGenerationOptions = {
   max_refinements: 3,
   max_context_files: 8,
   context_token_budget: 8000,
@@ -59,6 +74,9 @@ const DEFAULT_OPTIONS: Required<PlanGenerationOptions> = {
   generate_diagrams: false,
   analyze_parallelism: true,
   mvp_only: false,
+  auto_scope: true,
+  include_paths: undefined,
+  exclude_paths: undefined,
 };
 
 const DEFAULT_PLAN_AI_TIMEOUT_MS = 5 * 60 * 1000;
@@ -105,7 +123,7 @@ export class PlanningService {
 
   private choosePlanningPromptProfile(
     task: string,
-    options: Required<PlanGenerationOptions>,
+    options: ResolvedPlanGenerationOptions,
     contextFileCount: number = 0,
     totalTokens: number = 0
   ): PlanningPromptProfile {
@@ -143,7 +161,7 @@ export class PlanningService {
     signal?: AbortSignal
   ): Promise<PlanResult> {
     const startTime = Date.now();
-    const opts = { ...DEFAULT_OPTIONS, ...options };
+    const opts: ResolvedPlanGenerationOptions = { ...DEFAULT_OPTIONS, ...options };
 
     // Safely handle potentially undefined task
     const taskPreview = task && typeof task === 'string' ? task.substring(0, 100) : 'undefined task';
@@ -152,22 +170,34 @@ export class PlanningService {
     try {
       throwIfAborted(signal);
 
+      const scopeDecision = await this.resolvePlanningScope(task, opts);
+      const scopedOptions: ResolvedPlanGenerationOptions = {
+        ...opts,
+        include_paths: scopeDecision.appliedIncludePaths.length > 0
+          ? scopeDecision.appliedIncludePaths
+          : opts.include_paths,
+      };
+
       // Step 1: Get relevant codebase context
-      const contextProfile = this.choosePlanningPromptProfile(task, opts);
-      const context = await this.getRelevantContext(task, opts, contextProfile);
+      const contextProfile = this.choosePlanningPromptProfile(task, scopedOptions);
+      const context = await this.getRelevantContext(task, scopedOptions, contextProfile);
       console.error(`[PlanningService] Retrieved context from ${context.files.length} files`);
 
       // Step 2: Build the planning prompt with context
       const promptProfile = this.choosePlanningPromptProfile(
         task,
-        opts,
+        scopedOptions,
         context.files.length,
         context.metadata.totalTokens
       );
       // Fast path: compact planning returns a lightweight local outline immediately.
       // Deep planning still uses the AI path for complex, architecture-heavy tasks.
       if (promptProfile === 'compact') {
-        const outlinePlan = this.buildCompactPlanOutline(task, context);
+        const outlinePlan = this.applyScopedContextDiagnostics(
+          this.buildCompactPlanOutline(task, context),
+          context,
+          scopedOptions
+        );
         const status: PlanStatus = outlinePlan.questions_for_clarification.length > 0
           ? 'needs_clarification'
           : 'ready';
@@ -179,6 +209,13 @@ export class PlanningService {
           plan: outlinePlan,
           status,
           duration_ms: Date.now() - startTime,
+          planning_context: this.buildPlanningContextDiagnostics(
+            promptProfile,
+            context,
+            scopedOptions,
+            status,
+            scopeDecision
+          ),
         };
       }
       const contextSummary = this.formatContextForPrompt(context, promptProfile);
@@ -225,7 +262,7 @@ export class PlanningService {
       // Step 6: Concurrent post-processing using Promise.all
       // - Full plan validation (async)
       // - Early dependency graph computation (if enabled)
-      const [plan, earlyDependencyGraph] = await Promise.all([
+      const [validatedPlan, earlyDependencyGraph] = await Promise.all([
         // Parse and validate the full plan
         this.parseAndValidatePlanFromJson(parsedJson, context),
 
@@ -235,6 +272,8 @@ export class PlanningService {
           ? Promise.resolve(this.earlyAnalyzeDependencies(parsedJson.steps))
           : Promise.resolve(null),
       ]);
+
+      const plan = this.applyScopedContextDiagnostics(validatedPlan, context, scopedOptions);
 
       // Apply pre-computed dependency graph if available
       if (earlyDependencyGraph && opts.analyze_parallelism) {
@@ -253,6 +292,13 @@ export class PlanningService {
         plan,
         status,
         duration_ms: Date.now() - startTime,
+        planning_context: this.buildPlanningContextDiagnostics(
+          promptProfile,
+          context,
+          scopedOptions,
+          status,
+          scopeDecision
+        ),
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -347,7 +393,7 @@ export class PlanningService {
    */
   private async getRelevantContext(
     task: string,
-    options: Required<PlanGenerationOptions>,
+    options: ResolvedPlanGenerationOptions,
     profile: PlanningPromptProfile
   ): Promise<ContextBundle> {
     const effectiveMaxFiles = clampContextFileCount(options.max_context_files, profile);
@@ -361,7 +407,99 @@ export class PlanningService {
       includeMemories: false,
       preferLocalSearch: true,
       priority: 'background',
+      includePaths: options.include_paths,
+      excludePaths: options.exclude_paths,
     });
+  }
+
+  private async resolvePlanningScope(
+    task: string,
+    options: ResolvedPlanGenerationOptions
+  ): Promise<PlanningScopeDecision> {
+    const decision = await resolveAutoScopeDecision({
+      query: task,
+      autoScope: options.auto_scope,
+      includePaths: options.include_paths,
+      excludePaths: options.exclude_paths,
+      search: async (query) => this.contextClient.semanticSearch(query, 12, {
+        bypassCache: true,
+        priority: 'background',
+      }),
+    });
+    return this.mapAutoScopeDecision(decision);
+  }
+
+  private mapAutoScopeDecision(decision: AutoScopeDecision): PlanningScopeDecision {
+    return {
+      source: decision.source,
+      confidence: decision.confidence,
+      appliedIncludePaths: decision.appliedIncludePaths,
+      candidateIncludePaths: decision.candidateIncludePaths,
+    };
+  }
+
+  private hasScopedPathFilters(options: Pick<PlanGenerationOptions, 'include_paths' | 'exclude_paths'>): boolean {
+    return Boolean(
+      (options.include_paths && options.include_paths.length > 0) ||
+      (options.exclude_paths && options.exclude_paths.length > 0)
+    );
+  }
+
+  private hasThinScopedContext(
+    context: ContextBundle,
+    options: Pick<PlanGenerationOptions, 'include_paths' | 'exclude_paths'>
+  ): boolean {
+    if (!this.hasScopedPathFilters(options)) {
+      return false;
+    }
+
+    return context.files.length === 0 || context.metadata.totalTokens < 500;
+  }
+
+  private applyScopedContextDiagnostics(
+    plan: EnhancedPlanOutput,
+    context: ContextBundle,
+    options: Pick<PlanGenerationOptions, 'include_paths' | 'exclude_paths'>
+  ): EnhancedPlanOutput {
+    if (!this.hasThinScopedContext(context, options)) {
+      return plan;
+    }
+
+    const question =
+      'Scoped planning context returned limited results. Confirm the current include_paths/exclude_paths filters or widen them before implementing the plan.';
+    if (!plan.questions_for_clarification.includes(question)) {
+      plan.questions_for_clarification = [...plan.questions_for_clarification, question];
+    }
+
+    plan.confidence_score = Math.max(0.15, Math.min(plan.confidence_score, 0.4));
+
+    const scopedInsight =
+      'Planning stayed within the requested path scope and did not widen retrieval automatically.';
+    if (!plan.codebase_insights.includes(scopedInsight)) {
+      plan.codebase_insights = [...plan.codebase_insights, scopedInsight];
+    }
+
+    return plan;
+  }
+
+  private buildPlanningContextDiagnostics(
+    promptProfile: PlanningPromptProfile,
+    context: ContextBundle,
+    options: Pick<PlanGenerationOptions, 'include_paths' | 'exclude_paths'>,
+    status: PlanStatus,
+    scopeDecision: PlanningScopeDecision
+  ): NonNullable<PlanResult['planning_context']> {
+    return {
+      prompt_profile: promptProfile,
+      scope_applied: this.hasScopedPathFilters(options),
+      scope_source: scopeDecision.source,
+      scope_confidence: scopeDecision.confidence,
+      applied_include_paths: scopeDecision.appliedIncludePaths,
+      candidate_include_paths: scopeDecision.candidateIncludePaths,
+      context_file_count: context.files.length,
+      token_budget: context.metadata.tokenBudget,
+      clarification_triggered: status === 'needs_clarification',
+    };
   }
 
   /**

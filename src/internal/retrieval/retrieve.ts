@@ -24,11 +24,13 @@ import { ExpandedQuery, InternalSearchResult, RetrievalOptions } from './types.j
 const DISABLED_VALUES = new Set(['0', 'false', 'off', 'disable', 'disabled']);
 
 type NormalizedRetrievalOptions =
-  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider' | 'reranker' | 'signal' | 'flow'> & {
+  Omit<Required<RetrievalOptions>, 'bypassCache' | 'maxOutputLength' | 'denseProvider' | 'reranker' | 'signal' | 'flow' | 'includePaths' | 'excludePaths'> & {
     bypassCache: boolean;
     maxOutputLength?: number;
     denseProvider?: RetrievalOptions['denseProvider'];
     reranker?: RetrievalOptions['reranker'];
+    includePaths?: string[];
+    excludePaths?: string[];
   };
 
 export function isRetrievalPipelineEnabled(): boolean {
@@ -85,6 +87,8 @@ function normalizeOptions(options: RetrievalOptions | undefined): NormalizedRetr
     log: options?.log ?? false,
     bypassCache: options?.bypassCache ?? false,
     maxOutputLength: options?.maxOutputLength,
+    includePaths: options?.includePaths,
+    excludePaths: options?.excludePaths,
   };
 }
 
@@ -314,8 +318,16 @@ export async function retrieve(
   noteRetrievalStage(flow, 'start');
   assertRetrievalFlowActive(flow, 'start');
   const semanticSearchOptions =
-    settings.bypassCache || settings.maxOutputLength !== undefined
-      ? { bypassCache: settings.bypassCache, maxOutputLength: settings.maxOutputLength }
+    settings.bypassCache
+    || settings.maxOutputLength !== undefined
+    || settings.includePaths !== undefined
+    || settings.excludePaths !== undefined
+      ? {
+          bypassCache: settings.bypassCache,
+          maxOutputLength: settings.maxOutputLength,
+          includePaths: settings.includePaths,
+          excludePaths: settings.excludePaths,
+        }
       : undefined;
   const semanticSearch = (q: string, k: number) =>
     semanticSearchOptions
@@ -336,7 +348,11 @@ export async function retrieve(
   const denseCandidates: InternalSearchResult[] = [];
   const denseProvider = resolveDenseProvider(settings, serviceClient);
   const localKeywordSearch = (serviceClient as ContextServiceClient & {
-    localKeywordSearch?: (input: string, topK: number) => Promise<SearchResult[]>;
+    localKeywordSearch?: (
+      input: string,
+      topK: number,
+      options?: { includePaths?: string[]; excludePaths?: string[]; bypassCache?: boolean }
+    ) => Promise<SearchResult[]>;
   }).localKeywordSearch;
 
   const perVariantResults = await Promise.all(
@@ -355,7 +371,11 @@ export async function retrieve(
 
       const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
         ? withTimeout(
-            localKeywordSearch(variant.query, settings.perQueryTopK),
+            localKeywordSearch(variant.query, settings.perQueryTopK, {
+              includePaths: settings.includePaths,
+              excludePaths: settings.excludePaths,
+              bypassCache: settings.bypassCache,
+            }),
             settings.timeoutMs,
             []
           ).catch((error) => {

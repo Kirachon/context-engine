@@ -206,6 +206,137 @@ export function buildPlanningPrompt(
   return prompt.join('\n');
 }
 
+export type CreatePlanPromptArgumentName =
+  | 'task'
+  | 'auto_scope'
+  | 'mvp_only'
+  | 'max_context_files'
+  | 'context_token_budget'
+  | 'include_paths'
+  | 'exclude_paths';
+
+export interface CreatePlanPromptArgumentDefinition {
+  name: CreatePlanPromptArgumentName;
+  promptDescription: string;
+  toolDescription: string;
+  required?: boolean;
+}
+
+export const CREATE_PLAN_PROMPT_ARGUMENT_DEFINITIONS = [
+  {
+    name: 'task',
+    promptDescription: 'Implementation task to plan.',
+    toolDescription: 'The task or goal to plan for. Be specific about what you want to accomplish.',
+    required: true,
+  },
+  {
+    name: 'auto_scope',
+    promptDescription: 'Optional boolean string (`true`/`false`) to control automatic scope inference.',
+    toolDescription: 'Automatically infer likely include paths when no explicit scope is provided (default: true)',
+  },
+  {
+    name: 'mvp_only',
+    promptDescription: 'Optional boolean string (`true`/`false`).',
+    toolDescription: 'Focus on MVP features only, excluding nice-to-have (default: false)',
+  },
+  {
+    name: 'max_context_files',
+    promptDescription: 'Optional integer string for context file limit.',
+    toolDescription: 'Maximum number of files to include in context analysis (default: 8)',
+  },
+  {
+    name: 'context_token_budget',
+    promptDescription: 'Optional integer string for prompt context budget.',
+    toolDescription: 'Token budget for context retrieval (default: 8000)',
+  },
+  {
+    name: 'include_paths',
+    promptDescription: 'Optional comma/newline-separated workspace-relative glob list.',
+    toolDescription: 'Optional workspace-relative glob filters to include matching paths only.',
+  },
+  {
+    name: 'exclude_paths',
+    promptDescription: 'Optional comma/newline-separated workspace-relative glob list.',
+    toolDescription: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+  },
+] as const satisfies readonly CreatePlanPromptArgumentDefinition[];
+
+export function getCreatePlanPromptArguments(): Array<{
+  name: CreatePlanPromptArgumentName;
+  description: string;
+  required?: boolean;
+}> {
+  return CREATE_PLAN_PROMPT_ARGUMENT_DEFINITIONS.map((definition) => ({
+    name: definition.name,
+    description: definition.promptDescription,
+    ...('required' in definition ? { required: definition.required } : {}),
+  }));
+}
+
+export function getCreatePlanToolFieldDescription(name: CreatePlanPromptArgumentName): string {
+  const definition = CREATE_PLAN_PROMPT_ARGUMENT_DEFINITIONS.find((entry) => entry.name === name);
+  if (!definition) {
+    throw new Error(`Unsupported create_plan field: ${name}`);
+  }
+  return definition.toolDescription;
+}
+
+export interface CreatePlanPromptRequestOptions {
+  task: string;
+  auto_scope?: boolean;
+  mvp_only?: boolean;
+  max_context_files?: number;
+  context_token_budget?: number;
+  include_paths?: string[];
+  exclude_paths?: string[];
+  profile?: PlanningPromptProfile;
+}
+
+export function buildCreatePlanPromptRequest(
+  options: CreatePlanPromptRequestOptions
+): string {
+  const prompt = buildPlanningPrompt(
+    options.task,
+    'No additional codebase context was provided with this prompt request.',
+    options.profile ?? 'compact'
+  );
+
+  const requestOptions: string[] = [];
+  const optionalRequestOptionValues: Partial<
+    Record<CreatePlanPromptArgumentName, boolean | number | string[]>
+  > = {
+    mvp_only: options.mvp_only,
+    auto_scope: options.auto_scope,
+    max_context_files: options.max_context_files,
+    context_token_budget: options.context_token_budget,
+    include_paths: options.include_paths,
+    exclude_paths: options.exclude_paths,
+  };
+
+  for (const definition of CREATE_PLAN_PROMPT_ARGUMENT_DEFINITIONS) {
+    if (definition.name === 'task') {
+      continue;
+    }
+    const value = optionalRequestOptionValues[definition.name];
+    if (typeof value === 'boolean' || typeof value === 'number') {
+      requestOptions.push(`- ${definition.name}: ${value}`);
+    } else if (Array.isArray(value) && value.length > 0) {
+      requestOptions.push(`- ${definition.name}: ${value.join(', ')}`);
+    }
+  }
+
+  if (requestOptions.length === 0) {
+    return prompt;
+  }
+
+  return [
+    prompt,
+    '',
+    '## Request Options',
+    ...requestOptions,
+  ].join('\n');
+}
+
 /**
  * Build a refinement prompt with feedback
  */
@@ -246,6 +377,142 @@ export function buildRefinementPrompt(
   }
 
   return prompt.join('\n');
+}
+
+export interface RefinePlanPromptRequestOptions {
+  currentPlan: string;
+  feedback?: string;
+  clarifications?: Record<string, string>;
+  profile?: PlanningPromptProfile;
+}
+
+export function buildRefinePlanPromptRequest(
+  options: RefinePlanPromptRequestOptions
+): string {
+  const feedback =
+    options.feedback?.trim() ||
+    'No explicit feedback was provided. Review the current plan for consistency and apply any supplied clarifications.';
+
+  return buildRefinementPrompt(
+    options.currentPlan,
+    feedback,
+    options.clarifications,
+    options.profile ?? 'compact'
+  );
+}
+
+export const ENHANCE_REQUEST_SYSTEM_PROMPT = `You are an expert prompt enhancer preparing a coding request for the Context Engine workflow.
+
+Turn the raw request into a sharper implementation brief that keeps the user's intent intact while making scope, codebase focus, and validation clearer.
+
+Do not invent files, APIs, or requirements. Preserve any provided path filters and highlight them when they materially affect the work.`;
+
+export type EnhanceRequestPromptArgumentName =
+  | 'prompt'
+  | 'auto_scope'
+  | 'include_paths'
+  | 'exclude_paths'
+  | 'external_sources';
+
+export interface EnhanceRequestPromptArgumentDefinition {
+  name: EnhanceRequestPromptArgumentName;
+  promptDescription: string;
+  toolDescription: string;
+  required?: boolean;
+}
+
+export const ENHANCE_REQUEST_PROMPT_ARGUMENT_DEFINITIONS = [
+  {
+    name: 'prompt',
+    promptDescription: 'Raw request to sharpen.',
+    toolDescription: 'The simple prompt to enhance (e.g., "fix the login bug")',
+    required: true,
+  },
+  {
+    name: 'auto_scope',
+    promptDescription: 'Optional boolean string (`true`/`false`) to control automatic scope inference.',
+    toolDescription: 'Automatically infer likely include paths when no explicit scope is provided (default: true)',
+  },
+  {
+    name: 'include_paths',
+    promptDescription: 'Optional comma/newline-separated workspace-relative glob list.',
+    toolDescription: 'Optional workspace-relative glob filters to include matching paths only.',
+  },
+  {
+    name: 'exclude_paths',
+    promptDescription: 'Optional comma/newline-separated workspace-relative glob list.',
+    toolDescription: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+  },
+  {
+    name: 'external_sources',
+    promptDescription: 'Optional JSON string of external source objects for grounding.',
+    toolDescription: 'Optional JSON array of external sources to ground the enhancement request.',
+  },
+] as const satisfies readonly EnhanceRequestPromptArgumentDefinition[];
+
+export function getEnhanceRequestPromptArguments(): Array<{
+  name: EnhanceRequestPromptArgumentName;
+  description: string;
+  required?: boolean;
+}> {
+  return ENHANCE_REQUEST_PROMPT_ARGUMENT_DEFINITIONS.map((definition) => ({
+    name: definition.name,
+    description: definition.promptDescription,
+    ...('required' in definition ? { required: definition.required } : {}),
+  }));
+}
+
+export function getEnhanceRequestToolFieldDescription(name: EnhanceRequestPromptArgumentName): string {
+  const definition = ENHANCE_REQUEST_PROMPT_ARGUMENT_DEFINITIONS.find((entry) => entry.name === name);
+  if (!definition) {
+    throw new Error(`Unsupported enhance_prompt field: ${name}`);
+  }
+  return definition.toolDescription;
+}
+
+export interface EnhanceRequestPromptOptions {
+  autoScope?: boolean;
+  includePaths?: string[];
+  excludePaths?: string[];
+  externalSourcesJson?: string;
+}
+
+export function buildEnhanceRequestPrompt(
+  prompt: string,
+  options: EnhanceRequestPromptOptions = {}
+): string {
+  const sections = [
+    '## Raw Request',
+    prompt.trim(),
+  ];
+
+  if (typeof options.autoScope === 'boolean') {
+    sections.push('', '## Auto Scope', `- ${options.autoScope}`);
+  }
+
+  if (options.includePaths && options.includePaths.length > 0) {
+    sections.push('', '## Include Paths', ...options.includePaths.map((value) => `- ${value}`));
+  }
+
+  if (options.excludePaths && options.excludePaths.length > 0) {
+    sections.push('', '## Exclude Paths', ...options.excludePaths.map((value) => `- ${value}`));
+  }
+
+  if (options.externalSourcesJson && options.externalSourcesJson.trim().length > 0) {
+    sections.push('', '## External Sources', options.externalSourcesJson.trim());
+  }
+
+  sections.push(
+    '',
+    '## Instructions',
+    '- Rewrite the request into a concrete implementation brief.',
+    '- Keep the request grounded in the existing codebase.',
+    '- Preserve any include/exclude path constraints exactly as provided.',
+    '- Treat any external_sources content as additive reference material, not local codebase truth.',
+    '- End with a short validation checklist.'
+  );
+
+  return sections.join('\n');
 }
 
 /**

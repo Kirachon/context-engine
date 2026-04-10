@@ -10,6 +10,10 @@ import {
   buildPlanningPrompt,
   buildRefinementPrompt,
   buildDiagramPrompt,
+  buildCreatePlanPromptRequest,
+  buildEnhanceRequestPrompt,
+  getCreatePlanPromptArguments,
+  getEnhanceRequestPromptArguments,
   PLANNING_SYSTEM_PROMPT,
   REFINEMENT_SYSTEM_PROMPT,
 } from '../../src/mcp/prompts/planning.js';
@@ -124,6 +128,64 @@ That's the plan!`;
     });
   });
 
+  describe('create-plan prompt contract helpers', () => {
+    it('includes scoped path arguments in the prompt contract', () => {
+      expect(getCreatePlanPromptArguments()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'auto_scope' }),
+          expect.objectContaining({ name: 'include_paths' }),
+          expect.objectContaining({ name: 'exclude_paths' }),
+        ])
+      );
+    });
+
+    it('renders auto_scope and scoped paths in the request options block', () => {
+      const result = buildCreatePlanPromptRequest({
+        task: 'Plan the auth update',
+        auto_scope: false,
+        include_paths: ['src/auth/**'],
+        exclude_paths: ['src/auth/legacy/**'],
+      });
+
+      expect(result).toContain('## Request Options');
+      expect(result).toContain('- auto_scope: false');
+      expect(result).toContain('- include_paths: src/auth/**');
+      expect(result).toContain('- exclude_paths: src/auth/legacy/**');
+    });
+  });
+
+  describe('enhance-request prompt contract helpers', () => {
+    it('includes auto_scope and scoped path arguments in the prompt contract', () => {
+      expect(getEnhanceRequestPromptArguments()).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ name: 'prompt', required: true }),
+          expect.objectContaining({ name: 'auto_scope' }),
+          expect.objectContaining({ name: 'include_paths' }),
+          expect.objectContaining({ name: 'exclude_paths' }),
+          expect.objectContaining({ name: 'external_sources' }),
+        ])
+      );
+    });
+
+    it('renders auto_scope and scoped paths in the request body', () => {
+      const result = buildEnhanceRequestPrompt('Tighten the auth request', {
+        autoScope: false,
+        includePaths: ['src/auth/**'],
+        excludePaths: ['src/auth/legacy/**'],
+        externalSourcesJson: JSON.stringify([{ type: 'docs_url', url: 'https://example.com/docs' }]),
+      });
+
+      expect(result).toContain('## Auto Scope');
+      expect(result).toContain('- false');
+      expect(result).toContain('## Include Paths');
+      expect(result).toContain('- src/auth/**');
+      expect(result).toContain('## Exclude Paths');
+      expect(result).toContain('- src/auth/legacy/**');
+      expect(result).toContain('## External Sources');
+      expect(result).toContain('https://example.com/docs');
+    });
+  });
+
   describe('buildRefinementPrompt', () => {
     it('should include current plan', () => {
       const plan = '{"goal": "Original plan"}';
@@ -183,4 +245,3 @@ That's the plan!`;
     });
   });
 });
-

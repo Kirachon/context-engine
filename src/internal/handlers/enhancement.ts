@@ -1,5 +1,15 @@
 import type { ContextServiceClient } from '../../mcp/serviceClient.js';
 import { createHash } from 'crypto';
+import { AUTO_SCOPE_INFERENCE_VERSION, resolveAutoScopeDecision, type AutoScopeDecision } from '../../mcp/tooling/autoScope.js';
+import {
+  EXTERNAL_GROUNDING_PROVIDER_VERSION,
+  fetchExternalGrounding,
+  serializeExternalSourcesForCache,
+  type ExternalReferenceSnippet,
+  type GroundingSourceStatus,
+  type GroundingWarning,
+  type NormalizedExternalSource,
+} from '../../mcp/tooling/externalGrounding.js';
 import { isRetrievalPipelineEnabled, retrieve } from '../retrieval/retrieve.js';
 import {
   createRetrievalFlowContext,
@@ -51,6 +61,13 @@ const CORE_REQUIREMENT_LINES = [
 
 type EnhancePromptMode = 'off' | 'light' | 'rich';
 
+type EnhancePromptScopeOptions = {
+  autoScope?: boolean;
+  includePaths?: string[];
+  excludePaths?: string[];
+  externalSources?: NormalizedExternalSource[];
+};
+
 type BudgetManager = {
   readonly totalBudgetMs: number;
   readonly deadlineMs: number;
@@ -60,6 +77,7 @@ type BudgetManager = {
 
 type ContextSnippetCacheEntry = {
   snippet: string | null;
+  contextFiles: string[];
   expiresAtMs: number;
 };
 
@@ -177,7 +195,9 @@ function buildContextCacheKey(
   maxFiles: number,
   maxChars: number,
   providerId: string,
-  indexFingerprint: string
+  indexFingerprint: string,
+  scope: EnhancePromptScopeOptions | undefined,
+  scopeDecision: AutoScopeDecision
 ): string {
   const queryHash = hashString(prompt.trim());
   const profile = mode;
@@ -192,6 +212,16 @@ function buildContextCacheKey(
     top_k: topK,
     max_files: maxFiles,
     max_chars: maxChars,
+    auto_scope_enabled: scope?.autoScope !== false,
+    auto_scope_version: AUTO_SCOPE_INFERENCE_VERSION,
+    scope_source: scopeDecision.source,
+    scope_confidence: scopeDecision.confidence,
+    applied_include_paths: scopeDecision.appliedIncludePaths,
+    candidate_include_paths: scopeDecision.candidateIncludePaths,
+    include_paths: scopeDecision.appliedIncludePaths,
+    exclude_paths: scope?.excludePaths ?? [],
+    external_sources: serializeExternalSourcesForCache(scope?.externalSources),
+    external_grounding_version: EXTERNAL_GROUNDING_PROVIDER_VERSION,
   });
 
   return [
@@ -206,23 +236,45 @@ function buildContextCacheKey(
   ].join(':');
 }
 
-function getCachedContextSnippet(cacheKey: string): string | null | undefined {
+function getCachedContextSnippet(cacheKey: string): ContextSnippetCacheEntry | undefined {
   const cached = contextSnippetCache.get(cacheKey);
   if (!cached) return undefined;
   if (cached.expiresAtMs <= Date.now()) {
     contextSnippetCache.delete(cacheKey);
     return undefined;
   }
-  return cached.snippet;
+  return cached;
 }
 
-function setCachedContextSnippet(cacheKey: string, snippet: string | null): void {
+function setCachedContextSnippet(cacheKey: string, snippet: string | null, contextFiles: string[] = []): void {
   const ttlMs = normalizePromptCacheTtl(process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS);
   if (ttlMs <= 0) return;
   contextSnippetCache.set(cacheKey, {
     snippet,
+    contextFiles,
     expiresAtMs: Date.now() + ttlMs,
   });
+}
+
+function summarizeContextFiles(results: Array<{ path: string; relevanceScore?: number }>, limit: number): string[] {
+  const fileScores = new Map<string, number>();
+  for (const result of results) {
+    const current = fileScores.get(result.path) ?? Number.NEGATIVE_INFINITY;
+    const score = result.relevanceScore ?? 0;
+    if (score > current) {
+      fileScores.set(result.path, score);
+    }
+  }
+
+  return Array.from(fileScores.entries())
+    .sort((left, right) => {
+      if (right[1] !== left[1]) {
+        return right[1] - left[1];
+      }
+      return left[0].localeCompare(right[0]);
+    })
+    .slice(0, limit)
+    .map(([filePath]) => filePath);
 }
 
 function createAbortError(context: string): Error {
@@ -541,9 +593,43 @@ export interface PromptEnhancementResult {
   enhancedPrompt: string;
   source: 'ai';
   templateVersion: string;
+  contextFiles: string[];
+  mode: EnhancePromptMode;
+  scopeApplied: boolean;
+  scopeSource: 'manual' | 'auto' | 'none';
+  scopeConfidence: 'high' | 'medium' | 'low' | 'none';
+  appliedIncludePaths: string[];
+  candidateIncludePaths: string[];
+  includePaths?: string[];
+  excludePaths?: string[];
+  groundingStrategy: 'local_first_additive';
+  groundingApplied: boolean;
+  groundingSummary: string;
+  groundingSourcesRequested: number;
+  groundingSourcesUsed: number;
+  groundingSourceStatuses: GroundingSourceStatus[];
+  groundingWarnings: GroundingWarning[];
+  groundingTruncated: boolean;
   reasonCode:
     | 'ai_enhanced'
     | 'ai_enhanced_repaired';
+}
+
+function buildExternalGroundingContextBlock(references: ExternalReferenceSnippet[]): string | undefined {
+  if (references.length === 0) {
+    return undefined;
+  }
+  return [
+    'External reference snippets (user-supplied, not from the local index):',
+    '',
+    ...references.flatMap((reference) => [
+      `Source: ${reference.url}`,
+      ...(reference.label ? [`Label: ${reference.label}`] : []),
+      ...(reference.title ? [`Title: ${reference.title}`] : []),
+      reference.excerpt,
+      '',
+    ]),
+  ].join('\n').trim();
 }
 
 export type EnhancePromptErrorCode =
@@ -568,16 +654,18 @@ export class EnhancePromptError extends Error {
 export async function internalPromptEnhancer(
   prompt: string,
   serviceClient: ContextServiceClient,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  scope?: EnhancePromptScopeOptions
 ): Promise<string> {
-  const result = await internalPromptEnhancerDetailed(prompt, serviceClient, signal);
+  const result = await internalPromptEnhancerDetailed(prompt, serviceClient, signal, scope);
   return result.enhancedPrompt;
 }
 
 export async function internalPromptEnhancerDetailed(
   prompt: string,
   serviceClient: ContextServiceClient,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  scope?: EnhancePromptScopeOptions
 ): Promise<PromptEnhancementResult> {
   const totalStartMs = Date.now();
   const flow = createRetrievalFlowContext('enhance_prompt', {
@@ -615,6 +703,32 @@ export async function internalPromptEnhancerDetailed(
 
   const baseEnhancementPrompt = buildAIEnhancementPrompt(prompt);
   let enhancementPrompt = baseEnhancementPrompt;
+  let contextFiles: string[] = [];
+  const groundingResult = await fetchExternalGrounding(scope?.externalSources, { signal });
+  const groundingContextBlock = buildExternalGroundingContextBlock(groundingResult.references);
+  const groundingSourceStatuses: GroundingSourceStatus[] = (scope?.externalSources ?? []).map((source) => ({
+    type: source.type,
+    url: source.url,
+    host: source.host,
+    label: source.label,
+    status: groundingResult.references.some((reference) => reference.url === source.url)
+      ? 'used'
+      : groundingResult.warnings.some((warning) => warning.source_url === source.url)
+        ? 'failed'
+        : 'ignored',
+    warning_code: groundingResult.warnings.find((warning) => warning.source_url === source.url)?.code,
+  }));
+  const scopeDecision = await resolveAutoScopeDecision({
+    query: prompt,
+    autoScope: scope?.autoScope,
+    includePaths: scope?.includePaths,
+    excludePaths: scope?.excludePaths,
+    search: async (query) => serviceClient.semanticSearch(query, 12, {
+      priority: 'background',
+    }),
+  });
+  const effectiveIncludePaths = scopeDecision.appliedIncludePaths;
+  const isScopeApplied = effectiveIncludePaths.length > 0 || (scope?.excludePaths?.length ?? 0) > 0;
   const retrievalEnabled = mode !== 'off' && (mode === 'light' || isRetrievalPipelineEnabled());
   noteEnhancementFlowStage(flow, retrievalEnabled ? 'retrieval:enabled' : 'retrieval:disabled');
 
@@ -629,22 +743,29 @@ export async function internalPromptEnhancerDetailed(
       DEFAULT_CONTEXT_MAX_FILES,
       DEFAULT_CONTEXT_MAX_CHARS,
       providerId,
-      indexFingerprint
+      indexFingerprint,
+      scope,
+      scopeDecision
     );
-    const cachedContextSnippet = getCachedContextSnippet(cacheKey);
-    const hasCachedSnippet = cachedContextSnippet !== undefined;
+    const cachedContextEntry = getCachedContextSnippet(cacheKey);
+    const hasCachedSnippet = cachedContextEntry !== undefined;
     const retrievalStageTimeoutMs = budget.stageBudgetMs('retrieval', retrievalBudgetMs);
     noteEnhancementFlowStage(flow, hasCachedSnippet ? 'retrieval:cache_hit' : 'retrieval:cache_miss');
 
     try {
-      let contextSnippet = hasCachedSnippet ? cachedContextSnippet ?? null : null;
+      let contextSnippet = hasCachedSnippet ? cachedContextEntry?.snippet ?? null : null;
+      contextFiles = hasCachedSnippet ? cachedContextEntry?.contextFiles ?? [] : [];
 
       if (!hasCachedSnippet && retrievalStageTimeoutMs > 0) {
         throwIfSignalAborted(signal, 'Enhance prompt');
         const preferLocalDocsSearch = mode === 'light' || isOperationalDocsQuery(prompt);
         if (preferLocalDocsSearch) {
           const localSearch = (serviceClient as unknown as {
-            localKeywordSearch?: (query: string, topK: number) => Promise<Array<{
+            localKeywordSearch?: (
+              query: string,
+              topK: number,
+              options?: { includePaths?: string[]; excludePaths?: string[]; bypassCache?: boolean }
+            ) => Promise<Array<{
               path: string;
               content: string;
               relevanceScore?: number;
@@ -659,12 +780,16 @@ export async function internalPromptEnhancerDetailed(
               relevanceScore?: number;
             }> = [];
             try {
-              localResults = await withTimeout(
-                localSearch.call(serviceClient, prompt, DEFAULT_CONTEXT_TOP_K),
+              const scopedResults = await withTimeout(
+                localSearch.call(serviceClient, prompt, DEFAULT_CONTEXT_TOP_K, {
+                  includePaths: effectiveIncludePaths,
+                  excludePaths: scope?.excludePaths,
+                }),
                 retrievalStageTimeoutMs,
                 'Local keyword retrieval',
                 signal
               );
+              localResults = scopedResults;
             } catch (localError) {
               if (mode !== 'light') {
                 localResults = [];
@@ -672,12 +797,12 @@ export async function internalPromptEnhancerDetailed(
                 throw localError;
               }
             }
-
             contextSnippet = internalContextSnippet(
               localResults,
               DEFAULT_CONTEXT_MAX_FILES,
               DEFAULT_CONTEXT_MAX_CHARS
             );
+            contextFiles = summarizeContextFiles(localResults, DEFAULT_CONTEXT_MAX_FILES);
           }
 
           if (!contextSnippet && mode !== 'light') {
@@ -689,6 +814,8 @@ export async function internalPromptEnhancerDetailed(
                 maxVariants: 1,
                 enableExpansion: false,
                 timeoutMs: retrievalStageTimeoutMs,
+                includePaths: effectiveIncludePaths,
+                excludePaths: scope?.excludePaths,
               }),
               retrievalStageTimeoutMs,
               'Enhance prompt retrieval',
@@ -699,6 +826,7 @@ export async function internalPromptEnhancerDetailed(
               DEFAULT_CONTEXT_MAX_FILES,
               DEFAULT_CONTEXT_MAX_CHARS
             );
+            contextFiles = summarizeContextFiles(retrievalResults, DEFAULT_CONTEXT_MAX_FILES);
           }
         } else if (mode === 'rich') {
           throwIfSignalAborted(signal, 'Enhance prompt');
@@ -709,6 +837,8 @@ export async function internalPromptEnhancerDetailed(
               maxVariants: 1,
               enableExpansion: false,
               timeoutMs: retrievalStageTimeoutMs,
+              includePaths: effectiveIncludePaths,
+              excludePaths: scope?.excludePaths,
             }),
             retrievalStageTimeoutMs,
             'Enhance prompt retrieval',
@@ -719,13 +849,17 @@ export async function internalPromptEnhancerDetailed(
             DEFAULT_CONTEXT_MAX_FILES,
             DEFAULT_CONTEXT_MAX_CHARS
           );
+          contextFiles = summarizeContextFiles(retrievalResults, DEFAULT_CONTEXT_MAX_FILES);
         }
 
-        setCachedContextSnippet(cacheKey, contextSnippet ?? null);
+        setCachedContextSnippet(cacheKey, contextSnippet ?? null, contextFiles);
       }
 
-      if (contextSnippet) {
-        enhancementPrompt = buildAIEnhancementPrompt(prompt, contextSnippet);
+      const mergedContextBlock = [contextSnippet, groundingContextBlock].filter(Boolean).join('\n\n');
+      if (mergedContextBlock) {
+        enhancementPrompt = buildAIEnhancementPrompt(prompt, mergedContextBlock);
+      } else if (groundingContextBlock) {
+        enhancementPrompt = buildAIEnhancementPrompt(prompt, groundingContextBlock);
       }
       noteEnhancementFlowStage(flow, 'retrieval:complete');
       observeDurationMs(
@@ -743,6 +877,10 @@ export async function internalPromptEnhancerDetailed(
         { help: 'Enhance prompt retrieval stage duration in seconds.' }
       );
     }
+  }
+
+  if (enhancementPrompt === baseEnhancementPrompt && groundingContextBlock) {
+    enhancementPrompt = buildAIEnhancementPrompt(prompt, groundingContextBlock);
   }
 
   try {
@@ -904,6 +1042,27 @@ export async function internalPromptEnhancerDetailed(
         enhancedPrompt: enhanced,
         source: 'ai',
         templateVersion: ENHANCE_PROMPT_TEMPLATE_VERSION,
+        contextFiles,
+        mode,
+        scopeApplied: isScopeApplied,
+        scopeSource: scopeDecision.source,
+        scopeConfidence: scopeDecision.confidence,
+        appliedIncludePaths: scopeDecision.appliedIncludePaths,
+        candidateIncludePaths: scopeDecision.candidateIncludePaths,
+        includePaths: scope?.includePaths,
+        excludePaths: scope?.excludePaths,
+        groundingStrategy: 'local_first_additive',
+        groundingApplied: groundingResult.references.length > 0,
+        groundingSummary: groundingResult.references.length > 0
+          ? `Used ${groundingResult.references.length} of ${scope?.externalSources?.length ?? 0} external sources after local codebase context.`
+          : scope?.externalSources?.length
+            ? 'External sources were requested, but none were used. Result is local-only.'
+            : 'No external sources requested.',
+        groundingSourcesRequested: scope?.externalSources?.length ?? 0,
+        groundingSourcesUsed: groundingResult.references.length,
+        groundingSourceStatuses: groundingSourceStatuses,
+        groundingWarnings: groundingResult.warnings,
+        groundingTruncated: groundingResult.truncated,
         reasonCode: 'ai_enhanced_repaired',
       };
     }
@@ -927,6 +1086,27 @@ export async function internalPromptEnhancerDetailed(
       enhancedPrompt: enhanced,
       source: 'ai',
       templateVersion: ENHANCE_PROMPT_TEMPLATE_VERSION,
+      contextFiles,
+      mode,
+      scopeApplied: isScopeApplied,
+      scopeSource: scopeDecision.source,
+      scopeConfidence: scopeDecision.confidence,
+      appliedIncludePaths: scopeDecision.appliedIncludePaths,
+      candidateIncludePaths: scopeDecision.candidateIncludePaths,
+      includePaths: scope?.includePaths,
+      excludePaths: scope?.excludePaths,
+      groundingStrategy: 'local_first_additive',
+      groundingApplied: groundingResult.references.length > 0,
+      groundingSummary: groundingResult.references.length > 0
+        ? `Used ${groundingResult.references.length} of ${scope?.externalSources?.length ?? 0} external sources after local codebase context.`
+        : scope?.externalSources?.length
+          ? 'External sources were requested, but none were used. Result is local-only.'
+          : 'No external sources requested.',
+      groundingSourcesRequested: scope?.externalSources?.length ?? 0,
+      groundingSourcesUsed: groundingResult.references.length,
+      groundingSourceStatuses: groundingSourceStatuses,
+      groundingWarnings: groundingResult.warnings,
+      groundingTruncated: groundingResult.truncated,
       reasonCode: 'ai_enhanced',
     };
   } catch (error) {

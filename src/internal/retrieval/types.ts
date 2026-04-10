@@ -73,6 +73,10 @@ export interface RetrievalOptions {
   bypassCache?: boolean;
   /** Optional override for the SDK search output length. */
   maxOutputLength?: number;
+  /** Optional workspace-relative include glob filters. */
+  includePaths?: string[];
+  /** Optional workspace-relative exclude glob filters. */
+  excludePaths?: string[];
   /** Optional abort signal for cancellation-aware retrieval flows. */
   signal?: AbortSignal;
   /** Optional shared flow context for cancellation and stage metadata. */

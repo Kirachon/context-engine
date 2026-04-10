@@ -12,8 +12,30 @@
 
 import express, { type Express } from 'express';
 import type { Server } from 'http';
+import { randomUUID } from 'node:crypto';
+import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import {
+    CallToolRequestSchema,
+    GetPromptRequestSchema,
+    ListPromptsRequestSchema,
+    ListResourcesRequestSchema,
+    ListToolsRequestSchema,
+    ReadResourceRequestSchema,
+    isInitializeRequest,
+} from '@modelcontextprotocol/sdk/types.js';
 import { featureEnabled } from '../config/features.js';
 import type { ContextServiceClient } from '../mcp/serviceClient.js';
+import { MCP_SERVER_VERSION } from '../mcp/tools/manifest.js';
+import {
+    PROMPT_DEFINITIONS,
+    buildPromptByName,
+    buildResourceList,
+    buildToolRegistryEntries,
+    createServerCapabilities,
+    readResourceByUri,
+} from '../mcp/server.js';
+import { initializePlanManagementServices } from '../mcp/tools/planManagement.js';
 import { renderPrometheusMetrics } from '../metrics/metrics.js';
 import {
     createCorsMiddleware,
@@ -25,6 +47,65 @@ import {
     createStatusRouter,
     createToolsRouter,
 } from './routes/index.js';
+
+type SignalAwareToolHandler = (args: unknown, signal?: AbortSignal) => Promise<string>;
+
+type McpHttpSession = {
+    server: McpServer;
+    transport: StreamableHTTPServerTransport;
+};
+
+function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
+    const server = new McpServer(
+        {
+            name: 'context-engine',
+            version: MCP_SERVER_VERSION,
+        },
+        {
+            capabilities: createServerCapabilities({ resources: true, prompts: true }),
+        }
+    );
+
+    const toolRegistryEntries = buildToolRegistryEntries(serviceClient);
+    const tools = toolRegistryEntries.map((entry) => entry.tool);
+    const toolHandlers = new Map<string, SignalAwareToolHandler>(
+        toolRegistryEntries.map((entry) => [entry.tool.name, entry.handler])
+    );
+
+    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
+    server.setRequestHandler(ListResourcesRequestSchema, async () => ({
+        resources: await buildResourceList(),
+    }));
+    server.setRequestHandler(ReadResourceRequestSchema, async (request) =>
+        readResourceByUri(request.params.uri)
+    );
+    server.setRequestHandler(ListPromptsRequestSchema, async () => ({
+        prompts: PROMPT_DEFINITIONS,
+    }));
+    server.setRequestHandler(GetPromptRequestSchema, async (request) =>
+        buildPromptByName(request.params.name, request.params.arguments ?? {})
+    );
+    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+        const { name, arguments: args } = request.params;
+        const handler = toolHandlers.get(name);
+
+        if (!handler) {
+            throw new Error(`Unknown tool: ${name}`);
+        }
+
+        const result = await handler(args, extra.signal);
+        return {
+            content: [
+                {
+                    type: 'text',
+                    text: result,
+                },
+            ],
+        };
+    });
+
+    return server;
+}
 
 export interface HttpServerOptions {
     /** Port to listen on (default: 3333) */
@@ -44,11 +125,17 @@ export class ContextEngineHttpServer {
     private server: Server | null = null;
     private readonly port: number;
     private readonly version: string;
+    private readonly mcpSessions = new Map<string, McpHttpSession>();
 
     constructor(
         private readonly serviceClient: ContextServiceClient,
         options: HttpServerOptions = {}
     ) {
+        const workspacePath =
+            typeof (serviceClient as { getWorkspacePath?: unknown }).getWorkspacePath === 'function'
+                ? (serviceClient as { getWorkspacePath: () => string }).getWorkspacePath()
+                : process.cwd();
+        initializePlanManagementServices(workspacePath);
         this.port = options.port || 3333;
         this.version = options.version || '1.0.0';
         this.app = this.createApp();
@@ -84,6 +171,13 @@ export class ContextEngineHttpServer {
         // API routes under /api/v1
         app.use('/api/v1', createStatusRouter(this.serviceClient));
         app.use('/api/v1', createToolsRouter(this.serviceClient));
+        app.post('/mcp', async (req, res, next) => {
+            try {
+                await this.handleMcpRequest(req, res);
+            } catch (error) {
+                next(error);
+            }
+        });
 
         // Error handler (must be last)
         app.use(errorHandler);
@@ -101,6 +195,7 @@ export class ContextEngineHttpServer {
                     console.error(`[HTTP] Server listening on http://localhost:${this.port}`);
                     console.error(`[HTTP] Health: http://localhost:${this.port}/health`);
                     console.error(`[HTTP] API: http://localhost:${this.port}/api/v1/`);
+                    console.error(`[HTTP] MCP: http://localhost:${this.port}/mcp`);
                     if (featureEnabled('metrics') && featureEnabled('http_metrics')) {
                         console.error(`[HTTP] Metrics: http://localhost:${this.port}/metrics`);
                     }
@@ -129,13 +224,28 @@ export class ContextEngineHttpServer {
                 return;
             }
 
+            const closeMcpSessions = async (): Promise<void> => {
+                const sessions = Array.from(new Set(this.mcpSessions.values()));
+                this.mcpSessions.clear();
+                await Promise.allSettled(
+                    sessions.map(async ({ transport, server }) => {
+                        await transport.close();
+                        await server.close();
+                    })
+                );
+            };
+
             this.server.close((err) => {
                 if (err) {
                     reject(err);
                 } else {
-                    console.error('[HTTP] Server stopped');
-                    this.server = null;
-                    resolve();
+                    closeMcpSessions()
+                        .then(() => {
+                            console.error('[HTTP] Server stopped');
+                            this.server = null;
+                            resolve();
+                        })
+                        .catch(reject);
                 }
             });
         });
@@ -160,5 +270,68 @@ export class ContextEngineHttpServer {
      */
     getApp(): Express {
         return this.app;
+    }
+
+    private async handleMcpRequest(
+        req: express.Request,
+        res: express.Response
+    ): Promise<void> {
+        const requestSessionId = req.headers['mcp-session-id'];
+        const sessionId = Array.isArray(requestSessionId) ? requestSessionId[0] : requestSessionId;
+
+        if (sessionId) {
+            const session = this.mcpSessions.get(sessionId);
+            if (!session) {
+                res.status(404).json({
+                    jsonrpc: '2.0',
+                    error: {
+                        code: -32001,
+                        message: `MCP session not found: ${sessionId}`,
+                    },
+                    id: req.body?.id ?? null,
+                });
+                return;
+            }
+
+            await session.transport.handleRequest(req, res, req.body);
+            return;
+        }
+
+        if (!isInitializeRequest(req.body)) {
+            res.status(400).json({
+                jsonrpc: '2.0',
+                error: {
+                    code: -32000,
+                    message: 'Bad Request: No valid session ID provided',
+                },
+                id: req.body?.id ?? null,
+            });
+            return;
+        }
+
+        let session: McpHttpSession | undefined;
+        const transport = new StreamableHTTPServerTransport({
+            sessionIdGenerator: () => randomUUID(),
+            onsessioninitialized: (initializedSessionId) => {
+                if (session) {
+                    this.mcpSessions.set(initializedSessionId, session);
+                }
+            },
+        });
+        const server = createHttpMcpServer(this.serviceClient);
+        session = { server, transport };
+
+        transport.onclose = () => {
+            const activeSessionId = transport.sessionId;
+            if (activeSessionId) {
+                this.mcpSessions.delete(activeSessionId);
+            }
+            void server.close().catch((error) => {
+                console.error('[HTTP] Failed to close MCP session server:', error);
+            });
+        };
+
+        await server.connect(transport);
+        await transport.handleRequest(req, res, req.body);
     }
 }

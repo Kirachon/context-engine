@@ -82,6 +82,21 @@ describe('semantic_search Tool', () => {
         .rejects.toThrow(/invalid timeout_ms/i);
     });
 
+    it('should reject absolute include_paths entries', async () => {
+      await expect(
+        handleSemanticSearch(
+          { query: 'test', include_paths: ['C:/repo/**'] },
+          mockServiceClient as any
+        )
+      ).rejects.toThrow(/include_paths/i);
+    });
+
+    it('should reject invalid include_paths values', async () => {
+      await expect(
+        handleSemanticSearch({ query: 'test', include_paths: ['/abs/**'] as any }, mockServiceClient as any)
+      ).rejects.toThrow(/invalid include_paths/i);
+    });
+
     it('should accept valid parameters', async () => {
       mockServiceClient.semanticSearch.mockResolvedValue([]);
 
@@ -139,6 +154,50 @@ describe('semantic_search Tool', () => {
         'audit',
         10,
         expect.objectContaining({ bypassCache: false, maxOutputLength: 15000 })
+      );
+    });
+
+    it('normalizes include_paths and exclude_paths before delegating', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch(
+        {
+          query: 'audit',
+          include_paths: ['./src/auth/', 'src/auth/'],
+          exclude_paths: ['src/auth/legacy/**'],
+        },
+        mockServiceClient as any
+      );
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'audit',
+        10,
+        expect.objectContaining({
+          includePaths: ['src/auth/**'],
+          excludePaths: ['src/auth/legacy/**'],
+        })
+      );
+    });
+
+    it('normalizes scoped path filters before delegating to semanticSearch', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+      await handleSemanticSearch(
+        {
+          query: 'audit',
+          include_paths: ['src/', './src/**', 'src\\**'],
+          exclude_paths: ['dist\\', './dist/**'],
+        },
+        mockServiceClient as any
+      );
+
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'audit',
+        10,
+        expect.objectContaining({
+          includePaths: ['src/**'],
+          excludePaths: ['dist/**'],
+        })
       );
     });
 

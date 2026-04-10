@@ -15,6 +15,7 @@ import { handleReviewGitDiff, type ReviewGitDiffArgs } from '../../mcp/tools/git
 import { handleReviewAuto, type ReviewAutoArgs } from '../../mcp/tools/reviewAuto.js';
 import { badRequest, HttpError } from '../middleware/errorHandler.js';
 import { envMs } from '../../config/env.js';
+import { validateExternalSources } from '../../mcp/tooling/validation.js';
 
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 const CONTEXT_TIMEOUT_MS = 60000;
@@ -27,6 +28,14 @@ const PLAN_TOOL_TIMEOUT_MS = envMs('CE_HTTP_PLAN_TIMEOUT_MS', DEFAULT_HTTP_PLAN_
     min: MIN_PLAN_TIMEOUT_MS,
     max: MAX_PLAN_TIMEOUT_MS,
 });
+
+function parseExternalSourcesOrBadRequest(value: unknown) {
+    try {
+        return validateExternalSources(value, 'external_sources');
+    } catch (error) {
+        throw badRequest(error instanceof Error ? error.message : 'Invalid external_sources parameter');
+    }
+}
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -275,7 +284,7 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
     router.post(
         '/enhance-prompt',
         asyncHandler(async (req, res) => {
-            const { prompt } = req.body || {};
+            const { prompt, external_sources } = req.body || {};
 
             if (!prompt || typeof prompt !== 'string') {
                 throw badRequest('prompt is required and must be a string');
@@ -285,7 +294,14 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 req,
                 AI_TOOL_TIMEOUT_MS,
                 'Prompt enhancement',
-                (signal) => handleEnhancePrompt({ prompt }, serviceClient, signal)
+                (signal) => handleEnhancePrompt(
+                    {
+                        prompt,
+                        external_sources: parseExternalSourcesOrBadRequest(external_sources),
+                    },
+                    serviceClient,
+                    signal
+                )
             );
 
             res.json({
@@ -332,14 +348,24 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
     router.post(
         '/context',
         asyncHandler(async (req, res) => {
-            const { query, options = {} } = req.body || {};
+            const { query, options } = req.body || {};
 
             if (!query || typeof query !== 'string') {
                 throw badRequest('query is required and must be a string');
             }
 
+            if (options !== undefined && (typeof options !== 'object' || options === null || Array.isArray(options))) {
+                throw badRequest('options must be an object when provided');
+            }
+
+            const optionsRecord = (options ?? {}) as Record<string, unknown>;
+            const normalizedOptions = {
+                ...(optionsRecord as ContextOptions),
+                externalSources: parseExternalSourcesOrBadRequest(optionsRecord.external_sources),
+            } as ContextOptions;
+
             const context = await withTimeout(
-                serviceClient.getContextForPrompt(query, options as ContextOptions),
+                serviceClient.getContextForPrompt(query, normalizedOptions),
                 CONTEXT_TIMEOUT_MS,
                 'Context retrieval'
             );

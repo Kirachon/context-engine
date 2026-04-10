@@ -73,7 +73,7 @@
   "dependencies": {
     "@huggingface/transformers": "^3.8.1",
     "@lancedb/lancedb": "^0.27.1",
-    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@modelcontextprotocol/sdk": "1.29.0",
     "apache-arrow": "^18.1.0",
     "chokidar": "^3.5.3",
     "cors": "^2.8.5",

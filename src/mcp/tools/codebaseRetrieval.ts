@@ -15,6 +15,7 @@ import {
   validateFiniteNumberInRange,
   validateMaxLength,
   validateOneOf,
+  validatePathScopeGlobs,
   validateTrimmedNonEmptyString,
 } from '../tooling/validation.js';
 
@@ -24,6 +25,8 @@ export interface CodebaseRetrievalArgs {
   response_version?: 'v1' | 'v2';
   compact?: boolean;
   profile?: 'fast' | 'balanced' | 'rich';
+  include_paths?: string[];
+  exclude_paths?: string[];
 }
 
 export interface CodebaseRetrievalResult {
@@ -240,7 +243,15 @@ export async function handleCodebaseRetrieval(
   serviceClient: ContextServiceClient
 ): Promise<string> {
   const startTime = Date.now();
-  const { query, top_k = 10, response_version = 'v1', compact = false, profile } = args;
+  const {
+    query,
+    top_k = 10,
+    response_version = 'v1',
+    compact = false,
+    profile,
+    include_paths,
+    exclude_paths,
+  } = args;
   const useV2 = response_version === 'v2';
   const useCompactPreview = useV2 && compact;
   const normalizedQuery = validateTrimmedNonEmptyString(
@@ -258,6 +269,8 @@ export async function handleCodebaseRetrieval(
       'Invalid profile parameter: must be "fast", "balanced", or "rich"'
     );
   }
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
 
   const effectiveProfile: RetrievalProfile = profile ?? 'fast';
   const profileSettings = RETRIEVAL_PROFILE_MAP[effectiveProfile];
@@ -277,6 +290,8 @@ export async function handleCodebaseRetrieval(
       : featureEnabled('retrieval_ranking_v2')
         ? 'v2' as const
         : 'v1' as const,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
   };
 
   const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, retrievalOptions);
@@ -425,6 +440,16 @@ Before editing a file, ALWAYS first call the codebase-retrieval MCP tool, asking
         type: 'boolean',
         description: 'Use compact snippet previews instead of full content (only effective in response_version v2).',
         default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
       },
     },
     required: ['query'],

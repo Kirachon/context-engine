@@ -19,7 +19,18 @@ import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import {
   CallToolRequestSchema,
+  ErrorCode,
+  GetPromptRequestSchema,
+  ListPromptsRequestSchema,
+  ListResourcesRequestSchema,
   ListToolsRequestSchema,
+  McpError,
+  ReadResourceRequestSchema,
+  type GetPromptResult,
+  type Prompt,
+  type PromptMessage,
+  type ReadResourceResult,
+  type Resource,
 } from '@modelcontextprotocol/sdk/types.js';
 import { normalizeIgnoredPatterns } from '../watcher/ignoreRules.js';
 
@@ -36,7 +47,7 @@ import {
   handleReindexWorkspace,
   handleClearIndex,
 } from './tools/lifecycle.js';
-import { MCP_SERVER_VERSION, toolManifestTool, handleToolManifest } from './tools/manifest.js';
+import { MCP_SERVER_VERSION, getToolManifest, toolManifestTool, handleToolManifest } from './tools/manifest.js';
 import { codebaseRetrievalTool, handleCodebaseRetrieval } from './tools/codebaseRetrieval.js';
 import {
   createPlanTool,
@@ -56,6 +67,8 @@ import {
 } from './tools/memory.js';
 import {
   planManagementTools,
+  getPlanHistoryService,
+  getPlanPersistenceService,
   initializePlanManagementServices,
   handleSavePlan,
   handleLoadPlan,
@@ -90,6 +103,18 @@ import {
   handleValidateContent,
 } from './tools/reactiveReview.js';
 import { FileWatcher } from '../watcher/index.js';
+import { CODE_REVIEW_SYSTEM_PROMPT, buildCodeReviewPrompt } from './prompts/codeReview.js';
+import {
+  ENHANCE_REQUEST_SYSTEM_PROMPT,
+  PLANNING_SYSTEM_PROMPT,
+  REFINEMENT_SYSTEM_PROMPT,
+  buildCreatePlanPromptRequest,
+  buildEnhanceRequestPrompt,
+  buildRefinePlanPromptRequest,
+  getCreatePlanPromptArguments,
+  getEnhanceRequestPromptArguments,
+} from './prompts/planning.js';
+import { validateExternalSources, validatePathScopeGlobs } from './tooling/validation.js';
 
 type ToolRegistryEntry = {
   tool: { name: string };
@@ -100,6 +125,69 @@ type ToolRegistryEntry = {
 export type ToolHandler = RuntimeToolHandler;
 
 type SignalAwareToolHandler = (args: unknown, signal?: AbortSignal) => Promise<string>;
+
+export type ServerCapabilityOptions = {
+  resources?: boolean;
+  prompts?: boolean;
+};
+
+const TOOL_MANIFEST_RESOURCE_URI = 'context-engine://tool-manifest';
+const PLAN_RESOURCE_URI_PREFIX = 'context-engine://plans/';
+const PLAN_HISTORY_RESOURCE_URI_PREFIX = 'context-engine://plan-history/';
+const RESOURCE_NOT_FOUND_MESSAGE = 'Resource not found';
+
+type PromptArgumentsMap = Record<string, string>;
+
+type PromptDescriptor = Prompt & {
+  name: string;
+};
+
+export const PROMPT_DEFINITIONS: PromptDescriptor[] = [
+  {
+    name: 'create-plan',
+    title: 'Create Plan',
+    description: 'Build a planning request using the repo planning templates.',
+    arguments: getCreatePlanPromptArguments(),
+  },
+  {
+    name: 'refine-plan',
+    description: 'Build a plan-refinement request using the repo refinement templates.',
+    arguments: [
+      { name: 'current_plan', description: 'Existing plan JSON string.', required: true },
+      { name: 'feedback', description: 'Optional refinement feedback text.' },
+      { name: 'clarifications', description: 'Optional JSON object string of clarification answers.' },
+    ],
+  },
+  {
+    name: 'review-diff',
+    description: 'Build a code-review request for a diff using the repo review templates.',
+    arguments: [
+      { name: 'diff', description: 'Unified diff to review.', required: true },
+      { name: 'categories', description: 'Optional comma-separated category list.' },
+      { name: 'custom_instructions', description: 'Optional extra review instructions.' },
+    ],
+  },
+  {
+    name: 'enhance-request',
+    description: 'Build a request-enhancement prompt using the repo prompt-enhancement templates.',
+    arguments: getEnhanceRequestPromptArguments(),
+  },
+];
+
+export function createServerCapabilities(options?: ServerCapabilityOptions): Record<string, unknown> {
+  const capabilities: Record<string, unknown> = {
+    tools: { listChanged: true },
+  };
+
+  if (options?.resources) {
+    capabilities.resources = { subscribe: false, listChanged: true };
+  }
+  if (options?.prompts) {
+    capabilities.prompts = { listChanged: true };
+  }
+
+  return capabilities;
+}
 
 function formatToolExecutionResponse(result: string): {
   response: {
@@ -181,6 +269,439 @@ async function executeToolCallWithSignal(params: {
   }
 }
 
+function buildPlanResourceUri(planId: string): string {
+  return `${PLAN_RESOURCE_URI_PREFIX}${encodeURIComponent(planId)}`;
+}
+
+function buildPlanHistoryResourceUri(planId: string): string {
+  return `${PLAN_HISTORY_RESOURCE_URI_PREFIX}${encodeURIComponent(planId)}`;
+}
+
+function buildTextResourceContents(uri: string, text: string): ReadResourceResult {
+  return {
+    contents: [
+      {
+        uri,
+        mimeType: 'application/json',
+        text,
+      },
+    ],
+  };
+}
+
+function buildPromptTextMessage(role: 'assistant' | 'user', text: string): PromptMessage {
+  return {
+    role,
+    content: {
+      type: 'text',
+      text,
+    },
+  };
+}
+
+function buildPromptResult(description: string, messages: PromptMessage[]): GetPromptResult {
+  return {
+    description,
+    messages,
+  };
+}
+
+function parseRequiredPromptString(args: PromptArgumentsMap, key: string): string {
+  const value = args[key];
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new McpError(ErrorCode.InvalidParams, `Prompt argument "${key}" is required`);
+  }
+  return value.trim();
+}
+
+function parseOptionalBooleanPromptString(args: PromptArgumentsMap, key: string): boolean | undefined {
+  const value = args[key];
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true') {
+    return true;
+  }
+  if (normalized === 'false') {
+    return false;
+  }
+
+  throw new McpError(ErrorCode.InvalidParams, `Prompt argument "${key}" must be "true" or "false"`);
+}
+
+function parseOptionalPositiveIntegerPromptString(
+  args: PromptArgumentsMap,
+  key: string
+): number | undefined {
+  const value = args[key];
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(value.trim(), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new McpError(ErrorCode.InvalidParams, `Prompt argument "${key}" must be a positive integer`);
+  }
+
+  return parsed;
+}
+
+function parseOptionalClarifications(args: PromptArgumentsMap): Record<string, string> | undefined {
+  const raw = args.clarifications;
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('Clarifications must be a JSON object');
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).map(([key, value]) => [key, typeof value === 'string' ? value : String(value)])
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new McpError(ErrorCode.InvalidParams, `Prompt argument "clarifications" must be valid JSON: ${message}`);
+  }
+}
+
+function parseOptionalPromptPathList(args: PromptArgumentsMap, key: 'include_paths' | 'exclude_paths'): string[] | undefined {
+  const raw = args[key];
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  const parsed = raw
+    .split(/[\r\n,]+/u)
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  return validatePathScopeGlobs(parsed, key);
+}
+
+function parseOptionalPromptExternalSources(args: PromptArgumentsMap) {
+  const raw = args.external_sources;
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    return validateExternalSources(parsed, 'external_sources');
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new McpError(
+      ErrorCode.InvalidParams,
+      `Prompt argument "external_sources" must be valid JSON: ${message}`
+    );
+  }
+}
+
+function parseOptionalReviewCategories(args: PromptArgumentsMap): string[] | undefined {
+  const raw = args.categories;
+  if (raw === undefined || raw.trim().length === 0) {
+    return undefined;
+  }
+
+  const parsed = raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+
+  return parsed.length > 0 ? parsed : undefined;
+}
+
+function resourceNotFoundError(uri: string): McpError {
+  return new McpError(ErrorCode.InvalidParams, `${RESOURCE_NOT_FOUND_MESSAGE}: ${uri}`);
+}
+
+function decodePlanIdFromResourceUri(uri: string, prefix: string): string {
+  if (!uri.startsWith(prefix)) {
+    throw resourceNotFoundError(uri);
+  }
+
+  const encodedPlanId = uri.slice(prefix.length);
+  if (!encodedPlanId) {
+    throw resourceNotFoundError(uri);
+  }
+
+  try {
+    const planId = decodeURIComponent(encodedPlanId);
+    if (!planId.trim()) {
+      throw new Error('empty plan id');
+    }
+    return planId;
+  } catch {
+    throw resourceNotFoundError(uri);
+  }
+}
+
+export async function buildResourceList(): Promise<Resource[]> {
+  const persistenceService = getPlanPersistenceService();
+  const knownPlans = await persistenceService.listPlans({
+    sort_by: 'name',
+    sort_order: 'asc',
+  });
+
+  const resources: Resource[] = [
+    {
+      uri: TOOL_MANIFEST_RESOURCE_URI,
+      name: 'tool-manifest',
+      description: 'JSON tool manifest for the current Context Engine server.',
+      mimeType: 'application/json',
+    },
+  ];
+
+  for (const plan of knownPlans) {
+    resources.push(
+      {
+        uri: buildPlanResourceUri(plan.id),
+        name: `plan:${plan.id}`,
+        description: `Saved plan ${plan.id}.`,
+        mimeType: 'application/json',
+      },
+      {
+        uri: buildPlanHistoryResourceUri(plan.id),
+        name: `plan-history:${plan.id}`,
+        description: `Version history for saved plan ${plan.id}.`,
+        mimeType: 'application/json',
+      }
+    );
+  }
+
+  return resources;
+}
+
+export async function readResourceByUri(uri: string): Promise<ReadResourceResult> {
+  if (uri === TOOL_MANIFEST_RESOURCE_URI) {
+    return buildTextResourceContents(uri, JSON.stringify(getToolManifest(), null, 2));
+  }
+
+  if (uri.startsWith(PLAN_RESOURCE_URI_PREFIX)) {
+    const planId = decodePlanIdFromResourceUri(uri, PLAN_RESOURCE_URI_PREFIX);
+    const persistenceService = getPlanPersistenceService();
+    const plan = await persistenceService.loadPlan(planId);
+    if (!plan) {
+      throw resourceNotFoundError(uri);
+    }
+    return buildTextResourceContents(uri, JSON.stringify(plan, null, 2));
+  }
+
+  if (uri.startsWith(PLAN_HISTORY_RESOURCE_URI_PREFIX)) {
+    const planId = decodePlanIdFromResourceUri(uri, PLAN_HISTORY_RESOURCE_URI_PREFIX);
+    const persistenceService = getPlanPersistenceService();
+    const planExists = await persistenceService.planExists(planId);
+    if (!planExists) {
+      throw resourceNotFoundError(uri);
+    }
+
+    const historyService = getPlanHistoryService();
+    const history = historyService.getHistory(planId, { include_plans: true });
+    if (!history) {
+      throw resourceNotFoundError(uri);
+    }
+    return buildTextResourceContents(uri, JSON.stringify(history, null, 2));
+  }
+
+  throw resourceNotFoundError(uri);
+}
+
+function getPromptByName(name: string): PromptDescriptor {
+  const prompt = PROMPT_DEFINITIONS.find((entry) => entry.name === name);
+  if (!prompt) {
+    throw new McpError(ErrorCode.InvalidParams, `Unknown prompt: ${name}`);
+  }
+  return prompt;
+}
+
+export function buildPromptByName(name: string, rawArgs: PromptArgumentsMap = {}): GetPromptResult {
+  switch (name) {
+    case 'create-plan': {
+      const task = parseRequiredPromptString(rawArgs, 'task');
+      const autoScope = parseOptionalBooleanPromptString(rawArgs, 'auto_scope');
+      const mvpOnly = parseOptionalBooleanPromptString(rawArgs, 'mvp_only');
+      const maxContextFiles = parseOptionalPositiveIntegerPromptString(rawArgs, 'max_context_files');
+      const contextTokenBudget = parseOptionalPositiveIntegerPromptString(rawArgs, 'context_token_budget');
+      const includePaths = parseOptionalPromptPathList(rawArgs, 'include_paths');
+      const excludePaths = parseOptionalPromptPathList(rawArgs, 'exclude_paths');
+      const prompt = getPromptByName(name);
+      return buildPromptResult(prompt.description ?? '', [
+        buildPromptTextMessage('assistant', PLANNING_SYSTEM_PROMPT),
+        buildPromptTextMessage(
+          'user',
+          buildCreatePlanPromptRequest({
+            task,
+            auto_scope: autoScope,
+            mvp_only: mvpOnly,
+            max_context_files: maxContextFiles,
+            context_token_budget: contextTokenBudget,
+            include_paths: includePaths,
+            exclude_paths: excludePaths,
+            profile: mvpOnly ? 'compact' : 'deep',
+          })
+        ),
+      ]);
+    }
+    case 'refine-plan': {
+      const currentPlan = parseRequiredPromptString(rawArgs, 'current_plan');
+      const feedback = rawArgs.feedback?.trim();
+      const clarifications = parseOptionalClarifications(rawArgs);
+      const prompt = getPromptByName(name);
+      return buildPromptResult(prompt.description ?? '', [
+        buildPromptTextMessage('assistant', REFINEMENT_SYSTEM_PROMPT),
+        buildPromptTextMessage(
+          'user',
+          buildRefinePlanPromptRequest({
+            currentPlan,
+            feedback,
+            clarifications,
+            profile: 'deep',
+          })
+        ),
+      ]);
+    }
+    case 'review-diff': {
+      const diff = parseRequiredPromptString(rawArgs, 'diff');
+      const categories = parseOptionalReviewCategories(rawArgs);
+      const customInstructions = rawArgs.custom_instructions?.trim();
+      const prompt = getPromptByName(name);
+      return buildPromptResult(prompt.description ?? '', [
+        buildPromptTextMessage('assistant', CODE_REVIEW_SYSTEM_PROMPT),
+        buildPromptTextMessage(
+          'user',
+          buildCodeReviewPrompt(diff, {}, {
+            categories: categories as any,
+            custom_instructions: customInstructions,
+          })
+        ),
+      ]);
+    }
+    case 'enhance-request': {
+      const requestPrompt = parseRequiredPromptString(rawArgs, 'prompt');
+      const autoScope = parseOptionalBooleanPromptString(rawArgs, 'auto_scope');
+      const includePaths = parseOptionalPromptPathList(rawArgs, 'include_paths');
+      const excludePaths = parseOptionalPromptPathList(rawArgs, 'exclude_paths');
+      const externalSources = parseOptionalPromptExternalSources(rawArgs);
+      const prompt = getPromptByName(name);
+      return buildPromptResult(prompt.description ?? '', [
+        buildPromptTextMessage('assistant', ENHANCE_REQUEST_SYSTEM_PROMPT),
+        buildPromptTextMessage(
+          'user',
+          buildEnhanceRequestPrompt(requestPrompt, {
+            autoScope,
+            includePaths,
+            excludePaths,
+            externalSourcesJson: externalSources
+              ? JSON.stringify(
+                  externalSources.map((source) => ({
+                    type: source.type,
+                    url: source.url,
+                    ...(source.label ? { label: source.label } : {}),
+                  })),
+                  null,
+                  2
+                )
+              : undefined,
+          })
+        ),
+      ]);
+    }
+    default:
+      throw new McpError(ErrorCode.InvalidParams, `Unknown prompt: ${name}`);
+  }
+}
+
+function findToolByName(tools: Array<{ name: string }>, name: string): { name: string } {
+  const tool = tools.find((t) => t.name === name);
+  if (!tool) {
+    throw new Error(`Tool definition not found: ${name}`);
+  }
+  return tool;
+}
+
+export function buildToolRegistryEntries(serviceClient: ContextServiceClient): ToolRegistryEntry[] {
+  return [
+    { tool: indexWorkspaceTool, handler: (args) => handleIndexWorkspace(args as any, serviceClient) },
+    { tool: codebaseRetrievalTool, handler: (args) => handleCodebaseRetrieval(args as any, serviceClient) },
+    { tool: semanticSearchTool, handler: (args) => handleSemanticSearch(args as any, serviceClient) },
+    { tool: getFileTool, handler: (args) => handleGetFile(args as any, serviceClient) },
+    { tool: getContextTool, handler: (args) => handleGetContext(args as any, serviceClient) },
+    { tool: enhancePromptTool, handler: (args, signal) => handleEnhancePrompt(args as any, serviceClient, signal) },
+    { tool: indexStatusTool, handler: (args) => handleIndexStatus(args as any, serviceClient) },
+    { tool: reindexWorkspaceTool, handler: (args) => handleReindexWorkspace(args as any, serviceClient) },
+    { tool: clearIndexTool, handler: (args) => handleClearIndex(args as any, serviceClient) },
+    { tool: toolManifestTool, handler: (args) => handleToolManifest(args as any, serviceClient) },
+    { tool: addMemoryTool, handler: (args) => handleAddMemory(args as any, serviceClient) },
+    { tool: listMemoriesTool, handler: (args) => handleListMemories(args as any, serviceClient) },
+    { tool: createPlanTool, handler: (args, signal) => handleCreatePlan(args as any, serviceClient, signal) },
+    { tool: refinePlanTool, handler: (args, signal) => handleRefinePlan(args as any, serviceClient, signal) },
+    { tool: visualizePlanTool, handler: (args) => handleVisualizePlan(args as any, serviceClient) },
+    { tool: executePlanTool, handler: (args, signal) => handleExecutePlan(args as any, serviceClient, signal) },
+    { tool: findToolByName(planManagementTools, 'save_plan'), handler: (args) => handleSavePlan(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'load_plan'), handler: (args) => handleLoadPlan(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'list_plans'), handler: (args) => handleListPlans(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'delete_plan'), handler: (args) => handleDeletePlan(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'request_approval'), handler: (args) => handleRequestApproval(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'respond_approval'), handler: (args) => handleRespondApproval(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'start_step'), handler: (args) => handleStartStep(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'complete_step'), handler: (args) => handleCompleteStep(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'fail_step'), handler: (args) => handleFailStep(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'view_progress'), handler: (args) => handleViewProgress(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'view_history'), handler: (args) => handleViewHistory(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'compare_plan_versions'), handler: (args) => handleComparePlanVersions(args as Record<string, unknown>) },
+    { tool: findToolByName(planManagementTools, 'rollback_plan'), handler: (args) => handleRollbackPlan(args as Record<string, unknown>) },
+    {
+      tool: reviewChangesTool,
+      handler: (args, signal) =>
+        (handleReviewChanges as unknown as (
+          args: unknown,
+          serviceClient: ContextServiceClient,
+          signal?: AbortSignal
+        ) => Promise<string>)(args as any, serviceClient, signal),
+    },
+    {
+      tool: reviewGitDiffTool,
+      handler: (args, signal) =>
+        (handleReviewGitDiff as unknown as (
+          args: unknown,
+          serviceClient: ContextServiceClient,
+          signal?: AbortSignal
+        ) => Promise<string>)(args as any, serviceClient, signal),
+    },
+    {
+      tool: reviewDiffTool,
+      handler: (args, signal) =>
+        (handleReviewDiff as unknown as (
+          args: unknown,
+          serviceClient: ContextServiceClient,
+          signal?: AbortSignal
+        ) => Promise<string>)(args as any, serviceClient, signal),
+    },
+    {
+      tool: reviewAutoTool,
+      handler: (args, signal) =>
+        (handleReviewAuto as unknown as (
+          args: unknown,
+          serviceClient: ContextServiceClient,
+          signal?: AbortSignal
+        ) => Promise<string>)(args as any, serviceClient, signal),
+    },
+    { tool: checkInvariantsTool, handler: (args) => handleCheckInvariants(args as any, serviceClient) },
+    { tool: runStaticAnalysisTool, handler: (args) => handleRunStaticAnalysis(args as any, serviceClient) },
+    { tool: findToolByName(reactiveReviewTools, 'reactive_review_pr'), handler: (args) => handleReactiveReviewPR(args as any, serviceClient) },
+    { tool: findToolByName(reactiveReviewTools, 'get_review_status'), handler: (args) => handleGetReviewStatus(args as any, serviceClient) },
+    { tool: findToolByName(reactiveReviewTools, 'pause_review'), handler: (args) => handlePauseReview(args as any, serviceClient) },
+    { tool: findToolByName(reactiveReviewTools, 'resume_review'), handler: (args) => handleResumeReview(args as any, serviceClient) },
+    { tool: findToolByName(reactiveReviewTools, 'get_review_telemetry'), handler: (args) => handleGetReviewTelemetry(args as any, serviceClient) },
+    { tool: findToolByName(reactiveReviewTools, 'scrub_secrets'), handler: (args) => handleScrubSecrets(args as any) },
+    { tool: findToolByName(reactiveReviewTools, 'validate_content'), handler: (args) => handleValidateContent(args as any) },
+  ];
+}
+
 export class ContextEngineMCPServer {
   private server: Server;
   private serviceClient: ContextServiceClient;
@@ -208,9 +729,7 @@ export class ContextEngineMCPServer {
         version: MCP_SERVER_VERSION,
       },
       {
-        capabilities: {
-          tools: { listChanged: true },
-        },
+        capabilities: createServerCapabilities({ resources: true, prompts: true }),
       }
     );
 
@@ -313,95 +832,7 @@ export class ContextEngineMCPServer {
   }
 
   private setupHandlers(): void {
-    const findToolByName = (tools: Array<{ name: string }>, name: string): { name: string } => {
-      const tool = tools.find((t) => t.name === name);
-      if (!tool) {
-        throw new Error(`Tool definition not found: ${name}`);
-      }
-      return tool;
-    };
-
-    const toolRegistryEntries: ToolRegistryEntry[] = [
-      { tool: indexWorkspaceTool, handler: (args) => handleIndexWorkspace(args as any, this.serviceClient) },
-      { tool: codebaseRetrievalTool, handler: (args) => handleCodebaseRetrieval(args as any, this.serviceClient) },
-      { tool: semanticSearchTool, handler: (args) => handleSemanticSearch(args as any, this.serviceClient) },
-      { tool: getFileTool, handler: (args) => handleGetFile(args as any, this.serviceClient) },
-      { tool: getContextTool, handler: (args) => handleGetContext(args as any, this.serviceClient) },
-      { tool: enhancePromptTool, handler: (args, signal) => handleEnhancePrompt(args as any, this.serviceClient, signal) },
-      { tool: indexStatusTool, handler: (args) => handleIndexStatus(args as any, this.serviceClient) },
-      { tool: reindexWorkspaceTool, handler: (args) => handleReindexWorkspace(args as any, this.serviceClient) },
-      { tool: clearIndexTool, handler: (args) => handleClearIndex(args as any, this.serviceClient) },
-      { tool: toolManifestTool, handler: (args) => handleToolManifest(args as any, this.serviceClient) },
-      // Memory tools (v1.4.1)
-      { tool: addMemoryTool, handler: (args) => handleAddMemory(args as any, this.serviceClient) },
-      { tool: listMemoriesTool, handler: (args) => handleListMemories(args as any, this.serviceClient) },
-      // Planning tools (Phase 1)
-      { tool: createPlanTool, handler: (args, signal) => handleCreatePlan(args as any, this.serviceClient, signal) },
-      { tool: refinePlanTool, handler: (args, signal) => handleRefinePlan(args as any, this.serviceClient, signal) },
-      { tool: visualizePlanTool, handler: (args) => handleVisualizePlan(args as any, this.serviceClient) },
-      { tool: executePlanTool, handler: (args, signal) => handleExecutePlan(args as any, this.serviceClient, signal) },
-      // Plan management tools (Phase 2)
-      { tool: findToolByName(planManagementTools, 'save_plan'), handler: (args) => handleSavePlan(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'load_plan'), handler: (args) => handleLoadPlan(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'list_plans'), handler: (args) => handleListPlans(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'delete_plan'), handler: (args) => handleDeletePlan(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'request_approval'), handler: (args) => handleRequestApproval(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'respond_approval'), handler: (args) => handleRespondApproval(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'start_step'), handler: (args) => handleStartStep(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'complete_step'), handler: (args) => handleCompleteStep(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'fail_step'), handler: (args) => handleFailStep(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'view_progress'), handler: (args) => handleViewProgress(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'view_history'), handler: (args) => handleViewHistory(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'compare_plan_versions'), handler: (args) => handleComparePlanVersions(args as Record<string, unknown>) },
-      { tool: findToolByName(planManagementTools, 'rollback_plan'), handler: (args) => handleRollbackPlan(args as Record<string, unknown>) },
-      // Code Review tools (v1.5.0)
-      {
-        tool: reviewChangesTool,
-        handler: (args, signal) =>
-          (handleReviewChanges as unknown as (
-            args: unknown,
-            serviceClient: ContextServiceClient,
-            signal?: AbortSignal
-          ) => Promise<string>)(args as any, this.serviceClient, signal),
-      },
-      {
-        tool: reviewGitDiffTool,
-        handler: (args, signal) =>
-          (handleReviewGitDiff as unknown as (
-            args: unknown,
-            serviceClient: ContextServiceClient,
-            signal?: AbortSignal
-          ) => Promise<string>)(args as any, this.serviceClient, signal),
-      },
-      {
-        tool: reviewDiffTool,
-        handler: (args, signal) =>
-          (handleReviewDiff as unknown as (
-            args: unknown,
-            serviceClient: ContextServiceClient,
-            signal?: AbortSignal
-          ) => Promise<string>)(args as any, this.serviceClient, signal),
-      },
-      {
-        tool: reviewAutoTool,
-        handler: (args, signal) =>
-          (handleReviewAuto as unknown as (
-            args: unknown,
-            serviceClient: ContextServiceClient,
-            signal?: AbortSignal
-          ) => Promise<string>)(args as any, this.serviceClient, signal),
-      },
-      { tool: checkInvariantsTool, handler: (args) => handleCheckInvariants(args as any, this.serviceClient) },
-      { tool: runStaticAnalysisTool, handler: (args) => handleRunStaticAnalysis(args as any, this.serviceClient) },
-      // Reactive Review tools (Phase 4)
-      { tool: findToolByName(reactiveReviewTools, 'reactive_review_pr'), handler: (args) => handleReactiveReviewPR(args as any, this.serviceClient) },
-      { tool: findToolByName(reactiveReviewTools, 'get_review_status'), handler: (args) => handleGetReviewStatus(args as any, this.serviceClient) },
-      { tool: findToolByName(reactiveReviewTools, 'pause_review'), handler: (args) => handlePauseReview(args as any, this.serviceClient) },
-      { tool: findToolByName(reactiveReviewTools, 'resume_review'), handler: (args) => handleResumeReview(args as any, this.serviceClient) },
-      { tool: findToolByName(reactiveReviewTools, 'get_review_telemetry'), handler: (args) => handleGetReviewTelemetry(args as any, this.serviceClient) },
-      { tool: findToolByName(reactiveReviewTools, 'scrub_secrets'), handler: (args) => handleScrubSecrets(args as any) },
-      { tool: findToolByName(reactiveReviewTools, 'validate_content'), handler: (args) => handleValidateContent(args as any) },
-    ];
+    const toolRegistryEntries = buildToolRegistryEntries(this.serviceClient);
 
     const tools = toolRegistryEntries.map((entry) => entry.tool);
     const toolHandlers = new Map<string, ToolHandler>(
@@ -414,6 +845,26 @@ export class ContextEngineMCPServer {
       return {
         tools,
       };
+    });
+
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
+      return {
+        resources: await buildResourceList(),
+      };
+    });
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      return await readResourceByUri(request.params.uri);
+    });
+
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
+      return {
+        prompts: PROMPT_DEFINITIONS,
+      };
+    });
+
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+      return buildPromptByName(request.params.name, request.params.arguments ?? {});
     });
 
     // Handle tool calls

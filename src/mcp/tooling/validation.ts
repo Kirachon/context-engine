@@ -5,6 +5,11 @@
  * preserve their existing behavior and error messages.
  */
 
+import {
+  validateAndNormalizeExternalSources,
+  type NormalizedExternalSource,
+} from './externalGrounding.js';
+
 export function validateNonEmptyString(value: unknown, errorMessage: string): string {
   if (!value || typeof value !== 'string') {
     throw new Error(errorMessage);
@@ -105,6 +110,83 @@ export function validateBoolean(value: unknown, errorMessage: string): void {
   }
 }
 
+function normalizeScopeGlobPattern(pattern: string): string {
+  let normalized = pattern.trim().replace(/\\/g, '/');
+
+  while (normalized.startsWith('./')) {
+    normalized = normalized.slice(2);
+  }
+
+  normalized = normalized.replace(/\/{2,}/g, '/');
+
+  if (!normalized) {
+    throw new Error('invalid');
+  }
+  if (/^(?:\/|[a-zA-Z]:\/|\/\/)/.test(normalized)) {
+    throw new Error('invalid');
+  }
+  if (normalized.split('/').some((segment) => segment === '..')) {
+    throw new Error('invalid');
+  }
+
+  if (normalized.endsWith('/')) {
+    normalized = `${normalized.slice(0, -1)}/**`;
+  }
+
+  return normalized;
+}
+
+export function validatePathScopeGlobs(value: unknown, fieldName: string): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `Invalid ${fieldName} parameter: must be an array of workspace-relative glob strings`
+    );
+  }
+
+  const caseInsensitive = process.platform === 'win32';
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      throw new Error(
+        `Invalid ${fieldName} parameter: must be an array of workspace-relative glob strings`
+      );
+    }
+
+    let normalizedEntry: string;
+    try {
+      normalizedEntry = normalizeScopeGlobPattern(entry);
+    } catch {
+      throw new Error(
+        `Invalid ${fieldName} parameter: must contain only workspace-relative glob strings`
+      );
+    }
+
+    const dedupeKey = caseInsensitive ? normalizedEntry.toLowerCase() : normalizedEntry;
+    if (seen.has(dedupeKey)) {
+      continue;
+    }
+    seen.add(dedupeKey);
+    normalized.push(normalizedEntry);
+  }
+
+  if (normalized.length === 0) {
+    return undefined;
+  }
+
+  normalized.sort((left, right) => {
+    const a = caseInsensitive ? left.toLowerCase() : left;
+    const b = caseInsensitive ? right.toLowerCase() : right;
+    return a.localeCompare(b);
+  });
+
+  return normalized;
+}
+
 export function validateRequiredNumber(value: unknown, errorMessage: string): number {
   if (typeof value !== 'number') {
     throw new Error(errorMessage);
@@ -141,4 +223,37 @@ export function parseJsonString<T = unknown>(value: unknown, errorMessage: strin
   } catch {
     throw new Error(errorMessage);
   }
+}
+
+export function validateExternalSources(
+  value: unknown,
+  fieldName = 'external_sources'
+): NormalizedExternalSource[] | undefined {
+  try {
+    return validateAndNormalizeExternalSources(value, fieldName);
+  } catch (error) {
+    if (error instanceof Error) {
+      throw new Error(error.message.replace(/^Invalid external_sources/u, `Invalid ${fieldName}`));
+    }
+    throw error;
+  }
+}
+
+export function parseOptionalExternalSourcesJsonString(
+  value: unknown,
+  fieldName = 'external_sources'
+): NormalizedExternalSource[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid ${fieldName} parameter: must be a JSON string when provided`);
+  }
+  if (value.trim().length === 0) {
+    return undefined;
+  }
+  return validateExternalSources(
+    parseJsonString(value, `Invalid ${fieldName} parameter: must be valid JSON`),
+    fieldName
+  );
 }

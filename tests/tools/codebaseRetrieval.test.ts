@@ -46,6 +46,12 @@ describe('codebase_retrieval Tool', () => {
     ).rejects.toThrow(/invalid profile/i);
   });
 
+  it('rejects invalid exclude_paths', async () => {
+    await expect(
+      handleCodebaseRetrieval({ query: 'test', exclude_paths: ['../secret/**'] as any }, mockServiceClient as any)
+    ).rejects.toThrow(/invalid exclude_paths/i);
+  });
+
   it('returns JSON string with expected structure', async () => {
     const mockResults: SearchResult[] = [
       { path: 'src/a.ts', content: 'code a', lines: '1-5', relevanceScore: 0.9 },
@@ -136,6 +142,28 @@ describe('codebase_retrieval Tool', () => {
       'audit',
       15,
       expect.objectContaining({ bypassCache: false, maxOutputLength: 20000 })
+    );
+  });
+
+  it('passes normalized scoped path filters through retrieval options', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+
+    await handleCodebaseRetrieval(
+      {
+        query: 'audit',
+        include_paths: ['src/', 'src\\**'],
+        exclude_paths: ['./dist/', 'dist/**'],
+      },
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+      'audit',
+      10,
+      expect.objectContaining({
+        includePaths: ['src/**'],
+        excludePaths: ['dist/**'],
+      })
     );
   });
 

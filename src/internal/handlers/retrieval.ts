@@ -1,5 +1,6 @@
 import type { ContextServiceClient } from '../../mcp/serviceClient.js';
 import { featureEnabled } from '../../config/features.js';
+import { normalizePathScopeInput } from '../../mcp/tooling/pathScope.js';
 import { retrieve } from '../retrieval/retrieve.js';
 import { createRetrievalFlowContext, finalizeRetrievalFlow, noteRetrievalStage } from '../retrieval/flow.js';
 import type {
@@ -35,7 +36,15 @@ function buildRetrieveCacheKey(
   serviceClient: ContextServiceClient,
   options?: InternalRetrieveOptions
 ): string {
-  const stableOptions = stableValue(options ?? {});
+  const normalizedScope = normalizePathScopeInput({
+    includePaths: options?.includePaths,
+    excludePaths: options?.excludePaths,
+  });
+  const stableOptions = stableValue({
+    ...(options ?? {}),
+    includePaths: normalizedScope.includePaths,
+    excludePaths: normalizedScope.excludePaths,
+  });
   const workspaceScope =
     typeof (serviceClient as { getWorkspacePath?: unknown }).getWorkspacePath === 'function'
       ? (serviceClient as { getWorkspacePath: () => string }).getWorkspacePath()
@@ -195,6 +204,17 @@ export async function internalRetrieveCode(
   serviceClient: ContextServiceClient,
   options?: InternalRetrieveOptions
 ): Promise<InternalRetrieveResult> {
+  const normalizedScope = normalizePathScopeInput({
+    includePaths: options?.includePaths,
+    excludePaths: options?.excludePaths,
+  });
+  const normalizedOptions = options
+    ? {
+        ...options,
+        includePaths: normalizedScope.includePaths,
+        excludePaths: normalizedScope.excludePaths,
+      }
+    : undefined;
   const qualityGuardEnabled = featureEnabled('retrieval_quality_guard_v1');
 
   const resolveResultWithOptionalFallback = async (): Promise<InternalRetrieveResult> => {
@@ -204,11 +224,11 @@ export async function internalRetrieveCode(
       metadata: {
         cacheHit: false,
         qualityGuardEnabled,
-        topK: options?.topK ?? 10,
+        topK: normalizedOptions?.topK ?? 10,
       },
     });
     let results = await retrieve(query, serviceClient, {
-      ...options,
+      ...normalizedOptions,
       flow,
     });
     let fallbackState: InternalRetrieveResult['fallbackState'] = 'inactive';
@@ -216,13 +236,24 @@ export async function internalRetrieveCode(
     if (qualityGuardEnabled && shouldTriggerQualityGuardFallback(results)) {
       try {
         const fallbackResults = typeof serviceClient.localKeywordSearch === 'function'
-          ? await serviceClient.localKeywordSearch(query, options?.topK ?? 10, { bypassCache: options?.bypassCache })
-          : options?.bypassCache
-            ? await serviceClient.semanticSearch(query, options?.topK ?? 10, { bypassCache: true })
-            : await serviceClient.semanticSearch(query, options?.topK ?? 10);
+          ? await serviceClient.localKeywordSearch(query, normalizedOptions?.topK ?? 10, {
+              bypassCache: normalizedOptions?.bypassCache,
+              includePaths: normalizedOptions?.includePaths,
+              excludePaths: normalizedOptions?.excludePaths,
+            })
+          : normalizedOptions?.bypassCache
+            ? await serviceClient.semanticSearch(query, normalizedOptions?.topK ?? 10, {
+                bypassCache: true,
+                includePaths: normalizedOptions?.includePaths,
+                excludePaths: normalizedOptions?.excludePaths,
+              })
+            : await serviceClient.semanticSearch(query, normalizedOptions?.topK ?? 10, {
+                includePaths: normalizedOptions?.includePaths,
+                excludePaths: normalizedOptions?.excludePaths,
+              });
         results = sortByScoreDesc(mergeUniqueResults(results, fallbackResults)).slice(
           0,
-          options?.topK ?? 10
+          normalizedOptions?.topK ?? 10
         );
         fallbackState = 'active';
       } catch {
@@ -237,7 +268,7 @@ export async function internalRetrieveCode(
       matchType?: string;
       retrievalSource?: string;
     }>, {
-      rankingMode: options?.rankingMode,
+      rankingMode: normalizedOptions?.rankingMode,
       fallbackState,
       rerankGateState: flow.metadata.rerankGateState,
       rerankFallbackReason: flow.metadata.rerankFallbackReason,
@@ -262,16 +293,16 @@ export async function internalRetrieveCode(
     };
   };
 
-  if (options?.bypassCache) {
+  if (normalizedOptions?.bypassCache) {
     return resolveResultWithOptionalFallback();
   }
 
   const cache = getInternalCache();
-  const cacheKey = buildRetrieveCacheKey(query, serviceClient, options);
+  const cacheKey = buildRetrieveCacheKey(query, serviceClient, normalizedOptions);
   const cached = cache.get<InternalRetrieveResult>(cacheKey);
   if (cached) {
     const cacheFlow = createRetrievalFlowContext(query, {
-      signal: options?.signal,
+      signal: normalizedOptions?.signal,
       metadata: {
         cacheHit: true,
         cacheKeyVersion: RETRIEVE_CACHE_KEY_VERSION,

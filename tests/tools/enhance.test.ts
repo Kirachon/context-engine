@@ -59,6 +59,30 @@ describe('enhance_prompt Tool (AI Mode Only)', () => {
         .rejects.toThrow('Prompt too long: maximum 10000 characters');
     });
 
+    it('should reject absolute include_paths entries', async () => {
+      await expect(
+        handleEnhancePrompt(
+          { prompt: 'scope validation', include_paths: ['C:/secret/**'] },
+          mockServiceClient as any
+        )
+      ).rejects.toThrow(/include_paths/i);
+    });
+
+    it('should reject invalid exclude_paths', async () => {
+      await expect(
+        handleEnhancePrompt({ prompt: 'fix login', exclude_paths: ['../secret/**'] as any }, mockServiceClient as any)
+      ).rejects.toThrow(/invalid exclude_paths/i);
+    });
+
+    it('should reject invalid auto_scope values before any inference or enhancement runs', async () => {
+      await expect(
+        handleEnhancePrompt({ prompt: 'fix login', auto_scope: 'yes' as any }, mockServiceClient as any)
+      ).rejects.toThrow(/auto_scope must be a boolean/i);
+
+      expect(mockServiceClient.semanticSearch).not.toHaveBeenCalled();
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+    });
+
     it('should accept valid prompt', async () => {
       const aiResponse = `### BEGIN RESPONSE ###
 Here is an enhanced version of the original instruction that is more specific and clear:
@@ -220,6 +244,39 @@ Here is an enhanced version of the original instruction that is more specific an
         expect(promptText).not.toContain('draft');
       });
 
+      it('should pass normalized scoped path filters into rich retrieval', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+        mockServiceClient.semanticSearch.mockResolvedValue([
+          {
+            path: 'src/auth/high.ts',
+            content: 'export function highPriorityFlow() { return "high"; }',
+            relevanceScore: 0.96,
+            matchType: 'keyword',
+          },
+        ]);
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###\r\nHere is an enhanced version of the original instruction that is more specific and clear:\r\n<enhanced-prompt>Scoped rich mode enhancement.</enhanced-prompt>\r\n\r\n### END RESPONSE ###`
+        );
+
+        await handleEnhancePrompt(
+          {
+            prompt: 'fix login path selection',
+            include_paths: ['./src/', 'src\\**'],
+            exclude_paths: ['dist/', './dist/**'],
+          },
+          mockServiceClient as any
+        );
+
+        expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+          'fix login path selection',
+          3,
+          expect.objectContaining({
+            includePaths: ['src/**'],
+            excludePaths: ['dist/**'],
+          })
+        );
+      });
+
       it('should forward abort signal to searchAndAsk', async () => {
         const aiResponse = `### BEGIN RESPONSE ###
 Here is an enhanced version of the original instruction that is more specific and clear:
@@ -367,7 +424,7 @@ Here is an enhanced version of the original instruction that is more specific an
       }, mockServiceClient as any);
 
       expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
-      expect(mockServiceClient.semanticSearch).not.toHaveBeenCalled();
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(1);
       expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
       expect(result).toContain('quickstart docs first');
     });
@@ -393,7 +450,7 @@ Here is an enhanced version of the original instruction that is more specific an
       }, mockServiceClient as any);
 
       expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
-      expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(1);
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(2);
       expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
       expect(result).toContain('richer answer');
     });
@@ -523,7 +580,132 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(parsed.enhanced_prompt).toContain('Structured AI enhancement output.');
       expect(parsed.source).toBe('ai');
       expect(parsed.reason_code).toBe('ai_enhanced');
+      expect(parsed.context_files).toEqual([]);
+      expect(parsed.mode).toBeDefined();
+      expect(parsed.scope_applied).toBe(false);
+      expect(parsed.scope_source).toBe('none');
+      expect(parsed.scope_confidence).toBe('none');
+      expect(parsed.applied_include_paths).toEqual([]);
+      expect(parsed.candidate_include_paths).toEqual([]);
+      expect(parsed.grounding_strategy).toBe('local_first_additive');
+      expect(parsed.grounding_applied).toBe(false);
+      expect(parsed.grounding_sources_requested).toBe(0);
+      expect(parsed.grounding_sources_used).toBe(0);
+      expect(parsed.grounding_source_statuses).toEqual([]);
+      expect(parsed.grounding_warnings).toEqual([]);
       expect(parsed).not.toHaveProperty('flow');
+    });
+
+    it('returns scoped provenance fields in JSON mode when path filters are applied', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+      mockServiceClient.localKeywordSearch = jest.fn(async () => [
+        {
+          path: 'src/auth/login.ts',
+          content: 'export function login() { return true; }',
+          relevanceScore: 0.91,
+        },
+      ]);
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        `### BEGIN RESPONSE ###\nHere is an enhanced version of the original instruction that is more specific and clear:\n<enhanced-prompt>Scoped AI enhancement output.</enhanced-prompt>\n\n### END RESPONSE ###`
+      );
+
+      const raw = await handleEnhancePrompt(
+        {
+          prompt: 'structured scoped response please',
+          include_paths: ['src/auth/'],
+          exclude_paths: ['src/auth/legacy/**'],
+        },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+
+      expect(parsed.scope_applied).toBe(true);
+      expect(parsed.scope_source).toBe('manual');
+      expect(parsed.scope_confidence).toBe('high');
+      expect(parsed.applied_include_paths).toEqual(['src/auth/**']);
+      expect(parsed.candidate_include_paths).toEqual(['src/auth/**']);
+      expect(parsed.include_paths).toEqual(['src/auth/**']);
+      expect(parsed.exclude_paths).toEqual(['src/auth/legacy/**']);
+      expect(parsed.context_files).toEqual(['src/auth/login.ts']);
+    });
+
+    it('returns inferred auto-scope metadata in JSON mode when one area dominates the search results', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+      mockServiceClient.semanticSearch = jest.fn(async () => [
+        { path: 'src/auth/login.ts', content: '', relevanceScore: 0.96 },
+        { path: 'src/auth/session.ts', content: '', relevanceScore: 0.95 },
+        { path: 'src/auth/guards.ts', content: '', relevanceScore: 0.94 },
+        { path: 'src/auth/index.ts', content: '', relevanceScore: 0.93 },
+      ]);
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        `### BEGIN RESPONSE ###\nHere is an enhanced version of the original instruction that is more specific and clear:\n<enhanced-prompt>Auto-scoped AI enhancement output.</enhanced-prompt>\n\n### END RESPONSE ###`
+      );
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'tighten the auth enhancement' },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+
+      expect(parsed.scope_applied).toBe(true);
+      expect(parsed.scope_source).toBe('auto');
+      expect(parsed.scope_confidence).toBe('high');
+      expect(parsed.applied_include_paths).toEqual(['src/auth/**']);
+      expect(parsed.candidate_include_paths).toEqual(['src/auth/**']);
+      expect(parsed).not.toHaveProperty('include_paths');
+      expect(parsed).not.toHaveProperty('exclude_paths');
+      expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
+        'tighten the auth enhancement',
+        12,
+        expect.objectContaining({ priority: 'background' })
+      );
+    });
+
+    it('keeps enhancement broad in JSON mode when inferred scope confidence is not high enough', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      process.env.CE_ENHANCE_PROMPT_MODE = 'rich';
+      mockServiceClient.semanticSearch = jest.fn(async () => [
+        { path: 'src/auth/login.ts', content: '', relevanceScore: 0.9 },
+        { path: 'src/session/store.ts', content: '', relevanceScore: 0.82 },
+        { path: 'src/ui/login.tsx', content: '', relevanceScore: 0.8 },
+      ]);
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        `### BEGIN RESPONSE ###\nHere is an enhanced version of the original instruction that is more specific and clear:\n<enhanced-prompt>Broad fallback enhancement output.</enhanced-prompt>\n\n### END RESPONSE ###`
+      );
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'improve the login enhancement' },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+
+      expect(parsed.scope_applied).toBe(false);
+      expect(parsed.scope_source).toBe('none');
+      expect(parsed.scope_confidence).toBe('low');
+      expect(parsed.applied_include_paths).toEqual([]);
+      expect(parsed.candidate_include_paths).toEqual(['src/auth/**', 'src/session/**', 'src/ui/**']);
+    });
+
+    it('skips scope inference when auto_scope is false', async () => {
+      process.env.CE_ENHANCE_PROMPT_RESPONSE_FORMAT = 'json';
+      mockServiceClient.searchAndAsk.mockResolvedValue(
+        `### BEGIN RESPONSE ###\nHere is an enhanced version of the original instruction that is more specific and clear:\n<enhanced-prompt>No auto-scope enhancement output.</enhanced-prompt>\n\n### END RESPONSE ###`
+      );
+
+      const raw = await handleEnhancePrompt(
+        { prompt: 'keep this broad', auto_scope: false },
+        mockServiceClient as any
+      );
+      const parsed = JSON.parse(raw);
+
+      expect(parsed.scope_applied).toBe(false);
+      expect(parsed.scope_source).toBe('none');
+      expect(parsed.scope_confidence).toBe('none');
+      expect(parsed.applied_include_paths).toEqual([]);
+      expect(parsed.candidate_include_paths).toEqual([]);
+      expect(mockServiceClient.semanticSearch).not.toHaveBeenCalled();
     });
 
     it('returns structured JSON error envelope when CE_ENHANCE_PROMPT_RESPONSE_FORMAT=json and transient failure occurs', async () => {
@@ -538,6 +720,10 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(parsed.schema_version).toBeDefined();
       expect(parsed.error_code).toBe('TRANSIENT_UPSTREAM');
       expect(parsed.retryable).toBe(true);
+      expect(parsed).not.toHaveProperty('scope_source');
+      expect(parsed).not.toHaveProperty('scope_confidence');
+      expect(parsed).not.toHaveProperty('applied_include_paths');
+      expect(parsed).not.toHaveProperty('candidate_include_paths');
     });
 
     it('returns retry_after_ms in JSON envelope when upstream provides retry hint', async () => {
@@ -734,6 +920,44 @@ Here is an enhanced version of the original instruction that is more specific an
 
         expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
       });
+
+      it('invalidates cache when inferred scope state changes', async () => {
+        process.env.CE_ENHANCE_PROMPT_MODE = 'light';
+        process.env.CE_ENHANCE_PROMPT_CACHE_TTL_MS = '60000';
+        mockServiceClient.getActiveAIProviderId = jest.fn(() => 'provider-alpha');
+        mockServiceClient.getIndexFingerprint = jest.fn(() => 'index-fingerprint-1');
+        mockServiceClient.localKeywordSearch = jest.fn(async () => [
+          {
+            path: 'src/auth/login.ts',
+            content: 'export function login() { return true; }',
+            relevanceScore: 0.95,
+          },
+        ]);
+        const semanticSearchMock: any = jest.fn();
+        semanticSearchMock
+          .mockResolvedValueOnce([
+            { path: 'src/auth/login.ts', content: '', relevanceScore: 0.96 },
+            { path: 'src/auth/session.ts', content: '', relevanceScore: 0.95 },
+            { path: 'src/auth/guards.ts', content: '', relevanceScore: 0.94 },
+            { path: 'src/auth/index.ts', content: '', relevanceScore: 0.93 },
+          ])
+          .mockResolvedValueOnce([
+            { path: 'src/auth/login.ts', content: '', relevanceScore: 0.9 },
+            { path: 'src/session/store.ts', content: '', relevanceScore: 0.85 },
+            { path: 'src/ui/login.tsx', content: '', relevanceScore: 0.82 },
+          ]);
+        mockServiceClient.semanticSearch = semanticSearchMock;
+        mockServiceClient.searchAndAsk.mockResolvedValue(
+          `### BEGIN RESPONSE ###\r\nHere is an enhanced version of the original instruction that is more specific and clear:\r\n<enhanced-prompt>Scope-sensitive cache output.</enhanced-prompt>\r\n\r\n### END RESPONSE ###`
+        );
+
+        await handleEnhancePrompt({ prompt: 'cache scope boundary prompt' }, mockServiceClient as any);
+        await handleEnhancePrompt({ prompt: 'cache scope boundary prompt' }, mockServiceClient as any);
+
+        expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(2);
+        expect(mockServiceClient.localKeywordSearch).toHaveBeenCalledTimes(2);
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+      });
     });
   });
 
@@ -758,12 +982,16 @@ Here is an enhanced version of the original instruction that is more specific an
       expect(enhancePromptTool.inputSchema.required).toContain('prompt');
     });
 
-    it('should only have prompt property (no use_ai or max_files)', () => {
+    it('should expose prompt plus optional scoped path filters', () => {
       const props = Object.keys(enhancePromptTool.inputSchema.properties);
       expect(props).toContain('prompt');
+      expect(props).toContain('auto_scope');
+      expect(props).toContain('include_paths');
+      expect(props).toContain('exclude_paths');
+      expect(props).toContain('external_sources');
       expect(props).not.toContain('use_ai');
       expect(props).not.toContain('max_files');
-      expect(props.length).toBe(1);
+      expect(props.length).toBe(5);
     });
 
     it('should have descriptive description mentioning AI-powered enhancement', () => {

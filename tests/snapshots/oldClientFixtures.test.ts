@@ -20,6 +20,7 @@ import { reviewAutoTool } from '../../src/mcp/tools/reviewAuto.js';
 import { checkInvariantsTool } from '../../src/mcp/tools/checkInvariants.js';
 import { runStaticAnalysisTool } from '../../src/mcp/tools/staticAnalysis.js';
 import { reactiveReviewTools } from '../../src/mcp/tools/reactiveReview.js';
+import { handleToolManifest } from '../../src/mcp/tools/manifest.js';
 
 type ToolDefinition = {
   name: string;
@@ -50,6 +51,14 @@ const FIXTURE_PATH = path.join(
   'phase2',
   'fixtures',
   'old-client-tool-families.json'
+);
+const MANIFEST_BASELINE_PATH = path.join(
+  process.cwd(),
+  'tests',
+  'snapshots',
+  'phase2',
+  'baseline',
+  'tool_manifest_basic.baseline.txt'
 );
 
 function getRegisteredTools(): ToolDefinition[] {
@@ -119,5 +128,21 @@ describe('Old-client fixture catalog coverage', () => {
     }
 
     expect(errors).toEqual([]);
+  });
+
+  it('keeps runtime tool inventory in parity with manifest output and the baseline snapshot', async () => {
+    const runtimeTools = getRegisteredTools().map((tool) => tool.name);
+    const manifest = JSON.parse(await handleToolManifest({}, {} as never)) as {
+      version: string;
+      tools: string[];
+    };
+    const manifestBaseline = JSON.parse(fs.readFileSync(MANIFEST_BASELINE_PATH, 'utf-8')) as {
+      version: string;
+      tools: string[];
+    };
+
+    expect(new Set(runtimeTools).size).toBe(runtimeTools.length);
+    expect(manifest.tools).toEqual(runtimeTools);
+    expect(manifest).toEqual(manifestBaseline);
   });
 });

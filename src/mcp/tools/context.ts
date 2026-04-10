@@ -24,8 +24,10 @@ import { featureEnabled } from '../../config/features.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateBoolean,
+  validateExternalSources,
   validateFiniteNumberInRange,
   validateMaxLength,
+  validatePathScopeGlobs,
   validateTrimmedNonEmptyString,
 } from '../tooling/validation.js';
 
@@ -36,6 +38,9 @@ export interface GetContextArgs {
   include_related?: boolean;
   min_relevance?: number;
   bypass_cache?: boolean;
+  include_paths?: string[];
+  exclude_paths?: string[];
+  external_sources?: Array<{ type: 'github_url' | 'docs_url'; url: string; label?: string }>;
 }
 
 const MAX_QUERY_LENGTH = 1000;
@@ -97,6 +102,9 @@ export async function handleGetContext(
     include_related = true,
     min_relevance = 0.3,
     bypass_cache = false,
+    include_paths,
+    exclude_paths,
+    external_sources,
   } = args;
   const normalizedQuery = validateTrimmedNonEmptyString(
     query,
@@ -120,6 +128,9 @@ export async function handleGetContext(
     1,
     'Invalid min_relevance parameter: must be a number between 0 and 1'
   );
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
+  const normalizedExternalSources = validateExternalSources(external_sources, 'external_sources');
 
   // Build options
   const options: ContextOptions = {
@@ -129,6 +140,9 @@ export async function handleGetContext(
     minRelevance: min_relevance,
     includeSummaries: true,
     bypassCache: bypass_cache,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
+    externalSources: normalizedExternalSources,
   };
 
   const contextBundle = await internalContextBundle(normalizedQuery, serviceClient, options);
@@ -229,6 +243,28 @@ export async function handleGetContext(
       for (const [filePath, related] of edges) {
         output += `- \`${filePath}\` -> ${related.map((item) => `\`${item}\``).join(', ')}\n`;
       }
+      output += '\n';
+    }
+  }
+
+  if ((contextBundle.externalReferences?.length ?? 0) > 0 || (contextBundle.metadata.externalSourcesRequested ?? 0) > 0) {
+    output += `## 🌐 External References\n\n`;
+    output += `_The following snippets are user-supplied references. They are not part of the indexed local codebase._\n\n`;
+    if ((contextBundle.externalReferences?.length ?? 0) > 0) {
+      for (const reference of contextBundle.externalReferences ?? []) {
+        output += `### ${reference.label ?? reference.title ?? reference.url}\n\n`;
+        output += `- Source: \`${reference.url}\`\n`;
+        output += `- Host: \`${reference.host}\`\n`;
+        output += `- Status: ${reference.status}\n\n`;
+        output += `${reference.excerpt}\n\n`;
+      }
+    } else {
+      output += `External sources were requested, but none were used. Result is local-only.\n\n`;
+    }
+    for (const warning of contextBundle.metadata.externalWarnings ?? []) {
+      output += `- Warning [${warning.code}]: ${warning.message} (\`${warning.source_url}\`)\n`;
+    }
+    if ((contextBundle.metadata.externalWarnings?.length ?? 0) > 0) {
       output += '\n';
     }
   }
@@ -354,6 +390,29 @@ Use this tool when you need to:
         type: 'boolean',
         description: 'Bypass caches (forces fresh retrieval; useful for benchmarking/debugging).',
         default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+      },
+      external_sources: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            type: { type: 'string', enum: ['github_url', 'docs_url'] },
+            url: { type: 'string' },
+            label: { type: 'string' },
+          },
+          required: ['type', 'url'],
+        },
+        description: 'Optional external sources to ground the returned context without indexing them locally.',
       },
     },
     required: ['query'],

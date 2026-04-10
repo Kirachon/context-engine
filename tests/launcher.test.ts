@@ -4,6 +4,7 @@ import net from 'net';
 import os from 'os';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
+import { handleToolManifest } from '../src/mcp/tools/manifest.js';
 
 const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const entrypoint = path.join(process.cwd(), 'src', 'index.ts');
@@ -15,10 +16,31 @@ interface RunningServer {
   stop: () => Promise<void>;
 }
 
+type JsonRpcMessage = {
+  jsonrpc: '2.0';
+  id?: number | string;
+  method?: string;
+  params?: Record<string, unknown>;
+  result?: unknown;
+  error?: unknown;
+};
+
+interface RunningStdioServer extends RunningServer {
+  sendMessage: (message: JsonRpcMessage) => void;
+  nextMessage: (
+    predicate: (message: JsonRpcMessage) => boolean,
+    timeoutMs?: number
+  ) => Promise<JsonRpcMessage>;
+}
+
 function seedRepo(rootDir: string): void {
   fs.mkdirSync(path.join(rootDir, '.git'), { recursive: true });
   fs.mkdirSync(path.join(rootDir, 'src'), { recursive: true });
   fs.writeFileSync(path.join(rootDir, 'src', 'index.ts'), 'export const smoke = true;\n', 'utf-8');
+}
+
+function encodeStdioMessage(message: JsonRpcMessage): Buffer {
+  return Buffer.from(`${JSON.stringify(message)}\n`, 'utf-8');
 }
 
 function waitForServerReady(
@@ -188,6 +210,119 @@ async function startServer(cwd: string, args: string[] = []): Promise<RunningSer
   };
 }
 
+async function startStdioServer(cwd: string): Promise<RunningStdioServer> {
+  const stderrRef = { value: '' };
+  const stdoutRef = { value: '' };
+  const child = spawn(process.execPath, [tsxCli, entrypoint], {
+    cwd,
+    env: {
+      ...process.env,
+      CE_AUTO_INDEX_ON_STARTUP: 'false',
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+    windowsHide: true,
+  });
+
+  let frameBuffer = Buffer.alloc(0);
+  const queuedMessages: JsonRpcMessage[] = [];
+  const pendingResolvers: Array<{
+    predicate: (message: JsonRpcMessage) => boolean;
+    resolve: (message: JsonRpcMessage) => void;
+    reject: (error: Error) => void;
+    timer: ReturnType<typeof setTimeout>;
+  }> = [];
+
+  const settleMessage = (message: JsonRpcMessage): void => {
+    const resolverIndex = pendingResolvers.findIndex((entry) => entry.predicate(message));
+    if (resolverIndex >= 0) {
+      const [entry] = pendingResolvers.splice(resolverIndex, 1);
+      clearTimeout(entry.timer);
+      entry.resolve(message);
+      return;
+    }
+
+    queuedMessages.push(message);
+  };
+
+  const rejectPendingResolvers = (reason: string): void => {
+    while (pendingResolvers.length > 0) {
+      const entry = pendingResolvers.shift();
+      if (!entry) {
+        continue;
+      }
+      clearTimeout(entry.timer);
+      entry.reject(new Error(reason));
+    }
+  };
+
+  child.stdout?.on('data', (chunk: Buffer | string) => {
+    const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    stdoutRef.value += data.toString('utf-8');
+    frameBuffer = Buffer.concat([frameBuffer, data]);
+
+    while (true) {
+      const lineEnd = frameBuffer.indexOf('\n');
+      if (lineEnd < 0) {
+        return;
+      }
+
+      const body = frameBuffer.subarray(0, lineEnd).toString('utf-8').replace(/\r$/, '');
+      frameBuffer = frameBuffer.subarray(lineEnd + 1);
+      if (!body.trim()) {
+        continue;
+      }
+
+      settleMessage(JSON.parse(body) as JsonRpcMessage);
+    }
+  });
+
+  child.once('exit', (code, signal) => {
+    rejectPendingResolvers(`stdio server exited (code=${code ?? 'null'}, signal=${signal ?? 'null'})`);
+  });
+
+  await waitForServerReady(child, stderrRef, stdoutRef, [
+    'Starting MCP server (stdio)...',
+    'Transport: stdio',
+    'Available tools (42 total):',
+    'Server ready. Waiting for requests...',
+  ]);
+
+  return {
+    child,
+    get stderr() {
+      return stderrRef.value;
+    },
+    get stdout() {
+      return stdoutRef.value;
+    },
+    stop: async () => {
+      await stopChildProcess(child);
+    },
+    sendMessage: (message: JsonRpcMessage) => {
+      child.stdin?.write(encodeStdioMessage(message));
+    },
+    nextMessage: (predicate, timeoutMs = 15000) => {
+      const queuedIndex = queuedMessages.findIndex((message) => predicate(message));
+      if (queuedIndex >= 0) {
+        const [message] = queuedMessages.splice(queuedIndex, 1);
+        return Promise.resolve(message);
+      }
+
+      return new Promise<JsonRpcMessage>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const resolverIndex = pendingResolvers.findIndex((entry) => entry.resolve === resolve);
+          if (resolverIndex >= 0) {
+            pendingResolvers.splice(resolverIndex, 1);
+          }
+          reject(new Error(`Timed out waiting for stdio message. Captured stderr:\n${stderrRef.value}`));
+        }, timeoutMs);
+
+        pendingResolvers.push({ predicate, resolve, reject, timer });
+      });
+    },
+  };
+}
+
 describe('repo-aware launcher startup smoke', () => {
   it('advertises repo-aware one-time setup in --help output', () => {
     const result = spawnSync(process.execPath, [tsxCli, entrypoint, '--help'], {
@@ -349,6 +484,62 @@ describe('repo-aware launcher startup smoke', () => {
       expect(result.stderr).toContain('Workspace path does not exist');
       expect(result.stderr).not.toContain('Starting MCP server (stdio)...');
     } finally {
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('preserves stdio startup markers and tools/list inventory', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-launcher-stdio-smoke-'));
+    seedRepo(repoRoot);
+
+    const server = await startStdioServer(repoRoot);
+
+    try {
+      server.sendMessage({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2025-11-25',
+          capabilities: {},
+          clientInfo: {
+            name: 'compat-harness',
+            version: '1.0.0',
+          },
+        },
+      });
+
+      const initializeResponse = await server.nextMessage((message) => message.id === 1);
+      expect((initializeResponse.result as { protocolVersion?: string })?.protocolVersion).toBe('2025-11-25');
+      expect(
+        (initializeResponse.result as { capabilities?: { tools?: { listChanged?: boolean } } })?.capabilities?.tools
+          ?.listChanged
+      ).toBe(true);
+
+      server.sendMessage({
+        jsonrpc: '2.0',
+        method: 'notifications/initialized',
+      });
+
+      server.sendMessage({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/list',
+        params: {},
+      });
+
+      const listToolsResponse = await server.nextMessage((message) => message.id === 2);
+      const runtimeToolNames = (
+        (listToolsResponse.result as { tools?: Array<{ name: string }> })?.tools ?? []
+      ).map((tool) => tool.name);
+      const manifest = JSON.parse(await handleToolManifest({}, {} as never)) as { tools: string[] };
+
+      expect(runtimeToolNames).toEqual(manifest.tools);
+      expect(server.stderr).toContain('Starting MCP server (stdio)...');
+      expect(server.stderr).toContain('Available tools (42 total):');
+      expect(server.stderr).toContain('Server ready. Waiting for requests...');
+    } finally {
+      await server.stop();
       fs.rmSync(repoRoot, { recursive: true, force: true });
     }
   });

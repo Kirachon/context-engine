@@ -27,6 +27,23 @@ import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
 import { evaluateStartupAutoIndex } from './tooling/indexFreshness.js';
 import {
+  filterEntriesByPathScope,
+  matchesNormalizedPathScope,
+  normalizePathScopeInput,
+  scopeApplied,
+  serializeNormalizedPathScope,
+  type PathScopeInput,
+  type NormalizedPathScope,
+} from './tooling/pathScope.js';
+import {
+  EXTERNAL_GROUNDING_PROVIDER_VERSION,
+  fetchExternalGrounding,
+  serializeExternalSourcesForCache,
+  type ExternalReferenceSnippet,
+  type GroundingWarning,
+  type NormalizedExternalSource,
+} from './tooling/externalGrounding.js';
+import {
   JsonIndexStateStore,
   type IndexStateFile,
   type IndexStateLoadMetadata,
@@ -162,6 +179,8 @@ export interface ContextBundle {
   dependencyMap?: Record<string, string[]>;
   /** Relevant memories from .memories/ directory */
   memories?: MemoryEntry[];
+  /** Optional external references supplied by the caller. */
+  externalReferences?: ExternalReferenceSnippet[];
   /** Metadata about the context bundle */
   metadata: {
     totalFiles: number;
@@ -171,10 +190,15 @@ export interface ContextBundle {
     truncated: boolean;
     searchTimeMs: number;
     memoriesIncluded?: number;
+    externalSourcesRequested?: number;
+    externalSourcesUsed?: number;
+    externalWarnings?: GroundingWarning[];
   };
 }
 
-export interface ContextOptions {
+export type PathScopeOptions = PathScopeInput;
+
+export interface ContextOptions extends PathScopeInput {
   /** Maximum number of files to include (default: 5) */
   maxFiles?: number;
   /** Maximum tokens for the entire context (default: 8000) */
@@ -193,6 +217,12 @@ export interface ContextOptions {
   preferLocalSearch?: boolean;
   /** Queue lane for semantic retrieval work (default: interactive). */
   priority?: 'interactive' | 'background';
+  /** Optional workspace-relative include glob filters. */
+  includePaths?: string[];
+  /** Optional workspace-relative exclude glob filters. */
+  excludePaths?: string[];
+  /** Optional normalized external references supplied by caller. */
+  externalSources?: NormalizedExternalSource[];
 }
 
 export interface SearchDiagnostics {
@@ -1277,7 +1307,12 @@ export class ContextServiceClient {
         search: (
           query: string,
           topK: number,
-          options?: { bypassCache?: boolean; maxOutputLength?: number }
+          options?: {
+            bypassCache?: boolean;
+            maxOutputLength?: number;
+            includePaths?: string[];
+            excludePaths?: string[];
+          }
         ) => this.searchWithProviderRuntime(query, topK, options),
         indexWorkspace: () => this.indexWorkspaceLocalNativeFallback(),
         indexFiles: (filePaths: string[]) => this.indexFilesLocalNativeFallback(filePaths),
@@ -1295,6 +1330,40 @@ export class ContextServiceClient {
     context?: RetrievalProviderCallbackContext
   ): RetrievalProviderId {
     return context?.providerId ?? this.retrievalProviderId;
+  }
+
+  private normalizePathScopeOptions(scope?: PathScopeOptions): NormalizedPathScope | undefined {
+    const normalizedScope = normalizePathScopeInput(scope);
+    return scopeApplied(normalizedScope) ? normalizedScope : undefined;
+  }
+
+  private getPathScopeCacheFragment(scope?: PathScopeOptions): string {
+    const normalizedScope = this.normalizePathScopeOptions(scope);
+    if (!normalizedScope) {
+      return 'scope=unscoped';
+    }
+
+    return `scope=${serializeNormalizedPathScope(normalizedScope)}`;
+  }
+
+  private pathMatchesScope(filePath: string, scope?: PathScopeOptions): boolean {
+    return matchesNormalizedPathScope(filePath, this.normalizePathScopeOptions(scope));
+  }
+
+  public filterSearchResultsByScope(results: SearchResult[], scope?: PathScopeOptions): SearchResult[] {
+    const normalizedScope = this.normalizePathScopeOptions(scope);
+    if (!normalizedScope) {
+      return results;
+    }
+    return filterEntriesByPathScope(results, normalizedScope);
+  }
+
+  private filterPathsByScope(paths: string[], scope?: PathScopeOptions): string[] {
+    const normalizedScope = this.normalizePathScopeOptions(scope);
+    if (!normalizedScope) {
+      return paths;
+    }
+    return paths.filter((filePath) => matchesNormalizedPathScope(filePath, normalizedScope));
   }
 
   private getFallbackDiscoverFilesCacheKey(): string {
@@ -2629,9 +2698,14 @@ export class ContextServiceClient {
    * @param topK Number of results
    * @returns Cache key string
    */
-  private getCommitAwareCacheKey(query: string, topK: number, providerId?: RetrievalProviderId): string {
+  private getCommitAwareCacheKey(
+    query: string,
+    topK: number,
+    providerId?: RetrievalProviderId,
+    scope?: PathScopeOptions
+  ): string {
     const retrievalProvider = providerId ?? this.getActiveRetrievalProviderId();
-    const baseKey = `${retrievalProvider}:${query}:${topK}`;
+    const baseKey = `${retrievalProvider}:${query}:${topK}:${this.getPathScopeCacheFragment(scope)}`;
     if (this.commitCacheEnabled && this.currentCommitHash) {
       return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
     }
@@ -2642,14 +2716,15 @@ export class ContextServiceClient {
     query: string,
     topK: number,
     providerId: RetrievalProviderId,
-    maxOutputLength?: number
+    maxOutputLength?: number,
+    scope?: PathScopeOptions
   ): string {
-    const baseKey = this.getCommitAwareCacheKey(query, topK, providerId);
+    const baseKey = this.getCommitAwareCacheKey(query, topK, providerId, scope);
     return `${baseKey}|maxOutputLength=${maxOutputLength ?? 'default'}`;
   }
 
-  private getKeywordFallbackSearchCacheKey(query: string, topK: number): string {
-    const baseKey = `keyword:${query}:${topK}`;
+  private getKeywordFallbackSearchCacheKey(query: string, topK: number, scope?: PathScopeOptions): string {
+    const baseKey = `keyword:${query}:${topK}:${this.getPathScopeCacheFragment(scope)}`;
     if (this.commitCacheEnabled && this.currentCommitHash) {
       return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
     }
@@ -3318,16 +3393,23 @@ export class ContextServiceClient {
   async semanticSearch(
     query: string,
     topK: number = 10,
-    options?: { bypassCache?: boolean; maxOutputLength?: number; priority?: 'interactive' | 'background' }
+    options?: {
+      bypassCache?: boolean;
+      maxOutputLength?: number;
+      priority?: 'interactive' | 'background';
+      includePaths?: string[];
+      excludePaths?: string[];
+    }
   ): Promise<SearchResult[]> {
     const metricsStart = Date.now();
     const debugSearch = process.env.CE_DEBUG_SEARCH === 'true';
     const bypassCache = options?.bypassCache ?? false;
+    const normalizedScope = this.normalizePathScopeOptions(options);
     const retrievalProvider = this.getActiveRetrievalProviderId();
     this.setLastSearchDiagnostics(null);
 
     // Use commit-aware cache key when reactive mode is enabled
-    const memoryCacheKey = this.getCommitAwareCacheKey(query, topK, retrievalProvider);
+    const memoryCacheKey = this.getCommitAwareCacheKey(query, topK, retrievalProvider, normalizedScope);
 
     if (!bypassCache) {
       const cached = this.getCachedSearch(memoryCacheKey);
@@ -3381,7 +3463,8 @@ export class ContextServiceClient {
       query,
       topK,
       retrievalProvider,
-      options?.maxOutputLength
+      options?.maxOutputLength,
+      normalizedScope
     );
     const inFlightRequest = this.semanticSearchInFlight.get(inFlightKey);
     if (inFlightRequest) {
@@ -3413,7 +3496,10 @@ export class ContextServiceClient {
       shouldCache: !bypassCache,
       promise: Promise.resolve().then(async () => {
         try {
-          const searchResults = await this.retrievalProvider.search(query, topK, options);
+          const searchResults = this.filterSearchResultsByScope(
+            await this.retrievalProvider.search(query, topK, options),
+            normalizedScope
+          );
 
           if (
             sharedRequest.generation === this.semanticSearchCacheGeneration &&
@@ -3456,7 +3542,11 @@ export class ContextServiceClient {
             { help: 'semanticSearch end-to-end duration in seconds (includes cache hits).' }
           );
           try {
-            return await this.keywordFallbackSearch(query, topK, { bypassCache });
+            return await this.keywordFallbackSearch(query, topK, {
+              bypassCache,
+              includePaths: normalizedScope?.includePaths,
+              excludePaths: normalizedScope?.excludePaths,
+            });
           } catch {
             return [];
           }
@@ -3481,7 +3571,13 @@ export class ContextServiceClient {
   private async searchWithProviderRuntime(
     query: string,
     topK: number,
-    options?: { bypassCache?: boolean; maxOutputLength?: number; priority?: 'interactive' | 'background' }
+    options?: {
+      bypassCache?: boolean;
+      maxOutputLength?: number;
+      priority?: 'interactive' | 'background';
+      includePaths?: string[];
+      excludePaths?: string[];
+    }
   ): Promise<SearchResult[]> {
     const semanticTimeoutMs = envMs('CE_SEMANTIC_SEARCH_AI_TIMEOUT_MS', 30_000, {
       min: MIN_API_TIMEOUT_MS,
@@ -3498,7 +3594,10 @@ export class ContextServiceClient {
           signal: runtimeOptions?.signal,
         }),
       keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
-        this.keywordFallbackSearch(fallbackQuery, fallbackTopK),
+        this.keywordFallbackSearch(fallbackQuery, fallbackTopK, {
+          includePaths: options?.includePaths,
+          excludePaths: options?.excludePaths,
+        }),
     });
   }
 
@@ -3508,9 +3607,13 @@ export class ContextServiceClient {
   async localKeywordSearch(
     query: string,
     topK: number = 10,
-    options?: { bypassCache?: boolean }
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
   ): Promise<SearchResult[]> {
-    return this.keywordFallbackSearch(query, topK, { bypassCache: options?.bypassCache });
+    return this.keywordFallbackSearch(query, topK, {
+      bypassCache: options?.bypassCache,
+      includePaths: options?.includePaths,
+      excludePaths: options?.excludePaths,
+    });
   }
 
   private getConfiguredShadowCompareState(): { enabled: boolean; sampleRate: number } {
@@ -3740,10 +3843,11 @@ export class ContextServiceClient {
   private async keywordFallbackSearch(
     query: string,
     topK: number,
-    options?: { bypassCache?: boolean }
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
   ): Promise<SearchResult[]> {
     const bypassCache = options?.bypassCache === true;
-    const cacheKey = this.getKeywordFallbackSearchCacheKey(query, topK);
+    const normalizedScope = this.normalizePathScopeOptions(options);
+    const cacheKey = this.getKeywordFallbackSearchCacheKey(query, topK, normalizedScope);
     if (!bypassCache) {
       const cached = this.getCachedKeywordFallbackSearch(cacheKey);
       if (cached) {
@@ -3818,13 +3922,14 @@ export class ContextServiceClient {
             opsEvidenceIntent,
             normalizedQuery,
           });
-          if (lexicalResults.length > 0) {
+          const scopedLexicalResults = this.filterSearchResultsByScope(lexicalResults, normalizedScope);
+          if (scopedLexicalResults.length > 0) {
             this.setLastSearchDiagnostics({
-              filters_applied: [],
-              filtered_paths_count: 0,
+              filters_applied: normalizedScope ? ['scope:lexical'] : [],
+              filtered_paths_count: Math.max(0, lexicalResults.length - scopedLexicalResults.length),
               second_pass_used: false,
             });
-            return lexicalResults;
+            return scopedLexicalResults;
           }
         } catch (error) {
           if (process.env.CE_DEBUG_SEARCH === 'true') {
@@ -3850,13 +3955,14 @@ export class ContextServiceClient {
             opsEvidenceIntent,
             normalizedQuery,
           });
-          if (chunkResults.length > 0) {
+          const scopedChunkResults = this.filterSearchResultsByScope(chunkResults, normalizedScope);
+          if (scopedChunkResults.length > 0) {
             this.setLastSearchDiagnostics({
-              filters_applied: [],
-              filtered_paths_count: 0,
+              filters_applied: normalizedScope ? ['scope:chunk'] : [],
+              filtered_paths_count: Math.max(0, chunkResults.length - scopedChunkResults.length),
               second_pass_used: false,
             });
-            return chunkResults;
+            return scopedChunkResults;
           }
         } catch (error) {
           if (process.env.CE_DEBUG_SEARCH === 'true') {
@@ -3867,9 +3973,13 @@ export class ContextServiceClient {
     }
 
     const computeKeywordFallbackSearch = async (): Promise<SearchResult[]> => {
-      const files = await this.getCachedFallbackFiles(options);
+      const allFiles = await this.getCachedFallbackFiles(options);
+      const files = this.filterPathsByScope(allFiles, normalizedScope);
       if (files.length === 0) return [];
       const filtersApplied: string[] = [];
+      const scopeFilteredPathsCount = Math.max(0, allFiles.length - files.length);
+      if (normalizedScope?.includePaths?.length) filtersApplied.push('scope:include_paths');
+      if (normalizedScope?.excludePaths?.length) filtersApplied.push('scope:exclude_paths');
       if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');
       if (codeIntent && !includeDocs) filtersApplied.push('deprioritize:docs');
       if (codeIntent && !includeJson) filtersApplied.push('deprioritize:json');
@@ -4028,7 +4138,7 @@ export class ContextServiceClient {
       const firstPass = await runPass(true);
       let rankedResults = firstPass.rankedResults;
       let secondPassUsed = false;
-      let filteredPathsCount = firstPass.filteredPathsCount;
+      let filteredPathsCount = firstPass.filteredPathsCount + scopeFilteredPathsCount;
 
       if (rankedResults.length === 0 && firstPass.filteredPathsCount > 0) {
         secondPassUsed = true;
@@ -4391,7 +4501,12 @@ export class ContextServiceClient {
       bypassCache = false,
       preferLocalSearch = false,
       priority = 'interactive',
+      includePaths,
+      excludePaths,
+      externalSources,
     } = options;
+    const normalizedScope = this.normalizePathScopeOptions({ includePaths, excludePaths });
+    const serializedExternalSources = serializeExternalSourcesForCache(externalSources);
 
     const normalizedCacheOptions = {
       maxFiles,
@@ -4400,6 +4515,10 @@ export class ContextServiceClient {
       minRelevance,
       includeSummaries,
       includeMemories,
+      includePaths: normalizedScope?.includePaths,
+      excludePaths: normalizedScope?.excludePaths,
+      externalSources: serializedExternalSources,
+      externalGroundingVersion: externalSources?.length ? EXTERNAL_GROUNDING_PROVIDER_VERSION : undefined,
     };
 
     const commitPrefix = (this.commitCacheEnabled && this.currentCommitHash)
@@ -4435,12 +4554,12 @@ export class ContextServiceClient {
 
     const semanticSearch = (q: string, k: number) =>
       bypassCache
-        ? this.semanticSearch(q, k, { bypassCache: true, priority })
-        : this.semanticSearch(q, k, { priority });
+        ? this.semanticSearch(q, k, { bypassCache: true, priority, ...normalizedScope })
+        : this.semanticSearch(q, k, { priority, ...normalizedScope });
 
     const useLocalKeywordSearchFirst = preferLocalSearch || isOperationalDocsQuery(query);
     const searchResultsPromise = useLocalKeywordSearchFirst
-      ? this.localKeywordSearch(query, maxFiles * 3)
+      ? this.localKeywordSearch(query, maxFiles * 3, normalizedScope)
           .then(results => (results.length > 0 ? results : semanticSearch(query, maxFiles * 3)))
           .catch(() => semanticSearch(query, maxFiles * 3))
       : semanticSearch(query, maxFiles * 3);
@@ -4540,6 +4659,9 @@ export class ContextServiceClient {
 
       // Wait for related files (I/O-bound operation)
       const relatedFiles = await relatedFilesPromise;
+      const scopedRelatedFiles = relatedFiles
+        ? this.filterPathsByScope(relatedFiles, normalizedScope)
+        : relatedFiles;
 
       return {
         path: filePath,
@@ -4548,7 +4670,7 @@ export class ContextServiceClient {
         relevance: fileRelevance.get(filePath) || 0,
         tokenCount: fileTokens,
         snippets,
-        relatedFiles: relatedFiles?.length ? relatedFiles : undefined,
+        relatedFiles: scopedRelatedFiles?.length ? scopedRelatedFiles : undefined,
         selectionRationale: `Top relevance ${(fileRelevance.get(filePath) || 0).toFixed(2)} with ${snippets.length} snippet(s)` +
           (summary ? `; ${summary}` : ''),
       };
@@ -4612,6 +4734,8 @@ export class ContextServiceClient {
 
     const searchTimeMs = Date.now() - startTime;
 
+    const externalGrounding = await fetchExternalGrounding(externalSources);
+
     const bundle: ContextBundle = {
       summary,
       query,
@@ -4625,14 +4749,24 @@ export class ContextServiceClient {
           )
         : undefined,
       memories: memories.length > 0 ? memories : undefined,
+      externalReferences: externalGrounding.references.length > 0 ? externalGrounding.references : undefined,
       metadata: {
         totalFiles: files.length,
         totalSnippets: files.reduce((sum, f) => sum + f.snippets.length, 0),
         totalTokens,
         tokenBudget,
-        truncated,
+        truncated: truncated || externalGrounding.truncated,
         searchTimeMs,
         memoriesIncluded: memories.length,
+        ...(externalSources?.length
+          ? {
+              externalSourcesRequested: externalSources.length,
+              externalSourcesUsed: externalGrounding.references.length,
+            }
+          : {}),
+        ...(externalGrounding.warnings.length > 0
+          ? { externalWarnings: externalGrounding.warnings }
+          : {}),
       },
     };
 

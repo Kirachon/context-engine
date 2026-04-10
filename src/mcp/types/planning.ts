@@ -405,6 +405,12 @@ export interface PlanGenerationOptions {
   analyze_parallelism?: boolean;
   /** Focus on MVP only (default: false) */
   mvp_only?: boolean;
+  /** Optional workspace-relative glob filters to include matching paths only. */
+  include_paths?: string[];
+  /** Optional workspace-relative glob filters to exclude matching paths after include filtering. */
+  exclude_paths?: string[];
+  /** Automatically infer likely include paths when the caller did not provide scope (default: true). */
+  auto_scope?: boolean;
 }
 
 /**
@@ -444,6 +450,18 @@ export interface PlanResult {
   error?: string;
   /** Time taken in milliseconds */
   duration_ms: number;
+  /** Additive wrapper diagnostics about the planning request/context. */
+  planning_context?: {
+    prompt_profile: 'compact' | 'deep';
+    scope_applied: boolean;
+    scope_source?: 'manual' | 'auto' | 'none';
+    scope_confidence?: 'high' | 'medium' | 'low' | 'none';
+    applied_include_paths?: string[];
+    candidate_include_paths?: string[];
+    context_file_count: number;
+    token_budget: number;
+    clarification_triggered: boolean;
+  };
 }
 
 /**

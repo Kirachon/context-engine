@@ -1,5 +1,30 @@
 import type { ContextBundle, ContextOptions, ContextServiceClient, SearchResult } from '../../mcp/serviceClient.js';
+import { normalizePathScopeInput } from '../../mcp/tooling/pathScope.js';
 import { getInternalCache } from './performance.js';
+
+function normalizeContextOptionsForCache(options: ContextOptions): ContextOptions {
+  const normalizedScope = normalizePathScopeInput({
+    includePaths: options.includePaths,
+    excludePaths: options.excludePaths,
+  });
+
+  return {
+    ...options,
+    ...(normalizedScope.includePaths ? { includePaths: normalizedScope.includePaths } : {}),
+    ...(normalizedScope.excludePaths ? { excludePaths: normalizedScope.excludePaths } : {}),
+    ...(options.externalSources
+      ? {
+          externalSources: options.externalSources.map((source) => ({
+            type: source.type,
+            url: source.url,
+            host: source.host,
+            label: source.label,
+            sourceIndex: source.sourceIndex,
+          })),
+        }
+      : {}),
+  };
+}
 
 export async function internalContextBundle(
   query: string,
@@ -11,7 +36,8 @@ export async function internalContextBundle(
   }
 
   const cache = getInternalCache();
-  const cacheKey = `context:${query}:${JSON.stringify(options ?? {})}`;
+  const normalizedOptions = normalizeContextOptionsForCache(options ?? {});
+  const cacheKey = `context:${query}:${JSON.stringify(normalizedOptions)}`;
   const cached = cache.get<ContextBundle>(cacheKey);
   if (cached) {
     return cached;
