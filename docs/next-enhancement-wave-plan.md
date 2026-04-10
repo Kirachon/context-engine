@@ -1,5 +1,11 @@
 # Plan: MCP Confidence, Discoverability, Traceability, and Rerank Calibration
 
+> Status: Reference-only after consolidation
+>
+> This roadmap documents a completed earlier wave and remains useful as scoped reference.
+> `context-engine-improvement-swarm-plan.md` is the active delivery plan.
+> `ARCHITECTURE.md` remains the architecture reference.
+
 ## Summary
 Deliver the next Context Engine enhancement wave as four coordinated streams:
 

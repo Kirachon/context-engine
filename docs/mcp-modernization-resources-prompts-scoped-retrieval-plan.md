@@ -2,6 +2,12 @@
 
 **Generated**: 2026-04-10
 
+> Status: Reference-only after consolidation
+>
+> This roadmap captures an earlier implementation wave and remains useful as scoped reference.
+> `context-engine-improvement-swarm-plan.md` is the active delivery plan.
+> `ARCHITECTURE.md` remains the architecture reference.
+
 ## Overview
 This plan modernizes the repo's MCP surface in a low-risk sequence optimized for parallel execution. It first freezes protocol and compatibility contracts, then upgrades the MCP SDK and adds a dedicated `/mcp` transport adapter without disturbing the current stdio or REST behavior, then layers in first-class MCP resources/prompts plus scoped retrieval and `enhance_prompt` provenance.
 

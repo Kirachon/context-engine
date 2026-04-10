@@ -4,6 +4,12 @@ Detailed architecture documentation for the Context Engine MCP Server.
 
 > Historical note: some older sections below are archival. The current active runtime is `local_native`, and legacy provider SDKs are not part of the live provider path.
 
+> Current doc status:
+> - Architecture reference: `ARCHITECTURE.md`
+> - Active delivery plan: `context-engine-improvement-swarm-plan.md`
+> - Planning-only follow-on artifact: `docs/advanced-mcp-ux-and-hosted-maturity-plan.md`
+> - Older roadmap and modernization docs under `docs/` are scoped reference artifacts unless they explicitly replace the active delivery plan.
+
 ## Overview
 
 This project implements a **local-first, agent-agnostic context engine** using the Model Context Protocol (MCP) as the interface layer and a local-native retrieval runtime as the core engine.
