@@ -1,0 +1,22 @@
+{
+  "version": "1.0.0",
+  "cases": [
+    {
+      "id": "clean-diff-no-findings",
+      "description": "A benign diff should not produce deterministic review findings.",
+      "kind": "clean_diff",
+      "expected_finding_classes": [],
+      "max_false_positives": 0
+    },
+    {
+      "id": "public-api-change-without-tests",
+      "description": "A risky public API diff should be represented with at least one expected deterministic finding class.",
+      "kind": "expected_findings",
+      "expected_finding_classes": [
+        "public_api_change",
+        "test_gap"
+      ],
+      "max_false_positives": 0
+    }
+  ]
+}

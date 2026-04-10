@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "baseline": {
+    "required_provider": "local_native",
+    "index_requirement": "healthy",
+    "baseline_artifact": "artifacts/bench/pr-baseline.json",
+    "candidate_artifact": "artifacts/bench/pr-candidate.json",
+    "cache_modes": ["cold", "warm"],
+    "scoped_runs": ["unscoped", "scoped"]
+  },
+  "profiles": {
+    "fast": {
+      "token_budget": 8000
+    },
+    "balanced": {
+      "token_budget": 8000
+    },
+    "rich": {
+      "token_budget": 8000
+    }
+  },
+  "workload_packs": {
+    "retrieval_quality_fixture_pack": "config/ci/retrieval-quality-fixture-pack.json",
+    "legacy_capability_matrix": "config/ci/legacy-capability-matrix.json"
+  },
+  "calibration_contract": "config/ci/retrieval-calibration-contract.json",
+  "gate_tiers": {
+    "pr_blockers": [
+      "build",
+      "ci:check:mcp-smoke",
+      "ci:check:retrieval-holdout-fixture",
+      "ci:check:retrieval-quality-gate",
+      "ci:check:retrieval-shadow-canary-gate",
+      "ci:check:enhancement-error-taxonomy-report",
+      "ci:check:enhance-prompt-contract"
+    ],
+    "nightly_report_only": [
+      "bench:ci:nightly",
+      "ci:generate:weekly-retrieval-trend-report",
+      "ci:check:weekly-retrieval-trend-report",
+      "ci:generate:semantic-latency-report"
+    ]
+  }
+}

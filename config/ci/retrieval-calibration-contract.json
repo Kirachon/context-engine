@@ -1,0 +1,47 @@
+{
+  "version": "1.0.0",
+  "frozen_contracts": {
+    "benchmark_eval": "config/ci/benchmark-eval-contract.json",
+    "gate_tiers": "config/ci/gate-tier-contract.json"
+  },
+  "artifacts": {
+    "baseline": "artifacts/bench/pr-baseline.json",
+    "candidate": "artifacts/bench/pr-candidate.json",
+    "holdout_check": "artifacts/bench/retrieval-holdout-check.json",
+    "quality_report": "artifacts/bench/retrieval-quality-report.json",
+    "quality_telemetry": "artifacts/bench/retrieval-quality-telemetry.json",
+    "shadow_canary_gate": "artifacts/bench/retrieval-shadow-canary-gate.json"
+  },
+  "measurable_metrics": {
+    "compare_metric_path": "payload.timing.p95_ms",
+    "quality_ids": [
+      "quality.ndcg_at_10",
+      "quality.mrr_at_10"
+    ],
+    "diagnostic_ids": [
+      "telemetry.skipped_docs_rate_pct",
+      "telemetry.embed_batch_p95_ms"
+    ]
+  },
+  "diagnostic_receipts": {
+    "skip_reasons": "ContextServiceClient.IndexResult.skipReasons",
+    "truncation_reasons": "ContextBundle.metadata.truncationReasons"
+  },
+  "runtime_change_policy": {
+    "allow_default_profile_changes": false,
+    "allow_large_file_behavior_changes": false
+  },
+  "validation": {
+    "scripts": [
+      "bench:ci:pr",
+      "ci:check:retrieval-quality-gate",
+      "ci:check:retrieval-shadow-canary-gate"
+    ],
+    "tests": [
+      "tests/ci/runBenchSuite.test.ts",
+      "tests/ci/generateRetrievalQualityReport.test.ts",
+      "tests/ci/generateRetrievalQualityTelemetry.test.ts",
+      "tests/serviceClient.test.ts"
+    ]
+  }
+}

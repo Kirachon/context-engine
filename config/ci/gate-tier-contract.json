@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "pr_blockers": {
+    "stable_local_transport_contract": "config/ci/local-transport-contract.json",
+    "scripts": [
+      "build",
+      "ci:check:mcp-smoke",
+      "ci:check:retrieval-holdout-fixture",
+      "ci:check:retrieval-quality-gate",
+      "ci:check:retrieval-shadow-canary-gate",
+      "ci:check:enhancement-error-taxonomy-report",
+      "ci:check:enhance-prompt-contract"
+    ],
+    "deterministic_review_quality": {
+      "receipt_type": "jest",
+      "corpus": "config/ci/review-quality-corpus.json",
+      "tests": [
+        "tests/tools/reviewDiff.test.ts",
+        "tests/ci/reviewDiffArtifacts.test.ts"
+      ]
+    }
+  },
+  "nightly_report_only": {
+    "scripts": [
+      "bench:ci:nightly",
+      "ci:generate:weekly-retrieval-trend-report",
+      "ci:check:weekly-retrieval-trend-report",
+      "ci:generate:semantic-latency-report"
+    ],
+    "grader_based_scoring": {
+      "mode": "report_only",
+      "activation": "post-calibration"
+    }
+  }
+}

@@ -114,6 +114,10 @@ export interface IndexResult {
   totalIndexable?: number;
   /** Number of files skipped because they were unchanged (when enabled). */
   unchangedSkipped?: number;
+  /** Deterministic counts for why files were skipped during indexing. */
+  skipReasons?: Partial<Record<IndexSkipReason, number>>;
+  /** Deterministic counts for file handling outcomes, including metadata-only fallbacks. */
+  fileOutcomes?: Partial<Record<IndexFileOutcome, number>>;
 }
 
 export interface StartupAutoIndexResult {
@@ -189,6 +193,7 @@ export interface ContextBundle {
     totalTokens: number;
     tokenBudget: number;
     truncated: boolean;
+    truncationReasons?: ContextTruncationReason[];
     searchTimeMs: number;
     memoriesIncluded?: number;
     externalSourcesRequested?: number;
@@ -196,6 +201,30 @@ export interface ContextBundle {
     externalWarnings?: GroundingWarning[];
   };
 }
+
+export type IndexSkipReason =
+  | 'file_too_large'
+  | 'binary_file'
+  | 'read_error'
+  | 'ignored_or_unsupported'
+  | 'invalid_path'
+  | 'unchanged';
+
+export type IndexFileOutcome =
+  | 'full_content'
+  | 'metadata_only'
+  | 'size_skip'
+  | 'binary_skip'
+  | 'read_error'
+  | 'ignored_or_unsupported'
+  | 'invalid_path'
+  | 'unchanged';
+
+type FileReadResult =
+  | { content: string; outcome: 'full_content' | 'metadata_only'; skipReason?: undefined }
+  | { content: null; outcome: 'size_skip' | 'binary_skip' | 'read_error'; skipReason: 'file_too_large' | 'binary_file' | 'read_error' };
+
+export type ContextTruncationReason = 'token_budget' | 'external_grounding';
 
 export type PathScopeOptions = PathScopeInput;
 
@@ -2060,17 +2089,64 @@ export class ContextServiceClient {
     return ratio > 0.1 || content.includes('\x00');
   }
 
+  private isLikelyBinaryBuffer(buffer: Buffer): boolean {
+    if (buffer.length === 0) {
+      return false;
+    }
+
+    let nonPrintableCount = 0;
+    for (const byte of buffer) {
+      if (byte === 0) {
+        return true;
+      }
+      if ((byte < 32 || byte > 126) && byte !== 9 && byte !== 10 && byte !== 13) {
+        nonPrintableCount += 1;
+      }
+    }
+
+    return (nonPrintableCount / buffer.length) > 0.1;
+  }
+
+  private buildLargeFileMetadataSummary(relativePath: string, sizeBytes: number, modifiedTimeMs: number): string {
+    return [
+      '[context-engine large-file metadata]',
+      `path: ${relativePath}`,
+      `extension: ${path.extname(relativePath) || '(none)'}`,
+      `size_bytes: ${sizeBytes}`,
+      `modified_time_ms: ${Math.trunc(modifiedTimeMs)}`,
+      'index_strategy: metadata_only',
+      'reason_code: metadata_only',
+      `safe_size_limit_bytes: ${MAX_FILE_SIZE}`,
+      'note: content omitted because the file exceeded the safe indexing threshold',
+    ].join('\n');
+  }
+
   /**
    * Read file contents with size limit check
    */
-  private readFileContents(relativePath: string): string | null {
+  private readFileContents(relativePath: string): FileReadResult {
     try {
       const fullPath = path.join(this.workspacePath, relativePath);
       const stats = fs.statSync(fullPath);
 
       if (stats.size > MAX_FILE_SIZE) {
-        console.error(`Skipping large file: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
-        return null;
+        const fd = fs.openSync(fullPath, 'r');
+        try {
+          const probeBuffer = Buffer.alloc(Math.min(8192, stats.size));
+          const bytesRead = fs.readSync(fd, probeBuffer, 0, probeBuffer.length, 0);
+          if (this.isLikelyBinaryBuffer(probeBuffer.subarray(0, bytesRead))) {
+            console.error(`Skipping large binary file: ${relativePath}`);
+            return { content: null, outcome: 'binary_skip', skipReason: 'binary_file' };
+          }
+        } finally {
+          fs.closeSync(fd);
+        }
+
+        console.error(`Indexing large file as metadata-only: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+        return {
+          content: this.buildLargeFileMetadataSummary(relativePath, stats.size, stats.mtimeMs),
+          outcome: 'metadata_only',
+        };
       }
 
       const content = fs.readFileSync(fullPath, 'utf-8');
@@ -2078,37 +2154,52 @@ export class ContextServiceClient {
       // Check for binary content
       if (this.isBinaryContent(content)) {
         console.error(`Skipping binary file: ${relativePath}`);
-        return null;
+        return { content: null, outcome: 'binary_skip', skipReason: 'binary_file' };
       }
 
-      return content;
+      return { content, outcome: 'full_content' };
     } catch (error) {
       console.error(`Error reading file ${relativePath}:`, error);
-      return null;
+      return { content: null, outcome: 'read_error', skipReason: 'read_error' };
     }
   }
 
-  private async readFileContentsAsync(relativePath: string): Promise<string | null> {
+  private async readFileContentsAsync(relativePath: string): Promise<FileReadResult> {
     try {
       const fullPath = path.join(this.workspacePath, relativePath);
       const stats = await fs.promises.stat(fullPath);
 
       if (stats.size > MAX_FILE_SIZE) {
-        console.error(`Skipping large file: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
-        return null;
+        const handle = await fs.promises.open(fullPath, 'r');
+        try {
+          const probeBuffer = Buffer.alloc(Math.min(8192, stats.size));
+          const { bytesRead } = await handle.read(probeBuffer, 0, probeBuffer.length, 0);
+          if (this.isLikelyBinaryBuffer(probeBuffer.subarray(0, bytesRead))) {
+            console.error(`Skipping large binary file: ${relativePath}`);
+            return { content: null, outcome: 'binary_skip', skipReason: 'binary_file' };
+          }
+        } finally {
+          await handle.close();
+        }
+
+        console.error(`Indexing large file as metadata-only: ${relativePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB)`);
+        return {
+          content: this.buildLargeFileMetadataSummary(relativePath, stats.size, stats.mtimeMs),
+          outcome: 'metadata_only',
+        };
       }
 
       const content = await fs.promises.readFile(fullPath, 'utf-8');
 
       if (this.isBinaryContent(content)) {
         console.error(`Skipping binary file: ${relativePath}`);
-        return null;
+        return { content: null, outcome: 'binary_skip', skipReason: 'binary_file' };
       }
 
-      return content;
+      return { content, outcome: 'full_content' };
     } catch (error) {
       console.error(`Error reading file ${relativePath}:`, error);
-      return null;
+      return { content: null, outcome: 'read_error', skipReason: 'read_error' };
     }
   }
 
@@ -2896,20 +2987,28 @@ export class ContextServiceClient {
     let indexed = 0;
     let skipped = 0;
     let unchangedSkipped = 0;
+    const skipReasons: Partial<Record<IndexSkipReason, number>> = {};
+    const fileOutcomes: Partial<Record<IndexFileOutcome, number>> = {};
     const skipUnchanged = Boolean(store) && featureEnabled('skip_unchanged_indexing');
 
     for (const relativePath of filePaths) {
-      const contents = await this.readFileContentsAsync(relativePath);
-      if (contents === null) {
+      const readResult = await this.readFileContentsAsync(relativePath);
+      if (readResult.content === null) {
         skipped += 1;
+        skipReasons[readResult.skipReason] = (skipReasons[readResult.skipReason] ?? 0) + 1;
+        fileOutcomes[readResult.outcome] = (fileOutcomes[readResult.outcome] ?? 0) + 1;
         continue;
       }
+      const contents = readResult.content;
+      fileOutcomes[readResult.outcome] = (fileOutcomes[readResult.outcome] ?? 0) + 1;
 
       const nextHash = this.hashContent(contents);
       if (skipUnchanged) {
         const previous = prior?.files[relativePath];
         if (previous?.hash === nextHash) {
           unchangedSkipped += 1;
+          skipReasons.unchanged = (skipReasons.unchanged ?? 0) + 1;
+          fileOutcomes.unchanged = (fileOutcomes.unchanged ?? 0) + 1;
           nextFiles[relativePath] = previous;
           continue;
         }
@@ -2951,6 +3050,8 @@ export class ContextServiceClient {
       duration: Date.now() - startTime,
       totalIndexable: filePaths.length - skipped,
       unchangedSkipped,
+      skipReasons: Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
+      fileOutcomes: Object.keys(fileOutcomes).length > 0 ? fileOutcomes : undefined,
     };
   }
 
@@ -2960,6 +3061,8 @@ export class ContextServiceClient {
     const uniquePaths = Array.from(new Set(filePaths));
     const normalizedPaths: string[] = [];
     let skipped = 0;
+    const skipReasons: Partial<Record<IndexSkipReason, number>> = {};
+    const fileOutcomes: Partial<Record<IndexFileOutcome, number>> = {};
 
     for (const rawPath of uniquePaths) {
       const relativePath = path.isAbsolute(rawPath)
@@ -2967,10 +3070,14 @@ export class ContextServiceClient {
         : rawPath;
       if (!relativePath || relativePath.startsWith('..')) {
         skipped += 1;
+        skipReasons.invalid_path = (skipReasons.invalid_path ?? 0) + 1;
+        fileOutcomes.invalid_path = (fileOutcomes.invalid_path ?? 0) + 1;
         continue;
       }
       if (this.shouldIgnorePath(relativePath) || !this.shouldIndexFile(relativePath)) {
         skipped += 1;
+        skipReasons.ignored_or_unsupported = (skipReasons.ignored_or_unsupported ?? 0) + 1;
+        fileOutcomes.ignored_or_unsupported = (fileOutcomes.ignored_or_unsupported ?? 0) + 1;
         continue;
       }
       normalizedPaths.push(relativePath);
@@ -2997,14 +3104,18 @@ export class ContextServiceClient {
     let indexed = 0;
 
     for (const relativePath of normalizedPaths) {
-      const contents = await this.readFileContentsAsync(relativePath);
-      if (contents === null) {
+      const readResult = await this.readFileContentsAsync(relativePath);
+      if (readResult.content === null) {
         skipped += 1;
+        skipReasons[readResult.skipReason] = (skipReasons[readResult.skipReason] ?? 0) + 1;
+        fileOutcomes[readResult.outcome] = (fileOutcomes[readResult.outcome] ?? 0) + 1;
         if (store) {
           delete nextFiles[relativePath];
         }
         continue;
       }
+      const contents = readResult.content;
+      fileOutcomes[readResult.outcome] = (fileOutcomes[readResult.outcome] ?? 0) + 1;
       indexed += 1;
       if (store) {
         nextFiles[relativePath] = {
@@ -3039,6 +3150,8 @@ export class ContextServiceClient {
       skipped,
       errors: indexed > 0 ? [] : ['No indexable file changes provided'],
       duration: Date.now() - startTime,
+      skipReasons: Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
+      fileOutcomes: Object.keys(fileOutcomes).length > 0 ? fileOutcomes : undefined,
     };
   }
 
@@ -4615,6 +4728,7 @@ export class ContextServiceClient {
 
     // Track token usage
     let truncated = false;
+    const truncationReasons = new Set<ContextTruncationReason>();
     const existingPaths = new Set(sortedFiles.map(([p]) => p));
 
     // Calculate per-file budget upfront for parallel processing
@@ -4642,8 +4756,14 @@ export class ContextServiceClient {
         const snippetBudget = Math.floor(perFileBudget / results.length);
         const smartContent = this.extractSmartSnippet(result.content, snippetBudget);
         const tokenCount = this.estimateTokens(smartContent);
+        if (this.estimateTokens(result.content) > snippetBudget) {
+          truncated = true;
+          truncationReasons.add('token_budget');
+        }
 
         if (fileTokens + tokenCount > perFileBudget) {
+          truncated = true;
+          truncationReasons.add('token_budget');
           break;
         }
 
@@ -4709,6 +4829,7 @@ export class ContextServiceClient {
     // Check if we exceeded the budget (mark as truncated)
     if (totalTokens > tokenBudget) {
       truncated = true;
+      truncationReasons.add('token_budget');
       // Trim files to fit budget (keeping highest relevance first - already sorted)
       totalTokens = 0;
       const trimmedFiles: FileContext[] = [];
@@ -4773,6 +4894,14 @@ export class ContextServiceClient {
         totalTokens,
         tokenBudget,
         truncated: truncated || externalGrounding.truncated,
+        ...(truncationReasons.size > 0 || externalGrounding.truncated
+          ? {
+              truncationReasons: [
+                ...truncationReasons,
+                ...(externalGrounding.truncated ? ['external_grounding' as const] : []),
+              ],
+            }
+          : {}),
         searchTimeMs,
         memoriesIncluded: memories.length,
         ...(externalSources?.length

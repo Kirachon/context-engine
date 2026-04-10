@@ -1995,6 +1995,39 @@ describe('ContextServiceClient', () => {
       expect(semanticSearchSpy).toHaveBeenCalledTimes(1);
       expect(bundle.files[0]?.path).toBe('src/fallback.ts');
     });
+
+    it('should report token-budget truncation reasons in context metadata', async () => {
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/alpha.ts',
+          content: 'export const alpha = "' + 'x'.repeat(1200) + '";',
+          relevanceScore: 0.95,
+          lines: '1-3',
+        },
+        {
+          path: 'src/beta.ts',
+          content: 'export const beta = "' + 'y'.repeat(1200) + '";',
+          relevanceScore: 0.9,
+          lines: '1-3',
+        },
+      ]);
+      const estimateTokensSpy = jest
+        .spyOn(client as any, 'estimateTokens')
+        .mockImplementation((text: unknown) => (typeof text === 'string' && text.includes('export const') ? 120 : 8));
+
+      const bundle = await client.getContextForPrompt('truncation receipt test', {
+        maxFiles: 2,
+        tokenBudget: 200,
+        includeMemories: false,
+        includeRelated: false,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).toHaveBeenCalledTimes(1);
+      expect(estimateTokensSpy).toHaveBeenCalled();
+      expect(bundle.metadata.truncated).toBe(true);
+      expect(bundle.metadata.truncationReasons).toContain('token_budget');
+    });
   });
 
   describe('Index Workspace', () => {
@@ -2004,6 +2037,111 @@ describe('ContextServiceClient', () => {
       expect(result.errors).toEqual([]);
       expect(result.indexed).toBeGreaterThan(0);
       expect(mockContextInstance.addToIndex).not.toHaveBeenCalled();
+    });
+
+    it('should index oversized text files using deterministic metadata-only outcomes', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-skip-receipts-'));
+
+      try {
+        const largeFilePath = path.join(tempDir, 'large.ts');
+        fs.writeFileSync(largeFilePath, 'x'.repeat(1024 * 1024 + 16), 'utf-8');
+
+        const receiptClient = new ContextServiceClient(tempDir);
+        const result = await receiptClient.indexFiles(['large.ts']);
+
+        expect(result.indexed).toBe(1);
+        expect(result.skipped).toBe(0);
+        expect(result.skipReasons).toBeUndefined();
+        expect(result.fileOutcomes).toMatchObject({
+          metadata_only: 1,
+        });
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should reindex oversized metadata-only files when contents change without changing file size', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-metadata-refresh-'));
+      FEATURE_FLAGS.index_state_store = true;
+      FEATURE_FLAGS.skip_unchanged_indexing = true;
+
+      try {
+        const largeFilePath = path.join(tempDir, 'large.ts');
+        const oversizedLength = 1024 * 1024 + 16;
+        fs.writeFileSync(largeFilePath, 'a'.repeat(oversizedLength), 'utf-8');
+
+        const receiptClient = new ContextServiceClient(tempDir);
+        const firstResult = await receiptClient.indexFiles(['large.ts']);
+
+        expect(firstResult.indexed).toBe(1);
+        expect(firstResult.fileOutcomes).toMatchObject({
+          metadata_only: 1,
+        });
+
+        fs.writeFileSync(largeFilePath, 'b'.repeat(oversizedLength), 'utf-8');
+        const bumpedTime = new Date(Date.now() + 2000);
+        fs.utimesSync(largeFilePath, bumpedTime, bumpedTime);
+
+        const secondResult = await receiptClient.indexFiles(['large.ts']);
+
+        expect(secondResult.indexed).toBe(1);
+        expect(secondResult.unchangedSkipped ?? 0).toBe(0);
+        expect(secondResult.skipReasons?.unchanged ?? 0).toBe(0);
+        expect(secondResult.fileOutcomes).toMatchObject({
+          metadata_only: 1,
+        });
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should continue to report binary skips distinctly from metadata-only large text handling', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-binary-skip-'));
+
+      try {
+        const binaryFilePath = path.join(tempDir, 'binary.ts');
+        fs.writeFileSync(binaryFilePath, Buffer.from([0, 159, 146, 150, 0, 1, 2, 3]));
+
+        const receiptClient = new ContextServiceClient(tempDir);
+        const result = await receiptClient.indexFiles(['binary.ts']);
+
+        expect(result.indexed).toBe(0);
+        expect(result.skipped).toBe(1);
+        expect(result.skipReasons).toMatchObject({
+          binary_file: 1,
+        });
+        expect(result.fileOutcomes).toMatchObject({
+          binary_skip: 1,
+        });
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should keep oversized binary files classified as binary skips instead of metadata-only', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-index-large-binary-skip-'));
+
+      try {
+        const binaryFilePath = path.join(tempDir, 'binary-large.ts');
+        fs.writeFileSync(binaryFilePath, Buffer.concat([
+          Buffer.from([0, 159, 146, 150, 0, 1, 2, 3]),
+          Buffer.alloc(1024 * 1024 + 32, 1),
+        ]));
+
+        const receiptClient = new ContextServiceClient(tempDir);
+        const result = await receiptClient.indexFiles(['binary-large.ts']);
+
+        expect(result.indexed).toBe(0);
+        expect(result.skipped).toBe(1);
+        expect(result.skipReasons).toMatchObject({
+          binary_file: 1,
+        });
+        expect(result.fileOutcomes).toMatchObject({
+          binary_skip: 1,
+        });
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
 
     it('should clear cache after indexing', async () => {

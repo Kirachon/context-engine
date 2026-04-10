@@ -138,6 +138,35 @@ export type ServerCapabilityOptions = {
   prompts?: boolean;
 };
 
+type AdvertisedServerCapability = {
+  capability: Record<string, unknown> | undefined;
+  runtimeReceipts: string[];
+};
+
+export const SERVER_CAPABILITY_PARITY: Readonly<{
+  tools: AdvertisedServerCapability;
+  resources: AdvertisedServerCapability;
+  prompts: AdvertisedServerCapability;
+  logging: AdvertisedServerCapability;
+}> = Object.freeze({
+  tools: {
+    capability: Object.freeze({ listChanged: true }),
+    runtimeReceipts: ['ListToolsRequestSchema', 'CallToolRequestSchema'],
+  },
+  resources: {
+    capability: Object.freeze({ subscribe: false, listChanged: true }),
+    runtimeReceipts: ['ListResourcesRequestSchema', 'ReadResourceRequestSchema'],
+  },
+  prompts: {
+    capability: Object.freeze({ listChanged: true }),
+    runtimeReceipts: ['ListPromptsRequestSchema', 'GetPromptRequestSchema'],
+  },
+  logging: {
+    capability: undefined,
+    runtimeReceipts: [],
+  },
+});
+
 const TOOL_MANIFEST_RESOURCE_URI = 'context-engine://tool-manifest';
 const PLAN_RESOURCE_URI_PREFIX = 'context-engine://plans/';
 const PLAN_HISTORY_RESOURCE_URI_PREFIX = 'context-engine://plan-history/';
@@ -182,14 +211,14 @@ export const PROMPT_DEFINITIONS: PromptDescriptor[] = [
 
 export function createServerCapabilities(options?: ServerCapabilityOptions): Record<string, unknown> {
   const capabilities: Record<string, unknown> = {
-    tools: { listChanged: true },
+    tools: SERVER_CAPABILITY_PARITY.tools.capability,
   };
 
   if (options?.resources) {
-    capabilities.resources = { subscribe: false, listChanged: true };
+    capabilities.resources = SERVER_CAPABILITY_PARITY.resources.capability;
   }
   if (options?.prompts) {
-    capabilities.prompts = { listChanged: true };
+    capabilities.prompts = SERVER_CAPABILITY_PARITY.prompts.capability;
   }
 
   return capabilities;
