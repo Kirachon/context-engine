@@ -558,6 +558,7 @@ function withWorkspaceArgs(args: string[], workspace: string): string[] {
 }
 
 function runCompare(
+  mode: SuiteMode,
   baselinePath: string,
   candidatePath: string,
   metricPath: string,
@@ -653,6 +654,6 @@ async function main(): Promise<void> {
   // eslint-disable-next-line no-console
   console.log(`Compare metric: ${runConfig.metricPath}`);
 
-  runCompare(baselinePath, candidatePath, runConfig.metricPath, runConfig.thresholds);
+  runCompare(args.mode, baselinePath, candidatePath, runConfig.metricPath, runConfig.thresholds);
 }
 
