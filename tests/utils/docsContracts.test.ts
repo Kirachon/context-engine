@@ -46,4 +46,18 @@ describe('documentation contracts', () => {
     expect(text).not.toContain('get_plan_status');
     expect(text).not.toContain('generate_plan');
   });
+
+  it('active documentation status points to the next-tranche plan as active and preserves the prior plan as ledger', () => {
+    const architecture = readUtf8('ARCHITECTURE.md');
+    const advancedPlan = readUtf8('docs/advanced-mcp-ux-and-hosted-maturity-plan.md');
+
+    expect(architecture).toContain('Active delivery plan: `context-engine-next-tranche-swarm-plan.md`');
+    expect(architecture).toContain('Execution ledger: `context-engine-improvement-swarm-plan.md`');
+    expect(advancedPlan).toContain(
+      '`context-engine-next-tranche-swarm-plan.md` is the active execution plan.'
+    );
+    expect(advancedPlan).toContain(
+      '`context-engine-improvement-swarm-plan.md` is the completed execution ledger.'
+    );
+  });
 });

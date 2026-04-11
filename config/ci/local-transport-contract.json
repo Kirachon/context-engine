@@ -23,6 +23,7 @@
     "denied_origin_status": 403
   },
   "auth_hook": {
+    "status": "provisional_local_plumbing_only",
     "default_mode": "disabled",
     "configured_scope": "all_mcp_verbs",
     "unauthorized_status": 401

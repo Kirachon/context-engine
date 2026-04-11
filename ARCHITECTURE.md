@@ -6,9 +6,11 @@ Detailed architecture documentation for the Context Engine MCP Server.
 
 > Current doc status:
 > - Architecture reference: `ARCHITECTURE.md`
-> - Active delivery plan: `context-engine-improvement-swarm-plan.md`
+> - Active delivery plan: `context-engine-next-tranche-swarm-plan.md`
+> - Execution ledger: `context-engine-improvement-swarm-plan.md`
 > - Planning-only follow-on artifact: `docs/advanced-mcp-ux-and-hosted-maturity-plan.md`
 > - Older roadmap and modernization docs under `docs/` are scoped reference artifacts unless they explicitly replace the active delivery plan.
+> - Source-of-truth hierarchy: runtime code + `config/ci/*` contracts > `ARCHITECTURE.md` > active delivery plan > execution ledger.
 
 ## Overview
 

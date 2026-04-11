@@ -2,11 +2,12 @@
 
 **Generated**: 2026-04-10
 
-> Status: Active delivery plan
+> Status: Execution ledger (completed tranche)
 >
-> This is the single active execution plan for the current improvement program.
+> This file is preserved as historical execution evidence for T0-T13.
+> `context-engine-next-tranche-swarm-plan.md` is the active delivery plan.
 > `ARCHITECTURE.md` remains the architecture reference.
-> `docs/advanced-mcp-ux-and-hosted-maturity-plan.md` is a planning-only follow-on artifact, not a second active delivery plan.
+> `docs/advanced-mcp-ux-and-hosted-maturity-plan.md` remains a planning-only follow-on artifact.
 
 ## Overview
 Recast the improvement roadmap as a dependency-aware, parallel-safe swarm plan. The first execution slices stay additive and low-risk: freeze current truth, harden the MCP transport and capability surface, then extend existing gates and observability, then move into retrieval calibration and large-file behavior. Docs cleanup and advanced MCP UX stay late so they do not interfere with transport or measurement receipts.

@@ -40,6 +40,8 @@ describe('config/ci/retrieval-calibration-contract.json', () => {
     expect(contract.frozen_contracts).toEqual({
       benchmark_eval: 'config/ci/benchmark-eval-contract.json',
       gate_tiers: 'config/ci/gate-tier-contract.json',
+      decision_thresholds: 'config/ci/retrieval-decision-thresholds.json',
+      rollback_evidence: 'config/ci/retrieval-rollback-evidence-contract.json',
     });
     expect(contract.artifacts).toEqual({
       baseline: 'artifacts/bench/pr-baseline.json',
@@ -60,7 +62,11 @@ describe('config/ci/retrieval-calibration-contract.json', () => {
     ]);
     expect(contract.diagnostic_receipts).toEqual({
       skip_reasons: 'ContextServiceClient.IndexResult.skipReasons',
+      skip_reason_total: 'ContextServiceClient.IndexResult.skipReasonTotal',
+      file_outcomes: 'ContextServiceClient.IndexResult.fileOutcomes',
+      file_outcome_total: 'ContextServiceClient.IndexResult.fileOutcomeTotal',
       truncation_reasons: 'ContextBundle.metadata.truncationReasons',
+      memory_candidate_count: 'ContextBundle.metadata.memoryCandidates',
     });
     expect(contract.runtime_change_policy).toEqual({
       allow_default_profile_changes: false,

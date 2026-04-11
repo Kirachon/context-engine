@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "workload_pack_contract": "config/ci/benchmark-eval-contract.json",
+  "required_artifacts": {
+    "baseline": "artifacts/bench/pr-baseline.json",
+    "candidate": "artifacts/bench/pr-candidate.json",
+    "rollback": "artifacts/bench/pr-rollback.json"
+  },
+  "required_sections": [
+    "change_summary",
+    "trigger_conditions",
+    "rollback_result"
+  ],
+  "policy": {
+    "behavior_changing_retrieval_slices_require_rollback_evidence": true,
+    "same_workload_pack_required_for_baseline_and_candidate": true
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "version": 1,
+  "artifact_inputs": {
+    "baseline": "artifacts/bench/pr-baseline.json",
+    "candidate": "artifacts/bench/pr-candidate.json"
+  },
+  "metrics": {
+    "p95_latency_ms": {
+      "comparator": "lte_delta_pct",
+      "threshold": 20,
+      "required": true
+    },
+    "blank_result_rate_pct": {
+      "comparator": "lte_absolute",
+      "threshold": 12,
+      "required": true
+    },
+    "fallback_rate_pct": {
+      "comparator": "lte_absolute",
+      "threshold": 25,
+      "required": true
+    },
+    "scope_leakage_rate_pct": {
+      "comparator": "lte_absolute",
+      "threshold": 2,
+      "required": true
+    },
+    "large_file_metadata_only_rate_pct": {
+      "comparator": "lte_absolute",
+      "threshold": 35,
+      "required": false
+    },
+    "large_file_size_skip_rate_pct": {
+      "comparator": "lte_absolute",
+      "threshold": 20,
+      "required": false
+    }
+  },
+  "required_receipts": {
+    "skip_reasons": "ContextServiceClient.IndexResult.skipReasons",
+    "skip_reason_total": "ContextServiceClient.IndexResult.skipReasonTotal",
+    "file_outcomes": "ContextServiceClient.IndexResult.fileOutcomes",
+    "file_outcome_total": "ContextServiceClient.IndexResult.fileOutcomeTotal",
+    "truncation_reasons": "ContextBundle.metadata.truncationReasons"
+  }
+}

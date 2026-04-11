@@ -21,6 +21,7 @@ type LocalTransportContract = {
     denied_origin_status: number;
   };
   auth_hook: {
+    status: string;
     default_mode: string;
     configured_scope: string;
     unauthorized_status: number;
@@ -65,6 +66,7 @@ describe('config/ci/local-transport-contract.json', () => {
       'vscode-webview://*',
     ]);
     expect(contract.auth_hook).toEqual({
+      status: 'provisional_local_plumbing_only',
       default_mode: 'disabled',
       configured_scope: 'all_mcp_verbs',
       unauthorized_status: 401,

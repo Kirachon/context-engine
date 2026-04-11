@@ -5,7 +5,8 @@
 > Status: Planning-only follow-on artifact
 >
 > This document is not the active delivery plan.
-> `context-engine-improvement-swarm-plan.md` remains the single active execution plan.
+> `context-engine-next-tranche-swarm-plan.md` is the active execution plan.
+> `context-engine-improvement-swarm-plan.md` is the completed execution ledger.
 > `ARCHITECTURE.md` remains the architecture reference.
 
 ## Summary
@@ -47,6 +48,7 @@ If any of those contracts or receipt surfaces change, re-freeze them first and u
 - Capability flags follow tested runtime behavior, never the other way around.
 - Local receipts remain the release gate for any hosted path.
 - Hosted maturity is an extension of the local-first server, not a separate product line.
+- The current `authHook` remains provisional local plumbing and is not a hosted auth contract.
 - If an MCP capability can be satisfied by an existing Context Engine surface, prefer mapping and reuse over parallel systems.
 - Every new capability needs:
   - an explicit contract
@@ -136,6 +138,19 @@ The next implementation-facing plan should not start until it creates or updates
 - tasks decision record or bridge contract
 - hosted auth/origin/session contract
 - advanced MCP UX readiness gate
+
+## Unresolved Decision Register
+- Subscriptions lifecycle semantics:
+  - confirm replay/drop behavior for reconnecting sessions
+  - confirm unknown-session behavior for notification streams
+- Completions scope:
+  - decide whether completions should only cover known tool/prompt arguments in v1
+- Tasks capability decision:
+  - decide whether MCP tasks should be implemented directly or mapped to existing plan/execution tools
+- Hosted auth model:
+  - choose auth mode and rotation/expiry model before any hosted-default guidance
+- Automatic memory capture:
+  - keep default as manual-only unless explicit opt-in and deterministic safeguards are approved
 
 ## Validation
 - Doc-only consistency check:

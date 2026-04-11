@@ -1,0 +1,109 @@
+{
+  "version": 1,
+  "hierarchy": [
+    "runtime_code_and_ci_contracts",
+    "architecture_reference",
+    "active_delivery_plan",
+    "execution_ledger"
+  ],
+  "lifecycle_states": [
+    "active",
+    "planning-only",
+    "reference-only",
+    "retired"
+  ],
+  "documentation_roles": {
+    "architecture_reference": "ARCHITECTURE.md",
+    "active_delivery_plan": "context-engine-next-tranche-swarm-plan.md",
+    "execution_ledger": "context-engine-improvement-swarm-plan.md",
+    "planning_only": [
+      "docs/advanced-mcp-ux-and-hosted-maturity-plan.md"
+    ]
+  },
+  "ownership_lanes": {
+    "platform_transport": "platform-transport",
+    "eval_gates": "eval-gates",
+    "retrieval": "retrieval",
+    "docs_release": "docs-release"
+  },
+  "change_control": {
+    "require_paired_tests": true,
+    "require_consuming_gate_reference": true,
+    "pr_blockers_must_be_deterministic": true,
+    "nightly_to_blocker_promotion_requires_contract_update": true
+  },
+  "gate_tier_expectations": {
+    "ci:check:mcp-smoke": "pr_blocker",
+    "ci:check:retrieval-quality-gate": "pr_blocker",
+    "ci:check:retrieval-shadow-canary-gate": "pr_blocker"
+  },
+  "governed_contracts": [
+    {
+      "path": "config/ci/governance-contract.json",
+      "owner_lane": "docs_release",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/governanceContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:mcp-smoke"
+      ]
+    },
+    {
+      "path": "config/ci/local-transport-contract.json",
+      "owner_lane": "platform_transport",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/localTransportContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:mcp-smoke"
+      ]
+    },
+    {
+      "path": "config/ci/gate-tier-contract.json",
+      "owner_lane": "eval_gates",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/gateTierContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:mcp-smoke"
+      ]
+    },
+    {
+      "path": "config/ci/retrieval-calibration-contract.json",
+      "owner_lane": "retrieval",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/retrievalCalibrationContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:retrieval-quality-gate",
+        "ci:check:retrieval-shadow-canary-gate"
+      ]
+    },
+    {
+      "path": "config/ci/retrieval-decision-thresholds.json",
+      "owner_lane": "retrieval",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/retrievalDecisionThresholdsContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:retrieval-quality-gate"
+      ]
+    },
+    {
+      "path": "config/ci/retrieval-rollback-evidence-contract.json",
+      "owner_lane": "retrieval",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/retrievalRollbackEvidenceContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:retrieval-shadow-canary-gate"
+      ]
+    }
+  ]
+}
