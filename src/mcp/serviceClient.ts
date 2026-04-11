@@ -116,8 +116,12 @@ export interface IndexResult {
   unchangedSkipped?: number;
   /** Deterministic counts for why files were skipped during indexing. */
   skipReasons?: Partial<Record<IndexSkipReason, number>>;
+  /** Deterministic denominator for skip reason ratio calculations. */
+  skipReasonTotal?: number;
   /** Deterministic counts for file handling outcomes, including metadata-only fallbacks. */
   fileOutcomes?: Partial<Record<IndexFileOutcome, number>>;
+  /** Deterministic denominator for file outcome ratio calculations. */
+  fileOutcomeTotal?: number;
 }
 
 export interface StartupAutoIndexResult {
@@ -162,6 +166,8 @@ export interface FileContext {
 }
 
 /** A memory entry retrieved from .memories/ directory */
+export type MemoryPriority = 'critical' | 'helpful' | 'archive';
+
 export interface MemoryEntry {
   /** Category of the memory (preferences, decisions, facts) */
   category: string;
@@ -169,6 +175,32 @@ export interface MemoryEntry {
   content: string;
   /** Relevance score (0-1) */
   relevanceScore: number;
+  /** Optional title parsed from memory heading */
+  title?: string;
+  /** Optional subtype tag (for example: review_finding, incident) */
+  subtype?: string;
+  /** Optional priority used by ranking */
+  priority?: MemoryPriority;
+  /** Optional metadata tags */
+  tags?: string[];
+  /** Optional source reference */
+  source?: string;
+  /** Optional linked file paths */
+  linkedFiles?: string[];
+  /** Optional linked plan identifiers */
+  linkedPlans?: string[];
+  /** Optional evidence reference */
+  evidence?: string;
+  /** Optional owner for lifecycle maintenance */
+  owner?: string;
+  /** Optional created timestamp (ISO) */
+  createdAt?: string;
+  /** Optional updated timestamp (ISO) */
+  updatedAt?: string;
+  /** True when selected as part of the startup memory pack */
+  startupPack?: boolean;
+  /** Final ranking score used for sorting */
+  rankScore?: number;
 }
 
 export interface ContextBundle {
@@ -196,6 +228,8 @@ export interface ContextBundle {
     truncationReasons?: ContextTruncationReason[];
     searchTimeMs: number;
     memoriesIncluded?: number;
+    memoryCandidates?: number;
+    memoriesStartupPackIncluded?: number;
     externalSourcesRequested?: number;
     externalSourcesUsed?: number;
     externalWarnings?: GroundingWarning[];
@@ -259,6 +293,12 @@ export interface SearchDiagnostics {
   filters_applied: string[];
   filtered_paths_count: number;
   second_pass_used: boolean;
+}
+
+interface MemoryRetrievalResult {
+  selected: MemoryEntry[];
+  candidateCount: number;
+  startupPackCount: number;
 }
 
 type ChunkSearchEngine = {
@@ -3043,6 +3083,9 @@ export class ContextServiceClient {
     });
     this.clearCache();
 
+    const skipReasonTotal = Object.values(skipReasons).reduce((sum, count) => sum + (count ?? 0), 0);
+    const fileOutcomeTotal = Object.values(fileOutcomes).reduce((sum, count) => sum + (count ?? 0), 0);
+
     return {
       indexed,
       skipped: skipped + unchangedSkipped,
@@ -3051,7 +3094,9 @@ export class ContextServiceClient {
       totalIndexable: filePaths.length - skipped,
       unchangedSkipped,
       skipReasons: Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
+      skipReasonTotal: skipReasonTotal > 0 ? skipReasonTotal : undefined,
       fileOutcomes: Object.keys(fileOutcomes).length > 0 ? fileOutcomes : undefined,
+      fileOutcomeTotal: fileOutcomeTotal > 0 ? fileOutcomeTotal : undefined,
     };
   }
 
@@ -3145,13 +3190,18 @@ export class ContextServiceClient {
     });
     this.clearCache();
 
+    const skipReasonTotal = Object.values(skipReasons).reduce((sum, count) => sum + (count ?? 0), 0);
+    const fileOutcomeTotal = Object.values(fileOutcomes).reduce((sum, count) => sum + (count ?? 0), 0);
+
     return {
       indexed,
       skipped,
       errors: indexed > 0 ? [] : ['No indexable file changes provided'],
       duration: Date.now() - startTime,
       skipReasons: Object.keys(skipReasons).length > 0 ? skipReasons : undefined,
+      skipReasonTotal: skipReasonTotal > 0 ? skipReasonTotal : undefined,
       fileOutcomes: Object.keys(fileOutcomes).length > 0 ? fileOutcomes : undefined,
+      fileOutcomeTotal: fileOutcomeTotal > 0 ? fileOutcomeTotal : undefined,
     };
   }
 
@@ -4565,43 +4615,154 @@ export class ContextServiceClient {
     return result.trim();
   }
 
+  private parseMetadataListField(rawValue?: string): string[] | undefined {
+    if (!rawValue) return undefined;
+    const entries = rawValue
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    return entries.length > 0 ? entries : undefined;
+  }
+
+  private parseMemoryEntry(result: SearchResult): MemoryEntry {
+    const lines = result.content.split('\n');
+    const metadata = new Map<string, string>();
+    let title: string | undefined;
+
+    for (const line of lines) {
+      const headingMatch = /^###\s+\[[^\]]+\]\s+(.+)$/.exec(line.trim());
+      if (headingMatch) {
+        title = headingMatch[1].trim();
+      }
+      const metadataMatch = /^-\s+\[meta\]\s+([a-z_]+)\s*:\s*(.+)$/.exec(line.trim());
+      if (metadataMatch) {
+        metadata.set(metadataMatch[1], metadataMatch[2].trim());
+      }
+    }
+
+    const fileName = path.basename(result.path, '.md');
+    return {
+      category: fileName,
+      content: result.content,
+      relevanceScore: result.relevanceScore || 0.5,
+      title,
+      subtype: metadata.get('subtype'),
+      priority: metadata.get('priority') as MemoryPriority | undefined,
+      tags: this.parseMetadataListField(metadata.get('tags')),
+      source: metadata.get('source'),
+      linkedFiles: this.parseMetadataListField(metadata.get('linked_files')),
+      linkedPlans: this.parseMetadataListField(metadata.get('linked_plans')),
+      evidence: metadata.get('evidence'),
+      owner: metadata.get('owner'),
+      createdAt: metadata.get('created_at'),
+      updatedAt: metadata.get('updated_at'),
+    };
+  }
+
+  private calculateMemoryRankScore(memory: MemoryEntry): number {
+    const base = memory.relevanceScore || 0.5;
+    let score = base;
+
+    if (memory.priority === 'critical') score += 0.12;
+    else if (memory.priority === 'helpful') score += 0.06;
+    else if (memory.priority === 'archive') score -= 0.04;
+
+    if (memory.category === 'decisions') score += 0.06;
+    if (memory.category === 'preferences') score += 0.03;
+
+    if (memory.subtype === 'review_finding' || memory.subtype === 'failed_attempt') {
+      score += 0.04;
+    } else if (memory.subtype === 'incident' || memory.subtype === 'plan_note') {
+      score += 0.02;
+    }
+
+    const updatedAt = memory.updatedAt || memory.createdAt;
+    if (updatedAt) {
+      const ageDays = Math.floor((Date.now() - Date.parse(updatedAt)) / (1000 * 60 * 60 * 24));
+      if (!Number.isNaN(ageDays) && ageDays >= 0) {
+        if (ageDays <= 14) score += 0.08;
+        else if (ageDays <= 60) score += 0.04;
+        else if (ageDays <= 180) score += 0.02;
+      }
+    }
+
+    return Math.min(1, Math.max(0, score));
+  }
+
+  private buildStartupMemoryPack(memories: MemoryEntry[], limit: number): MemoryEntry[] {
+    const startupCandidates = memories
+      .filter((memory) => memory.priority === 'critical' || memory.category === 'decisions' || memory.category === 'preferences')
+      .sort((a, b) => (b.rankScore || 0) - (a.rankScore || 0))
+      .slice(0, limit)
+      .map((memory) => ({ ...memory, startupPack: true }));
+    return startupCandidates;
+  }
+
   /**
    * Retrieve relevant memories from .memories/ directory
    * Memories are searched semantically alongside code context
    */
-  private async getRelevantMemories(query: string, maxMemories: number = 5): Promise<MemoryEntry[]> {
+  private async getRelevantMemories(query: string, maxMemories: number = 5): Promise<MemoryRetrievalResult> {
     const memoriesPath = path.join(this.workspacePath, MEMORIES_DIR);
 
     // Check if memories directory exists
     if (!fs.existsSync(memoriesPath)) {
-      return [];
+      return { selected: [], candidateCount: 0, startupPackCount: 0 };
     }
 
     const memories: MemoryEntry[] = [];
 
     // Search for memories in the indexed content
     try {
-      const searchResults = await this.semanticSearch(query, maxMemories * 2);
+      const searchResults = await this.semanticSearch(query, maxMemories * 3);
 
       // Filter to only memory files
       const memoryResults = searchResults.filter(r =>
         r.path.startsWith(MEMORIES_DIR + '/') || r.path.startsWith(MEMORIES_DIR + '\\')
       );
 
-      // Extract category from file path and build memory entries
-      for (const result of memoryResults.slice(0, maxMemories)) {
-        const fileName = path.basename(result.path, '.md');
-        memories.push({
-          category: fileName,
-          content: result.content,
-          relevanceScore: result.relevanceScore || 0.5,
-        });
+      // Extract metadata and build memory entries
+      for (const result of memoryResults) {
+        const memory = this.parseMemoryEntry(result);
+        memory.rankScore = this.calculateMemoryRankScore(memory);
+        memories.push(memory);
       }
+
+      const uniqueMemories = new Map<string, MemoryEntry>();
+      for (const memory of memories) {
+        const key = `${memory.category}:${memory.title || ''}:${memory.content.slice(0, 160)}`;
+        if (!uniqueMemories.has(key)) {
+          uniqueMemories.set(key, memory);
+        }
+      }
+
+      const ranked = Array.from(uniqueMemories.values())
+        .sort((a, b) => (b.rankScore || 0) - (a.rankScore || 0));
+      const startupPack = this.buildStartupMemoryPack(ranked, Math.min(2, maxMemories));
+      const selected: MemoryEntry[] = [];
+      const selectedKeys = new Set<string>();
+      for (const startupMemory of startupPack) {
+        const key = `${startupMemory.category}:${startupMemory.title || ''}:${startupMemory.content.slice(0, 160)}`;
+        selectedKeys.add(key);
+        selected.push(startupMemory);
+      }
+      for (const memory of ranked) {
+        if (selected.length >= maxMemories) break;
+        const key = `${memory.category}:${memory.title || ''}:${memory.content.slice(0, 160)}`;
+        if (selectedKeys.has(key)) continue;
+        selected.push(memory);
+      }
+
+      return {
+        selected,
+        candidateCount: ranked.length,
+        startupPackCount: startupPack.length,
+      };
     } catch (error) {
       console.error('[getRelevantMemories] Error searching memories:', error);
     }
 
-    return memories;
+    return { selected: [], candidateCount: 0, startupPackCount: 0 };
   }
 
   /**
@@ -4695,10 +4856,13 @@ export class ContextServiceClient {
       : semanticSearch(query, maxFiles * 3);
 
     // Perform search and memory retrieval in parallel
-    const [searchResults, memories] = await Promise.all([
+    const [searchResults, memoryRetrieval] = await Promise.all([
       searchResultsPromise,
-      includeMemories ? this.getRelevantMemories(query, 5) : Promise.resolve([]),
+      includeMemories
+        ? this.getRelevantMemories(query, 5)
+        : Promise.resolve({ selected: [], candidateCount: 0, startupPackCount: 0 }),
     ]);
+    const memories = memoryRetrieval.selected;
 
     // Filter by minimum relevance
     const relevantResults = searchResults.filter(
@@ -4859,6 +5023,9 @@ export class ContextServiceClient {
     if (memories.length > 0) {
       const categories = [...new Set(memories.map(m => m.category))];
       hints.push(`Memories: ${memories.length} relevant entries from ${categories.join(', ')}`);
+      if (memoryRetrieval.startupPackCount > 0) {
+        hints.push(`Startup memory pack: ${memoryRetrieval.startupPackCount} high-priority entries`);
+      }
     }
 
     if (connectorSignals.length > 0) {
@@ -4904,6 +5071,8 @@ export class ContextServiceClient {
           : {}),
         searchTimeMs,
         memoriesIncluded: memories.length,
+        memoryCandidates: memoryRetrieval.candidateCount,
+        memoriesStartupPackIncluded: memoryRetrieval.startupPackCount,
         ...(externalSources?.length
           ? {
               externalSourcesRequested: externalSources.length,

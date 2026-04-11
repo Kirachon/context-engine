@@ -178,6 +178,9 @@ export async function handleGetContext(
   output += `~${contextBundle.metadata.totalTokens} tokens`;
   if (contextBundle.metadata.memoriesIncluded && contextBundle.metadata.memoriesIncluded > 0) {
     output += `, ${contextBundle.metadata.memoriesIncluded} memories`;
+    if (contextBundle.metadata.memoriesStartupPackIncluded) {
+      output += ` (${contextBundle.metadata.memoriesStartupPackIncluded} startup pack)`;
+    }
   }
   if (contextBundle.metadata.truncated) {
     output += ` (truncated to fit ${contextBundle.metadata.tokenBudget} token budget)`;
@@ -205,7 +208,19 @@ export async function handleGetContext(
     for (const memory of contextBundle.memories) {
       const relevanceIcon = memory.relevanceScore >= 0.7 ? '🔥' :
         memory.relevanceScore >= 0.5 ? '✅' : '📌';
-      output += `### ${relevanceIcon} ${memory.category.charAt(0).toUpperCase() + memory.category.slice(1)}\n\n`;
+      const metadataTags = [
+        memory.startupPack ? 'startup_pack' : undefined,
+        memory.priority ? `priority:${memory.priority}` : undefined,
+        memory.subtype ? `subtype:${memory.subtype}` : undefined,
+      ].filter(Boolean);
+      output += `### ${relevanceIcon} ${memory.category.charAt(0).toUpperCase() + memory.category.slice(1)}`;
+      if (memory.title) {
+        output += ` - ${memory.title}`;
+      }
+      output += `\n\n`;
+      if (metadataTags.length > 0) {
+        output += `_metadata: ${metadataTags.join(', ')}_\n\n`;
+      }
       output += `${memory.content}\n\n`;
     }
   }

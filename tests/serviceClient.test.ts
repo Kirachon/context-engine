@@ -2028,6 +2028,123 @@ describe('ContextServiceClient', () => {
       expect(bundle.metadata.truncated).toBe(true);
       expect(bundle.metadata.truncationReasons).toContain('token_budget');
     });
+
+    it('should rank memories with metadata and include a bounded startup memory pack', async () => {
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockImplementation(
+        async (...args: unknown[]) => {
+          const topK = typeof args[1] === 'number' ? args[1] : 0;
+          if (topK === 3) {
+            return [
+              {
+                path: 'src/memory-consumer.ts',
+                content: 'export const memo = true;',
+                relevanceScore: 0.88,
+                lines: '1-1',
+              },
+            ];
+          }
+
+          return [
+            {
+              path: '.memories/decisions.md',
+              content: [
+                '### [2026-04-10] Keep deterministic blockers',
+                '- Use deterministic blockers for PR gating.',
+                '- [meta] priority: critical',
+                '- [meta] subtype: review_finding',
+                '- [meta] created_at: 2026-04-10T00:00:00.000Z',
+                '- [meta] updated_at: 2026-04-10T00:00:00.000Z',
+              ].join('\n'),
+              relevanceScore: 0.41,
+            },
+            {
+              path: '.memories/facts.md',
+              content: [
+                '### [2025-01-01] Legacy fact',
+                '- Older baseline note.',
+                '- [meta] priority: archive',
+                '- [meta] created_at: 2025-01-01T00:00:00.000Z',
+              ].join('\n'),
+              relevanceScore: 0.92,
+            },
+            {
+              path: '.memories/preferences.md',
+              content: [
+                '### [2026-04-09] Keep plans compact',
+                '- Prefer concise execution artifacts.',
+                '- [meta] priority: helpful',
+                '- [meta] tags: docs, planning',
+              ].join('\n'),
+              relevanceScore: 0.66,
+            },
+          ];
+        }
+      );
+
+      const bundle = await client.getContextForPrompt('memory ranking test', {
+        maxFiles: 1,
+        tokenBudget: 1500,
+        includeRelated: false,
+        includeMemories: true,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).toHaveBeenCalled();
+      expect(bundle.metadata.memoryCandidates).toBe(3);
+      expect(bundle.metadata.memoriesIncluded).toBeGreaterThan(0);
+      expect(bundle.metadata.memoriesStartupPackIncluded).toBeGreaterThan(0);
+      expect(bundle.hints.some((hint) => hint.startsWith('Startup memory pack:'))).toBe(true);
+      expect(bundle.memories?.some((memory) =>
+        memory.category === 'decisions' &&
+        memory.priority === 'critical' &&
+        memory.startupPack === true
+      )).toBe(true);
+      expect(bundle.memories?.some((memory) =>
+        memory.startupPack === true
+      )).toBe(true);
+    });
+
+    it('should preserve backward compatibility for memory entries without metadata fields', async () => {
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockImplementation(
+        async (...args: unknown[]) => {
+          const topK = typeof args[1] === 'number' ? args[1] : 0;
+          if (topK === 3) {
+            return [
+              {
+                path: 'src/legacy.ts',
+                content: 'export const legacy = true;',
+                relevanceScore: 0.8,
+                lines: '1-1',
+              },
+            ];
+          }
+
+          return [
+            {
+              path: '.memories/facts.md',
+              content: '- Legacy memory format with no [meta] markers.',
+              relevanceScore: 0.72,
+            },
+          ];
+        }
+      );
+
+      const bundle = await client.getContextForPrompt('legacy memory test', {
+        maxFiles: 1,
+        includeRelated: false,
+        includeMemories: true,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).toHaveBeenCalled();
+      expect(bundle.metadata.memoriesIncluded).toBe(1);
+      expect(bundle.metadata.memoryCandidates).toBe(1);
+      expect(bundle.memories?.[0]).toEqual(
+        expect.objectContaining({
+          category: 'facts',
+        })
+      );
+    });
   });
 
   describe('Index Workspace', () => {
@@ -2055,6 +2172,8 @@ describe('ContextServiceClient', () => {
         expect(result.fileOutcomes).toMatchObject({
           metadata_only: 1,
         });
+        expect(result.skipReasonTotal).toBeUndefined();
+        expect(result.fileOutcomeTotal).toBe(1);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
@@ -2090,6 +2209,8 @@ describe('ContextServiceClient', () => {
         expect(secondResult.fileOutcomes).toMatchObject({
           metadata_only: 1,
         });
+        expect(secondResult.skipReasonTotal).toBeUndefined();
+        expect(secondResult.fileOutcomeTotal).toBe(1);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
@@ -2113,6 +2234,8 @@ describe('ContextServiceClient', () => {
         expect(result.fileOutcomes).toMatchObject({
           binary_skip: 1,
         });
+        expect(result.skipReasonTotal).toBe(1);
+        expect(result.fileOutcomeTotal).toBe(1);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }
@@ -2139,6 +2262,8 @@ describe('ContextServiceClient', () => {
         expect(result.fileOutcomes).toMatchObject({
           binary_skip: 1,
         });
+        expect(result.skipReasonTotal).toBe(1);
+        expect(result.fileOutcomeTotal).toBe(1);
       } finally {
         fs.rmSync(tempDir, { recursive: true, force: true });
       }

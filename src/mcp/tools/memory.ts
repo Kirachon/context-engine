@@ -21,11 +21,22 @@ import { validateMaxLength, validateNonEmptyString, validateOneOf } from '../too
 // ============================================================================
 
 export type MemoryCategory = 'preferences' | 'decisions' | 'facts';
+export type MemoryPriority = 'critical' | 'helpful' | 'archive';
 
 export interface AddMemoryArgs {
   category: MemoryCategory;
   content: string;
   title?: string;
+  subtype?: string;
+  tags?: string[];
+  priority?: MemoryPriority;
+  source?: string;
+  linked_files?: string[];
+  linked_plans?: string[];
+  evidence?: string;
+  created_at?: string;
+  updated_at?: string;
+  owner?: string;
 }
 
 export interface ListMemoriesArgs {
@@ -50,6 +61,8 @@ const CATEGORY_DESCRIPTIONS: Record<MemoryCategory, string> = {
   facts: 'project facts, environment info, and codebase structure',
 };
 
+const VALID_PRIORITIES: MemoryPriority[] = ['critical', 'helpful', 'archive'];
+
 // ============================================================================
 // Helper Functions
 // ============================================================================
@@ -62,12 +75,23 @@ function ensureMemoriesDir(workspacePath: string): string {
   return memoriesPath;
 }
 
-function formatMemoryEntry(content: string, title?: string): string {
-  const timestamp = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+function normalizeStringArray(values?: string[]): string[] | undefined {
+  if (!values) return undefined;
+  const normalized = values
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function formatMemoryEntry(content: string, title: string | undefined, metadata: AddMemoryArgs): string {
+  const now = new Date().toISOString();
+  const createdAt = metadata.created_at || now;
+  const updatedAt = metadata.updated_at || createdAt;
+  const headingDate = createdAt.split('T')[0]; // YYYY-MM-DD
   let entry = '\n';
 
   if (title) {
-    entry += `### [${timestamp}] ${title}\n`;
+    entry += `### [${headingDate}] ${title}\n`;
   }
 
   // Ensure content starts with a bullet or proper formatting
@@ -80,6 +104,25 @@ function formatMemoryEntry(content: string, title?: string): string {
       entry += `${line}\n`;
     }
   }
+
+  const tags = normalizeStringArray(metadata.tags);
+  const linkedFiles = normalizeStringArray(metadata.linked_files);
+  const linkedPlans = normalizeStringArray(metadata.linked_plans);
+  const metadataLines: string[] = [];
+  if (metadata.subtype) metadataLines.push(`- [meta] subtype: ${metadata.subtype}`);
+  if (metadata.priority) metadataLines.push(`- [meta] priority: ${metadata.priority}`);
+  if (tags) metadataLines.push(`- [meta] tags: ${tags.join(', ')}`);
+  if (metadata.source) metadataLines.push(`- [meta] source: ${metadata.source}`);
+  if (linkedFiles) metadataLines.push(`- [meta] linked_files: ${linkedFiles.join(', ')}`);
+  if (linkedPlans) metadataLines.push(`- [meta] linked_plans: ${linkedPlans.join(', ')}`);
+  if (metadata.evidence) metadataLines.push(`- [meta] evidence: ${metadata.evidence}`);
+  if (metadata.owner) metadataLines.push(`- [meta] owner: ${metadata.owner}`);
+  metadataLines.push(`- [meta] created_at: ${createdAt}`);
+  metadataLines.push(`- [meta] updated_at: ${updatedAt}`);
+
+  entry += '\n';
+  entry += metadataLines.join('\n');
+  entry += '\n';
 
   return entry;
 }
@@ -95,7 +138,21 @@ export async function handleAddMemory(
   args: AddMemoryArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const { category, content, title } = args;
+  const {
+    category,
+    content,
+    title,
+    subtype,
+    tags,
+    priority,
+    source,
+    linked_files,
+    linked_plans,
+    evidence,
+    created_at,
+    updated_at,
+    owner,
+  } = args;
   const validContent = validateNonEmptyString(
     content,
     'Content is required and must be a non-empty string'
@@ -110,6 +167,29 @@ export async function handleAddMemory(
     );
   }
   validateMaxLength(validContent, 5000, 'Content too long: maximum 5000 characters per memory');
+  if (priority) {
+    validateOneOf(priority, VALID_PRIORITIES, 'Priority must be one of: critical, helpful, archive');
+  }
+  if (title) validateMaxLength(title, 200, 'Title too long: maximum 200 characters');
+  if (subtype) validateMaxLength(subtype, 100, 'Subtype too long: maximum 100 characters');
+  if (source) validateMaxLength(source, 500, 'Source too long: maximum 500 characters');
+  if (evidence) validateMaxLength(evidence, 1000, 'Evidence too long: maximum 1000 characters');
+  if (owner) validateMaxLength(owner, 120, 'Owner too long: maximum 120 characters');
+  if (created_at && Number.isNaN(Date.parse(created_at))) {
+    throw new Error('created_at must be a valid ISO timestamp');
+  }
+  if (updated_at && Number.isNaN(Date.parse(updated_at))) {
+    throw new Error('updated_at must be a valid ISO timestamp');
+  }
+  for (const value of tags ?? []) {
+    validateMaxLength(value, 50, 'Tag too long: maximum 50 characters');
+  }
+  for (const value of linked_files ?? []) {
+    validateMaxLength(value, 300, 'linked_files entry too long: maximum 300 characters');
+  }
+  for (const value of linked_plans ?? []) {
+    validateMaxLength(value, 120, 'linked_plans entry too long: maximum 120 characters');
+  }
 
   // Get workspace path from service client
   const workspacePath = serviceClient.getWorkspacePath();
@@ -118,7 +198,21 @@ export async function handleAddMemory(
   const relativePath = path.join(MEMORIES_DIR, CATEGORY_FILES[category]);
 
   // Format and append the memory
-  const formattedEntry = formatMemoryEntry(validContent, title);
+  const formattedEntry = formatMemoryEntry(validContent, title, {
+    category,
+    content: validContent,
+    title,
+    subtype,
+    tags,
+    priority,
+    source,
+    linked_files,
+    linked_plans,
+    evidence,
+    created_at,
+    updated_at,
+    owner,
+  });
 
   // Ensure file exists with header if it doesn't
   if (!fs.existsSync(filePath)) {
@@ -139,6 +233,11 @@ export async function handleAddMemory(
   }
 
   const timestamp = new Date().toISOString();
+  const metadataSummary = [
+    subtype ? `subtype=${subtype}` : null,
+    priority ? `priority=${priority}` : null,
+    tags && tags.length > 0 ? `tags=${tags.join(',')}` : null,
+  ].filter(Boolean);
 
   return `# ✅ Memory Added\n\n` +
     `| Property | Value |\n` +
@@ -147,6 +246,7 @@ export async function handleAddMemory(
     `| **File** | \`${relativePath}\` |\n` +
     `| **Title** | ${title || '(none)'} |\n` +
     `| **Timestamp** | ${timestamp} |\n` +
+    `| **Metadata** | ${metadataSummary.length > 0 ? metadataSummary.join('; ') : '(none)'} |\n` +
     `| **Indexed** | Yes |\n\n` +
     `**Content:**\n\`\`\`\n${validContent.trim()}\n\`\`\`\n\n` +
     `_This memory will be automatically retrieved when relevant to future queries._`;
@@ -231,6 +331,11 @@ export const addMemoryTool = {
 - Add decision: "Chose JWT for authentication because..."
 - Add fact: "API runs on port 3000"
 
+Optional metadata fields improve ranking and traceability across sessions:
+- \`subtype\`: finer-grained label such as \`review_finding\` or \`failed_attempt\`
+- \`priority\`: \`critical\`, \`helpful\`, or \`archive\`
+- \`tags\`, \`source\`, \`linked_files\`, \`linked_plans\`, \`evidence\`, \`owner\`, timestamps
+
 Memories are stored in \`.memories/\` directory and indexed for semantic retrieval.`,
   inputSchema: {
     type: 'object',
@@ -247,6 +352,50 @@ Memories are stored in \`.memories/\` directory and indexed for semantic retriev
       title: {
         type: 'string',
         description: 'Optional title for the memory (useful for decisions)',
+      },
+      subtype: {
+        type: 'string',
+        description: 'Optional subtype label (for example: review_finding, failed_attempt, incident)',
+      },
+      tags: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional tags to support filtering and ranking',
+      },
+      priority: {
+        type: 'string',
+        enum: ['critical', 'helpful', 'archive'],
+        description: 'Optional priority used for memory ranking',
+      },
+      source: {
+        type: 'string',
+        description: 'Optional source path or identifier',
+      },
+      linked_files: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional file paths related to this memory',
+      },
+      linked_plans: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional plan identifiers related to this memory',
+      },
+      evidence: {
+        type: 'string',
+        description: 'Optional evidence reference (commands, receipts, or docs)',
+      },
+      created_at: {
+        type: 'string',
+        description: 'Optional ISO timestamp for when this memory was first created',
+      },
+      updated_at: {
+        type: 'string',
+        description: 'Optional ISO timestamp for the most recent update',
+      },
+      owner: {
+        type: 'string',
+        description: 'Optional owner for memory maintenance',
       },
     },
     required: ['category', 'content'],

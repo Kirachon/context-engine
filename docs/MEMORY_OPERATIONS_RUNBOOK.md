@@ -35,6 +35,19 @@ Required fields for each memory entry:
 - `Evidence`: file/command/source reference.
 - `Owner`: who should maintain it.
 
+Optional structured metadata (recommended):
+- `subtype`: finer label such as `review_finding`, `failed_attempt`, `incident`, `plan_note`.
+- `priority`: `critical`, `helpful`, or `archive`.
+- `tags`: short retrieval tags.
+- `linked_files`, `linked_plans`, `source`: references used by ranking and traceability.
+
+Recommended optional metadata in `add_memory`:
+- `priority`: `critical`, `helpful`, or `archive`.
+- `subtype`: finer category like `review_finding`, `failed_attempt`, `incident`, `plan_note`.
+- `tags`: short labels for grouping.
+- `linked_files` and `linked_plans`: traceability references.
+- `source`: where the memory came from.
+
 ## 2) Priority Tags
 
 Use tags to make retrieval and cleanup easier.
@@ -47,6 +60,7 @@ Tagging rules:
 - Every new memory entry gets exactly one priority tag.
 - If a `critical` entry is stale, update or demote it in the same cycle.
 - Move inactive items to `archive` instead of deleting immediately.
+- Keep critical decisions concise because startup memory packs prioritize these entries.
 
 ## 3) Monthly Cleanup Routine
 

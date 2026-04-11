@@ -2,7 +2,7 @@ import { describe, expect, it, jest } from '@jest/globals';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { handleAddMemory } from '../../src/mcp/tools/memory.js';
+import { handleAddMemory, handleListMemories } from '../../src/mcp/tools/memory.js';
 
 function createMockServiceClient(workspacePath: string) {
   return {
@@ -52,5 +52,39 @@ describe('memory tool validation', () => {
     ).rejects.toThrow('Content too long: maximum 5000 characters per memory');
 
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('stores optional metadata fields without changing category contract', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-memory-metadata-'));
+    const client = createMockServiceClient(tmp);
+
+    try {
+      const result = await handleAddMemory(
+        {
+          category: 'decisions',
+          title: 'Memory schema extension',
+          content: 'We added metadata to improve retrieval ranking.',
+          priority: 'critical',
+          subtype: 'plan_note',
+          tags: ['memory', 'ranking'],
+          linked_files: ['src/mcp/tools/memory.ts'],
+          linked_plans: ['context-engine-next-tranche-swarm-plan'],
+          source: 'parallel-task execution',
+          evidence: 'tests/tools/memory.test.ts',
+          owner: 'platform-team',
+        },
+        client
+      );
+
+      expect(result).toContain('Metadata');
+
+      const listed = await handleListMemories({ category: 'decisions' }, client);
+      expect(listed).toContain('[meta] priority: critical');
+      expect(listed).toContain('[meta] subtype: plan_note');
+      expect(listed).toContain('[meta] tags: memory, ranking');
+      expect(listed).toContain('[meta] linked_files: src/mcp/tools/memory.ts');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
