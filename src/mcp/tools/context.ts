@@ -38,6 +38,8 @@ export interface GetContextArgs {
   include_related?: boolean;
   min_relevance?: number;
   bypass_cache?: boolean;
+  include_draft_memories?: boolean;
+  draft_session_id?: string;
   include_paths?: string[];
   exclude_paths?: string[];
   external_sources?: Array<{ type: 'github_url' | 'docs_url'; url: string; label?: string }>;
@@ -102,6 +104,8 @@ export async function handleGetContext(
     include_related = true,
     min_relevance = 0.3,
     bypass_cache = false,
+    include_draft_memories = false,
+    draft_session_id,
     include_paths,
     exclude_paths,
     external_sources,
@@ -122,6 +126,7 @@ export async function handleGetContext(
   );
   validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
   validateBoolean(include_related, 'Invalid include_related parameter: must be a boolean');
+  validateBoolean(include_draft_memories, 'Invalid include_draft_memories parameter: must be a boolean');
   validateFiniteNumberInRange(
     min_relevance,
     0,
@@ -131,6 +136,10 @@ export async function handleGetContext(
   const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
   const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
   const normalizedExternalSources = validateExternalSources(external_sources, 'external_sources');
+  const normalizedDraftSessionId = draft_session_id?.trim();
+  if (include_draft_memories && !normalizedDraftSessionId) {
+    throw new Error('draft_session_id is required when include_draft_memories is true');
+  }
 
   // Build options
   const options: ContextOptions = {
@@ -140,6 +149,8 @@ export async function handleGetContext(
     minRelevance: min_relevance,
     includeSummaries: true,
     bypassCache: bypass_cache,
+    includeDraftMemories: include_draft_memories,
+    draftSessionId: normalizedDraftSessionId,
     includePaths: normalizedIncludePaths,
     excludePaths: normalizedExcludePaths,
     externalSources: normalizedExternalSources,
@@ -180,6 +191,9 @@ export async function handleGetContext(
     output += `, ${contextBundle.metadata.memoriesIncluded} memories`;
     if (contextBundle.metadata.memoriesStartupPackIncluded) {
       output += ` (${contextBundle.metadata.memoriesStartupPackIncluded} startup pack)`;
+    }
+    if (contextBundle.metadata.draftMemoriesIncluded) {
+      output += `, ${contextBundle.metadata.draftMemoriesIncluded} drafts`;
     }
   }
   if (contextBundle.metadata.truncated) {
@@ -405,6 +419,15 @@ Use this tool when you need to:
         type: 'boolean',
         description: 'Bypass caches (forces fresh retrieval; useful for benchmarking/debugging).',
         default: false,
+      },
+      include_draft_memories: {
+        type: 'boolean',
+        description: 'Include explicit session-scoped draft memories when the feature flag is enabled (default: false).',
+        default: false,
+      },
+      draft_session_id: {
+        type: 'string',
+        description: 'Session ID required when include_draft_memories is enabled.',
       },
       include_paths: {
         type: 'array',

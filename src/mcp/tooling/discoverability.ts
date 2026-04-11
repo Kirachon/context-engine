@@ -236,6 +236,20 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       idempotentHint: true,
     },
   }),
+  review_memory_suggestions: toolMetadata('Review Memory Suggestions', {
+    usageHint: 'Review isolated draft memory suggestions in small batches and promote approved entries through the durable memory path.',
+    examples: ['List draft batches for the current session.', 'Approve a small batch of high-confidence memory suggestions.'],
+    safetyHints: [
+      'Writes draft review state and may persist approved memories through the existing add_memory pathway.',
+      'Feature-flagged; enable CE_MEMORY_SUGGESTIONS_V1 before using in production workflows.',
+    ],
+    related: {
+      tools: ['add_memory', 'list_memories', 'get_context_for_prompt'],
+    },
+    annotations: {
+      title: 'Review Memory Suggestions',
+    },
+  }),
   create_plan: toolMetadata('Create Plan', {
     usageHint: 'Generate a scoped implementation plan with context gathering and validation guidance.',
     examples: ['Plan an auth refactor.', 'Plan a safe MCP transport upgrade.'],

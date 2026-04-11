@@ -31,6 +31,8 @@ const { ContextServiceClient } = await import('../src/mcp/serviceClient.js');
 const { FEATURE_FLAGS, getFeatureFlagsFromEnv } = await import('../src/config/features.js');
 const { renderPrometheusMetrics } = await import('../src/metrics/metrics.js');
 const { snapshotRetrievalV2FeatureFlags } = await import('../src/internal/retrieval/v2Contracts.js');
+const { MemorySuggestionStore } = await import('../src/mcp/memorySuggestionStore.js');
+const { createDraftSuggestionRecord } = await import('../src/mcp/memorySuggestions.js');
 
 describe('ContextServiceClient', () => {
   let client: InstanceType<typeof ContextServiceClient>;
@@ -131,6 +133,159 @@ describe('ContextServiceClient', () => {
       process.env.CE_RETRIEVAL_LANCEDB_V1 = 'true';
       const flags = getFeatureFlagsFromEnv();
       expect(flags.retrieval_lancedb_v1).toBe(true);
+    });
+  });
+
+  describe('Memory suggestion isolation', () => {
+    it('should exclude the draft suggestion store from watcher/indexing surfaces and direct file indexing', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-memory-suggestion-index-'));
+      fs.mkdirSync(path.join(tempDir, '.context-engine-memory-suggestions', 'session-1'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, '.context-engine-memory-suggestions', 'session-1', 'draft-1.json'),
+        JSON.stringify({ ok: true }),
+        'utf-8'
+      );
+
+      const isolatedClient = new ContextServiceClient(tempDir);
+      const result = await isolatedClient.indexFiles([
+        '.context-engine-memory-suggestions/session-1/draft-1.json',
+      ]);
+
+      expect(isolatedClient.getExcludedDirectories()).toContain('.context-engine-memory-suggestions');
+      expect(result.indexed).toBe(0);
+      expect(result.skipped).toBe(1);
+      expect(result.errors).toContain('No indexable file changes provided');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should never surface draft suggestions in normal memory retrieval', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-memory-suggestion-retrieval-'));
+      const isolatedClient = new ContextServiceClient(tempDir);
+      const store = new MemorySuggestionStore(tempDir);
+      store.saveDraft(createDraftSuggestionRecord({
+        draft_id: 'draft-1',
+        session_id: 'session-1',
+        source_type: 'plan',
+        source_ref: 'plans/1',
+        category: 'decisions',
+        content: 'Draft suggestions stay out of normal retrieval.',
+        score_breakdown: {
+          repetition: 1,
+          directive_strength: 1,
+          source_reliability: 1,
+          traceability: 1,
+          stability_penalty: 0,
+        },
+        confidence: 0.91,
+      }));
+      fs.mkdirSync(path.join(tempDir, '.memories'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, '.memories', 'decisions.md'),
+        [
+          '### [2026-04-11] Durable decision',
+          '- Approved memories should still show up.',
+          '- [meta] priority: critical',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const semanticSearchSpy = jest.spyOn(isolatedClient as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: '.context-engine-memory-suggestions/session-1/draft-1.json',
+          content: '{"draft":true}',
+          relevanceScore: 0.99,
+        },
+        {
+          path: '.memories/decisions.md',
+          content: [
+            '### [2026-04-11] Durable decision',
+            '- Approved memories should still show up.',
+            '- [meta] priority: critical',
+          ].join('\n'),
+          relevanceScore: 0.75,
+        },
+      ]);
+
+      const bundle = await isolatedClient.getContextForPrompt('memory isolation test', {
+        maxFiles: 1,
+        includeRelated: false,
+        includeMemories: true,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).toHaveBeenCalled();
+      expect(bundle.memories).toEqual([
+        expect.objectContaining({
+          category: 'decisions',
+          content: expect.stringContaining('Approved memories should still show up.'),
+        }),
+      ]);
+      expect(bundle.memories?.some((memory) => memory.content.includes('Draft suggestions stay out of normal retrieval.'))).toBe(false);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should include session-scoped draft suggestions only when explicitly enabled', async () => {
+      const originalDraftFlag = FEATURE_FLAGS.memory_draft_retrieval_v1;
+      FEATURE_FLAGS.memory_draft_retrieval_v1 = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-memory-suggestion-explicit-retrieval-'));
+      const explicitClient = new ContextServiceClient(tempDir);
+      const store = new MemorySuggestionStore(tempDir);
+      store.saveDraft(createDraftSuggestionRecord({
+        draft_id: 'draft-1',
+        session_id: 'session-42',
+        source_type: 'plan_outputs',
+        source_ref: 'plan://42',
+        category: 'decisions',
+        title: 'Keep memory mode suggestive',
+        content: 'Auto-save should stay off until draft precision is proven.',
+        metadata: {
+          priority: 'critical',
+          subtype: 'plan_note',
+        },
+        score_breakdown: {
+          repetition: 1,
+          directive_strength: 1,
+          source_reliability: 1,
+          traceability: 1,
+          stability_penalty: 0,
+        },
+        confidence: 0.96,
+      }));
+
+      const semanticSearchSpy = jest.spyOn(explicitClient as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/memory-consumer.ts',
+          content: 'export const useDraftMemories = true;',
+          relevanceScore: 0.88,
+          lines: '1-1',
+        },
+      ]);
+
+      try {
+        const bundle = await explicitClient.getContextForPrompt('draft memory test', {
+          maxFiles: 1,
+          includeRelated: false,
+          includeMemories: false,
+          includeDraftMemories: true,
+          draftSessionId: 'session-42',
+          bypassCache: true,
+        });
+
+        expect(semanticSearchSpy).toHaveBeenCalled();
+        expect(bundle.metadata.draftMemoriesIncluded).toBe(1);
+        expect(bundle.metadata.draftMemoryCandidates).toBe(1);
+        expect(bundle.memories).toEqual([
+          expect.objectContaining({
+            title: 'Keep memory mode suggestive',
+            content: expect.stringContaining('Auto-save should stay off'),
+          }),
+        ]);
+      } finally {
+        FEATURE_FLAGS.memory_draft_retrieval_v1 = originalDraftFlag;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
   });
 

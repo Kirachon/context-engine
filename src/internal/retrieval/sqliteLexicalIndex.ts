@@ -27,6 +27,7 @@ const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
 const DEFAULT_SNIPPET_MAX_CHARS = 1_200;
 const MAX_FILE_SIZE_BYTES = 1 * 1024 * 1024;
+const MEMORY_SUGGESTIONS_DIR = '.context-engine-memory-suggestions';
 
 const DEFAULT_EXCLUDED_DIRS = new Set([
   'node_modules',
@@ -49,6 +50,7 @@ const DEFAULT_EXCLUDED_DIRS = new Set([
   '.vscode',
   '.vs',
   '.context-engine',
+  MEMORY_SUGGESTIONS_DIR,
   '.augment',
   'tmp',
   'temp',

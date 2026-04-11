@@ -50,6 +50,7 @@ export const toolManifest = {
     // Memory Tools (v1.4.1)
     'add_memory',
     'list_memories',
+    'review_memory_suggestions',
     // Planning Tools (v1.4.0)
     'create_plan',
     'refine_plan',
@@ -172,6 +173,17 @@ export const toolManifest = {
         'TypeScript typecheck via tsc (noEmit)',
         'Optional semgrep integration when available on PATH',
         'Deterministic output (no LLM) suitable for CI',
+      ],
+    },
+    memory_suggestions: {
+      description: 'Draft-first vibe-coder memory suggestion review and promotion flow',
+      version: '1.9.0',
+      tools: ['review_memory_suggestions'],
+      features: [
+        'Batch review of isolated draft memory suggestions',
+        'Idempotent approve, dismiss, snooze, edit, and suppression actions',
+        'Promotion through the existing durable memory writer only',
+        'Draft isolation from default retrieval unless explicitly enabled',
       ],
     },
   },

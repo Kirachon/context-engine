@@ -60,6 +60,26 @@ describe('MCP discoverability metadata', () => {
         }),
       })
     );
+
+    const reviewTool = entries.find((entry) => entry.tool.name === 'review_memory_suggestions')?.tool as
+      | {
+          name: string;
+          title?: string;
+          annotations?: {
+            title?: string;
+          };
+        }
+      | undefined;
+
+    expect(reviewTool).toEqual(
+      expect.objectContaining({
+        name: 'review_memory_suggestions',
+        title: 'Review Memory Suggestions',
+        annotations: expect.objectContaining({
+          title: 'Review Memory Suggestions',
+        }),
+      })
+    );
   });
 
   it('applies canonical prompt titles to runtime prompts and tool_manifest', () => {

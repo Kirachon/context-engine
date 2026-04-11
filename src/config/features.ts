@@ -3,6 +3,12 @@ import { envBool } from './env.js';
 export interface FeatureFlags {
   /** Global rollout kill switch for retrieval pipeline optimizations. */
   rollout_kill_switch: boolean;
+  /** Enable draft-first memory suggestion detection and review flows. */
+  memory_suggestions_v1: boolean;
+  /** Allow explicit in-session draft memory retrieval surfaces. */
+  memory_draft_retrieval_v1: boolean;
+  /** Allow any automatic durable memory save behavior. */
+  memory_autosave_v1: boolean;
   /** Persist per-file index state store (JSON sidecar). */
   index_state_store: boolean;
   /** Skip indexing unchanged files (requires index_state_store). */
@@ -48,6 +54,9 @@ export interface FeatureFlags {
 export function getFeatureFlagsFromEnv(): FeatureFlags {
  return {
    rollout_kill_switch: envBool('CE_ROLLOUT_KILL_SWITCH', false),
+   memory_suggestions_v1: envBool('CE_MEMORY_SUGGESTIONS_V1', false),
+   memory_draft_retrieval_v1: envBool('CE_MEMORY_DRAFT_RETRIEVAL_V1', false),
+   memory_autosave_v1: envBool('CE_MEMORY_AUTOSAVE_V1', false),
    index_state_store: envBool('CE_INDEX_STATE_STORE', false),
    skip_unchanged_indexing: envBool('CE_SKIP_UNCHANGED_INDEXING', false),
    hash_normalize_eol: envBool('CE_HASH_NORMALIZE_EOL', false),

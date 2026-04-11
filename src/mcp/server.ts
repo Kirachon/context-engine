@@ -66,6 +66,10 @@ import {
   handleListMemories,
 } from './tools/memory.js';
 import {
+  reviewMemorySuggestionsTool,
+  handleReviewMemorySuggestions,
+} from './tools/memoryReview.js';
+import {
   planManagementTools,
   getPlanHistoryService,
   getPlanPersistenceService,
@@ -675,6 +679,7 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
     { tool: applyToolDiscoverability(toolManifestTool), handler: (args) => handleToolManifest(args as any, serviceClient) },
     { tool: applyToolDiscoverability(addMemoryTool), handler: (args) => handleAddMemory(args as any, serviceClient) },
     { tool: applyToolDiscoverability(listMemoriesTool), handler: (args) => handleListMemories(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(reviewMemorySuggestionsTool), handler: (args) => handleReviewMemorySuggestions(args as any, serviceClient) },
     { tool: applyToolDiscoverability(createPlanTool), handler: (args, signal) => handleCreatePlan(args as any, serviceClient, signal) },
     { tool: applyToolDiscoverability(refinePlanTool), handler: (args, signal) => handleRefinePlan(args as any, serviceClient, signal) },
     { tool: applyToolDiscoverability(visualizePlanTool), handler: (args) => handleVisualizePlan(args as any, serviceClient) },

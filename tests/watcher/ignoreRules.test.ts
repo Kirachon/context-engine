@@ -6,12 +6,13 @@ describe('normalizeIgnoredPatterns', () => {
     const patterns = normalizeIgnoredPatterns(
       'D:/repo/workspace',
       ['/.env', 'tmp/', '*.log'],
-      ['node_modules', 'dist']
+      ['node_modules', 'dist', '.context-engine-memory-suggestions']
     );
 
     expect(patterns).toEqual([
       '**/node_modules/**',
       '**/dist/**',
+      '**/.context-engine-memory-suggestions/**',
       'D:/repo/workspace/.env',
       '**/tmp/**',
       '**/*.log',

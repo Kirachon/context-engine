@@ -49,6 +49,7 @@ import {
   type IndexStateFile,
   type IndexStateLoadMetadata,
 } from './indexStateStore.js';
+import { isMemorySuggestionPath, MEMORY_SUGGESTIONS_DIR, MemorySuggestionStore } from './memorySuggestionStore.js';
 import { createAIProvider, resolveAIProviderId } from '../ai/providers/factory.js';
 import type { AIProvider, AIProviderId } from '../ai/providers/types.js';
 import { createRetrievalProvider } from '../retrieval/providers/factory.js';
@@ -230,6 +231,8 @@ export interface ContextBundle {
     memoriesIncluded?: number;
     memoryCandidates?: number;
     memoriesStartupPackIncluded?: number;
+    draftMemoriesIncluded?: number;
+    draftMemoryCandidates?: number;
     externalSourcesRequested?: number;
     externalSourcesUsed?: number;
     externalWarnings?: GroundingWarning[];
@@ -275,6 +278,10 @@ export interface ContextOptions extends PathScopeInput {
   includeSummaries?: boolean;
   /** Include memories from .memories/ directory (default: true) */
   includeMemories?: boolean;
+  /** Include session-scoped draft memory suggestions when explicitly enabled. */
+  includeDraftMemories?: boolean;
+  /** Session ID required when includeDraftMemories is enabled. */
+  draftSessionId?: string;
   /** Bypass caches (default: false). */
   bypassCache?: boolean;
   /** Prefer a local keyword-first search path before semantic fallback. */
@@ -838,6 +845,7 @@ const DEFAULT_EXCLUDED_DIRS = new Set([
   '.webpack',
   '.esbuild',
   '.rollup.cache',
+  MEMORY_SUGGESTIONS_DIR,
 
   // === Temporary & Generated ===
   'tmp',
@@ -1794,6 +1802,9 @@ export class ContextServiceClient {
   private shouldIgnorePath(relativePath: string): boolean {
     // Normalize path separators
     const normalizedPath = relativePath.replace(/\\/g, '/');
+    if (isMemorySuggestionPath(normalizedPath)) {
+      return true;
+    }
     const fileName = path.basename(normalizedPath);
 
     for (const rawPattern of this.ignorePatterns) {
@@ -4765,6 +4776,44 @@ export class ContextServiceClient {
     return { selected: [], candidateCount: 0, startupPackCount: 0 };
   }
 
+  private getRelevantDraftMemories(sessionId: string, maxMemories: number = 3): MemoryRetrievalResult {
+    if (!featureEnabled('memory_draft_retrieval_v1')) {
+      return { selected: [], candidateCount: 0, startupPackCount: 0 };
+    }
+
+    const store = new MemorySuggestionStore(this.workspacePath);
+    const ranked = store
+      .listDrafts(sessionId)
+      .filter((draft) => draft.state === 'drafted' || draft.state === 'batched' || draft.state === 'reviewed' || draft.state === 'snoozed')
+      .map((draft) => {
+        const memory: MemoryEntry = {
+          category: draft.category,
+          content: draft.content,
+          relevanceScore: draft.confidence,
+          ...(draft.title ? { title: draft.title } : {}),
+          ...(draft.metadata.subtype ? { subtype: draft.metadata.subtype } : {}),
+          ...(draft.metadata.priority ? { priority: draft.metadata.priority } : {}),
+          ...(draft.metadata.tags ? { tags: draft.metadata.tags } : {}),
+          ...(draft.metadata.source ? { source: draft.metadata.source } : {}),
+          ...(draft.metadata.linked_files ? { linkedFiles: draft.metadata.linked_files } : {}),
+          ...(draft.metadata.linked_plans ? { linkedPlans: draft.metadata.linked_plans } : {}),
+          ...(draft.metadata.evidence ? { evidence: draft.metadata.evidence } : {}),
+          ...(draft.metadata.owner ? { owner: draft.metadata.owner } : {}),
+          ...(draft.metadata.created_at ? { createdAt: draft.metadata.created_at } : {}),
+          ...(draft.metadata.updated_at ? { updatedAt: draft.metadata.updated_at } : {}),
+        };
+        memory.rankScore = this.calculateMemoryRankScore(memory) + Math.min(0.2, draft.confidence * 0.2);
+        return memory;
+      })
+      .sort((a, b) => (b.rankScore || 0) - (a.rankScore || 0));
+
+    return {
+      selected: ranked.slice(0, maxMemories),
+      candidateCount: ranked.length,
+      startupPackCount: 0,
+    };
+  }
+
   /**
    * Get enhanced context bundle for prompt enhancement
    * This is the primary method for Layer 2 - Context Service
@@ -4789,6 +4838,8 @@ export class ContextServiceClient {
       minRelevance = 0.3,
       includeSummaries = true,
       includeMemories = true,
+      includeDraftMemories = false,
+      draftSessionId,
       bypassCache = false,
       preferLocalSearch = false,
       priority = 'interactive',
@@ -4806,6 +4857,8 @@ export class ContextServiceClient {
       minRelevance,
       includeSummaries,
       includeMemories,
+      includeDraftMemories,
+      draftSessionId,
       includePaths: normalizedScope?.includePaths,
       excludePaths: normalizedScope?.excludePaths,
       externalSources: serializedExternalSources,
@@ -4862,7 +4915,11 @@ export class ContextServiceClient {
         ? this.getRelevantMemories(query, 5)
         : Promise.resolve({ selected: [], candidateCount: 0, startupPackCount: 0 }),
     ]);
-    const memories = memoryRetrieval.selected;
+    const draftMemoryRetrieval =
+      includeDraftMemories && draftSessionId
+        ? this.getRelevantDraftMemories(draftSessionId, 3)
+        : { selected: [], candidateCount: 0, startupPackCount: 0 };
+    const memories = [...memoryRetrieval.selected, ...draftMemoryRetrieval.selected];
 
     // Filter by minimum relevance
     const relevantResults = searchResults.filter(
@@ -5026,6 +5083,9 @@ export class ContextServiceClient {
       if (memoryRetrieval.startupPackCount > 0) {
         hints.push(`Startup memory pack: ${memoryRetrieval.startupPackCount} high-priority entries`);
       }
+      if (draftMemoryRetrieval.selected.length > 0) {
+        hints.push(`Draft memories: ${draftMemoryRetrieval.selected.length} session-scoped suggestion(s) from ${draftSessionId}`);
+      }
     }
 
     if (connectorSignals.length > 0) {
@@ -5073,6 +5133,8 @@ export class ContextServiceClient {
         memoriesIncluded: memories.length,
         memoryCandidates: memoryRetrieval.candidateCount,
         memoriesStartupPackIncluded: memoryRetrieval.startupPackCount,
+        draftMemoriesIncluded: draftMemoryRetrieval.selected.length,
+        draftMemoryCandidates: draftMemoryRetrieval.candidateCount,
         ...(externalSources?.length
           ? {
               externalSourcesRequested: externalSources.length,

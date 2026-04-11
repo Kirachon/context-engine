@@ -43,6 +43,12 @@ export interface ListMemoriesArgs {
   category?: MemoryCategory;
 }
 
+export interface PersistMemoryResult {
+  relativePath: string;
+  indexed: boolean;
+  indexError?: string;
+}
+
 // ============================================================================
 // Constants
 // ============================================================================
@@ -67,7 +73,7 @@ const VALID_PRIORITIES: MemoryPriority[] = ['critical', 'helpful', 'archive'];
 // Helper Functions
 // ============================================================================
 
-function ensureMemoriesDir(workspacePath: string): string {
+export function ensureMemoriesDir(workspacePath: string): string {
   const memoriesPath = path.join(workspacePath, MEMORIES_DIR);
   if (!fs.existsSync(memoriesPath)) {
     fs.mkdirSync(memoriesPath, { recursive: true });
@@ -83,7 +89,7 @@ function normalizeStringArray(values?: string[]): string[] | undefined {
   return normalized.length > 0 ? normalized : undefined;
 }
 
-function formatMemoryEntry(content: string, title: string | undefined, metadata: AddMemoryArgs): string {
+export function formatMemoryEntry(content: string, title: string | undefined, metadata: AddMemoryArgs): string {
   const now = new Date().toISOString();
   const createdAt = metadata.created_at || now;
   const updatedAt = metadata.updated_at || createdAt;
@@ -127,6 +133,88 @@ function formatMemoryEntry(content: string, title: string | undefined, metadata:
   return entry;
 }
 
+export function validateAddMemoryArgs(args: AddMemoryArgs): AddMemoryArgs {
+  const validContent = validateNonEmptyString(
+    args.content,
+    'Content is required and must be a non-empty string'
+  );
+
+  if (!args.category || !CATEGORY_FILES[args.category as MemoryCategory]) {
+    validateOneOf(
+      args.category,
+      Object.keys(CATEGORY_FILES) as MemoryCategory[],
+      `Invalid category. Must be one of: ${Object.keys(CATEGORY_FILES).join(', ')}`
+    );
+  }
+  validateMaxLength(validContent, 5000, 'Content too long: maximum 5000 characters per memory');
+  if (args.priority) {
+    validateOneOf(args.priority, VALID_PRIORITIES, 'Priority must be one of: critical, helpful, archive');
+  }
+  if (args.title) validateMaxLength(args.title, 200, 'Title too long: maximum 200 characters');
+  if (args.subtype) validateMaxLength(args.subtype, 100, 'Subtype too long: maximum 100 characters');
+  if (args.source) validateMaxLength(args.source, 500, 'Source too long: maximum 500 characters');
+  if (args.evidence) validateMaxLength(args.evidence, 1000, 'Evidence too long: maximum 1000 characters');
+  if (args.owner) validateMaxLength(args.owner, 120, 'Owner too long: maximum 120 characters');
+  if (args.created_at && Number.isNaN(Date.parse(args.created_at))) {
+    throw new Error('created_at must be a valid ISO timestamp');
+  }
+  if (args.updated_at && Number.isNaN(Date.parse(args.updated_at))) {
+    throw new Error('updated_at must be a valid ISO timestamp');
+  }
+  for (const value of args.tags ?? []) {
+    validateMaxLength(value, 50, 'Tag too long: maximum 50 characters');
+  }
+  for (const value of args.linked_files ?? []) {
+    validateMaxLength(value, 300, 'linked_files entry too long: maximum 300 characters');
+  }
+  for (const value of args.linked_plans ?? []) {
+    validateMaxLength(value, 120, 'linked_plans entry too long: maximum 120 characters');
+  }
+
+  return {
+    ...args,
+    category: args.category,
+    content: validContent,
+  };
+}
+
+export async function persistMemoryEntry(
+  args: AddMemoryArgs,
+  serviceClient: ContextServiceClient
+): Promise<PersistMemoryResult> {
+  const validated = validateAddMemoryArgs(args);
+  const workspacePath = serviceClient.getWorkspacePath();
+  const memoriesPath = ensureMemoriesDir(workspacePath);
+  const filePath = path.join(memoriesPath, CATEGORY_FILES[validated.category]);
+  const relativePath = path.join(MEMORIES_DIR, CATEGORY_FILES[validated.category]);
+
+  const formattedEntry = formatMemoryEntry(validated.content, validated.title, validated);
+
+  if (!fs.existsSync(filePath)) {
+    const header = `# ${validated.category.charAt(0).toUpperCase() + validated.category.slice(1)}\n\n` +
+      `This file stores ${CATEGORY_DESCRIPTIONS[validated.category]}.\n`;
+    fs.writeFileSync(filePath, header, 'utf-8');
+  }
+
+  fs.appendFileSync(filePath, formattedEntry, 'utf-8');
+
+  try {
+    await serviceClient.indexFiles([relativePath]);
+    return {
+      relativePath,
+      indexed: true,
+    };
+  } catch (error) {
+    const indexError = error instanceof Error ? error.message : String(error);
+    console.error('[add_memory] Failed to reindex memory file:', error);
+    return {
+      relativePath,
+      indexed: false,
+      indexError,
+    };
+  }
+}
+
 // ============================================================================
 // Tool Handlers
 // ============================================================================
@@ -138,117 +226,26 @@ export async function handleAddMemory(
   args: AddMemoryArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const {
-    category,
-    content,
-    title,
-    subtype,
-    tags,
-    priority,
-    source,
-    linked_files,
-    linked_plans,
-    evidence,
-    created_at,
-    updated_at,
-    owner,
-  } = args;
-  const validContent = validateNonEmptyString(
-    content,
-    'Content is required and must be a non-empty string'
-  );
-
-  // Validate inputs
-  if (!category || !CATEGORY_FILES[category as MemoryCategory]) {
-    validateOneOf(
-      category,
-      Object.keys(CATEGORY_FILES) as MemoryCategory[],
-      `Invalid category. Must be one of: ${Object.keys(CATEGORY_FILES).join(', ')}`
-    );
-  }
-  validateMaxLength(validContent, 5000, 'Content too long: maximum 5000 characters per memory');
-  if (priority) {
-    validateOneOf(priority, VALID_PRIORITIES, 'Priority must be one of: critical, helpful, archive');
-  }
-  if (title) validateMaxLength(title, 200, 'Title too long: maximum 200 characters');
-  if (subtype) validateMaxLength(subtype, 100, 'Subtype too long: maximum 100 characters');
-  if (source) validateMaxLength(source, 500, 'Source too long: maximum 500 characters');
-  if (evidence) validateMaxLength(evidence, 1000, 'Evidence too long: maximum 1000 characters');
-  if (owner) validateMaxLength(owner, 120, 'Owner too long: maximum 120 characters');
-  if (created_at && Number.isNaN(Date.parse(created_at))) {
-    throw new Error('created_at must be a valid ISO timestamp');
-  }
-  if (updated_at && Number.isNaN(Date.parse(updated_at))) {
-    throw new Error('updated_at must be a valid ISO timestamp');
-  }
-  for (const value of tags ?? []) {
-    validateMaxLength(value, 50, 'Tag too long: maximum 50 characters');
-  }
-  for (const value of linked_files ?? []) {
-    validateMaxLength(value, 300, 'linked_files entry too long: maximum 300 characters');
-  }
-  for (const value of linked_plans ?? []) {
-    validateMaxLength(value, 120, 'linked_plans entry too long: maximum 120 characters');
-  }
-
-  // Get workspace path from service client
-  const workspacePath = serviceClient.getWorkspacePath();
-  const memoriesPath = ensureMemoriesDir(workspacePath);
-  const filePath = path.join(memoriesPath, CATEGORY_FILES[category]);
-  const relativePath = path.join(MEMORIES_DIR, CATEGORY_FILES[category]);
-
-  // Format and append the memory
-  const formattedEntry = formatMemoryEntry(validContent, title, {
-    category,
-    content: validContent,
-    title,
-    subtype,
-    tags,
-    priority,
-    source,
-    linked_files,
-    linked_plans,
-    evidence,
-    created_at,
-    updated_at,
-    owner,
-  });
-
-  // Ensure file exists with header if it doesn't
-  if (!fs.existsSync(filePath)) {
-    const header = `# ${category.charAt(0).toUpperCase() + category.slice(1)}\n\n` +
-      `This file stores ${CATEGORY_DESCRIPTIONS[category]}.\n`;
-    fs.writeFileSync(filePath, header, 'utf-8');
-  }
-
-  // Append the memory
-  fs.appendFileSync(filePath, formattedEntry, 'utf-8');
-
-  // Trigger incremental reindex for the updated file
-  try {
-    await serviceClient.indexFiles([relativePath]);
-  } catch (error) {
-    console.error('[add_memory] Failed to reindex memory file:', error);
-    // Don't fail the operation if reindexing fails - memory is still saved
-  }
+  const validated = validateAddMemoryArgs(args);
+  const persistResult = await persistMemoryEntry(validated, serviceClient);
 
   const timestamp = new Date().toISOString();
   const metadataSummary = [
-    subtype ? `subtype=${subtype}` : null,
-    priority ? `priority=${priority}` : null,
-    tags && tags.length > 0 ? `tags=${tags.join(',')}` : null,
+    validated.subtype ? `subtype=${validated.subtype}` : null,
+    validated.priority ? `priority=${validated.priority}` : null,
+    validated.tags && validated.tags.length > 0 ? `tags=${validated.tags.join(',')}` : null,
   ].filter(Boolean);
 
   return `# ✅ Memory Added\n\n` +
     `| Property | Value |\n` +
     `|----------|-------|\n` +
-    `| **Category** | ${category} |\n` +
-    `| **File** | \`${relativePath}\` |\n` +
-    `| **Title** | ${title || '(none)'} |\n` +
+    `| **Category** | ${validated.category} |\n` +
+    `| **File** | \`${persistResult.relativePath}\` |\n` +
+    `| **Title** | ${validated.title || '(none)'} |\n` +
     `| **Timestamp** | ${timestamp} |\n` +
     `| **Metadata** | ${metadataSummary.length > 0 ? metadataSummary.join('; ') : '(none)'} |\n` +
-    `| **Indexed** | Yes |\n\n` +
-    `**Content:**\n\`\`\`\n${validContent.trim()}\n\`\`\`\n\n` +
+    `| **Indexed** | ${persistResult.indexed ? 'Yes' : 'Pending'} |\n\n` +
+    `**Content:**\n\`\`\`\n${validated.content.trim()}\n\`\`\`\n\n` +
     `_This memory will be automatically retrieved when relevant to future queries._`;
 }
 
