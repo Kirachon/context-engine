@@ -60,4 +60,39 @@ describe('documentation contracts', () => {
       '`context-engine-improvement-swarm-plan.md` is the completed execution ledger.'
     );
   });
+
+  it('vibe-coder memory review contract makes checkpoint, batch-cap, undo, and suppression rules explicit', () => {
+    const text = readUtf8('docs/VIBE_CODER_MEMORY_REVIEW_CONTRACT.md');
+
+    expect(text).toContain('quiet mode by default');
+    expect(text).toContain('closure or idle checkpoints');
+    expect(text).toContain('end of task');
+    expect(text).toContain('end of review');
+    expect(text).toContain('end of plan');
+    expect(text).toContain('end of session');
+    expect(text).toContain('at most `5` suggestions');
+    expect(text).toContain('`3-5` suggestions');
+    expect(text).toContain('one-line explanation');
+    expect(text).toContain('`save`');
+    expect(text).toContain('`dismiss`');
+    expect(text).toContain('`inspect`');
+    expect(text).toContain('`snooze`');
+    expect(text).toContain('`never suggest like this`');
+    expect(text).toContain('`undo last batch` is pre-promotion only');
+    expect(text).toContain('suppression persists across sessions');
+    expect(text).toContain('must not imply rollback of already promoted durable memories');
+  });
+
+  it('vibe-coder memory canary runbook keeps phase-1 rollout constraints explicit', () => {
+    const text = readUtf8('docs/VIBE_CODER_MEMORY_CANARY_RUNBOOK.md');
+
+    expect(text).toContain('quiet assisted mode only');
+    expect(text).toContain('CE_MEMORY_SUGGESTIONS_V1');
+    expect(text).toContain('CE_MEMORY_DRAFT_RETRIEVAL_V1');
+    expect(text).toContain('CE_MEMORY_AUTOSAVE_V1');
+    expect(text).toContain('source allowlist');
+    expect(text).toContain('no auto-save in Phase 1');
+    expect(text).toContain('no draft indexing into default retrieval');
+    expect(text).toContain('promoted_pending_index');
+  });
 });

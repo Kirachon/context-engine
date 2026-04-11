@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "artifact_inputs": {
+    "candidate": "artifacts/bench/pr-candidate.json",
+    "rollback": "artifacts/bench/pr-rollback.json"
+  },
+  "metrics": {
+    "approval_precision_pct": { "comparator": "gte_absolute", "threshold": 70, "required": true },
+    "dismiss_rate_pct": { "comparator": "lte_absolute", "threshold": 35, "required": true },
+    "edit_rate_pct": { "comparator": "lte_absolute", "threshold": 20, "required": true },
+    "contradiction_block_rate_pct": { "comparator": "lte_absolute", "threshold": 15, "required": true },
+    "suppression_repeat_violation_rate_pct": { "comparator": "lte_absolute", "threshold": 5, "required": true },
+    "draft_memory_token_overhead_pct": { "comparator": "lte_absolute", "threshold": 10, "required": false }
+  },
+  "required_receipts": {
+    "draft_memories_included": "ContextBundle.metadata.draftMemoriesIncluded",
+    "draft_memory_candidates": "ContextBundle.metadata.draftMemoryCandidates",
+    "promotion_state": "DraftSuggestionRecord.promotion_result.state",
+    "promotion_index_status": "DraftSuggestionRecord.promotion_result.index_status"
+  }
+}

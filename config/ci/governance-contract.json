@@ -72,6 +72,40 @@
       ]
     },
     {
+      "path": "config/ci/memory-mode-contract.json",
+      "owner_lane": "retrieval",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/memoryModeContract.test.ts",
+        "tests/config/features.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:mcp-smoke"
+      ]
+    },
+    {
+      "path": "config/ci/memory-mode-thresholds.json",
+      "owner_lane": "retrieval",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/memoryModeThresholdsContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:mcp-smoke"
+      ]
+    },
+    {
+      "path": "config/ci/memory-mode-rollback-evidence-contract.json",
+      "owner_lane": "retrieval",
+      "lifecycle_state": "active",
+      "paired_tests": [
+        "tests/ci/memoryModeRollbackEvidenceContract.test.ts"
+      ],
+      "consuming_gates": [
+        "ci:check:mcp-smoke"
+      ]
+    },
+    {
       "path": "config/ci/retrieval-calibration-contract.json",
       "owner_lane": "retrieval",
       "lifecycle_state": "active",

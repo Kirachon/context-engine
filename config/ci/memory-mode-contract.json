@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "feature_flags": {
+    "draft_capture": "memory_suggestions_v1",
+    "draft_retrieval": "memory_draft_retrieval_v1",
+    "auto_save": "memory_autosave_v1",
+    "kill_switch": "rollout_kill_switch"
+  },
+  "rollout": {
+    "default_phase": "phase_1_assisted",
+    "feature_flags_default_off": true,
+    "draft_retrieval_default_off": true,
+    "auto_save_allowed_in_initial_phases": false,
+    "kill_switch_required": true
+  },
+  "source_allowlist": {
+    "phase_1": [
+      "plan_outputs",
+      "review_outputs",
+      "explicit_user_directives"
+    ]
+  },
+  "durable_memory": {
+    "sole_writer_tool": "add_memory",
+    "second_durable_writer_forbidden": true,
+    "promotion_must_reuse_add_memory_path": true
+  },
+  "draft_isolation": {
+    "draft_store_path": ".context-engine-memory-suggestions/",
+    "isolated_from_memories_path": true,
+    "excluded_from_default_retrieval": true,
+    "excluded_from_indexing": true,
+    "excluded_from_watchers": true
+  },
+  "rollout_gates": {
+    "contract_gate": [
+      "feature_flag_defaults_off",
+      "source_allowlist_pinned",
+      "durable_writer_rule_pinned",
+      "draft_isolation_pinned"
+    ],
+    "safety_gate": [
+      "no_secret_persistence",
+      "auto_save_disabled",
+      "kill_switch_available"
+    ],
+    "operational_gate": [
+      "feature_flag_default_off",
+      "rollback_ready_before_write_behavior"
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "feature_flag": "CE_MEMORY_SUGGESTIONS_V1",
+  "required_artifacts": {
+    "candidate": "artifacts/bench/pr-candidate.json",
+    "rollback": "artifacts/bench/pr-rollback.json"
+  },
+  "required_sections": [
+    "change_summary",
+    "rollback_trigger",
+    "rollback_steps",
+    "rollback_result"
+  ],
+  "policy": {
+    "behavior_changing_memory_mode_slices_require_rollback_evidence": true,
+    "feature_flag_default_off_until_canary_ready": true
+  }
+}
