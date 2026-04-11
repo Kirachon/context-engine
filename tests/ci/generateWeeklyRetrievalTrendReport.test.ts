@@ -39,7 +39,7 @@ describe('scripts/ci/generate-weekly-retrieval-trend-report.ts', () => {
       evaluations: [
         { id: 'quality.ndcg_at_10', value: 14 },
         { id: 'quality.mrr_at_10', value: 12.5 },
-        { id: 'quality.recall_at_50', value: 22 },
+        { id: 'quality.recall_at_10', value: 22 },
       ],
     });
 
@@ -76,7 +76,7 @@ describe('scripts/ci/generate-weekly-retrieval-trend-report.ts', () => {
       evaluations: [
         { id: 'quality.ndcg_at_10', value: 10 },
         { id: 'quality.mrr_at_10', value: 9 },
-        { id: 'quality.recall_at_50', value: 8 },
+        { id: 'quality.recall_at_10', value: 8 },
       ],
     });
 

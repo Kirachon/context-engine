@@ -370,12 +370,17 @@ function run(): number {
       message: mrrDeltaPct === null ? 'Missing evaluation value for quality.mrr_at_10' : `quality.mrr_at_10=${mrrDeltaPct}`,
     });
 
-    const recallDeltaPct = getEvaluationValue(quality, 'quality.recall_at_50');
+    const recallDeltaPct =
+      getEvaluationValue(quality, 'quality.recall_at_10') ??
+      getEvaluationValue(quality, 'quality.recall_at_50');
     checks.push({
       id: 'metric.recall_delta_pct',
       status: recallDeltaPct === null ? 'FAIL' : 'PASS',
       source: qualityPathForArtifact,
-      message: recallDeltaPct === null ? 'Missing evaluation value for quality.recall_at_50' : `quality.recall_at_50=${recallDeltaPct}`,
+      message:
+        recallDeltaPct === null
+          ? 'Missing evaluation value for quality.recall_at_10'
+          : `quality.recall_at_10=${recallDeltaPct}`,
     });
 
     const periodConflicts = findExistingPeriodEntries(archiveDir, period.key);

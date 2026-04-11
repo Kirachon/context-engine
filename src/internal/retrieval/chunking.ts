@@ -15,6 +15,7 @@ export interface ChunkingOptions {
   path: string;
   maxChunkLines?: number;
   maxChunkChars?: number;
+  overlapLines?: number;
 }
 
 export interface ChunkParser {
@@ -72,6 +73,7 @@ export function splitIntoChunks(content: string, options: ChunkingOptions): Chun
 
   const maxChunkLines = Math.max(1, Math.min(400, options.maxChunkLines ?? DEFAULT_MAX_CHUNK_LINES));
   const maxChunkChars = Math.max(64, Math.min(50_000, options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS));
+  const overlapLines = Math.max(0, Math.min(maxChunkLines - 1, Math.floor(options.overlapLines ?? 0)));
   const lines = content.split(/\r?\n/);
   const chunks: ChunkRecord[] = [];
 
@@ -79,6 +81,23 @@ export function splitIntoChunks(content: string, options: ChunkingOptions): Chun
   let bufferStartLine = 1;
   let bufferChars = 0;
   let bufferKind: ChunkKind = 'paragraph';
+
+  const captureOverlapBuffer = (lineCount: number): { lines: string[]; startLine: number; kind: ChunkKind } | null => {
+    if (lineCount <= 0 || buffer.length <= 1) {
+      return null;
+    }
+
+    const overlapCount = Math.max(0, Math.min(lineCount, buffer.length - 1));
+    if (overlapCount <= 0) {
+      return null;
+    }
+
+    return {
+      lines: buffer.slice(-overlapCount),
+      startLine: Math.max(1, bufferStartLine + buffer.length - overlapCount),
+      kind: bufferKind,
+    };
+  };
 
   const flush = (endLine: number): void => {
     if (buffer.length === 0) {
@@ -122,7 +141,14 @@ export function splitIntoChunks(content: string, options: ChunkingOptions): Chun
       && (buffer.length >= maxChunkLines || (bufferChars + lineLength) > maxChunkChars);
 
     if (startsNewSemanticChunk || exceedsSoftLimit) {
+      const overlapSeed = exceedsSoftLimit ? captureOverlapBuffer(overlapLines) : null;
       flush(lineNumber - 1);
+      if (overlapSeed) {
+        buffer = overlapSeed.lines;
+        bufferStartLine = overlapSeed.startLine;
+        bufferChars = overlapSeed.lines.reduce((sum, overlapLine) => sum + overlapLine.length, 0);
+        bufferKind = overlapSeed.kind;
+      }
     }
 
     if (buffer.length === 0) {

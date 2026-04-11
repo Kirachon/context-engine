@@ -1,5 +1,10 @@
 import type { SearchResult } from '../../mcp/serviceClient.js';
 import type { InternalSearchResult } from './types.js';
+import {
+  buildIdentifierPathSignals,
+  computeExactMatchBoost,
+  tokenizeSearchInput,
+} from './searchHeuristics.js';
 
 function tokenize(input: string): string[] {
   return input
@@ -38,7 +43,7 @@ export function scoreLexicalCandidates(
 ): InternalSearchResult[] {
   if (results.length === 0) return [];
 
-  const tokens = [...new Set(tokenize(options.query))];
+  const tokens = tokenizeSearchInput(options.query);
   if (tokens.length === 0) {
     return results.map((result) => ({
       ...result,
@@ -86,6 +91,41 @@ export function scoreLexicalCandidates(
     const lowerPath = doc.result.path.toLowerCase();
     const pathHits = tokens.reduce((hits, token) => (lowerPath.includes(token) ? hits + 1 : hits), 0);
     score += pathHits * 0.12;
+    score += computeExactMatchBoost({
+      query: options.query,
+      path: doc.result.path,
+      content: doc.result.content ?? '',
+      lines: doc.result.lines,
+      chunkId: doc.result.chunkId,
+    });
+
+    const identifierSignals = buildIdentifierPathSignals(options.query, doc.result.path);
+    if (identifierSignals.exactBasenameMatch) {
+      score += identifierSignals.isCodePath ? 6.5 : 4.5;
+    } else if (identifierSignals.pathTokenCoverage > 0) {
+      score += identifierSignals.pathTokenCoverage * (identifierSignals.isCodePath ? 2.2 : 1.6);
+    }
+    if (identifierSignals.isIdentifierQuery && identifierSignals.isCodePath && identifierSignals.pathTokenCoverage > 0) {
+      score += identifierSignals.isScriptPath ? 1.2 : 0.8;
+    }
+    if (
+      identifierSignals.isIdentifierQuery
+      && identifierSignals.isTestPath
+      && !identifierSignals.queryMentionsTest
+    ) {
+      score -= identifierSignals.exactBasenameMatch ? 4 : 1.5;
+    }
+    if (identifierSignals.isIdentifierQuery && !identifierSignals.exactBasenameMatch) {
+      if (identifierSignals.isArtifactPath) {
+        score -= 6;
+      }
+      if (identifierSignals.isConfigPath) {
+        score -= 4;
+      }
+      if (identifierSignals.isJsonPath && !identifierSignals.isCodePath) {
+        score -= 4;
+      }
+    }
 
     return { doc, rawScore: score };
   });
@@ -93,19 +133,40 @@ export function scoreLexicalCandidates(
   const maxRaw = scored.reduce((max, item) => Math.max(max, item.rawScore), 0);
   const normalize = (value: number) => (maxRaw > 0 ? Math.max(0, Math.min(1, value / maxRaw)) : 0);
 
-  return scored.map(({ doc, rawScore }) => {
+  const ranked = scored.map(({ doc, rawScore }, index) => {
     const normalizedScore = normalize(rawScore);
     return {
-      ...doc.result,
-      retrievalSource: 'lexical',
-      lexicalScore: normalizedScore,
-      relevanceScore: normalizedScore,
-      combinedScore: normalizedScore,
-      tieBreakPath: doc.result.path,
-      tieBreakLine: parseLineStart(doc.result.lines),
-      queryVariant: options.queryVariant,
-      variantIndex: options.variantIndex,
-      variantWeight: options.variantWeight,
+      result: {
+        ...doc.result,
+        retrievalSource: 'lexical',
+        lexicalScore: normalizedScore,
+        relevanceScore: normalizedScore,
+        combinedScore: normalizedScore,
+        tieBreakPath: doc.result.path,
+        tieBreakLine: parseLineStart(doc.result.lines),
+        queryVariant: options.queryVariant,
+        variantIndex: options.variantIndex,
+        variantWeight: options.variantWeight,
+      } satisfies InternalSearchResult,
+      normalizedScore,
+      index,
     };
   });
+
+  ranked.sort((left, right) => {
+    if (right.normalizedScore !== left.normalizedScore) {
+      return right.normalizedScore - left.normalizedScore;
+    }
+    if (left.result.path !== right.result.path) {
+      return left.result.path.localeCompare(right.result.path);
+    }
+    const leftLine = left.result.tieBreakLine ?? Number.MAX_SAFE_INTEGER;
+    const rightLine = right.result.tieBreakLine ?? Number.MAX_SAFE_INTEGER;
+    if (leftLine !== rightLine) {
+      return leftLine - rightLine;
+    }
+    return left.index - right.index;
+  });
+
+  return ranked.map(({ result }) => result);
 }

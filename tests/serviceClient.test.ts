@@ -550,6 +550,90 @@ describe('ContextServiceClient', () => {
   });
 
   describe('Retrieval Artifact V2 Metadata', () => {
+    it('should keep the zero-flags default posture stable for retrieval metadata outputs', () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'false';
+      delete process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE;
+
+      for (const key of [
+        'rollout_kill_switch',
+        'index_state_store',
+        'skip_unchanged_indexing',
+        'hash_normalize_eol',
+        'retrieval_rewrite_v2',
+        'retrieval_ranking_v2',
+        'retrieval_ranking_v3',
+        'retrieval_request_memo_v2',
+        'retrieval_hybrid_v1',
+        'context_packs_v2',
+        'retrieval_quality_guard_v1',
+        'retrieval_provider_v2',
+        'retrieval_artifacts_v2',
+        'retrieval_shadow_control_v2',
+        'retrieval_tree_sitter_v1',
+        'retrieval_chunk_search_v1',
+        'retrieval_sqlite_fts5_v1',
+        'retrieval_lancedb_v1',
+        'retrieval_transformer_embeddings_v1',
+      ]) {
+        featureFlags[key] = false;
+      }
+
+      const localClient = new ContextServiceClient(testWorkspace);
+      const runtimeMetadata = localClient.getRetrievalRuntimeMetadata();
+      const artifactMetadata = localClient.getRetrievalArtifactMetadata();
+      const featureSnapshot = snapshotRetrievalV2FeatureFlags();
+
+      expect(Object.keys(featureSnapshot).sort()).toEqual([
+        'context_packs_v2',
+        'hash_normalize_eol',
+        'index_state_store',
+        'retrieval_artifacts_v2',
+        'retrieval_chunk_search_v1',
+        'retrieval_hybrid_v1',
+        'retrieval_lancedb_v1',
+        'retrieval_provider_v2',
+        'retrieval_quality_guard_v1',
+        'retrieval_ranking_v2',
+        'retrieval_ranking_v3',
+        'retrieval_request_memo_v2',
+        'retrieval_rewrite_v2',
+        'retrieval_shadow_control_v2',
+        'retrieval_sqlite_fts5_v1',
+        'retrieval_tree_sitter_v1',
+        'rollout_kill_switch',
+        'skip_unchanged_indexing',
+      ]);
+      expect(Object.values(featureSnapshot).every((value) => value === false)).toBe(true);
+      expect(runtimeMetadata).toEqual({
+        providerId: 'local_native',
+        shadowCompare: {
+          enabled: false,
+          sampleRate: 0,
+        },
+        v2: {
+          retrievalRewriteV2: false,
+          retrievalRankingV2: false,
+          retrievalRankingV3: false,
+          retrievalRequestMemoV2: false,
+        },
+      });
+      expect(artifactMetadata).toMatchObject({
+        artifact_schema_version: 1,
+        retrieval_provider: 'local_native',
+        retrieval_engine_version: 'local-native-v1',
+        embedding_model_id: 'hash-128',
+        vector_dimension: 128,
+        fallback_domain: 'unknown',
+        fallback_reason: null,
+        feature_flags_snapshot: featureSnapshot,
+        shadow_compare: {
+          enabled: false,
+          sampleRate: 0,
+        },
+      });
+    });
+
     it('should expose a versioned retrieval artifact snapshot without changing runtime metadata', () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
@@ -1996,6 +2080,52 @@ describe('ContextServiceClient', () => {
         path: 'src/lexical.ts',
         chunkId: 'lex-1',
         lines: '8-12',
+        matchType: 'keyword',
+      }));
+    });
+
+    it('should blend chunk search for identifier-like queries even when SQLite returns hits', async () => {
+      featureFlags.retrieval_sqlite_fts5_v1 = true;
+      featureFlags.retrieval_chunk_search_v1 = true;
+
+      const lexicalSearchEngine = {
+        search: jest.fn(async () => [
+          {
+            path: 'tests/ci/generateRetrievalQualityReport.test.ts',
+            content: 'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+            lines: '1-40',
+            chunkId: 'lex-1',
+            relevanceScore: 0.97,
+            matchType: 'keyword',
+          },
+        ]),
+      };
+      (client as any).lexicalSqliteSearchEngine = lexicalSearchEngine;
+
+      const chunkSearchEngine = {
+        search: jest.fn(async () => [
+          {
+            path: 'scripts/ci/generate-retrieval-quality-report.ts',
+            content: 'export function generateRetrievalQualityReport() { return "generate-retrieval-quality-report synthetic_guard stable_fixture_token"; }',
+            lines: '8-12',
+            chunkId: 'chunk-1',
+            relevanceScore: 0.9,
+            matchType: 'keyword',
+          },
+        ]),
+      };
+      (client as any).chunkSearchEngine = chunkSearchEngine;
+
+      const results = await client.localKeywordSearch(
+        'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+        5,
+        { bypassCache: true }
+      );
+
+      expect(lexicalSearchEngine.search).toHaveBeenCalledTimes(1);
+      expect(chunkSearchEngine.search).toHaveBeenCalledTimes(1);
+      expect(results[0]).toEqual(expect.objectContaining({
+        path: 'scripts/ci/generate-retrieval-quality-report.ts',
         matchType: 'keyword',
       }));
     });

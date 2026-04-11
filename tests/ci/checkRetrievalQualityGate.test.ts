@@ -76,7 +76,7 @@ describe('scripts/ci/check-retrieval-quality-gate.ts', () => {
       ],
       gate_rules: {
         min_pass_rate: 1,
-        required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_50'],
+        required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_10', 'quality.p_at_1'],
       },
       gate: {
         status: 'fail',
@@ -98,7 +98,7 @@ describe('scripts/ci/check-retrieval-quality-gate.ts', () => {
     const gate = artifact.gate as Record<string, unknown>;
     expect(gate.status).toBe('fail');
     const reasons = gate.reasons as string[];
-    expect(reasons.some((line) => line.includes('quality.recall_at_50'))).toBe(true);
+    expect(reasons.some((line) => line.includes('quality.recall_at_10'))).toBe(true);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

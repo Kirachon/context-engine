@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it, jest } from '@jest/globals';
+import { FEATURE_FLAGS } from '../../../src/config/features.js';
+import {
+  clearConfiguredEmbeddingRuntimeCacheForTests,
+  createConfiguredEmbeddingRuntime,
+} from '../../../src/internal/retrieval/embeddingRuntime.js';
 import {
   clearRerankerRuntimeCacheForTests,
   rerankCandidates,
@@ -58,8 +63,12 @@ async function createTransformersModule(extractor: ReturnType<typeof createVecto
 }
 
 describe('reranker', () => {
+  const originalCrossEncoderRerank = FEATURE_FLAGS.retrieval_cross_encoder_rerank_v1;
+
   afterEach(() => {
+    FEATURE_FLAGS.retrieval_cross_encoder_rerank_v1 = originalCrossEncoderRerank;
     clearRerankerRuntimeCacheForTests();
+    clearConfiguredEmbeddingRuntimeCacheForTests();
   });
 
   it('uses transformer similarity ahead of heuristic score for hard queries', async () => {
@@ -94,6 +103,48 @@ describe('reranker', () => {
       'src/database/schema.ts',
     ]);
     expect(ranked[0]?.combinedScore).toBeGreaterThanOrEqual(ranked[1]?.combinedScore ?? -Infinity);
+  });
+
+  it('uses the cross-encoder text-classification path when enabled', async () => {
+    FEATURE_FLAGS.retrieval_cross_encoder_rerank_v1 = true;
+    const classifier = jest.fn(async (inputs: string | string[]) => {
+      const values = Array.isArray(inputs) ? inputs : [inputs];
+      return values.map((value) => (
+        value.includes('src/auth/login.ts')
+          ? [{ label: 'LABEL_1', score: 0.99 }, { label: 'LABEL_0', score: 0.01 }]
+          : [{ label: 'LABEL_1', score: 0.2 }, { label: 'LABEL_0', score: 0.8 }]
+      ));
+    });
+    const pipeline = jest.fn(async () => classifier);
+    const loadTransformersModule = jest.fn(async () => ({ pipeline }) as never);
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+
+    const ranked = await rerankCandidates(candidates, {
+      originalQuery: 'login handler',
+      mode: 'v3',
+      loadTransformersModule,
+      gateDecision,
+    });
+
+    expect(loadTransformersModule).toHaveBeenCalledTimes(1);
+    expect(pipeline).toHaveBeenCalledTimes(1);
+    const pipelineCalls = (pipeline as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    expect(pipelineCalls[0]?.[0]).toBe('text-classification');
+    expect(pipelineCalls[0]?.[1]).toBe('Xenova/ms-marco-MiniLM-L6-v2');
+    expect(classifier).toHaveBeenCalledTimes(1);
+    const crossEncoderInputs = classifier.mock.calls[0]?.[0];
+    expect(Array.isArray(crossEncoderInputs)).toBe(true);
+    expect((crossEncoderInputs as string[])[0]).toContain('login handler [SEP]');
+    expect(ranked[0]?.path).toBe('src/auth/login.ts');
   });
 
   it('skips transformer rerank on easy balanced queries', async () => {
@@ -181,6 +232,42 @@ describe('reranker', () => {
     await rerankCandidates(candidates, options);
 
     expect(loadTransformersModule).toHaveBeenCalledTimes(1);
+    expect(extractor).toHaveBeenCalledTimes(2);
+  });
+
+  it('shares the feature-extraction pipeline with the embedding runtime when the loader and model match', async () => {
+    const extractor = createVectorExtractor();
+    const pipeline = jest.fn(async () => extractor);
+    const loadTransformersModule = jest.fn(async () => ({
+      env: { localModelPath: '' },
+      pipeline,
+    }) as never);
+    const embeddingRuntime = createConfiguredEmbeddingRuntime({
+      preferTransformers: true,
+      transformerModelId: 'Xenova/all-MiniLM-L6-v2',
+      transformerVectorDimension: 16,
+      loadTransformersModule,
+    });
+    const candidates = [
+      createResult('src/database/schema.ts', 'database schema', 0.61, '1-2', 'semantic'),
+      createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
+      createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
+      createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+    ];
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+
+    await embeddingRuntime.embedQuery('login handler');
+    await rerankCandidates(candidates, {
+      originalQuery: 'login handler',
+      loadTransformersModule,
+      gateDecision,
+    });
+
+    expect(loadTransformersModule).toHaveBeenCalledTimes(1);
+    expect(pipeline).toHaveBeenCalledTimes(1);
     expect(extractor).toHaveBeenCalledTimes(2);
   });
 

@@ -334,6 +334,8 @@ describe('repo-aware launcher startup smoke', () => {
     expect(result.status).toBe(0);
     expect(result.stderr).toContain('Register once in ~/.codex/config.toml and reuse across repos');
     expect(result.stderr).toContain('CE_AUTO_INDEX_ON_STARTUP');
+    expect(result.stderr).toContain('CE_PERF_PROFILE');
+    expect(result.stderr).toContain('CE_FEATURE_KILL_SWITCHES');
     expect(result.stderr).not.toContain('args = ["/absolute/path/to/dist/index.js", "--workspace", "/path/to/your/project"]');
   });
 
@@ -486,6 +488,35 @@ describe('repo-aware launcher startup smoke', () => {
     } finally {
       fs.rmSync(repoRoot, { recursive: true, force: true });
     }
+  });
+
+  it('fails fast when incompatible feature flags are enabled together', async () => {
+    const port = await getAvailablePort();
+    const result = spawnSync(
+      process.execPath,
+      [tsxCli, entrypoint, '--http-only', '--port', String(port)],
+      {
+        cwd: process.cwd(),
+        env: {
+          ...process.env,
+          CE_AUTO_INDEX_ON_STARTUP: 'false',
+          CE_PERF_PROFILE: 'default',
+          CE_FEATURE_KILL_SWITCHES: '',
+          CE_INDEX_STATE_STORE: 'false',
+          CE_SKIP_UNCHANGED_INDEXING: 'true',
+        },
+        encoding: 'utf-8',
+        windowsHide: true,
+        timeout: 10000,
+      }
+    );
+
+    expect(result.error).toBeUndefined();
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(
+      'Invalid feature flag configuration: skip_unchanged_indexing requires index_state_store'
+    );
+    expect(result.stderr).not.toContain('Running in HTTP-only mode. Press Ctrl+C to stop.');
   });
 
   it('preserves stdio startup markers and tools/list inventory', async () => {

@@ -1,3 +1,4 @@
+import * as v8 from 'node:v8';
 import { featureEnabled } from '../config/features.js';
 
 type LabelValues = Record<string, string | number | boolean | undefined>;
@@ -151,6 +152,10 @@ class MetricsRegistry {
 
   renderPrometheus(): string {
     const lines: string[] = [];
+    const memoryUsage = process.memoryUsage();
+    const heapStats = v8.getHeapStatistics();
+    const heapLimitBytes = Math.max(0, Number(heapStats.heap_size_limit) || 0);
+    const heapUtilization = heapLimitBytes > 0 ? memoryUsage.heapUsed / heapLimitBytes : 0;
 
     // Process/runtime metrics (cheap, computed at render time)
     lines.push('# HELP process_uptime_seconds Uptime of the Node.js process in seconds.');
@@ -159,7 +164,31 @@ class MetricsRegistry {
 
     lines.push('# HELP process_resident_memory_bytes Resident set size memory in bytes.');
     lines.push('# TYPE process_resident_memory_bytes gauge');
-    lines.push(`process_resident_memory_bytes ${process.memoryUsage().rss}`);
+    lines.push(`process_resident_memory_bytes ${memoryUsage.rss}`);
+
+    lines.push('# HELP process_heap_used_bytes Used V8 heap memory in bytes.');
+    lines.push('# TYPE process_heap_used_bytes gauge');
+    lines.push(`process_heap_used_bytes ${memoryUsage.heapUsed}`);
+
+    lines.push('# HELP process_heap_total_bytes Total V8 heap memory in bytes.');
+    lines.push('# TYPE process_heap_total_bytes gauge');
+    lines.push(`process_heap_total_bytes ${memoryUsage.heapTotal}`);
+
+    lines.push('# HELP process_heap_limit_bytes Current V8 heap size limit in bytes.');
+    lines.push('# TYPE process_heap_limit_bytes gauge');
+    lines.push(`process_heap_limit_bytes ${heapLimitBytes}`);
+
+    lines.push('# HELP process_external_memory_bytes External memory tracked by Node.js in bytes.');
+    lines.push('# TYPE process_external_memory_bytes gauge');
+    lines.push(`process_external_memory_bytes ${memoryUsage.external}`);
+
+    lines.push('# HELP process_array_buffers_bytes ArrayBuffer memory tracked by Node.js in bytes.');
+    lines.push('# TYPE process_array_buffers_bytes gauge');
+    lines.push(`process_array_buffers_bytes ${memoryUsage.arrayBuffers}`);
+
+    lines.push('# HELP process_heap_utilization_ratio Ratio of used V8 heap bytes to the current heap limit.');
+    lines.push('# TYPE process_heap_utilization_ratio gauge');
+    lines.push(`process_heap_utilization_ratio ${heapUtilization}`);
 
     lines.push('# HELP context_engine_metrics_dropped_total Number of metric updates dropped due to registry limits.');
     lines.push('# TYPE context_engine_metrics_dropped_total counter');

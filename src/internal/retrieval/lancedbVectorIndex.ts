@@ -10,6 +10,16 @@ import {
   getReadableWorkspaceDirectory,
   getReadableWorkspacePath,
 } from '../../runtime/compatPaths.js';
+import {
+  createEmbeddingReuseLookup,
+  getInternalEmbeddingReuse,
+  getReusableEmbeddingVector,
+  hashEmbeddingReuseContent,
+  normalizeEmbeddingVector,
+  setReusableEmbeddingVector,
+  type InternalEmbeddingReuse,
+} from '../handlers/performance.js';
+import { splitIntoChunks } from './chunking.js';
 import type { DenseRetriever } from './embeddingProvider.js';
 import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
@@ -23,6 +33,10 @@ const TABLE_NAME = 'retrieval_vectors';
 const INDEX_VERSION = 1;
 const DEFAULT_REFRESH_MAX_DOCS = 500;
 const DEFAULT_EMBED_BATCH_SIZE = 64;
+const MAX_INDEXED_DOCUMENT_CHARS = 4_000;
+const EMBEDDING_CHUNK_MAX_LINES = 24;
+const EMBEDDING_CHUNK_MAX_CHARS = 750;
+const EMBEDDING_CHUNK_OVERLAP_LINES = 4;
 
 interface VectorIndexEntry {
   hash: string;
@@ -35,6 +49,8 @@ interface VectorIndexFile {
   embedding_model_id: string;
   vector_dimension: number;
   updated_at: string;
+  doc_count: number;
+  vector_index_ready: boolean;
   docs: Record<string, VectorIndexEntry>;
 }
 
@@ -55,6 +71,25 @@ type VectorTableRow = Record<string, unknown> & {
   vector: number[];
   indexed_at: string;
 };
+
+interface IncrementalRefreshResult {
+  vectorIndex: VectorIndexFile;
+  tableChanged: boolean;
+}
+
+type SearchFailureStage = 'refresh' | 'table_load' | 'query_embed' | 'query_search';
+
+class VectorSearchFailure extends Error {
+  readonly stage: SearchFailureStage;
+  readonly rootCause: unknown;
+
+  constructor(stage: SearchFailureStage, cause: unknown) {
+    super(cause instanceof Error ? cause.message : `LanceDB ${stage} failed.`);
+    this.name = 'VectorSearchFailure';
+    this.stage = stage;
+    this.rootCause = cause;
+  }
+}
 
 export interface WorkspaceLanceDbVectorRetrieverOptions {
   workspacePath: string;
@@ -114,15 +149,113 @@ function readIndexState(filePath: string): IndexStateFile {
   return { files: parsed.files as Record<string, IndexStateFileEntry> };
 }
 
-function readVectorIndex(filePath: string, runtime: EmbeddingRuntime): VectorIndexFile {
-  const fallback: VectorIndexFile = {
+function normalizeIndexStateEntries(indexState: IndexStateFile): Map<string, IndexStateFileEntry> {
+  const normalizedIndexEntries = new Map<string, IndexStateFileEntry>();
+  for (const [relativePath, entry] of Object.entries(indexState.files)) {
+    const safePath = sanitizePath(relativePath);
+    if (safePath && entry && typeof entry.hash === 'string') {
+      normalizedIndexEntries.set(safePath, entry);
+    }
+  }
+  return normalizedIndexEntries;
+}
+
+function normalizeVectorDocs(docs: Record<string, VectorIndexEntry>): Record<string, VectorIndexEntry> {
+  const normalizedDocs = new Map<string, VectorIndexEntry>();
+  for (const [relativePath, entry] of Object.entries(docs)) {
+    const safePath = sanitizePath(relativePath);
+    if (!safePath || !entry || typeof entry.hash !== 'string') {
+      continue;
+    }
+    normalizedDocs.set(safePath, {
+      hash: entry.hash,
+      indexed_at: typeof entry.indexed_at === 'string' ? entry.indexed_at : new Date(0).toISOString(),
+    });
+  }
+  return Object.fromEntries([...normalizedDocs.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
+function createVectorIndexFile(
+  runtime: EmbeddingRuntime,
+  docs: Record<string, VectorIndexEntry>,
+  updatedAt: string = new Date().toISOString(),
+  vectorIndexReady = false
+): VectorIndexFile {
+  const normalizedDocs = normalizeVectorDocs(docs);
+  const docCount = Object.keys(normalizedDocs).length;
+  return {
     version: INDEX_VERSION,
     embedding_provider: runtime.id,
     embedding_model_id: runtime.modelId,
     vector_dimension: runtime.vectorDimension,
-    updated_at: new Date(0).toISOString(),
-    docs: {},
+    updated_at: updatedAt,
+    doc_count: docCount,
+    vector_index_ready: vectorIndexReady && docCount > 0,
+    docs: normalizedDocs,
   };
+}
+
+function hasConsistentVectorIndexDocCount(vectorIndex: VectorIndexFile): boolean {
+  return vectorIndex.doc_count === Object.keys(vectorIndex.docs).length;
+}
+
+function shouldPersistVectorIndex(previous: VectorIndexFile, next: VectorIndexFile): boolean {
+  return JSON.stringify({ ...previous, updated_at: '' }) !== JSON.stringify({ ...next, updated_at: '' });
+}
+
+function getEmbedBatchSize(): number {
+  return envInt(
+    'CE_DENSE_EMBED_BATCH_SIZE',
+    DEFAULT_EMBED_BATCH_SIZE,
+    { min: 1, max: 512 }
+  );
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  if (typeof error === 'string') {
+    return error;
+  }
+  return 'unknown LanceDB error';
+}
+
+function toVectorSearchFailure(stage: SearchFailureStage, error: unknown): VectorSearchFailure {
+  return error instanceof VectorSearchFailure ? error : new VectorSearchFailure(stage, error);
+}
+
+function shouldAttemptNonDestructiveRetry(error: unknown): boolean {
+  return !(error instanceof VectorSearchFailure) || error.stage !== 'query_embed';
+}
+
+function shouldAttemptDestructiveRecovery(error: unknown): boolean {
+  if (!(error instanceof VectorSearchFailure)) {
+    return true;
+  }
+  if (error.stage === 'query_embed') {
+    return false;
+  }
+  if (error.stage === 'refresh' || error.stage === 'table_load' || error.stage === 'query_search') {
+    return /corrupt|manifest|schema|index|table|dataset|not a directory|failed to open|lance|arrow/i
+      .test(getErrorMessage(error.rootCause));
+  }
+  return true;
+}
+
+function docsFromRows(rows: VectorTableRow[]): Record<string, VectorIndexEntry> {
+  const docs: Record<string, VectorIndexEntry> = {};
+  for (const row of rows) {
+    docs[row.path] = {
+      hash: row.hash,
+      indexed_at: row.indexed_at,
+    };
+  }
+  return docs;
+}
+
+function readVectorIndex(filePath: string, runtime: EmbeddingRuntime): VectorIndexFile {
+  const fallback = createVectorIndexFile(runtime, {}, new Date(0).toISOString(), false);
 
   const parsed = safeReadJson<Partial<VectorIndexFile>>(filePath, fallback);
   if (!parsed || typeof parsed !== 'object') {
@@ -131,6 +264,9 @@ function readVectorIndex(filePath: string, runtime: EmbeddingRuntime): VectorInd
   if (parsed.embedding_provider !== runtime.id) {
     return fallback;
   }
+  const docs = parsed.docs && typeof parsed.docs === 'object'
+    ? normalizeVectorDocs(parsed.docs as Record<string, VectorIndexEntry>)
+    : {};
   return {
     version: typeof parsed.version === 'number' ? parsed.version : INDEX_VERSION,
     embedding_provider: runtime.id,
@@ -141,9 +277,11 @@ function readVectorIndex(filePath: string, runtime: EmbeddingRuntime): VectorInd
       ? parsed.vector_dimension
       : runtime.vectorDimension,
     updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : fallback.updated_at,
-    docs: parsed.docs && typeof parsed.docs === 'object'
-      ? (parsed.docs as Record<string, VectorIndexEntry>)
-      : {},
+    doc_count: typeof parsed.doc_count === 'number' && Number.isFinite(parsed.doc_count) && parsed.doc_count >= 0
+      ? Math.floor(parsed.doc_count)
+      : Object.keys(docs).length,
+    vector_index_ready: parsed.vector_index_ready === true,
+    docs,
   };
 }
 
@@ -157,7 +295,7 @@ function readDocumentContent(workspacePath: string, relativePath: string): strin
     if (stat.size > 1_000_000) return null;
     const content = fs.readFileSync(absolute, 'utf8');
     if (!content.trim()) return null;
-    return content.slice(0, 4000);
+    return content.slice(0, MAX_INDEXED_DOCUMENT_CHARS);
   } catch {
     return null;
   }
@@ -165,6 +303,105 @@ function readDocumentContent(workspacePath: string, relativePath: string): strin
 
 function getLinesPreview(content: string): string {
   return content.split(/\r?\n/).slice(0, 8).join('\n');
+}
+
+function buildEmbeddingInputs(relativePath: string, content: string): string[] {
+  const chunks = splitIntoChunks(content, {
+    path: relativePath,
+    maxChunkLines: EMBEDDING_CHUNK_MAX_LINES,
+    maxChunkChars: EMBEDDING_CHUNK_MAX_CHARS,
+    overlapLines: EMBEDDING_CHUNK_OVERLAP_LINES,
+  });
+
+  if (chunks.length === 0) {
+    return content.trim() ? [content] : [];
+  }
+
+  return chunks.map((chunk) => chunk.content);
+}
+
+function averageEmbeddings(vectors: number[][]): number[] {
+  const nonEmptyVectors = vectors.filter((vector) => vector.length > 0);
+  if (nonEmptyVectors.length === 0) {
+    return [];
+  }
+
+  const dimension = nonEmptyVectors.reduce((max, vector) => Math.max(max, vector.length), 0);
+  const sums = new Array<number>(dimension).fill(0);
+  for (const vector of nonEmptyVectors) {
+    for (let index = 0; index < dimension; index += 1) {
+      sums[index] += Number(vector[index] ?? 0);
+    }
+  }
+
+  return sums.map((sum) => sum / nonEmptyVectors.length);
+}
+
+async function embedRows(
+  rows: VectorTableRow[],
+  embeddingRuntime: EmbeddingRuntime,
+  batchSize: number,
+  embeddingReuse: InternalEmbeddingReuse
+): Promise<void> {
+  const pendingVectors = rows.map(() => [] as number[][]);
+  const embeddingInputs = rows.flatMap((row, rowIndex) =>
+    buildEmbeddingInputs(row.path, row.content).map((content) => ({
+      rowIndex,
+      content,
+      lookup: createEmbeddingReuseLookup(
+        embeddingRuntime,
+        'document',
+        hashEmbeddingReuseContent(content)
+      ),
+    }))
+  );
+  const cacheMisses: typeof embeddingInputs = [];
+
+  for (const input of embeddingInputs) {
+    const reused = getReusableEmbeddingVector(embeddingReuse, input.lookup);
+    if (reused) {
+      pendingVectors[input.rowIndex].push(reused);
+      continue;
+    }
+    cacheMisses.push(input);
+  }
+
+  for (let index = 0; index < cacheMisses.length; index += batchSize) {
+    const batch = cacheMisses.slice(index, index + batchSize);
+    const batchStart = Date.now();
+    const embeddings = await embeddingRuntime.embedDocuments(batch.map((entry) => entry.content));
+    observeDurationMs(
+      'context_engine_lancedb_embed_batch_duration_seconds',
+      { provider: embeddingRuntime.id },
+      Date.now() - batchStart,
+      { help: 'LanceDB embedding batch duration in seconds.' }
+    );
+    incCounter(
+      'context_engine_lancedb_embed_batches_total',
+      { provider: embeddingRuntime.id },
+      1,
+      'Total LanceDB embedding batches.'
+    );
+    incCounter(
+      'context_engine_lancedb_embed_docs_total',
+      { provider: embeddingRuntime.id },
+      batch.length,
+      'Total LanceDB embedding documents processed.'
+    );
+
+    for (let batchIndex = 0; batchIndex < batch.length; batchIndex += 1) {
+      const embedding = normalizeEmbeddingVector(embeddings[batchIndex], embeddingRuntime.vectorDimension);
+      if (!embedding) {
+        continue;
+      }
+      setReusableEmbeddingVector(embeddingReuse, batch[batchIndex].lookup, embedding);
+      pendingVectors[batch[batchIndex].rowIndex].push(embedding);
+    }
+  }
+
+  for (let index = 0; index < rows.length; index += 1) {
+    rows[index].vector = averageEmbeddings(pendingVectors[index]);
+  }
 }
 
 async function getConnection(vectorDbPath: string): Promise<lancedb.Connection> {
@@ -235,27 +472,18 @@ async function ensureVectorIndex(table: lancedb.Table): Promise<void> {
 async function buildRows(
   workspacePath: string,
   indexState: IndexStateFile,
-  embeddingRuntime: EmbeddingRuntime
+  embeddingRuntime: EmbeddingRuntime,
+  embeddingReuse: InternalEmbeddingReuse
 ): Promise<VectorTableRow[]> {
   const refreshMaxDocs = envInt(
     'CE_DENSE_REFRESH_MAX_DOCS',
     DEFAULT_REFRESH_MAX_DOCS,
     { min: 1, max: 10_000 }
   );
-  const embedBatchSize = envInt(
-    'CE_DENSE_EMBED_BATCH_SIZE',
-    DEFAULT_EMBED_BATCH_SIZE,
-    { min: 1, max: 512 }
-  );
+  const embedBatchSize = getEmbedBatchSize();
   const refreshStart = Date.now();
   const rows: VectorTableRow[] = [];
-  const normalizedIndexEntries = new Map<string, IndexStateFileEntry>();
-  for (const [relativePath, entry] of Object.entries(indexState.files)) {
-    const safePath = sanitizePath(relativePath);
-    if (safePath && entry && typeof entry.hash === 'string') {
-      normalizedIndexEntries.set(safePath, entry);
-    }
-  }
+  const normalizedIndexEntries = normalizeIndexStateEntries(indexState);
   const nextPaths = [...normalizedIndexEntries.keys()].sort();
   let refreshedDocs = 0;
 
@@ -289,33 +517,7 @@ async function buildRows(
   }
 
   if (rows.length > 0) {
-    for (let i = 0; i < rows.length; i += embedBatchSize) {
-      const batchRows = rows.slice(i, i + embedBatchSize);
-      const batchDocs = batchRows.map((row) => row.content);
-      const batchStart = Date.now();
-      const embeddings = await embeddingRuntime.embedDocuments(batchDocs);
-      observeDurationMs(
-        'context_engine_lancedb_embed_batch_duration_seconds',
-        { provider: embeddingRuntime.id },
-        Date.now() - batchStart,
-        { help: 'LanceDB embedding batch duration in seconds.' }
-      );
-      incCounter(
-        'context_engine_lancedb_embed_batches_total',
-        { provider: embeddingRuntime.id },
-        1,
-        'Total LanceDB embedding batches.'
-      );
-      incCounter(
-        'context_engine_lancedb_embed_docs_total',
-        { provider: embeddingRuntime.id },
-        batchDocs.length,
-        'Total LanceDB embedding documents processed.'
-      );
-      for (let j = 0; j < batchRows.length; j += 1) {
-        batchRows[j].vector = embeddings[j] ?? [];
-      }
-    }
+    await embedRows(rows, embeddingRuntime, embedBatchSize, embeddingReuse);
   }
 
   observeDurationMs(
@@ -331,7 +533,7 @@ async function buildRows(
     'Total LanceDB-refresh docs recomputed.'
   );
 
-  return rows;
+  return rows.filter((row) => row.vector.length === embeddingRuntime.vectorDimension);
 }
 
 async function applyIncrementalChanges(
@@ -339,27 +541,24 @@ async function applyIncrementalChanges(
   workspacePath: string,
   indexState: IndexStateFile,
   vectorIndex: VectorIndexFile,
-  embeddingRuntime: EmbeddingRuntime
-): Promise<VectorIndexFile> {
-  const normalizedIndexEntries = new Map<string, IndexStateFileEntry>();
-  for (const [relativePath, entry] of Object.entries(indexState.files)) {
-    const safePath = sanitizePath(relativePath);
-    if (safePath && entry && typeof entry.hash === 'string') {
-      normalizedIndexEntries.set(safePath, entry);
-    }
-  }
+  embeddingRuntime: EmbeddingRuntime,
+  embeddingReuse: InternalEmbeddingReuse
+): Promise<IncrementalRefreshResult> {
+  const normalizedIndexEntries = normalizeIndexStateEntries(indexState);
   const currentPaths = new Set(normalizedIndexEntries.keys());
-  const previousPaths = new Set(Object.keys(vectorIndex.docs));
+  const nextDocs: Record<string, VectorIndexEntry> = { ...vectorIndex.docs };
+  const previousPaths = new Set(Object.keys(nextDocs));
   const changed = [...currentPaths].filter((relativePath) => {
     const stateEntry = normalizedIndexEntries.get(relativePath);
     if (!stateEntry) return false;
-    return vectorIndex.docs[relativePath]?.hash !== stateEntry.hash;
+    return nextDocs[relativePath]?.hash !== stateEntry.hash;
   });
   const added = [...currentPaths].filter((relativePath) => {
     const stateEntry = normalizedIndexEntries.get(relativePath);
-    return Boolean(stateEntry) && !vectorIndex.docs[relativePath];
+    return Boolean(stateEntry) && !nextDocs[relativePath];
   });
   const removed = [...previousPaths].filter((relativePath) => !currentPaths.has(relativePath));
+  let tableChanged = false;
 
   const pathsToDelete = [...new Set([...removed, ...changed])];
   if (pathsToDelete.length > 0) {
@@ -367,8 +566,9 @@ async function applyIncrementalChanges(
       ? `path = ${sqlStringLiteral(pathsToDelete[0])}`
       : `path IN (${pathsToDelete.map(sqlStringLiteral).join(', ')})`;
     await table.delete(predicate);
+    tableChanged = true;
     for (const removedPath of pathsToDelete) {
-      delete vectorIndex.docs[removedPath];
+      delete nextDocs[removedPath];
     }
   }
 
@@ -393,39 +593,53 @@ async function applyIncrementalChanges(
     }
 
     if (rows.length > 0) {
-      const batchSize = envInt('CE_DENSE_EMBED_BATCH_SIZE', DEFAULT_EMBED_BATCH_SIZE, { min: 1, max: 512 });
-      for (let i = 0; i < rows.length; i += batchSize) {
-        const batchRows = rows.slice(i, i + batchSize);
-        const batchStart = Date.now();
-        const embeddings = await embeddingRuntime.embedDocuments(batchRows.map((row) => row.content));
-        observeDurationMs(
-          'context_engine_lancedb_embed_batch_duration_seconds',
-          { provider: embeddingRuntime.id },
-          Date.now() - batchStart,
-          { help: 'LanceDB embedding batch duration in seconds.' }
-        );
-        for (let j = 0; j < batchRows.length; j += 1) {
-          batchRows[j].vector = embeddings[j] ?? [];
-        }
+      const batchSize = getEmbedBatchSize();
+      await embedRows(rows, embeddingRuntime, batchSize, embeddingReuse);
+      const validRows = rows.filter((row) => row.vector.length === embeddingRuntime.vectorDimension);
+      for (let i = 0; i < validRows.length; i += batchSize) {
+        await table.add(validRows.slice(i, i + batchSize));
       }
-      await table.add(rows);
-      for (const row of rows) {
-        vectorIndex.docs[row.path] = {
-          hash: row.hash,
-          indexed_at: row.indexed_at,
-        };
+      if (validRows.length > 0) {
+        tableChanged = true;
+        for (const row of validRows) {
+          nextDocs[row.path] = {
+            hash: row.hash,
+            indexed_at: row.indexed_at,
+          };
+        }
       }
     }
   }
 
   return {
-    ...vectorIndex,
-    updated_at: new Date().toISOString(),
-    docs: { ...vectorIndex.docs },
-    embedding_provider: embeddingRuntime.id,
-    embedding_model_id: embeddingRuntime.modelId,
-    vector_dimension: embeddingRuntime.vectorDimension,
+    vectorIndex: createVectorIndexFile(
+      embeddingRuntime,
+      nextDocs,
+      new Date().toISOString(),
+      tableChanged ? false : vectorIndex.vector_index_ready
+    ),
+    tableChanged,
   };
+}
+
+async function rebuildVectorIndex(
+  connection: lancedb.Connection,
+  tableExists: boolean,
+  workspacePath: string,
+  indexState: IndexStateFile,
+  embeddingRuntime: EmbeddingRuntime,
+  embeddingReuse: InternalEmbeddingReuse
+): Promise<VectorIndexFile> {
+  const rows = await buildRows(workspacePath, indexState, embeddingRuntime, embeddingReuse);
+  if (tableExists) {
+    await connection.dropTable(TABLE_NAME);
+  }
+  if (rows.length === 0) {
+    return createVectorIndexFile(embeddingRuntime, {}, new Date().toISOString(), false);
+  }
+  const table = await connection.createTable(TABLE_NAME, rows, { mode: 'create', existOk: true });
+  await ensureVectorIndex(table);
+  return createVectorIndexFile(embeddingRuntime, docsFromRows(rows), new Date().toISOString(), true);
 }
 
 async function refreshVectorIndex(
@@ -433,90 +647,76 @@ async function refreshVectorIndex(
   vectorDbPath: string,
   vectorIndex: VectorIndexFile,
   indexState: IndexStateFile,
-  embeddingRuntime: EmbeddingRuntime
+  embeddingRuntime: EmbeddingRuntime,
+  embeddingReuse: InternalEmbeddingReuse
 ): Promise<VectorIndexFile> {
   const connection = await getConnection(vectorDbPath);
   const tableExists = await hasTable(connection, TABLE_NAME);
-  const currentPaths = Object.keys(indexState.files).sort();
+  const currentPaths = [...normalizeIndexStateEntries(indexState).keys()].sort();
 
   if (currentPaths.length === 0) {
     if (tableExists) {
       await connection.dropTable(TABLE_NAME);
     }
-    return {
-      version: INDEX_VERSION,
-      embedding_provider: embeddingRuntime.id,
-      embedding_model_id: embeddingRuntime.modelId,
-      vector_dimension: embeddingRuntime.vectorDimension,
-      updated_at: new Date().toISOString(),
-      docs: {},
-    };
+    return createVectorIndexFile(embeddingRuntime, {}, new Date().toISOString(), false);
   }
 
-  if (!tableExists || vectorIndex.embedding_provider !== embeddingRuntime.id || vectorIndex.vector_dimension !== embeddingRuntime.vectorDimension) {
-    const rows = await buildRows(workspacePath, indexState, embeddingRuntime);
-    if (tableExists) {
-      await connection.dropTable(TABLE_NAME);
-    }
-    if (rows.length === 0) {
-      return {
-        version: INDEX_VERSION,
-        embedding_provider: embeddingRuntime.id,
-        embedding_model_id: embeddingRuntime.modelId,
-        vector_dimension: embeddingRuntime.vectorDimension,
-        updated_at: new Date().toISOString(),
-        docs: {},
-      };
-    }
-    const table = await connection.createTable(TABLE_NAME, rows, { mode: 'create', existOk: true });
-    await ensureVectorIndex(table);
-    const nextDocs: Record<string, VectorIndexEntry> = {};
-    for (const row of rows) {
-      nextDocs[row.path] = { hash: row.hash, indexed_at: row.indexed_at };
-    }
-    return {
-      version: INDEX_VERSION,
-      embedding_provider: embeddingRuntime.id,
-      embedding_model_id: embeddingRuntime.modelId,
-      vector_dimension: embeddingRuntime.vectorDimension,
-      updated_at: new Date().toISOString(),
-      docs: nextDocs,
-    };
-  }
-
-  if (Object.keys(vectorIndex.docs).length === 0 && tableExists) {
-    await connection.dropTable(TABLE_NAME);
-    const rows = await buildRows(workspacePath, indexState, embeddingRuntime);
-    if (rows.length === 0) {
-      return {
-        version: INDEX_VERSION,
-        embedding_provider: embeddingRuntime.id,
-        embedding_model_id: embeddingRuntime.modelId,
-        vector_dimension: embeddingRuntime.vectorDimension,
-        updated_at: new Date().toISOString(),
-        docs: {},
-      };
-    }
-    const table = await connection.createTable(TABLE_NAME, rows, { mode: 'create', existOk: true });
-    await ensureVectorIndex(table);
-    const nextDocs: Record<string, VectorIndexEntry> = {};
-    for (const row of rows) {
-      nextDocs[row.path] = { hash: row.hash, indexed_at: row.indexed_at };
-    }
-    return {
-      version: INDEX_VERSION,
-      embedding_provider: embeddingRuntime.id,
-      embedding_model_id: embeddingRuntime.modelId,
-      vector_dimension: embeddingRuntime.vectorDimension,
-      updated_at: new Date().toISOString(),
-      docs: nextDocs,
-    };
+  if (
+    !tableExists
+    || vectorIndex.embedding_provider !== embeddingRuntime.id
+    || vectorIndex.embedding_model_id !== embeddingRuntime.modelId
+    || vectorIndex.vector_dimension !== embeddingRuntime.vectorDimension
+  ) {
+    return rebuildVectorIndex(connection, tableExists, workspacePath, indexState, embeddingRuntime, embeddingReuse);
   }
 
   const table = await connection.openTable(TABLE_NAME);
-  const refreshed = await applyIncrementalChanges(table, workspacePath, indexState, vectorIndex, embeddingRuntime);
+  const persistedDocCount = Object.keys(vectorIndex.docs).length;
+  if (persistedDocCount === 0) {
+    return rebuildVectorIndex(connection, true, workspacePath, indexState, embeddingRuntime, embeddingReuse);
+  }
+  let repairedVectorIndex = hasConsistentVectorIndexDocCount(vectorIndex)
+    ? vectorIndex
+    : createVectorIndexFile(
+        embeddingRuntime,
+        vectorIndex.docs,
+        new Date().toISOString(),
+        vectorIndex.vector_index_ready
+      );
+  if (!hasConsistentVectorIndexDocCount(vectorIndex)) {
+    const actualDocCount = await table.countRows();
+    if (actualDocCount !== persistedDocCount) {
+      return rebuildVectorIndex(connection, true, workspacePath, indexState, embeddingRuntime, embeddingReuse);
+    }
+    repairedVectorIndex = createVectorIndexFile(
+      embeddingRuntime,
+      vectorIndex.docs,
+      new Date().toISOString(),
+      vectorIndex.vector_index_ready
+    );
+  }
+  const refreshed = await applyIncrementalChanges(
+    table,
+    workspacePath,
+    indexState,
+    repairedVectorIndex,
+    embeddingRuntime,
+    embeddingReuse
+  );
+  if (!refreshed.vectorIndex.doc_count) {
+    await connection.dropTable(TABLE_NAME);
+    return createVectorIndexFile(embeddingRuntime, {}, refreshed.vectorIndex.updated_at, false);
+  }
+  if (!refreshed.tableChanged && refreshed.vectorIndex.vector_index_ready) {
+    return refreshed.vectorIndex;
+  }
   await ensureVectorIndex(table);
-  return refreshed;
+  return createVectorIndexFile(
+    embeddingRuntime,
+    refreshed.vectorIndex.docs,
+    refreshed.vectorIndex.updated_at,
+    true
+  );
 }
 
 export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbVectorRetrieverOptions): DenseRetriever {
@@ -546,67 +746,137 @@ export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbV
     id: `lancedb:${options.embeddingRuntime.id}`,
     async search(query: string, topK: number): Promise<SearchResult[]> {
       const safeTopK = clampTopK(topK);
+      const embeddingReuse = getInternalEmbeddingReuse();
       const runSearch = async (): Promise<SearchResult[]> => {
-        const indexState = readIndexState(indexStatePath);
-        const existingVectorIndex = readVectorIndex(vectorIndexReadPath, options.embeddingRuntime);
-        const refreshedVectorIndex = await refreshVectorIndex(
-          options.workspacePath,
-          vectorDbPath,
-          existingVectorIndex,
-          indexState,
-          options.embeddingRuntime
-        );
-        safeWriteJson(vectorIndexWritePath, refreshedVectorIndex);
-
-        const connection = await getConnection(vectorDbPath);
-        if (!(await hasTable(connection, TABLE_NAME))) {
-          return [];
-        }
-        const table = await loadTable(connection, TABLE_NAME);
-        if (!table) {
-          return [];
-        }
-
-        const queryEmbedding = await options.embeddingRuntime.embedQuery(query);
-        const rows = await table.vectorSearch(queryEmbedding).limit(safeTopK).toArray();
-        const ranked = rows
-          .map((row) => {
-            const distance = typeof row._distance === 'number' ? row._distance : Number.POSITIVE_INFINITY;
-            const relevanceScore = Number.isFinite(distance)
-              ? Math.max(0, Math.min(1, 1 - (distance / 2)))
-              : 0;
-            const content = typeof row.content === 'string' ? row.content : '';
-            return {
-              path: typeof row.path === 'string' ? row.path : '',
-              content,
-              lines: typeof row.lines === 'string' ? row.lines : content,
-              relevanceScore,
-              score: relevanceScore,
-              matchType: 'semantic' as const,
-              retrievedAt: refreshedVectorIndex.updated_at,
-              chunkId: typeof row.path === 'string' ? row.path : undefined,
-            };
-          })
-          .filter((row) => row.path.length > 0)
-          .sort((a, b) => {
-            if ((b.relevanceScore ?? 0) !== (a.relevanceScore ?? 0)) {
-              return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
+        try {
+          await options.embeddingRuntime.prepareForSearch?.();
+          const indexState = readIndexState(indexStatePath);
+          const existingVectorIndex = readVectorIndex(vectorIndexReadPath, options.embeddingRuntime);
+          let refreshedVectorIndex: VectorIndexFile;
+          try {
+            refreshedVectorIndex = await refreshVectorIndex(
+              options.workspacePath,
+              vectorDbPath,
+              existingVectorIndex,
+              indexState,
+              options.embeddingRuntime,
+              embeddingReuse
+            );
+          } catch (error) {
+            throw toVectorSearchFailure('refresh', error);
+          }
+          if (shouldPersistVectorIndex(existingVectorIndex, refreshedVectorIndex)) {
+            safeWriteJson(vectorIndexWritePath, refreshedVectorIndex);
+          }
+  
+          let connection!: lancedb.Connection;
+          try {
+            connection = await getConnection(vectorDbPath);
+            if (!(await hasTable(connection, TABLE_NAME))) {
+              return [];
             }
-            return a.path.localeCompare(b.path);
-          });
+          } catch (error) {
+            throw toVectorSearchFailure('table_load', error);
+          }
+          let table: lancedb.Table | null;
+          try {
+            table = await loadTable(connection, TABLE_NAME);
+          } catch (error) {
+            throw toVectorSearchFailure('table_load', error);
+          }
+          if (!table) {
+            return [];
+          }
 
-        return ranked.slice(0, safeTopK);
+          const queryLookup = createEmbeddingReuseLookup(
+            options.embeddingRuntime,
+            'query',
+            hashEmbeddingReuseContent(query)
+          );
+          let queryEmbedding = getReusableEmbeddingVector(embeddingReuse, queryLookup);
+          if (!queryEmbedding) {
+            try {
+              const runtimeVector = await options.embeddingRuntime.embedQuery(query);
+              const normalizedQueryEmbedding = normalizeEmbeddingVector(
+                runtimeVector,
+                options.embeddingRuntime.vectorDimension
+              );
+              if (!normalizedQueryEmbedding) {
+                throw new Error(`Invalid query embedding returned by "${options.embeddingRuntime.id}".`);
+              }
+              queryEmbedding = normalizedQueryEmbedding;
+              setReusableEmbeddingVector(embeddingReuse, queryLookup, queryEmbedding);
+            } catch (error) {
+              throw toVectorSearchFailure('query_embed', error);
+            }
+          }
+
+          let rows!: Array<Record<string, unknown>>;
+          try {
+            rows = await table.vectorSearch(queryEmbedding).limit(safeTopK).toArray();
+          } catch (error) {
+            throw toVectorSearchFailure('query_search', error);
+          }
+          const ranked = rows
+            .map((row) => {
+              const distance = typeof row._distance === 'number' ? row._distance : Number.POSITIVE_INFINITY;
+              const relevanceScore = Number.isFinite(distance)
+                ? Math.max(0, Math.min(1, 1 - (distance / 2)))
+                : 0;
+              const content = typeof row.content === 'string' ? row.content : '';
+              return {
+                path: typeof row.path === 'string' ? row.path : '',
+                content,
+                lines: typeof row.lines === 'string' ? row.lines : content,
+                relevanceScore,
+                score: relevanceScore,
+                matchType: 'semantic' as const,
+                retrievedAt: refreshedVectorIndex.updated_at,
+                chunkId: typeof row.path === 'string' ? row.path : undefined,
+              };
+            })
+            .filter((row) => row.path.length > 0)
+            .sort((a, b) => {
+              if ((b.relevanceScore ?? 0) !== (a.relevanceScore ?? 0)) {
+                return (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0);
+              }
+              return a.path.localeCompare(b.path);
+            });
+
+          return ranked.slice(0, safeTopK);
+        } finally {
+          await embeddingReuse.flush?.();
+        }
       };
 
       try {
         return await runSearch();
-      } catch {
-        removeVectorArtifacts(vectorDbPath);
-        try {
-          return await runSearch();
-        } catch {
-          return [];
+      } catch (firstError) {
+        if (shouldAttemptNonDestructiveRetry(firstError)) {
+          resetVectorConnection(vectorDbPath);
+          try {
+            return await runSearch();
+          } catch (retryError) {
+            if (shouldAttemptDestructiveRecovery(firstError) || shouldAttemptDestructiveRecovery(retryError)) {
+              removeVectorArtifacts(vectorDbPath);
+              try {
+                return await runSearch();
+              } catch {
+                return [];
+              }
+            }
+            return [];
+          }
         }
+        if (shouldAttemptDestructiveRecovery(firstError)) {
+          removeVectorArtifacts(vectorDbPath);
+          try {
+            return await runSearch();
+          } catch {
+            return [];
+          }
+        }
+        return [];
       }
     },
   };

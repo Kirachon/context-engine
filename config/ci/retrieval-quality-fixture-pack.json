@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "generated_for": "local-native-search-quality-upgrade",
   "holdout": {
     "enabled": true,
@@ -8,21 +8,51 @@
       "train_v1": {
         "description": "Reference training-like query set used only for leakage checks.",
         "queries": [
-          "semantic search indexing workflow",
-          "context engine cache invalidation strategy",
-          "retrieval profile fast balanced rich",
-          "mcp tool call timeout handling",
-          "quality gate report generation"
+          "local native retrieval provider dispatch",
+          "cache key feature flags snapshot",
+          "semantic search fallback file discovery",
+          "weekly trend archive retention policy",
+          "holdout leakage guard validation"
         ]
       },
       "holdout_v1": {
-        "description": "Deterministic holdout query set for benchmark/retrieval quality checks.",
-        "queries": [
-          "queue saturation reject mode behavior",
-          "benchmark reproducibility lock fields",
-          "json path threshold missing status fail",
-          "shadow canary abort threshold artifact",
-          "holdout dataset leakage guard check"
+        "description": "Deterministic holdout set with labeled file-path judgments for offline retrieval evaluation.",
+        "cases": [
+          {
+            "id": "bench-suite-mode-policy",
+            "query": "buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK",
+            "judgments": [
+              { "path": "src/ci/benchSuiteModePolicy.ts", "grade": 3 }
+            ]
+          },
+          {
+            "id": "bench-provenance",
+            "query": "makeBenchProvenance feature_flags_snapshot dataset_hash",
+            "judgments": [
+              { "path": "scripts/ci/bench-provenance.ts", "grade": 3 }
+            ]
+          },
+          {
+            "id": "holdout-validator",
+            "query": "check-retrieval-holdout-fixture leakage_guard normalization",
+            "judgments": [
+              { "path": "scripts/ci/check-retrieval-holdout-fixture.ts", "grade": 3 }
+            ]
+          },
+          {
+            "id": "quality-report",
+            "query": "generate-retrieval-quality-report calibration gate_rules reproducibility_lock",
+            "judgments": [
+              { "path": "scripts/ci/generate-retrieval-quality-report.ts", "grade": 3 }
+            ]
+          },
+          {
+            "id": "weekly-trend-report",
+            "query": "duplicate_identical_inputs r4_weekly_trend archive",
+            "judgments": [
+              { "path": "scripts/ci/generate-weekly-retrieval-trend-report.ts", "grade": 3 }
+            ]
+          }
         ]
       }
     },
@@ -47,23 +77,29 @@
     {
       "id": "quality.ndcg_at_10",
       "kind": "delta_pct_min",
-      "baseline": 0.5,
-      "candidate": 0.57,
-      "min_delta_pct": 8
+      "baseline": 0.55,
+      "metric": "quality.ndcg_at_10",
+      "min_delta_pct": 5
     },
     {
       "id": "quality.mrr_at_10",
       "kind": "delta_pct_min",
-      "baseline": 0.4,
-      "candidate": 0.45,
-      "min_delta_pct": 6
+      "baseline": 0.55,
+      "metric": "quality.mrr_at_10",
+      "min_delta_pct": 5
     },
     {
-      "id": "quality.recall_at_50",
+      "id": "quality.recall_at_10",
       "kind": "delta_pct_min",
-      "baseline": 0.5,
-      "candidate": 0.61,
-      "min_delta_pct": 10
+      "baseline": 0.6,
+      "metric": "quality.recall_at_10",
+      "min_delta_pct": 5
+    },
+    {
+      "id": "quality.p_at_1",
+      "kind": "threshold_min",
+      "metric": "quality.p_at_1",
+      "min": 0.4
     },
     {
       "id": "latency.fast.p95_ms",
@@ -120,6 +156,14 @@
       "missing_status": "fail"
     },
     {
+      "id": "holdout.case_count_min",
+      "kind": "json_path_threshold_min",
+      "path": "artifacts/bench/retrieval-holdout-check.json",
+      "json_path": "summary.case_count",
+      "min": 1,
+      "missing_status": "fail"
+    },
+    {
       "id": "holdout.leakage_count_max",
       "kind": "json_path_threshold_max",
       "path": "artifacts/bench/retrieval-holdout-check.json",
@@ -149,11 +193,13 @@
     "required_ids": [
       "quality.ndcg_at_10",
       "quality.mrr_at_10",
-      "quality.recall_at_50",
+      "quality.recall_at_10",
+      "quality.p_at_1",
       "latency.fast.p95_ms",
       "latency.balanced.p95_ms",
       "latency.rich.p95_ms",
       "holdout.query_count_min",
+      "holdout.case_count_min",
       "holdout.leakage_count_max",
       "telemetry.reproducibility.dataset_hash_length_min",
       "telemetry.reproducibility.config_keys_min"

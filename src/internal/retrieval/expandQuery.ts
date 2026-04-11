@@ -1,4 +1,8 @@
 import { ExpandedQuery, RetrievalProfile, RetrievalRewriteMode } from './types.js';
+import {
+  selectPrimaryIdentifierCandidate,
+  splitIdentifierParts,
+} from './searchHeuristics.js';
 
 const STOPWORDS = new Set([
   'a',
@@ -49,7 +53,7 @@ const SYNONYMS: Record<string, string[]> = {
 function tokenize(input: string): string[] {
   return input
     .toLowerCase()
-    .split(/[^a-z0-9_]+/g)
+    .split(/[^a-z0-9_./\\-]+/g)
     .map(token => token.trim())
     .filter(Boolean);
 }
@@ -65,6 +69,10 @@ const PROFILE_VARIANT_CAP: Record<RetrievalProfile, number> = {
   rich: 6,
 };
 
+const EXPAND_QUERY_CACHE_VERSION = 'v1';
+const MAX_EXPAND_QUERY_CACHE_ENTRIES = 256;
+const expandQueryCache = new Map<string, ExpandedQuery[]>();
+
 function isLikelyCodeLike(input: string): boolean {
   if (/[`{}()[\];<>]/.test(input)) {
     return true;
@@ -75,7 +83,48 @@ function isLikelyCodeLike(input: string): boolean {
 }
 
 function isLikelySymbolToken(token: string): boolean {
-  return token.includes('_') || /[a-z][A-Z]/.test(token) || /\d/.test(token);
+  return token.includes('_')
+    || token.includes('-')
+    || token.includes('/')
+    || token.includes('\\')
+    || token.includes('.')
+    || /[a-z][A-Z]/.test(token)
+    || /\d/.test(token);
+}
+
+function cloneExpandedQueries(queries: ExpandedQuery[]): ExpandedQuery[] {
+  return queries.map((query) => ({ ...query }));
+}
+
+function readExpandQueryCache(key: string): ExpandedQuery[] | null {
+  const cached = expandQueryCache.get(key);
+  if (!cached) {
+    return null;
+  }
+
+  expandQueryCache.delete(key);
+  expandQueryCache.set(key, cached);
+  return cloneExpandedQueries(cached);
+}
+
+function writeExpandQueryCache(key: string, queries: ExpandedQuery[]): ExpandedQuery[] {
+  expandQueryCache.set(key, cloneExpandedQueries(queries));
+  while (expandQueryCache.size > MAX_EXPAND_QUERY_CACHE_ENTRIES) {
+    const oldestKey = expandQueryCache.keys().next().value;
+    if (!oldestKey) {
+      break;
+    }
+    expandQueryCache.delete(oldestKey);
+  }
+  return cloneExpandedQueries(queries);
+}
+
+export function clearExpandQueryCacheForTests(): void {
+  expandQueryCache.clear();
+}
+
+export function getExpandQueryCacheSizeForTests(): number {
+  return expandQueryCache.size;
 }
 
 export function expandQuery(
@@ -93,6 +142,11 @@ export function expandQuery(
   const effectiveMaxVariants = mode === 'v2'
     ? Math.max(1, Math.min(maxVariants, PROFILE_VARIANT_CAP[profile]))
     : maxVariants;
+  const cacheKey = `${EXPAND_QUERY_CACHE_VERSION}:${mode}:${profile}:${effectiveMaxVariants}:${trimmed}`;
+  const cached = readExpandQueryCache(cacheKey);
+  if (cached) {
+    return cached;
+  }
 
   const variants = new Map<string, ExpandedQuery>();
   const addVariant = (value: string, source: ExpandedQuery['source'], weight: number) => {
@@ -111,32 +165,52 @@ export function expandQuery(
       index: variants.size,
     });
   };
+  const finalize = () => writeExpandQueryCache(
+    cacheKey,
+    Array.from(variants.values()).slice(0, effectiveMaxVariants)
+  );
 
   addVariant(trimmed, 'original', 1);
 
   if (effectiveMaxVariants <= 1) {
-    return Array.from(variants.values());
+    return finalize();
   }
 
   if (/[`]/.test(trimmed) || trimmed.length > 200) {
-    return Array.from(variants.values());
+    return finalize();
   }
 
   if (mode === 'v2' && isLikelyCodeLike(trimmed)) {
-    return Array.from(variants.values());
+    return finalize();
   }
 
+  const primaryIdentifier = selectPrimaryIdentifierCandidate(trimmed);
+  const normalizedPrimaryIdentifier = primaryIdentifier?.trim().toLowerCase() ?? null;
   const tokens = tokenize(trimmed);
-  if (tokens.length < 2) {
-    return Array.from(variants.values());
-  }
-
   const coreTokens = tokens.filter(token => !STOPWORDS.has(token));
-  if (coreTokens.length < 2) {
-    return Array.from(variants.values());
+  if (primaryIdentifier) {
+    addVariant(primaryIdentifier, 'expanded', 0.82);
+
+    const identifierFocusedTokens = [
+      ...splitIdentifierParts(primaryIdentifier),
+      ...coreTokens
+        .filter((token) => token !== normalizedPrimaryIdentifier)
+        .flatMap((token) => splitIdentifierParts(token)),
+    ];
+    if (identifierFocusedTokens.length > 0) {
+      addVariant(identifierFocusedTokens.join(' '), 'expanded', 0.74);
+    }
   }
 
-  if (mode === 'v1' || coreTokens.every(token => !isLikelySymbolToken(token))) {
+  if (tokens.length < 2) {
+    return finalize();
+  }
+
+  if (coreTokens.length < 2) {
+    return finalize();
+  }
+
+  if (!primaryIdentifier && (mode === 'v1' || coreTokens.every(token => !isLikelySymbolToken(token)))) {
     addVariant(`where ${coreTokens.join(' ')} is handled`, 'expanded', 0.7);
     addVariant(`implementation of ${coreTokens.join(' ')}`, 'expanded', 0.7);
   }
@@ -147,6 +221,9 @@ export function expandQuery(
   let synonymExpansions = 0;
   for (let i = 0; i < coreTokens.length; i += 1) {
     const token = coreTokens[i];
+    if (normalizedPrimaryIdentifier && token === normalizedPrimaryIdentifier) {
+      continue;
+    }
     if (mode === 'v2' && isLikelySymbolToken(token)) {
       continue;
     }
@@ -160,13 +237,13 @@ export function expandQuery(
       addVariant(clone.join(' '), 'expanded', 0.6);
       synonymExpansions += 1;
       if (mode === 'v2' && synonymExpansions >= maxSynonymExpansions) {
-        return Array.from(variants.values()).slice(0, effectiveMaxVariants);
+        return finalize();
       }
       if (variants.size >= effectiveMaxVariants) {
-        return Array.from(variants.values()).slice(0, effectiveMaxVariants);
+        return finalize();
       }
     }
   }
 
-  return Array.from(variants.values()).slice(0, effectiveMaxVariants);
+  return finalize();
 }

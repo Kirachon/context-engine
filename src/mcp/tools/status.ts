@@ -11,6 +11,12 @@ export interface IndexStatusArgs {
   // No arguments required for now
 }
 
+function formatTableCell(value: string | undefined): string {
+  return (value ?? 'None')
+    .replace(/\r?\n+/g, ' ')
+    .replace(/\|/g, '\\|');
+}
+
 function formatStatus(status: IndexStatus): string {
   const freshness = evaluateIndexFreshness(status);
   const statusEmoji =
@@ -32,9 +38,23 @@ function formatStatus(status: IndexStatus): string {
     `| **Last Indexed** | ${status.lastIndexed ?? 'never'} |\n` +
     `| **File Count** | ${status.fileCount} |\n` +
     `| **Is Stale** | ${status.isStale ? 'Yes' : 'No'} |\n` +
-    `| **Last Error** | ${status.lastError ?? 'None'} |\n` +
+    `| **Last Error** | ${formatTableCell(status.lastError)} |\n` +
     `| **Freshness** | ${freshnessEmoji} ${freshness.code} |\n` +
     `| **Freshness Summary** | ${freshness.summary} |\n`;
+
+  if (status.embeddingRuntime && status.embeddingRuntime.state !== 'uninitialized') {
+    const embeddingStatus =
+      status.embeddingRuntime.state === 'degraded'
+        ? `⚠️ degraded (fallback: \`${status.embeddingRuntime.active.id}\`; configured: \`${status.embeddingRuntime.configured.id}\`)`
+        : `✅ ${status.embeddingRuntime.active.id}`;
+    output += `| **Embedding Runtime** | ${embeddingStatus} |\n`;
+    if (status.embeddingRuntime.state === 'degraded') {
+      output +=
+        `| **Embedding Failure** | ${formatTableCell(status.embeddingRuntime.lastFailure ?? 'Unknown')} |\n` +
+        `| **Embedding Retry** | ${status.embeddingRuntime.nextRetryAt ?? 'pending'} |\n` +
+        `| **Embedding Load Failures** | ${status.embeddingRuntime.loadFailures} |\n`;
+    }
+  }
 
   if (freshness.guidance.length > 0) {
     output += `\n## Freshness Guidance\n` +

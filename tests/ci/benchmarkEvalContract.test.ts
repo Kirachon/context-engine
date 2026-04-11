@@ -11,9 +11,12 @@ type BenchmarkEvalContract = {
     candidate_artifact: string;
     cache_modes: string[];
     scoped_runs: string[];
+    resource_metric_paths: string[];
+    cache_metadata_paths: string[];
   };
   profiles: Record<string, { token_budget: number }>;
   workload_packs: Record<string, string>;
+  quality_gate_perf_profile: string;
   calibration_contract: string;
   gate_tiers: {
     pr_blockers: string[];
@@ -34,15 +37,23 @@ describe('config/ci/benchmark-eval-contract.json', () => {
 
     expect(contract.version).toBeTruthy();
     expect(contract.baseline).toEqual(
-      expect.objectContaining({
-        required_provider: 'local_native',
-        index_requirement: 'healthy',
-        baseline_artifact: 'artifacts/bench/pr-baseline.json',
-        candidate_artifact: 'artifacts/bench/pr-candidate.json',
-        cache_modes: ['cold', 'warm'],
-        scoped_runs: ['unscoped', 'scoped'],
-      })
-    );
+        expect.objectContaining({
+          required_provider: 'local_native',
+          index_requirement: 'healthy',
+          baseline_artifact: 'artifacts/bench/pr-baseline.json',
+          candidate_artifact: 'artifacts/bench/pr-candidate.json',
+          cache_modes: ['cold', 'warm'],
+          scoped_runs: ['unscoped', 'scoped'],
+          resource_metric_paths: [
+            'payload.resources.process_memory.rss_bytes.p95_bytes',
+            'payload.resources.process_memory.heap_used_bytes.p95_bytes',
+          ],
+          cache_metadata_paths: [
+            'payload.cache.mode',
+            'payload.cache.warmup_iterations',
+          ],
+        })
+      );
 
     expect(contract.profiles).toEqual(
       expect.objectContaining({
@@ -58,7 +69,9 @@ describe('config/ci/benchmark-eval-contract.json', () => {
         legacy_capability_matrix: 'config/ci/legacy-capability-matrix.json',
       })
     );
+    expect(contract.quality_gate_perf_profile).toBe('quality');
     expect(contract.calibration_contract).toBe('config/ci/retrieval-calibration-contract.json');
+    expect(scripts['ci:generate:retrieval-quality-report']).toContain('--perf-profile quality');
 
     expect(contract.gate_tiers.pr_blockers).toEqual(
       expect.arrayContaining([

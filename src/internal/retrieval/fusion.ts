@@ -26,6 +26,7 @@ function fusionKey(result: InternalSearchResult): string {
 }
 
 const FUSION_CALIBRATION = {
+  rankConstant: 10,
   chunkIdBonus: 0.02,
   spanBonuses: [
     { maxSpan: 8, bonus: 0.05 },
@@ -57,6 +58,105 @@ function chunkAffinityBonus(result: InternalSearchResult): number {
   return Math.min(FUSION_CALIBRATION.maxChunkAffinityBonus, bonus);
 }
 
+type RetrievalSource = 'semantic' | 'lexical' | 'dense';
+
+function resolveRetrievalSource(result: InternalSearchResult): RetrievalSource {
+  if (result.retrievalSource === 'lexical') {
+    return 'lexical';
+  }
+  if (result.retrievalSource === 'dense') {
+    return 'dense';
+  }
+  return 'semantic';
+}
+
+function resolveVariantWeight(result: InternalSearchResult): number {
+  return clampWeight(result.variantWeight, 1);
+}
+
+function resolveVariantListKey(result: InternalSearchResult): string {
+  if (Number.isFinite(result.variantIndex)) {
+    return String(result.variantIndex);
+  }
+  const queryVariant = typeof result.queryVariant === 'string' ? result.queryVariant.trim() : '';
+  return queryVariant.length > 0 ? queryVariant : 'default';
+}
+
+function resolveRankListSources(result: InternalSearchResult): RetrievalSource[] {
+  const sources = (['semantic', 'lexical', 'dense'] as const).filter((source) => sourceScore(result, source) > 0);
+  return sources.length > 0 ? [...sources] : [resolveRetrievalSource(result)];
+}
+
+function sourceScore(result: InternalSearchResult, source: RetrievalSource): number {
+  if (source === 'semantic') {
+    return result.semanticScore ?? (
+      result.retrievalSource === 'semantic' || result.retrievalSource === 'hybrid'
+        ? result.relevanceScore ?? result.score ?? 0
+        : 0
+    );
+  }
+  if (source === 'lexical') {
+    return result.lexicalScore ?? (result.retrievalSource === 'lexical' ? result.relevanceScore ?? result.score ?? 0 : 0);
+  }
+  return result.denseScore ?? (result.retrievalSource === 'dense' ? result.relevanceScore ?? result.score ?? 0 : 0);
+}
+
+function buildRankedLists(
+  results: InternalSearchResult[],
+  weights: Record<RetrievalSource, number>
+): Array<{ weight: number; ranks: Map<string, number> }> {
+  const lists = new Map<string, { source: RetrievalSource; variantWeight: number; items: InternalSearchResult[] }>();
+
+  for (const result of results) {
+    const variantKey = resolveVariantListKey(result);
+    for (const source of resolveRankListSources(result)) {
+      const listId = `${source}:${variantKey}`;
+      const existing = lists.get(listId);
+      if (existing) {
+        existing.items.push(result);
+        existing.variantWeight = Math.max(existing.variantWeight, resolveVariantWeight(result));
+        continue;
+      }
+      lists.set(listId, {
+        source,
+        variantWeight: resolveVariantWeight(result),
+        items: [result],
+      });
+    }
+  }
+
+  const rankedLists: Array<{ weight: number; ranks: Map<string, number> }> = [];
+  for (const list of lists.values()) {
+    const backendWeight = weights[list.source];
+    const listWeight = backendWeight * list.variantWeight;
+    if (!(listWeight > 0)) {
+      continue;
+    }
+
+    const rankedItems = [...list.items].sort((left, right) => {
+      const scoreDelta = sourceScore(right, list.source) - sourceScore(left, list.source);
+      if (scoreDelta !== 0) {
+        return scoreDelta;
+      }
+      if (left.path !== right.path) {
+        return left.path.localeCompare(right.path);
+      }
+      return parseLineStart(left.lines) - parseLineStart(right.lines);
+    });
+
+    const ranks = new Map<string, number>();
+    for (const [index, item] of rankedItems.entries()) {
+      const key = fusionKey(item);
+      if (!ranks.has(key)) {
+        ranks.set(key, index + 1);
+      }
+    }
+    rankedLists.push({ weight: listWeight, ranks });
+  }
+
+  return rankedLists;
+}
+
 export interface FusionOptions {
   semanticWeight?: number;
   lexicalWeight?: number;
@@ -76,23 +176,11 @@ export function fuseCandidates(
   const semanticNormWeight = semanticWeight / totalWeight;
   const lexicalNormWeight = lexicalWeight / totalWeight;
   const denseNormWeight = denseWeight / totalWeight;
-
-  const maxSemantic = results.reduce((max, item) => {
-    const score = item.semanticScore ?? (
-      item.retrievalSource === 'semantic' || item.retrievalSource === 'hybrid'
-        ? item.relevanceScore ?? item.score ?? 0
-        : 0
-    );
-    return Math.max(max, score);
-  }, 0);
-  const maxLexical = results.reduce((max, item) => {
-    const score = item.lexicalScore ?? (item.retrievalSource === 'lexical' ? item.relevanceScore ?? 0 : 0);
-    return Math.max(max, score);
-  }, 0);
-  const maxDense = results.reduce((max, item) => {
-    const score = item.denseScore ?? (item.retrievalSource === 'dense' ? item.relevanceScore ?? 0 : 0);
-    return Math.max(max, score);
-  }, 0);
+  const rankedLists = buildRankedLists(results, {
+    semantic: semanticNormWeight,
+    lexical: lexicalNormWeight,
+    dense: denseNormWeight,
+  });
 
   const groups = new Map<string, InternalSearchResult[]>();
   for (const result of results) {
@@ -105,33 +193,28 @@ export function fuseCandidates(
   const fused: InternalSearchResult[] = [];
 
   for (const group of groups.values()) {
-    const representative = group[0];
     const semanticScore = group.reduce((max, item) => {
-      const value = item.semanticScore ?? (
-        item.retrievalSource === 'semantic' || item.retrievalSource === 'hybrid'
-          ? item.relevanceScore ?? item.score ?? 0
-          : 0
-      );
+      const value = sourceScore(item, 'semantic');
       return Math.max(max, value);
     }, 0);
     const lexicalScore = group.reduce((max, item) => {
-      const value = item.lexicalScore ?? (item.retrievalSource === 'lexical' ? item.relevanceScore ?? item.score ?? 0 : 0);
+      const value = sourceScore(item, 'lexical');
       return Math.max(max, value);
     }, 0);
     const denseScore = group.reduce((max, item) => {
-      const value = item.denseScore ?? (item.retrievalSource === 'dense' ? item.relevanceScore ?? item.score ?? 0 : 0);
+      const value = sourceScore(item, 'dense');
       return Math.max(max, value);
     }, 0);
-
-    const normalizedSemantic = maxSemantic > 0 ? semanticScore / maxSemantic : 0;
-    const normalizedLexical = maxLexical > 0 ? lexicalScore / maxLexical : 0;
-    const normalizedDense = maxDense > 0 ? denseScore / maxDense : 0;
-    const chunkBonus = chunkAffinityBonus(representative);
-    const fusedScore =
-      (normalizedSemantic * semanticNormWeight) +
-      (normalizedLexical * lexicalNormWeight) +
-      (normalizedDense * denseNormWeight) +
-      chunkBonus;
+    const key = fusionKey(group[0]);
+    const reciprocalRankScore = rankedLists.reduce((sum, list) => {
+      const rank = list.ranks.get(key);
+      if (!rank) {
+        return sum;
+      }
+      return sum + (list.weight / (FUSION_CALIBRATION.rankConstant + rank));
+    }, 0);
+    const chunkBonus = group.reduce((max, item) => Math.max(max, chunkAffinityBonus(item)), 0);
+    const fusedScore = reciprocalRankScore + chunkBonus;
 
     const hasSemantic = semanticScore > 0;
     const hasLexical = lexicalScore > 0;
@@ -146,12 +229,13 @@ export function fuseCandidates(
           : 'dense';
 
     const bestVariant = group.reduce((best, item) => {
-      if (item.variantWeight > best.variantWeight) return item;
+      if (resolveVariantWeight(item) > resolveVariantWeight(best)) return item;
       return best;
-    }, representative);
+    }, group[0]);
 
     fused.push({
       ...bestVariant,
+      variantWeight: resolveVariantWeight(bestVariant),
       retrievalSource,
       semanticScore,
       lexicalScore,

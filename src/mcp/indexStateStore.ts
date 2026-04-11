@@ -1,6 +1,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
+import { featureEnabled } from '../config/features.js';
 import { getPreferredWorkspacePath, getReadableWorkspacePath } from '../runtime/compatPaths.js';
 
 const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
@@ -10,6 +11,20 @@ const DEFAULT_SCHEMA_VERSION = 2;
 const LEGACY_SCHEMA_VERSION = 1;
 const DEFAULT_PROVIDER_ID = 'local_native';
 const EPOCH_ISO = new Date(0).toISOString();
+
+export function buildIndexStateWorkspaceFingerprint(workspacePath: string): string {
+  const normalizedWorkspacePath = path.resolve(workspacePath).replace(/\\/g, '/');
+  return crypto.createHash('sha256').update(normalizedWorkspacePath).digest('hex').slice(0, 16);
+}
+
+export function normalizeIndexStateHashInput(contents: string): string {
+  return contents.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+export function hashIndexStateContent(contents: string): string {
+  const input = featureEnabled('hash_normalize_eol') ? normalizeIndexStateHashInput(contents) : contents;
+  return crypto.createHash('sha256').update(input).digest('hex');
+}
 
 export interface IndexStateFileEntry {
   hash: string;
@@ -66,14 +81,9 @@ export class JsonIndexStateStore {
       schema_version: DEFAULT_SCHEMA_VERSION,
       provider_id: DEFAULT_PROVIDER_ID,
       updated_at: EPOCH_ISO,
-      workspace_fingerprint: this.buildWorkspaceFingerprint(),
+      workspace_fingerprint: buildIndexStateWorkspaceFingerprint(this.workspacePath),
       files: {},
     };
-  }
-
-  private buildWorkspaceFingerprint(): string {
-    const normalizedWorkspacePath = path.resolve(this.workspacePath).replace(/\\/g, '/');
-    return crypto.createHash('sha256').update(normalizedWorkspacePath).digest('hex').slice(0, 16);
   }
 
   load(): IndexStateFile {
@@ -123,7 +133,7 @@ export class JsonIndexStateStore {
           workspace_fingerprint:
             typeof parsed.workspace_fingerprint === 'string' && parsed.workspace_fingerprint.trim().length > 0
               ? parsed.workspace_fingerprint
-              : this.buildWorkspaceFingerprint(),
+              : buildIndexStateWorkspaceFingerprint(this.workspacePath),
           feature_flags_snapshot:
             typeof parsed.feature_flags_snapshot === 'string' && parsed.feature_flags_snapshot.trim().length > 0
               ? parsed.feature_flags_snapshot
@@ -151,7 +161,7 @@ export class JsonIndexStateStore {
           ? data.provider_id
           : DEFAULT_PROVIDER_ID,
       updated_at: data.updated_at ?? new Date().toISOString(),
-      workspace_fingerprint: data.workspace_fingerprint ?? this.buildWorkspaceFingerprint(),
+      workspace_fingerprint: data.workspace_fingerprint ?? buildIndexStateWorkspaceFingerprint(this.workspacePath),
       feature_flags_snapshot:
         typeof data.feature_flags_snapshot === 'string' && data.feature_flags_snapshot.trim().length > 0
           ? data.feature_flags_snapshot

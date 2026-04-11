@@ -17,6 +17,14 @@ import { internalRetrieveCode } from '../src/internal/handlers/retrieval.js';
 import { handleEnhancePrompt } from '../src/mcp/tools/enhance.js';
 import { handleCreatePlan, handleRefinePlan, handleExecutePlan } from '../src/mcp/tools/plan.js';
 import { hashString, makeBenchProvenance, type BenchProvenance } from './ci/bench-provenance.js';
+import {
+  computeDatasetHash,
+  getDatasetMap,
+  getDatasetQueries,
+  getHoldoutConfig,
+  readFixturePack,
+  resolveSelectedDatasetId,
+} from './ci/retrieval-quality-fixture.js';
 import type { EnhancedPlanOutput } from '../src/mcp/types/planning.js';
 
 type Mode = 'scan' | 'index' | 'search' | 'retrieve' | 'enhance_prompt' | 'create_plan' | 'refine_plan' | 'execute_plan';
@@ -54,6 +62,47 @@ type CharSummary = {
   max_chars: number;
 };
 
+type BytesSummary = {
+  count: number;
+  avg_bytes: number;
+  p50_bytes: number;
+  p95_bytes: number;
+  p99_bytes: number;
+  min_bytes: number;
+  max_bytes: number;
+};
+
+type ProcessMemorySnapshot = {
+  rss_bytes: number;
+  heap_total_bytes: number;
+  heap_used_bytes: number;
+  external_bytes: number;
+  array_buffers_bytes: number;
+};
+
+type ProcessMemorySummary = {
+  sampling: 'process.memoryUsage';
+  sample_count: number;
+  start: ProcessMemorySnapshot;
+  end: ProcessMemorySnapshot;
+  peak: ProcessMemorySnapshot;
+  delta_bytes: ProcessMemorySnapshot;
+  rss_bytes: BytesSummary;
+  heap_total_bytes: BytesSummary;
+  heap_used_bytes: BytesSummary;
+  external_bytes: BytesSummary;
+  array_buffers_bytes: BytesSummary;
+};
+
+type BenchCacheMetadata = {
+  mode: 'cold' | 'warm';
+  cold: boolean;
+  warmup_iterations: number;
+  query_cycle_length?: number;
+  bypass_cache?: boolean;
+  retrieve_mode?: RetrieveMode | 'search';
+};
+
 type SlowToolCallSample = {
   search_query_chars: number;
   prompt_chars: number;
@@ -78,7 +127,11 @@ type SlowToolBenchmarkPayload = {
   cold: boolean;
   iterations: number;
   input: Record<string, unknown>;
+  cache: BenchCacheMetadata;
   timing: MsSummary;
+  resources: {
+    process_memory: ProcessMemorySummary;
+  };
   repeat: {
     first_ms: number;
     repeat_count: number;
@@ -117,21 +170,6 @@ interface Args {
   datasetId: string | null;
   fixturePackPath: string;
   json: boolean;
-}
-
-interface HoldoutDataset {
-  description?: string;
-  queries: string[];
-}
-
-interface HoldoutConfig {
-  enabled?: boolean;
-  default_dataset_id?: string;
-  datasets?: Record<string, HoldoutDataset>;
-}
-
-interface FixturePack {
-  holdout?: HoldoutConfig;
 }
 
 function resolveRetrievalProvider(): {
@@ -394,6 +432,89 @@ function summarizeChars(samples: number[]) {
   };
 }
 
+function summarizeBytes(samples: number[]): BytesSummary {
+  const summary = summarizeNumbers(samples);
+  return {
+    count: summary.count,
+    avg_bytes: summary.avg,
+    p50_bytes: summary.p50,
+    p95_bytes: summary.p95,
+    p99_bytes: summary.p99,
+    min_bytes: summary.min,
+    max_bytes: summary.max,
+  };
+}
+
+function takeProcessMemorySnapshot(): ProcessMemorySnapshot {
+  const usage = process.memoryUsage();
+  return {
+    rss_bytes: usage.rss,
+    heap_total_bytes: usage.heapTotal,
+    heap_used_bytes: usage.heapUsed,
+    external_bytes: usage.external,
+    array_buffers_bytes: usage.arrayBuffers,
+  };
+}
+
+function peakProcessMemorySnapshot(samples: ProcessMemorySnapshot[]): ProcessMemorySnapshot {
+  return samples.reduce<ProcessMemorySnapshot>(
+    (peak, sample) => ({
+      rss_bytes: Math.max(peak.rss_bytes, sample.rss_bytes),
+      heap_total_bytes: Math.max(peak.heap_total_bytes, sample.heap_total_bytes),
+      heap_used_bytes: Math.max(peak.heap_used_bytes, sample.heap_used_bytes),
+      external_bytes: Math.max(peak.external_bytes, sample.external_bytes),
+      array_buffers_bytes: Math.max(peak.array_buffers_bytes, sample.array_buffers_bytes),
+    }),
+    {
+      rss_bytes: 0,
+      heap_total_bytes: 0,
+      heap_used_bytes: 0,
+      external_bytes: 0,
+      array_buffers_bytes: 0,
+    }
+  );
+}
+
+export function summarizeProcessMemorySnapshots(
+  start: ProcessMemorySnapshot,
+  samples: ProcessMemorySnapshot[]
+): ProcessMemorySummary {
+  const end = samples[samples.length - 1] ?? start;
+  const timeline = samples.length > 0 ? [start, ...samples] : [start];
+  return {
+    sampling: 'process.memoryUsage',
+    sample_count: samples.length,
+    start,
+    end,
+    peak: peakProcessMemorySnapshot(timeline),
+    delta_bytes: {
+      rss_bytes: end.rss_bytes - start.rss_bytes,
+      heap_total_bytes: end.heap_total_bytes - start.heap_total_bytes,
+      heap_used_bytes: end.heap_used_bytes - start.heap_used_bytes,
+      external_bytes: end.external_bytes - start.external_bytes,
+      array_buffers_bytes: end.array_buffers_bytes - start.array_buffers_bytes,
+    },
+    rss_bytes: summarizeBytes(samples.map((entry) => entry.rss_bytes)),
+    heap_total_bytes: summarizeBytes(samples.map((entry) => entry.heap_total_bytes)),
+    heap_used_bytes: summarizeBytes(samples.map((entry) => entry.heap_used_bytes)),
+    external_bytes: summarizeBytes(samples.map((entry) => entry.external_bytes)),
+    array_buffers_bytes: summarizeBytes(samples.map((entry) => entry.array_buffers_bytes)),
+  };
+}
+
+export function buildBenchCacheMetadata(
+  cold: boolean,
+  warmupIterations: number,
+  extras: Omit<BenchCacheMetadata, 'mode' | 'cold' | 'warmup_iterations'> = {}
+): BenchCacheMetadata {
+  return {
+    mode: cold ? 'cold' : 'warm',
+    cold,
+    warmup_iterations: warmupIterations,
+    ...extras,
+  };
+}
+
 function createDefaultPlan(): EnhancedPlanOutput {
   const now = '2025-01-01T00:00:00.000Z';
   return {
@@ -620,6 +741,8 @@ export async function benchSlowOpenAiTool(
   ensureProviderRequirements(retrievalProvider, mode);
   const iterations = Math.max(1, args.iterations);
   const runSamples: SlowToolRunSample[] = [];
+  const memoryStart = takeProcessMemorySnapshot();
+  const memorySamples: ProcessMemorySnapshot[] = [];
   const sharedClient = args.cold ? null : new ContextServiceClient(workspace);
   const runForMode = async (client: ContextServiceClient): Promise<string> => {
     if (mode === 'enhance_prompt') {
@@ -690,11 +813,11 @@ export async function benchSlowOpenAiTool(
     }
 
     runSamples.push(runSample);
+    memorySamples.push(takeProcessMemorySnapshot());
   }
 
   const summary = summarizeSlowToolRuns(runSamples);
   const inputSummary = buildSlowToolInputSummary(mode, args);
-  const identity = resolveSlowToolBenchmarkIdentity(mode, args);
 
   return {
     mode,
@@ -703,17 +826,17 @@ export async function benchSlowOpenAiTool(
     cold: args.cold,
     iterations,
     input: inputSummary,
+    cache: buildBenchCacheMetadata(args.cold, 0),
     timing: summary.timing,
+    resources: {
+      process_memory: summarizeProcessMemorySnapshots(memoryStart, memorySamples),
+    },
     repeat: summary.repeat,
     prompt_stats: summary.prompt_stats,
     run_prompt_stats: summary.run_prompt_stats,
     call_stats: summary.call_stats,
     output_stats: summary.output_stats,
   };
-}
-
-function normalizeForHash(value: string): string {
-  return value.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function sha256Hex(value: string): string {
@@ -772,30 +895,17 @@ function getDeterministicQueries(args: Args): {
     };
   }
 
-  const fixturePath = path.resolve(args.fixturePackPath);
-  if (!fs.existsSync(fixturePath)) {
-    throw new Error(`Fixture pack not found for dataset mode: ${fixturePath}`);
-  }
-  const parsed = JSON.parse(fs.readFileSync(fixturePath, 'utf8')) as FixturePack;
-  const holdout = parsed.holdout;
-  const datasets = holdout?.datasets ?? {};
-  const datasetId = args.datasetId ?? holdout?.default_dataset_id;
-  if (!datasetId) {
-    throw new Error(
-      `No dataset selected. Provide --dataset-id or set holdout.default_dataset_id in ${fixturePath}`
-    );
-  }
+  const fixture = readFixturePack(args.fixturePackPath);
+  const holdout = getHoldoutConfig(fixture.parsed);
+  const datasets = getDatasetMap(holdout);
+  const datasetId = resolveSelectedDatasetId(holdout, args.datasetId ?? undefined);
   const dataset = datasets[datasetId];
-  if (!dataset || !Array.isArray(dataset.queries) || dataset.queries.length === 0) {
-    throw new Error(`Dataset "${datasetId}" missing or empty in ${fixturePath}`);
-  }
-
-  const queries = dataset.queries.map((entry) => String(entry).trim()).filter((entry) => entry.length > 0);
-  if (queries.length === 0) {
-    throw new Error(`Dataset "${datasetId}" has no usable queries in ${fixturePath}`);
-  }
-
-  const datasetHash = sha256Hex(JSON.stringify(queries.map(normalizeForHash)));
+  const queries = getDatasetQueries(dataset, datasetId);
+  const normalizationMode =
+    typeof holdout.leakage_guard?.normalization === 'string' && holdout.leakage_guard.normalization.trim().length > 0
+      ? holdout.leakage_guard.normalization
+      : undefined;
+  const datasetHash = computeDatasetHash(queries, normalizationMode);
   return {
     source: 'fixture_dataset',
     dataset_id: datasetId,
@@ -820,6 +930,7 @@ function shouldSkipDir(name: string): boolean {
 
 async function scanWorkspace(root: string, readFiles: boolean) {
   const started = performance.now();
+  const memoryStart = takeProcessMemorySnapshot();
   let fileCount = 0;
   let totalBytes = 0;
   let readBytes = 0;
@@ -858,6 +969,7 @@ async function scanWorkspace(root: string, readFiles: boolean) {
   }
 
   const elapsedMs = performance.now() - started;
+  const memorySummary = summarizeProcessMemorySnapshots(memoryStart, [takeProcessMemorySnapshot()]);
   return {
     mode: 'scan' as const,
     workspace: root,
@@ -868,6 +980,9 @@ async function scanWorkspace(root: string, readFiles: boolean) {
     elapsed_ms: elapsedMs,
     files_per_sec: elapsedMs > 0 ? (fileCount / elapsedMs) * 1000 : 0,
     mb_per_sec: elapsedMs > 0 ? ((readFiles ? readBytes : totalBytes) / 1024 / 1024 / elapsedMs) * 1000 : 0,
+    resources: {
+      process_memory: memorySummary,
+    },
   };
 }
 
@@ -878,6 +993,7 @@ function ensureProviderRequirements(_provider: RetrievalProvider, _mode: Mode): 
 async function benchIndex(workspace: string, provider: RetrievalProvider) {
   ensureProviderRequirements(provider, 'index');
   const client = new ContextServiceClient(workspace);
+  const memoryStart = takeProcessMemorySnapshot();
   const started = performance.now();
   const result = await client.indexWorkspace();
   const elapsedMs = performance.now() - started;
@@ -886,6 +1002,9 @@ async function benchIndex(workspace: string, provider: RetrievalProvider) {
     workspace,
     elapsed_ms: elapsedMs,
     result,
+    resources: {
+      process_memory: summarizeProcessMemorySnapshots(memoryStart, [takeProcessMemorySnapshot()]),
+    },
   };
 }
 
@@ -898,6 +1017,8 @@ async function benchSearch(
 ) {
   ensureProviderRequirements(provider, 'search');
   const samples: number[] = [];
+  const memoryStart = takeProcessMemorySnapshot();
+  const memorySamples: ProcessMemorySnapshot[] = [];
   let lastCount = 0;
   let cold = false;
   for (let i = 0; i < iterations; i++) {
@@ -911,6 +1032,7 @@ async function benchSearch(
     const elapsedMs = performance.now() - started;
     samples.push(elapsedMs);
     lastCount = results.length;
+    memorySamples.push(takeProcessMemorySnapshot());
   }
 
   return {
@@ -923,7 +1045,14 @@ async function benchSearch(
     iterations,
     cold,
     last_result_count: lastCount,
+    cache: buildBenchCacheMetadata(cold, 0, {
+      query_cycle_length: queries.length,
+      retrieve_mode: 'search',
+    }),
     timing: summarizeMs(samples),
+    resources: {
+      process_memory: summarizeProcessMemorySnapshots(memoryStart, memorySamples),
+    },
   };
 }
 
@@ -939,6 +1068,7 @@ async function benchRetrieve(
 ) {
   ensureProviderRequirements(provider, 'retrieve');
   const samples: number[] = [];
+  const memorySamples: ProcessMemorySnapshot[] = [];
   let lastCount = 0;
   let lastUniqueFiles = 0;
 
@@ -970,19 +1100,24 @@ async function benchRetrieve(
     samples.push(elapsedMs);
     lastCount = result.results.length;
     lastUniqueFiles = new Set(result.results.map(r => r.path)).size;
+    memorySamples.push(takeProcessMemorySnapshot());
   };
 
+  let memoryStart: ProcessMemorySnapshot;
   if (!cold) {
     const client = new ContextServiceClient(workspace);
     for (const query of queries) {
       await runOnce(client, query);
     }
     samples.length = 0;
+    memorySamples.length = 0;
+    memoryStart = takeProcessMemorySnapshot();
     for (let i = 0; i < iterations; i++) {
       const query = queries[i % queries.length]!;
       await runOnce(client, query);
     }
   } else {
+    memoryStart = takeProcessMemorySnapshot();
     for (let i = 0; i < iterations; i++) {
       const client = new ContextServiceClient(workspace);
       const query = queries[i % queries.length]!;
@@ -1003,7 +1138,15 @@ async function benchRetrieve(
     retrieve_mode: retrieveMode,
     last_result_count: lastCount,
     last_unique_files: lastUniqueFiles,
+    cache: buildBenchCacheMetadata(cold, cold ? 0 : queries.length, {
+      query_cycle_length: queries.length,
+      bypass_cache: bypassCache,
+      retrieve_mode: retrieveMode,
+    }),
     timing: summarizeMs(samples),
+    resources: {
+      process_memory: summarizeProcessMemorySnapshots(memoryStart, memorySamples),
+    },
   };
 }
 
@@ -1019,6 +1162,7 @@ async function main(): Promise<void> {
 
   const started = performance.now();
   const meta = {
+    harness_version: 2,
     node: process.version,
     platform: `${process.platform} ${process.arch}`,
     pid: process.pid,
@@ -1116,6 +1260,8 @@ async function main(): Promise<void> {
       }
 
       const samples: number[] = [];
+      const memoryStart = takeProcessMemorySnapshot();
+      const memorySamples: ProcessMemorySnapshot[] = [];
       let lastCount = 0;
       for (let i = 0; i < args.iterations; i++) {
         const query = deterministicQueries.queries[i % deterministicQueries.queries.length]!;
@@ -1124,6 +1270,7 @@ async function main(): Promise<void> {
         const elapsedMs = performance.now() - started;
         samples.push(elapsedMs);
         lastCount = results.length;
+        memorySamples.push(takeProcessMemorySnapshot());
       }
 
       payload = {
@@ -1136,7 +1283,14 @@ async function main(): Promise<void> {
         iterations: args.iterations,
         cold: false,
         last_result_count: lastCount,
+        cache: buildBenchCacheMetadata(false, deterministicQueries.queries.length, {
+          query_cycle_length: deterministicQueries.queries.length,
+          retrieve_mode: 'search',
+        }),
         timing: summarizeMs(samples),
+        resources: {
+          process_memory: summarizeProcessMemorySnapshots(memoryStart, memorySamples),
+        },
       };
     } else {
       payload = await benchSearch(
@@ -1182,6 +1336,17 @@ async function main(): Promise<void> {
   (out.meta as Record<string, unknown>).dataset = datasetInputSummary;
   (out.meta as Record<string, unknown>).dataset_id = datasetId;
   (out.meta as Record<string, unknown>).dataset_hash = datasetHash;
+  const payloadCache =
+    payload && typeof payload === 'object' && !Array.isArray(payload)
+      ? ((payload as Record<string, unknown>).cache as Record<string, unknown> | undefined)
+      : undefined;
+  (out.meta as Record<string, unknown>).execution = {
+    iterations: args.iterations,
+    cache_mode: payloadCache?.mode ?? null,
+    warmup_iterations:
+      typeof payloadCache?.warmup_iterations === 'number' ? payloadCache.warmup_iterations : 0,
+    cold: typeof payloadCache?.cold === 'boolean' ? payloadCache.cold : null,
+  };
   if (slowToolMode) {
     (out.meta as Record<string, unknown>).slow_tool = {
       mode: slowToolMode,

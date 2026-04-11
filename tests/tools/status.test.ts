@@ -87,6 +87,47 @@ describe('index_status Tool', () => {
     expect(result).toContain('Index worker exited with code 1');
   });
 
+  it('should surface degraded embedding runtime details', async () => {
+    const degradedStatus: IndexStatus = {
+      workspace: '/tmp/workspace',
+      status: 'idle',
+      lastIndexed: '2025-01-11T00:00:00.000Z',
+      fileCount: 42,
+      isStale: false,
+      embeddingRuntime: {
+        state: 'degraded',
+        configured: {
+          id: 'transformers:Xenova/all-MiniLM-L6-v2',
+          modelId: 'Xenova/all-MiniLM-L6-v2',
+          vectorDimension: 384,
+        },
+        active: {
+          id: 'hash-32',
+          modelId: 'hash-32',
+          vectorDimension: 32,
+        },
+        fallback: {
+          id: 'hash-32',
+          modelId: 'hash-32',
+          vectorDimension: 32,
+        },
+        loadFailures: 2,
+        lastFailure: 'model unavailable',
+        nextRetryAt: '2025-01-11T00:01:00.000Z',
+      },
+    };
+    mockServiceClient.getIndexStatus.mockReturnValue(degradedStatus);
+
+    const result = await handleIndexStatus({}, mockServiceClient as any);
+
+    expect(result).toContain('**Embedding Runtime**');
+    expect(result).toContain('degraded');
+    expect(result).toContain('hash-32');
+    expect(result).toContain('model unavailable');
+    expect(result).toContain('2025-01-11T00:01:00.000Z');
+    expect(result).toContain('Embedding Load Failures');
+  });
+
   it('should not classify status as unindexed when lastIndexed exists but fileCount is 0', async () => {
     const restoredEmptyStatus: IndexStatus = {
       workspace: '/tmp/workspace',

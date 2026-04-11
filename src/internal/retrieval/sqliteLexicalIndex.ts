@@ -1,8 +1,12 @@
-import * as crypto from 'crypto';
 import * as fs from 'fs';
 import { createRequire } from 'module';
 import * as path from 'path';
 import type { SearchResult } from '../../mcp/serviceClient.js';
+import {
+  buildIndexStateWorkspaceFingerprint,
+  hashIndexStateContent,
+  JsonIndexStateStore,
+} from '../../mcp/indexStateStore.js';
 import {
   getPreferredWorkspacePath,
   getReadableWorkspacePath,
@@ -193,8 +197,7 @@ function normalizePath(relativePath: string): string {
 }
 
 function buildWorkspaceFingerprint(workspacePath: string): string {
-  const normalizedWorkspacePath = normalizePath(path.resolve(workspacePath));
-  return crypto.createHash('sha256').update(normalizedWorkspacePath).digest('hex').slice(0, 16);
+  return buildIndexStateWorkspaceFingerprint(workspacePath);
 }
 
 function resolveChunkParser(options: WorkspaceSqliteLexicalIndexOptions): ChunkParser {
@@ -227,7 +230,7 @@ function isBinaryContent(content: string): boolean {
 }
 
 function hashContent(content: string): string {
-  return crypto.createHash('sha256').update(content).digest('hex');
+  return hashIndexStateContent(content);
 }
 
 function safeReadJson<T>(filePath: string, fallback: T): T {
@@ -384,6 +387,7 @@ export function createWorkspaceLexicalSearchIndex(
     preferred: SQLITE_INDEX_FILE_NAME,
     legacy: LEGACY_SQLITE_INDEX_FILE_NAME,
   });
+  const indexStateStore = options.indexStatePath ? null : new JsonIndexStateStore(workspacePath);
   const chunkParser = resolveChunkParser(options);
   const workspaceFingerprint = buildWorkspaceFingerprint(workspacePath);
   const maxChunkLines = options.maxChunkLines ?? DEFAULT_MAX_CHUNK_LINES;
@@ -600,7 +604,7 @@ export function createWorkspaceLexicalSearchIndex(
   };
 
   const resolveWorkspaceFiles = async (): Promise<Map<string, string>> => {
-    const state = readIndexState(indexStatePath);
+    const state = indexStateStore ? { files: indexStateStore.loadWithMetadata().state.files } : readIndexState(indexStatePath);
     if (state.files && Object.keys(state.files).length > 0) {
       const map = new Map<string, string>();
       for (const [rawPath, entry] of Object.entries(state.files)) {

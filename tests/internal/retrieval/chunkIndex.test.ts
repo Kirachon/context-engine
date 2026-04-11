@@ -80,6 +80,28 @@ describe('chunking', () => {
     expect(chunks[1].content).toContain('buildThing');
     expect(chunks[2].content).toContain('class Example');
   });
+
+  it('keeps a small overlap when soft chunk limits split a long paragraph', () => {
+    const chunks = splitIntoChunks(
+      [
+        'alpha line',
+        'bravo line',
+        'charlie line',
+        'delta line',
+        'echo line',
+        'foxtrot line',
+      ].join('\n'),
+      { path: 'src/overlap.ts', maxChunkLines: 3, maxChunkChars: 200, overlapLines: 1 }
+    );
+
+    expect(chunks.map((chunk) => chunk.lines)).toEqual([
+      '1-3',
+      '3-5',
+      '5-6',
+    ]);
+    expect(chunks[1].content.startsWith('charlie line')).toBe(true);
+    expect(chunks[2].content.startsWith('echo line')).toBe(true);
+  });
 });
 describe('workspace chunk search index', () => {
   let tempDir: string | null = null;
@@ -408,6 +430,52 @@ describe('workspace chunk search index', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].path).toBe('src/real.ts');
     expect(results.some((result) => result.path.startsWith('artifacts/'))).toBe(false);
+  });
+
+  it('prefers source scripts over config and artifact echoes for identifier-like script queries', async () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'artifacts/bench/retrieval-quality-report.json',
+      JSON.stringify({
+        query: 'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+      })
+    );
+    writeWorkspaceFile(
+      tempDir,
+      'config/ci/retrieval-quality-fixture-pack.json',
+      JSON.stringify({
+        query: 'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+      })
+    );
+    writeWorkspaceFile(
+      tempDir,
+      'scripts/ci/generate-retrieval-quality-report.ts',
+      [
+        'export function generateRetrievalQualityReport() {',
+        '  return "synthetic_guard stable_fixture_token";',
+        '}',
+      ].join('\n')
+    );
+
+    writeIndexState(tempDir, {
+      'artifacts/bench/retrieval-quality-report.json': { hash: 'hash-artifact-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+      'config/ci/retrieval-quality-fixture-pack.json': { hash: 'hash-config-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+      'scripts/ci/generate-retrieval-quality-report.ts': { hash: 'hash-script-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+    await index.refresh();
+
+    const results = await index.search('generate-retrieval-quality-report synthetic_guard stable_fixture_token', 5, {
+      codeIntent: true,
+      includeArtifacts: false,
+      includeJson: false,
+    });
+
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe('scripts/ci/generate-retrieval-quality-report.ts');
   });
 
   it('recovers from a corrupt chunk sidecar on first load', async () => {

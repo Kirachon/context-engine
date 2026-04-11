@@ -6,7 +6,15 @@
     "baseline_artifact": "artifacts/bench/pr-baseline.json",
     "candidate_artifact": "artifacts/bench/pr-candidate.json",
     "cache_modes": ["cold", "warm"],
-    "scoped_runs": ["unscoped", "scoped"]
+    "scoped_runs": ["unscoped", "scoped"],
+    "resource_metric_paths": [
+      "payload.resources.process_memory.rss_bytes.p95_bytes",
+      "payload.resources.process_memory.heap_used_bytes.p95_bytes"
+    ],
+    "cache_metadata_paths": [
+      "payload.cache.mode",
+      "payload.cache.warmup_iterations"
+    ]
   },
   "profiles": {
     "fast": {
@@ -23,6 +31,7 @@
     "retrieval_quality_fixture_pack": "config/ci/retrieval-quality-fixture-pack.json",
     "legacy_capability_matrix": "config/ci/legacy-capability-matrix.json"
   },
+  "quality_gate_perf_profile": "quality",
   "calibration_contract": "config/ci/retrieval-calibration-contract.json",
   "gate_tiers": {
     "pr_blockers": [

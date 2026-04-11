@@ -6,6 +6,7 @@ type RetrievalCalibrationContract = {
   version: string;
   frozen_contracts: Record<string, string>;
   artifacts: Record<string, string>;
+  quality_gate_perf_profile: string;
   measurable_metrics: {
     compare_metric_path: string;
     quality_ids: string[];
@@ -51,10 +52,13 @@ describe('config/ci/retrieval-calibration-contract.json', () => {
       quality_telemetry: 'artifacts/bench/retrieval-quality-telemetry.json',
       shadow_canary_gate: 'artifacts/bench/retrieval-shadow-canary-gate.json',
     });
+    expect(contract.quality_gate_perf_profile).toBe('quality');
     expect(contract.measurable_metrics.compare_metric_path).toBe('payload.timing.p95_ms');
     expect(contract.measurable_metrics.quality_ids).toEqual([
       'quality.ndcg_at_10',
       'quality.mrr_at_10',
+      'quality.recall_at_10',
+      'quality.p_at_1',
     ]);
     expect(contract.measurable_metrics.diagnostic_ids).toEqual([
       'telemetry.skipped_docs_rate_pct',

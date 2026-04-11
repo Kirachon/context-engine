@@ -51,6 +51,7 @@ export interface RetrievalOptions {
   topK?: number;
   perQueryTopK?: number;
   maxVariants?: number;
+  fanoutConcurrency?: number;
   timeoutMs?: number;
   enableExpansion?: boolean;
   enableDedupe?: boolean;
@@ -60,6 +61,8 @@ export interface RetrievalOptions {
   enableRerank?: boolean;
   rerankTopN?: number;
   rerankTimeoutMs?: number;
+  /** Optional latency budget for entering/completing rerank before the pipeline fails open to pre-rerank candidates. */
+  rerankBudgetMs?: number;
   reranker?: RetrievalReranker;
   semanticWeight?: number;
   lexicalWeight?: number;

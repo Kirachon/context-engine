@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "generated_at": "2026-03-13T10:30:19.072Z",
+  "schema_version": 2,
+  "generated_at": "2026-04-11T13:40:12.029Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "dataset_id": "holdout_v1",
@@ -8,9 +8,11 @@
   },
   "summary": {
     "dataset_id": "holdout_v1",
-    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716",
+    "dataset_hash": "d393e407c4e9304fd3994d8fc1fbfc40b51a5c9c59a3d064b2118ac687acbf39",
     "dataset_hash_length": 64,
     "query_count": 5,
+    "case_count": 5,
+    "judged_path_count": 5,
     "leakage_count": 0,
     "leakage_guard_training_dataset_id": "train_v1",
     "leakage_guard_holdout_dataset_id": "holdout_v1"
@@ -20,13 +22,15 @@
     "has_datasets_object": true,
     "has_selected_dataset": true,
     "has_leakage_guard": true,
-    "has_training_dataset_id": true
+    "has_training_dataset_id": true,
+    "has_eval_cases": true,
+    "has_eval_judgments": true
   },
   "leakage": {
     "matches": []
   },
   "reproducibility_lock": {
-    "fixture_pack_hash": "198ce10f0a420000c97107ff63337864f3e0a87f46ba056fd208b4921f87127d",
+    "fixture_pack_hash": "9417e2253ff0305c7c981cfca90e9d5ec1d59627be40e3f6856009c6e0716701",
     "normalization": "trim_lower_whitespace_collapse"
   },
   "gate": {

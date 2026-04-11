@@ -25,6 +25,23 @@ export function envMs(name: string, defaultValue: number, opts?: { min?: number;
   return envInt(name, defaultValue, opts);
 }
 
+export function envString(name: string, defaultValue?: string): string | undefined {
+  const raw = process.env[name];
+  if (raw === undefined) return defaultValue;
+  const trimmed = raw.trim();
+  if (trimmed === '') return defaultValue;
+  return trimmed;
+}
+
+export function envCsv(name: string): string[] {
+  const raw = process.env[name];
+  if (raw === undefined) return [];
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => value.length > 0);
+}
+
 export function envEnum<const T extends string>(
   name: string,
   allowed: readonly T[],
@@ -37,4 +54,14 @@ export function envEnum<const T extends string>(
   throw new Error(
     `Invalid ${name} value "${raw}". Allowed values: ${allowed.join(', ')}`
   );
+}
+
+export const PERF_PROFILE_VALUES = ['default', 'fast', 'quality'] as const;
+export type ParsedPerfProfile = typeof PERF_PROFILE_VALUES[number];
+
+export function envPerfProfile(
+  name: string = 'CE_PERF_PROFILE',
+  defaultValue: ParsedPerfProfile = 'default'
+): ParsedPerfProfile {
+  return envEnum(name, PERF_PROFILE_VALUES, defaultValue);
 }

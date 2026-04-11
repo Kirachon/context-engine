@@ -10,7 +10,20 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { createHash } from 'crypto';
+import {
+  SUPPORTED_NORMALIZATION,
+  RetrievalQualityFixtureError,
+  computeDatasetHash,
+  countDatasetJudgments,
+  getDatasetCases,
+  getDatasetMap,
+  getDatasetQueries,
+  getHoldoutConfig,
+  normalizeQuery,
+  readFixturePack,
+  resolveSelectedDatasetId,
+  sha256Hex,
+} from './retrieval-quality-fixture.js';
 
 interface CliArgs {
   fixturePackPath: string;
@@ -18,26 +31,8 @@ interface CliArgs {
   outPath: string;
 }
 
-interface DatasetDef {
-  description?: string;
-  queries?: unknown;
-}
-
-interface HoldoutFixture {
-  enabled?: unknown;
-  default_dataset_id?: unknown;
-  datasets?: unknown;
-  leakage_guard?: {
-    training_dataset_id?: unknown;
-    holdout_dataset_id?: unknown;
-    normalization?: unknown;
-  };
-}
-
 const DEFAULT_FIXTURE_PACK = path.join('config', 'ci', 'retrieval-quality-fixture-pack.json');
 const DEFAULT_OUT_PATH = path.join('artifacts', 'bench', 'retrieval-holdout-check.json');
-
-class ValidationError extends Error {}
 
 function printHelpAndExit(code: number): never {
   // eslint-disable-next-line no-console
@@ -89,92 +84,41 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
-const SUPPORTED_NORMALIZATION = 'trim_lower_whitespace_collapse';
-
-function normalizeQuery(raw: string, normalization: string): string {
-  if (normalization === SUPPORTED_NORMALIZATION) {
-    return raw.trim().replace(/\s+/g, ' ').toLowerCase();
-  }
-  throw new ValidationError(`Unsupported normalization mode: ${normalization}`);
-}
-
-function readFixture(filePath: string): { rawText: string; parsed: Record<string, unknown> } {
-  const resolved = path.resolve(filePath);
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Fixture pack not found: ${resolved}`);
-  }
-  const rawText = fs.readFileSync(resolved, 'utf8');
-  const parsed = JSON.parse(rawText) as unknown;
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Fixture pack must be a JSON object');
-  }
-  return { rawText, parsed: parsed as Record<string, unknown> };
-}
-
-function getDatasetQueries(dataset: DatasetDef | undefined, label: string): string[] {
-  if (!dataset || !Array.isArray(dataset.queries)) {
-    throw new ValidationError(`Dataset "${label}" missing queries[]`);
-  }
-  const out = dataset.queries
-    .map((entry) => {
-      if (typeof entry !== 'string') {
-        throw new ValidationError(`Dataset "${label}" contains non-string query entries`);
-      }
-      return entry.trim();
-    })
-    .filter((entry) => entry.length > 0);
-  if (out.length === 0) throw new ValidationError(`Dataset "${label}" has no usable queries`);
-  return out;
-}
-
-function sha256Hex(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
 function run(): number {
   try {
     const args = parseArgs(process.argv.slice(2));
-    const fixture = readFixture(args.fixturePackPath);
-    const holdout = fixture.parsed.holdout as HoldoutFixture | undefined;
-    const holdoutObj = holdout && typeof holdout === 'object' ? holdout : undefined;
-    if (!holdoutObj) {
-      throw new Error('Fixture pack missing holdout object');
-    }
-    const datasets = holdoutObj.datasets as Record<string, DatasetDef> | undefined;
-    if (!datasets || typeof datasets !== 'object' || Array.isArray(datasets)) {
-      throw new Error('Fixture holdout.datasets must be an object');
-    }
-
-    const selectedDatasetId =
-      args.datasetId ??
-      (typeof holdoutObj.default_dataset_id === 'string' && holdoutObj.default_dataset_id.trim().length > 0
-        ? holdoutObj.default_dataset_id
-        : undefined);
-    if (!selectedDatasetId) {
-      throw new Error('No holdout dataset id selected');
-    }
-
-    const leakageGuard = holdoutObj.leakage_guard;
+    const fixture = readFixturePack(args.fixturePackPath);
+    const holdout = getHoldoutConfig(fixture.parsed);
+    const datasets = getDatasetMap(holdout);
+    const selectedDatasetId = resolveSelectedDatasetId(holdout, args.datasetId);
     const normalizationMode =
-      typeof leakageGuard?.normalization === 'string' && leakageGuard.normalization.trim().length > 0
-        ? leakageGuard.normalization
+      typeof holdout.leakage_guard?.normalization === 'string' && holdout.leakage_guard.normalization.trim().length > 0
+        ? holdout.leakage_guard.normalization
         : SUPPORTED_NORMALIZATION;
 
     const selectedQueries = getDatasetQueries(datasets[selectedDatasetId], selectedDatasetId);
-    const selectedNormalized = selectedQueries.map((query) => normalizeQuery(query, normalizationMode));
-    const selectedDatasetHash = sha256Hex(JSON.stringify(selectedNormalized));
+    const selectedDatasetHash = computeDatasetHash(selectedQueries, normalizationMode);
+    const selectedCases = getDatasetCases(datasets[selectedDatasetId], selectedDatasetId);
+    const selectedJudgmentCount = countDatasetJudgments(selectedCases);
 
     const trainingDatasetId =
-      typeof leakageGuard?.training_dataset_id === 'string' ? leakageGuard.training_dataset_id : undefined;
+      typeof holdout.leakage_guard?.training_dataset_id === 'string'
+        ? holdout.leakage_guard.training_dataset_id
+        : undefined;
     const holdoutDatasetIdFromGuard =
-      typeof leakageGuard?.holdout_dataset_id === 'string' ? leakageGuard.holdout_dataset_id : selectedDatasetId;
+      typeof holdout.leakage_guard?.holdout_dataset_id === 'string'
+        ? holdout.leakage_guard.holdout_dataset_id
+        : selectedDatasetId;
     if (holdoutDatasetIdFromGuard !== selectedDatasetId) {
-      throw new ValidationError(
+      throw new RetrievalQualityFixtureError(
         `Selected dataset (${selectedDatasetId}) must match leakage_guard.holdout_dataset_id (${holdoutDatasetIdFromGuard})`
       );
     }
+
     const holdoutQueriesFromGuard = getDatasetQueries(datasets[holdoutDatasetIdFromGuard], holdoutDatasetIdFromGuard);
-    const holdoutNormalizedSet = new Set(holdoutQueriesFromGuard.map((query) => normalizeQuery(query, normalizationMode)));
+    const holdoutNormalizedSet = new Set(
+      holdoutQueriesFromGuard.map((query) => normalizeQuery(query, normalizationMode))
+    );
     const trainingQueries = trainingDatasetId ? getDatasetQueries(datasets[trainingDatasetId], trainingDatasetId) : [];
     const leakageMatches = trainingQueries
       .map((query) => normalizeQuery(query, normalizationMode))
@@ -186,19 +130,27 @@ function run(): number {
       has_holdout_object: true,
       has_datasets_object: true,
       has_selected_dataset: selectedQueries.length > 0,
-      has_leakage_guard: Boolean(leakageGuard),
+      has_leakage_guard: Boolean(holdout.leakage_guard),
       has_training_dataset_id: Boolean(trainingDatasetId),
+      has_eval_cases: selectedCases.length > 0,
+      has_eval_judgments: selectedJudgmentCount > 0,
     };
 
     const schemaReasons: string[] = [];
     if (!schemaChecks.has_leakage_guard) schemaReasons.push('missing holdout.leakage_guard');
     if (!schemaChecks.has_training_dataset_id) schemaReasons.push('missing leakage_guard.training_dataset_id');
+    if (!schemaChecks.has_eval_cases) {
+      schemaReasons.push(`selected dataset "${selectedDatasetId}" must define holdout evaluation cases`);
+    }
+    if (schemaChecks.has_eval_cases && !schemaChecks.has_eval_judgments) {
+      schemaReasons.push(`selected dataset "${selectedDatasetId}" must define judged paths for each case`);
+    }
 
     const artifact = {
-      schema_version: 1,
+      schema_version: 2,
       generated_at: new Date().toISOString(),
       inputs: {
-        fixture_pack: path.resolve(args.fixturePackPath),
+        fixture_pack: fixture.resolvedPath,
         dataset_id: selectedDatasetId,
         out: path.resolve(args.outPath),
       },
@@ -207,6 +159,8 @@ function run(): number {
         dataset_hash: selectedDatasetHash,
         dataset_hash_length: selectedDatasetHash.length,
         query_count: selectedQueries.length,
+        case_count: selectedCases.length,
+        judged_path_count: selectedJudgmentCount,
         leakage_count: leakageUnique.length,
         leakage_guard_training_dataset_id: trainingDatasetId ?? null,
         leakage_guard_holdout_dataset_id: holdoutDatasetIdFromGuard,
@@ -234,15 +188,16 @@ function run(): number {
 
     // eslint-disable-next-line no-console
     console.log(
-      `retrieval_holdout_check status=${artifact.gate.status} dataset=${selectedDatasetId} leakage=${leakageUnique.length} out=${outPath}`
+      `retrieval_holdout_check status=${artifact.gate.status} dataset=${selectedDatasetId} leakage=${leakageUnique.length} cases=${selectedCases.length} out=${outPath}`
     );
     return artifact.gate.status === 'pass' ? 0 : 1;
   } catch (error) {
-    // eslint-disable-next-line no-console
-    if (error instanceof ValidationError) {
+    if (error instanceof RetrievalQualityFixtureError) {
+      // eslint-disable-next-line no-console
       console.error(`Validation failed: ${error.message}`);
       return 1;
     }
+    // eslint-disable-next-line no-console
     console.error(`Error: ${(error as Error).message}`);
     return 2;
   }

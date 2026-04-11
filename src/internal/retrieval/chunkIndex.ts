@@ -14,6 +14,7 @@ import {
 } from './chunking.js';
 import { createTreeSitterChunkParser } from './treeSitterChunkParser.js';
 import {
+  buildIdentifierPathSignals,
   computeExactMatchBoost,
   normalizeSearchText,
   tokenizeSearchInput,
@@ -450,6 +451,7 @@ function scoreChunk(chunk: ChunkRecord, context: ChunkSearchContext): number {
   const lowerPath = pathHaystack;
   const isArtifactPath = lowerPath.startsWith('artifacts/');
   const isDocsPath = /^(docs|benchmark|bench|tmp|coverage|dist|build)\//.test(lowerPath);
+  const identifierSignals = buildIdentifierPathSignals(context.normalizedQuery, chunk.path);
 
   if (context.codeIntent && !context.opsEvidenceIntent && !context.includeArtifacts && isArtifactPath) {
     return 0;
@@ -495,6 +497,34 @@ function scoreChunk(chunk: ChunkRecord, context: ChunkSearchContext): number {
 
   if (context.queryTokens.length > 0 && matchedTokens >= context.queryTokens.length) {
     score += 1.5;
+  }
+
+  if (identifierSignals.isIdentifierQuery) {
+    if (identifierSignals.exactBasenameMatch) {
+      score += identifierSignals.isCodePath ? 7 : 4;
+    } else if (identifierSignals.pathTokenCoverage > 0) {
+      score += identifierSignals.pathTokenCoverage * (identifierSignals.isCodePath ? 2.5 : 1.4);
+    }
+    if (identifierSignals.isScriptPath) {
+      score += 1.1;
+    }
+    if (
+      identifierSignals.isTestPath
+      && !identifierSignals.queryMentionsTest
+    ) {
+      score -= identifierSignals.exactBasenameMatch ? 4 : 1.5;
+    }
+    if (!identifierSignals.exactBasenameMatch) {
+      if (!context.includeArtifacts && identifierSignals.isArtifactPath) {
+        score -= 8;
+      }
+      if (identifierSignals.isConfigPath) {
+        score -= 6;
+      }
+      if (!context.includeJson && identifierSignals.isJsonPath && !identifierSignals.isCodePath) {
+        score -= 4;
+      }
+    }
   }
 
   if (context.codeIntent) {

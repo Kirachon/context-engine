@@ -21,6 +21,7 @@
 import { ContextEngineMCPServer } from './mcp/server.js';
 import { ContextEngineHttpServer } from './http/index.js';
 import { envBool } from './config/env.js';
+import { FEATURE_FLAGS, validateFlagCombinations } from './config/features.js';
 import { resolveWorkspacePath, type WorkspaceResolutionResult } from './workspace/resolveWorkspace.js';
 import { acquireWorkspaceStartupLock } from './runtime/workspaceLock.js';
 import * as path from 'path';
@@ -100,6 +101,8 @@ Environment Variables:
   CE_RETRIEVAL_PROVIDER    Retrieval provider preference: local_native (default)
   CE_AI_PROVIDER           AI provider for ask calls: openai_session
   CE_OPENAI_SESSION_CMD    Command for session-based provider (default: codex)
+  CE_PERF_PROFILE          Feature preset defaults: default | fast | quality (default: default)
+  CE_FEATURE_KILL_SWITCHES Comma-separated FeatureFlags keys to force-disable after env/profile resolution
   CE_AUTO_INDEX_ON_STARTUP Automatically background-index missing or stale workspaces on startup (default: true)
 
 Examples:
@@ -138,6 +141,14 @@ Examples:
 
   if (cliParseError) {
     console.error(cliParseError);
+    process.exit(1);
+  }
+
+  try {
+    validateFlagCombinations(FEATURE_FLAGS);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
     process.exit(1);
   }
 

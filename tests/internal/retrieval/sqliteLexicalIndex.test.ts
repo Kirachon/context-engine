@@ -2,6 +2,8 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { afterEach, describe, expect, it } from '@jest/globals';
+import { FEATURE_FLAGS } from '../../../src/config/features.js';
+import { hashIndexStateContent } from '../../../src/mcp/indexStateStore.js';
 import {
   createWorkspaceSqliteLexicalIndex,
   type WorkspaceSqliteLexicalIndex,
@@ -21,11 +23,29 @@ function removeWorkspace(workspace: string): void {
   fs.rmSync(workspace, { recursive: true, force: true });
 }
 
+function writeIndexState(
+  workspace: string,
+  files: Record<string, { hash: string; indexed_at: string }>
+): void {
+  fs.writeFileSync(
+    path.join(workspace, '.context-engine-index-state.json'),
+    JSON.stringify({
+      version: 2,
+      schema_version: 2,
+      provider_id: 'local_native',
+      updated_at: new Date().toISOString(),
+      files,
+    }),
+    'utf8'
+  );
+}
+
 describe('sqlite lexical index', () => {
   let workspacePath = '';
   let activeIndex: WorkspaceSqliteLexicalIndex | null = null;
 
   afterEach(() => {
+    FEATURE_FLAGS.hash_normalize_eol = false;
     activeIndex?.clearCache?.();
     activeIndex = null;
     if (workspacePath) {
@@ -146,6 +166,93 @@ describe('sqlite lexical index', () => {
     const alphaResult = results.find((result) => result.path === 'src/alpha.ts');
     expect(alphaResult?.content.toLowerCase()).toContain('needle updated');
     expect(results.some((result) => result.path === 'src/gamma.ts')).toBe(true);
+    expect(results.some((result) => result.path === 'src/beta.ts')).toBe(false);
+  });
+
+  it('reuses unchanged files across refreshes when index-state hashes normalize line endings', async () => {
+    FEATURE_FLAGS.hash_normalize_eol = true;
+    workspacePath = createTempWorkspace();
+
+    const alphaContent = 'export const alpha = "needle one";\r\nexport const beta = "needle two";\r\n';
+    writeWorkspaceFile(workspacePath, 'src/alpha.ts', alphaContent);
+    writeIndexState(workspacePath, {
+      'src/alpha.ts': {
+        hash: hashIndexStateContent(alphaContent),
+        indexed_at: '2026-03-21T00:00:00.000Z',
+      },
+    });
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+
+    const first = await index.refresh();
+    expect(first).toMatchObject({
+      refreshedFiles: 1,
+      reusedFiles: 0,
+      removedFiles: 0,
+      totalFiles: 1,
+      wroteIndex: true,
+    });
+
+    const second = await index.refresh();
+    expect(second).toMatchObject({
+      refreshedFiles: 0,
+      reusedFiles: 1,
+      removedFiles: 0,
+      totalFiles: 1,
+      wroteIndex: false,
+    });
+
+    const results = await index.search('needle', 5);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].path).toBe('src/alpha.ts');
+  });
+
+  it('refreshes mutated content and removes deleted files from state-driven hash diffs', async () => {
+    FEATURE_FLAGS.hash_normalize_eol = true;
+    workspacePath = createTempWorkspace();
+
+    const alphaV1 = 'export const alpha = "needle one";\r\n';
+    const betaV1 = 'export const beta = "needle two";\r\n';
+    writeWorkspaceFile(workspacePath, 'src/alpha.ts', alphaV1);
+    writeWorkspaceFile(workspacePath, 'src/beta.ts', betaV1);
+    writeIndexState(workspacePath, {
+      'src/alpha.ts': {
+        hash: hashIndexStateContent(alphaV1),
+        indexed_at: '2026-03-21T00:00:00.000Z',
+      },
+      'src/beta.ts': {
+        hash: hashIndexStateContent(betaV1),
+        indexed_at: '2026-03-21T00:00:00.000Z',
+      },
+    });
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const alphaV2 = 'export const alpha = "needle updated";\r\n';
+    writeWorkspaceFile(workspacePath, 'src/alpha.ts', alphaV2);
+    fs.rmSync(path.join(workspacePath, 'src', 'beta.ts'));
+    writeIndexState(workspacePath, {
+      'src/alpha.ts': {
+        hash: hashIndexStateContent(alphaV2),
+        indexed_at: '2026-03-21T00:01:00.000Z',
+      },
+    });
+
+    const stats = await index.refresh();
+    expect(stats).toMatchObject({
+      refreshedFiles: 1,
+      reusedFiles: 0,
+      removedFiles: 1,
+      totalFiles: 1,
+      wroteIndex: true,
+    });
+
+    const results = await index.search('needle', 5);
+    const alphaResult = results.find((result) => result.path === 'src/alpha.ts');
+    expect(alphaResult?.content.toLowerCase()).toContain('needle updated');
     expect(results.some((result) => result.path === 'src/beta.ts')).toBe(false);
   });
 

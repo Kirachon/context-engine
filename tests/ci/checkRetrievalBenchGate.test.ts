@@ -58,11 +58,12 @@ function qualityReportArtifact(commitSha: string): Record<string, unknown> {
     evaluations: [
       { id: 'quality.ndcg_at_10', status: 'pass' },
       { id: 'quality.mrr_at_10', status: 'pass' },
-      { id: 'quality.recall_at_50', status: 'pass' },
+      { id: 'quality.recall_at_10', status: 'pass' },
+      { id: 'quality.p_at_1', status: 'pass' },
     ],
     gate_rules: {
       min_pass_rate: 1,
-      required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_50'],
+      required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_10', 'quality.p_at_1'],
     },
     gate: {
       status: 'pass',
@@ -179,7 +180,7 @@ describe('scripts/ci/check-retrieval-bench-gate.ts', () => {
       ],
       gate_rules: {
         min_pass_rate: 1,
-        required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_50'],
+        required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_10', 'quality.p_at_1'],
       },
       gate: {
         status: 'fail',

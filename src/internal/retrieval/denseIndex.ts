@@ -7,6 +7,15 @@ import {
   getPreferredWorkspacePath,
   getReadableWorkspacePath,
 } from '../../runtime/compatPaths.js';
+import {
+  createEmbeddingReuseLookup,
+  getInternalEmbeddingReuse,
+  getReusableEmbeddingVector,
+  hashEmbeddingReuseContent,
+  normalizeEmbeddingVector,
+  setReusableEmbeddingVector,
+  type InternalEmbeddingReuse,
+} from '../handlers/performance.js';
 import type { DenseRetriever } from './embeddingProvider.js';
 import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
@@ -17,6 +26,7 @@ const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
 const INDEX_VERSION = 1;
 const DEFAULT_DENSE_REFRESH_MAX_DOCS = 500;
 const DEFAULT_DENSE_EMBED_BATCH_SIZE = 64;
+const DEFAULT_DENSE_INDEX_MAX_LOAD_BYTES = 32 * 1024 * 1024;
 
 interface DenseIndexEntry {
   path: string;
@@ -70,9 +80,14 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
-function safeReadJson<T>(filePath: string, fallback: T): T {
+function safeReadJson<T>(filePath: string, fallback: T, maxLoadBytes?: number): T {
   try {
     if (!fs.existsSync(filePath)) return fallback;
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile()) return fallback;
+    if (typeof maxLoadBytes === 'number' && maxLoadBytes > 0 && stat.size > maxLoadBytes) {
+      return fallback;
+    }
     const raw = fs.readFileSync(filePath, 'utf8');
     return JSON.parse(raw) as T;
   } catch {
@@ -103,6 +118,43 @@ function readIndexState(filePath: string): IndexStateFile {
   return { files: parsed.files as Record<string, IndexStateFileEntry> };
 }
 
+function getDenseIndexMaxLoadBytes(): number {
+  return envInt(
+    'CE_DENSE_INDEX_MAX_LOAD_BYTES',
+    DEFAULT_DENSE_INDEX_MAX_LOAD_BYTES,
+    { min: 1_024, max: 256 * 1024 * 1024 }
+  );
+}
+
+function normalizeDenseIndexDocs(
+  docs: Record<string, DenseIndexEntry>,
+  embeddingRuntime: EmbeddingRuntime
+): Record<string, DenseIndexEntry> {
+  const normalizedDocs = new Map<string, DenseIndexEntry>();
+  for (const [relativePath, entry] of Object.entries(docs)) {
+    const safePath = sanitizePath(relativePath);
+    if (!safePath || !entry || typeof entry.hash !== 'string' || typeof entry.content !== 'string') {
+      continue;
+    }
+
+    const embedding = normalizeEmbeddingVector(entry.embedding, embeddingRuntime.vectorDimension);
+    if (!embedding) {
+      continue;
+    }
+
+    normalizedDocs.set(safePath, {
+      path: safePath,
+      hash: entry.hash,
+      content: entry.content,
+      lines: typeof entry.lines === 'string' ? entry.lines : undefined,
+      embedding,
+      indexed_at: typeof entry.indexed_at === 'string' ? entry.indexed_at : new Date(0).toISOString(),
+    });
+  }
+
+  return Object.fromEntries([...normalizedDocs.entries()].sort(([left], [right]) => left.localeCompare(right)));
+}
+
 function readDenseIndex(filePath: string, embeddingRuntime: EmbeddingRuntime): DenseIndexFile {
   const fallback: DenseIndexFile = {
     version: INDEX_VERSION,
@@ -113,11 +165,15 @@ function readDenseIndex(filePath: string, embeddingRuntime: EmbeddingRuntime): D
     docs: {},
   };
 
-  const parsed = safeReadJson<Partial<DenseIndexFile>>(filePath, fallback);
+  const parsed = safeReadJson<Partial<DenseIndexFile>>(filePath, fallback, getDenseIndexMaxLoadBytes());
   if (!parsed || typeof parsed !== 'object') {
     return fallback;
   }
-  if (parsed.embedding_provider !== embeddingRuntime.id) {
+  if (
+    parsed.embedding_provider !== embeddingRuntime.id
+    || parsed.embedding_model_id !== embeddingRuntime.modelId
+    || parsed.vector_dimension !== embeddingRuntime.vectorDimension
+  ) {
     return fallback;
   }
   return {
@@ -130,7 +186,9 @@ function readDenseIndex(filePath: string, embeddingRuntime: EmbeddingRuntime): D
       ? parsed.vector_dimension
       : embeddingRuntime.vectorDimension,
     updated_at: typeof parsed.updated_at === 'string' ? parsed.updated_at : fallback.updated_at,
-    docs: parsed.docs && typeof parsed.docs === 'object' ? (parsed.docs as Record<string, DenseIndexEntry>) : {},
+    docs: parsed.docs && typeof parsed.docs === 'object'
+      ? normalizeDenseIndexDocs(parsed.docs as Record<string, DenseIndexEntry>, embeddingRuntime)
+      : {},
   };
 }
 
@@ -162,7 +220,8 @@ async function refreshDenseIndex(
   workspacePath: string,
   denseIndex: DenseIndexFile,
   indexState: IndexStateFile,
-  embeddingRuntime: EmbeddingRuntime
+  embeddingRuntime: EmbeddingRuntime,
+  embeddingReuse: InternalEmbeddingReuse
 ): Promise<DenseIndexFile> {
   const refreshMaxDocs = envInt(
     'CE_DENSE_REFRESH_MAX_DOCS',
@@ -176,8 +235,11 @@ async function refreshDenseIndex(
   );
   const refreshStart = Date.now();
   const nextDocs: Record<string, DenseIndexEntry> = {};
-  const toEmbedPaths: string[] = [];
-  const toEmbedDocs: string[] = [];
+  const toEmbedEntries: Array<{
+    path: string;
+    content: string;
+    lookup: ReturnType<typeof createEmbeddingReuseLookup>;
+  }> = [];
   const nowIso = new Date().toISOString();
   let refreshedDocs = 0;
 
@@ -197,6 +259,22 @@ async function refreshDenseIndex(
     if (!content) {
       continue;
     }
+    const lookup = createEmbeddingReuseLookup(
+      embeddingRuntime,
+      'document',
+      hashEmbeddingReuseContent(content)
+    );
+    const reused = getReusableEmbeddingVector(embeddingReuse, lookup);
+    if (reused) {
+      nextDocs[safePath] = {
+        path: safePath,
+        hash: stateEntry.hash,
+        content,
+        indexed_at: nowIso,
+        embedding: reused,
+      };
+      continue;
+    }
     if (refreshedDocs >= refreshMaxDocs) {
       incCounter(
         'context_engine_dense_refresh_skipped_docs_total',
@@ -206,8 +284,11 @@ async function refreshDenseIndex(
       );
       continue;
     }
-    toEmbedPaths.push(safePath);
-    toEmbedDocs.push(content);
+    toEmbedEntries.push({
+      path: safePath,
+      content,
+      lookup,
+    });
     nextDocs[safePath] = {
       path: safePath,
       hash: stateEntry.hash,
@@ -218,12 +299,11 @@ async function refreshDenseIndex(
     refreshedDocs += 1;
   }
 
-  if (toEmbedDocs.length > 0) {
-    for (let i = 0; i < toEmbedDocs.length; i += embedBatchSize) {
-      const batchDocs = toEmbedDocs.slice(i, i + embedBatchSize);
-      const batchPaths = toEmbedPaths.slice(i, i + embedBatchSize);
+  if (toEmbedEntries.length > 0) {
+    for (let i = 0; i < toEmbedEntries.length; i += embedBatchSize) {
+      const batchEntries = toEmbedEntries.slice(i, i + embedBatchSize);
       const batchStart = Date.now();
-      const embeddings = await embeddingRuntime.embedDocuments(batchDocs);
+      const embeddings = await embeddingRuntime.embedDocuments(batchEntries.map((entry) => entry.content));
       observeDurationMs(
         'context_engine_dense_embed_batch_duration_seconds',
         { provider: embeddingRuntime.id },
@@ -239,16 +319,27 @@ async function refreshDenseIndex(
       incCounter(
         'context_engine_dense_embed_docs_total',
         { provider: embeddingRuntime.id },
-        batchDocs.length,
+        batchEntries.length,
         'Total dense embedding documents processed.'
       );
-      for (let j = 0; j < batchPaths.length; j += 1) {
-        const docPath = batchPaths[j];
-        const embedding = embeddings[j] ?? [];
-        nextDocs[docPath].embedding = embedding;
+      for (let j = 0; j < batchEntries.length; j += 1) {
+        const batchEntry = batchEntries[j];
+        const embedding = normalizeEmbeddingVector(embeddings[j], embeddingRuntime.vectorDimension);
+        if (!embedding) {
+          delete nextDocs[batchEntry.path];
+          continue;
+        }
+        setReusableEmbeddingVector(embeddingReuse, batchEntry.lookup, embedding);
+        nextDocs[batchEntry.path].embedding = embedding;
       }
     }
   }
+
+  const validDocs = Object.fromEntries(
+    Object.entries(nextDocs)
+      .filter(([, entry]) => entry.embedding.length === embeddingRuntime.vectorDimension)
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
 
   observeDurationMs(
     'context_engine_dense_refresh_duration_seconds',
@@ -269,7 +360,7 @@ async function refreshDenseIndex(
     embedding_model_id: embeddingRuntime.modelId,
     vector_dimension: embeddingRuntime.vectorDimension,
     updated_at: nowIso,
-    docs: nextDocs,
+    docs: validDocs,
   };
 }
 
@@ -290,38 +381,61 @@ export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOp
   return {
     id: `dense:${options.embeddingRuntime.id}`,
     async search(query: string, topK: number): Promise<SearchResult[]> {
+      const embeddingReuse = getInternalEmbeddingReuse();
       const safeTopK = clampTopK(topK);
-      const indexState = readIndexState(indexStatePath);
-      const existingDense = readDenseIndex(denseIndexReadPath, options.embeddingRuntime);
-      const refreshedDense = await refreshDenseIndex(
-        options.workspacePath,
-        existingDense,
-        indexState,
-        options.embeddingRuntime
-      );
-      safeWriteJson(denseIndexWritePath, refreshedDense);
+      try {
+        const indexState = readIndexState(indexStatePath);
+        const existingDense = readDenseIndex(denseIndexReadPath, options.embeddingRuntime);
+        const refreshedDense = await refreshDenseIndex(
+          options.workspacePath,
+          existingDense,
+          indexState,
+          options.embeddingRuntime,
+          embeddingReuse
+        );
+        safeWriteJson(denseIndexWritePath, refreshedDense);
 
-      const queryEmbedding = await options.embeddingRuntime.embedQuery(query);
-      const ranked = Object.values(refreshedDense.docs)
-        .map((doc) => {
-          const score = cosineSimilarity(queryEmbedding, doc.embedding);
-          return {
-            path: doc.path,
-            content: doc.content,
-            relevanceScore: Math.max(0, Math.min(1, score)),
-            matchType: 'semantic' as const,
-            retrievedAt: refreshedDense.updated_at,
-          };
-        })
-        .sort((a, b) => {
-          if (b.relevanceScore !== a.relevanceScore) {
-            return b.relevanceScore - a.relevanceScore;
+        const queryLookup = createEmbeddingReuseLookup(
+          options.embeddingRuntime,
+          'query',
+          hashEmbeddingReuseContent(query)
+        );
+        let queryEmbedding = getReusableEmbeddingVector(embeddingReuse, queryLookup);
+        if (!queryEmbedding) {
+          const runtimeVector = normalizeEmbeddingVector(
+            await options.embeddingRuntime.embedQuery(query),
+            options.embeddingRuntime.vectorDimension
+          );
+          if (!runtimeVector) {
+            throw new Error(`Invalid query embedding returned by "${options.embeddingRuntime.id}".`);
           }
-          return a.path.localeCompare(b.path);
-        })
-        .slice(0, safeTopK);
+          queryEmbedding = runtimeVector;
+          setReusableEmbeddingVector(embeddingReuse, queryLookup, queryEmbedding);
+        }
 
-      return ranked;
+        const ranked = Object.values(refreshedDense.docs)
+          .map((doc) => {
+            const score = cosineSimilarity(queryEmbedding, doc.embedding);
+            return {
+              path: doc.path,
+              content: doc.content,
+              relevanceScore: Math.max(0, Math.min(1, score)),
+              matchType: 'semantic' as const,
+              retrievedAt: refreshedDense.updated_at,
+            };
+          })
+          .sort((a, b) => {
+            if (b.relevanceScore !== a.relevanceScore) {
+              return b.relevanceScore - a.relevanceScore;
+            }
+            return a.path.localeCompare(b.path);
+          })
+          .slice(0, safeTopK);
+
+        return ranked;
+      } finally {
+        await embeddingReuse.flush?.();
+      }
     },
   };
 }

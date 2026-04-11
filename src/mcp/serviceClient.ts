@@ -45,6 +45,8 @@ import {
   type NormalizedExternalSource,
 } from './tooling/externalGrounding.js';
 import {
+  buildIndexStateWorkspaceFingerprint,
+  hashIndexStateContent,
   JsonIndexStateStore,
   type IndexStateFile,
   type IndexStateLoadMetadata,
@@ -58,7 +60,12 @@ import {
   parseFormattedResults as parseFormattedSemanticResults,
   searchWithSemanticRuntime,
 } from '../retrieval/providers/semanticRuntime.js';
-import { describeEmbeddingRuntimeSelection } from '../internal/retrieval/embeddingRuntime.js';
+import {
+  describeEmbeddingRuntimeSelection,
+  describeEmbeddingRuntimeStatus,
+  type EmbeddingRuntimeStatus,
+} from '../internal/retrieval/embeddingRuntime.js';
+import { scoreLexicalCandidates } from '../internal/retrieval/lexical.js';
 import {
   buildRetrievalArtifactV2Metadata,
   snapshotRetrievalV2FeatureFlags,
@@ -101,6 +108,7 @@ export interface IndexStatus {
   fileCount: number;
   isStale: boolean;
   lastError?: string;
+  embeddingRuntime?: EmbeddingRuntimeStatus;
 }
 
 export interface IndexResult {
@@ -1547,7 +1555,7 @@ export class ContextServiceClient {
   }
 
   private getCurrentIndexStateWorkspaceFingerprint(): string {
-    return crypto.createHash('sha256').update(path.resolve(this.workspacePath).replace(/\\/g, '/')).digest('hex').slice(0, 16);
+    return buildIndexStateWorkspaceFingerprint(this.workspacePath);
   }
 
   private getCurrentIndexStateFeatureFlagsSnapshot(): string {
@@ -1607,15 +1615,8 @@ export class ContextServiceClient {
     };
   }
 
-  private normalizeEolForHash(contents: string): string {
-    // Normalize CRLF/CR to LF for stable hashing across OSes.
-    return contents.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  }
-
   private hashContent(contents: string): string {
-    const normalize = featureEnabled('hash_normalize_eol');
-    const input = normalize ? this.normalizeEolForHash(contents) : contents;
-    return crypto.createHash('sha256').update(input).digest('hex');
+    return hashIndexStateContent(contents);
   }
 
   /**
@@ -3387,6 +3388,13 @@ export class ContextServiceClient {
     this.hydrateIndexStatusFromDisk();
     // Refresh staleness dynamically based on lastIndexed
     this.updateIndexStatus({});
+    const embeddingRuntime = describeEmbeddingRuntimeStatus(featureEnabled('retrieval_lancedb_v1'));
+    if (embeddingRuntime && embeddingRuntime.state !== 'uninitialized') {
+      return {
+        ...this.indexStatus,
+        embeddingRuntime,
+      };
+    }
     return { ...this.indexStatus };
   }
 
@@ -4092,6 +4100,61 @@ export class ContextServiceClient {
       || identifierLikeToken;
     const opsEvidenceIntent = /\b(benchmark|report|receipt|metrics?|snapshot|artifact|baseline|json)\b/i.test(cleanedQuery);
     const pureCodeIntent = codeIntent && !opsEvidenceIntent;
+    const shouldBlendChunkSearch = identifierLikeToken && this.isChunkAwareExactSearchEnabled();
+    const rerankKeywordFallbackResults = (results: SearchResult[]): SearchResult[] => {
+      if (results.length <= 1) {
+        return results;
+      }
+      return scoreLexicalCandidates(results, {
+        query: cleanedQuery,
+        queryVariant: cleanedQuery,
+        variantIndex: 0,
+        variantWeight: 1,
+      })
+        .map((result) => ({
+          path: result.path,
+          content: result.content,
+          score: result.score,
+          lines: result.lines,
+          relevanceScore: result.relevanceScore,
+          matchType: result.matchType,
+          retrievedAt: result.retrievedAt,
+          chunkId: result.chunkId,
+        }))
+        .slice(0, topK);
+    };
+    const mergeKeywordFallbackResults = (
+      primary: SearchResult[],
+      secondary: SearchResult[]
+    ): SearchResult[] => {
+      const merged = new Map<string, SearchResult>();
+      for (const result of [...primary, ...secondary]) {
+        const key = `${result.path}::${result.chunkId ?? ''}::${result.lines ?? ''}`;
+        if (!merged.has(key)) {
+          merged.set(key, result);
+        }
+      }
+      return rerankKeywordFallbackResults(Array.from(merged.values()));
+    };
+    const runChunkSearch = async (): Promise<SearchResult[]> => {
+      const chunkSearchEngine = this.getChunkSearchEngine();
+      if (!chunkSearchEngine) {
+        return [];
+      }
+      const chunkResults = await chunkSearchEngine.search(rawQuery, topK, {
+        bypassCache,
+        workspacePath: this.workspacePath,
+        includeArtifacts,
+        includeDocs,
+        includeJson,
+        queryTokens,
+        symbolTokens,
+        codeIntent,
+        opsEvidenceIntent,
+        normalizedQuery,
+      });
+      return this.filterSearchResultsByScope(chunkResults, normalizedScope);
+    };
 
     if (this.isLexicalSqliteSearchEnabled()) {
       const lexicalSearchEngine = this.getLexicalSqliteSearchEngine();
@@ -4115,12 +4178,34 @@ export class ContextServiceClient {
           });
           const scopedLexicalResults = this.filterSearchResultsByScope(lexicalResults, normalizedScope);
           if (scopedLexicalResults.length > 0) {
+            if (shouldBlendChunkSearch) {
+              let scopedChunkResults: SearchResult[] = [];
+              try {
+                scopedChunkResults = await runChunkSearch();
+              } catch (error) {
+                if (process.env.CE_DEBUG_SEARCH === 'true') {
+                  console.error('[chunkSearch] Helper search failed during lexical blend, keeping SQLite results:', error);
+                }
+              }
+              if (scopedChunkResults.length > 0) {
+                const mergedResults = mergeKeywordFallbackResults(scopedChunkResults, scopedLexicalResults);
+                this.setLastSearchDiagnostics({
+                  filters_applied: normalizedScope ? ['scope:lexical', 'scope:chunk'] : [],
+                  filtered_paths_count: Math.max(
+                    0,
+                    lexicalResults.length + scopedChunkResults.length - mergedResults.length
+                  ),
+                  second_pass_used: false,
+                });
+                return mergedResults;
+              }
+            }
             this.setLastSearchDiagnostics({
               filters_applied: normalizedScope ? ['scope:lexical'] : [],
               filtered_paths_count: Math.max(0, lexicalResults.length - scopedLexicalResults.length),
               second_pass_used: false,
             });
-            return scopedLexicalResults;
+            return shouldBlendChunkSearch ? rerankKeywordFallbackResults(scopedLexicalResults) : scopedLexicalResults;
           }
         } catch (error) {
           if (process.env.CE_DEBUG_SEARCH === 'true') {
@@ -4131,34 +4216,19 @@ export class ContextServiceClient {
     }
 
     if (this.isChunkAwareExactSearchEnabled()) {
-      const chunkSearchEngine = this.getChunkSearchEngine();
-      if (chunkSearchEngine) {
-        try {
-          const chunkResults = await chunkSearchEngine.search(rawQuery, topK, {
-            bypassCache,
-            workspacePath: this.workspacePath,
-            includeArtifacts,
-            includeDocs,
-            includeJson,
-            queryTokens,
-            symbolTokens,
-            codeIntent,
-            opsEvidenceIntent,
-            normalizedQuery,
+      try {
+        const scopedChunkResults = await runChunkSearch();
+        if (scopedChunkResults.length > 0) {
+          this.setLastSearchDiagnostics({
+            filters_applied: normalizedScope ? ['scope:chunk'] : [],
+            filtered_paths_count: 0,
+            second_pass_used: false,
           });
-          const scopedChunkResults = this.filterSearchResultsByScope(chunkResults, normalizedScope);
-          if (scopedChunkResults.length > 0) {
-            this.setLastSearchDiagnostics({
-              filters_applied: normalizedScope ? ['scope:chunk'] : [],
-              filtered_paths_count: Math.max(0, chunkResults.length - scopedChunkResults.length),
-              second_pass_used: false,
-            });
-            return scopedChunkResults;
-          }
-        } catch (error) {
-          if (process.env.CE_DEBUG_SEARCH === 'true') {
-            console.error('[chunkSearch] Helper search failed, falling back to file scan:', error);
-          }
+          return shouldBlendChunkSearch ? rerankKeywordFallbackResults(scopedChunkResults) : scopedChunkResults;
+        }
+      } catch (error) {
+        if (process.env.CE_DEBUG_SEARCH === 'true') {
+          console.error('[chunkSearch] Helper search failed, falling back to file scan:', error);
         }
       }
     }

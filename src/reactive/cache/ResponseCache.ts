@@ -63,6 +63,8 @@ export interface ResponseCacheConfig {
     enable_file_hash_cache: boolean;
     /** Maximum memory cache size (entries) */
     max_memory_cache_size: number;
+    /** Maximum number of commits retained in commit cache */
+    max_commit_cache_commits: number;
     /** Cache TTL in milliseconds */
     cache_ttl_ms: number;
 }
@@ -72,6 +74,7 @@ const DEFAULT_CONFIG: ResponseCacheConfig = {
     enable_commit_cache: true,
     enable_file_hash_cache: true,
     max_memory_cache_size: 1000,
+    max_commit_cache_commits: 50,
     cache_ttl_ms: 3600000, // 1 hour
 };
 
@@ -135,7 +138,7 @@ export class ResponseCache {
             if (memoryResult && this.isValid(memoryResult)) {
                 this.recordHit('memory');
                 this.updateAccessOrder(cacheKeyStr);
-                return memoryResult;
+                return this.cloneResult(memoryResult, 'memory');
             }
         }
 
@@ -146,10 +149,11 @@ export class ResponseCache {
                 const commitResult = commitCacheEntries.get(cacheKeyStr);
                 if (commitResult && this.isValid(commitResult)) {
                     this.recordHit('commit');
+                    this.touchCommitCache(key.commit_hash, commitCacheEntries);
                     // Promote to memory cache
-                    const promotedResult = { ...commitResult, cache_layer: 'memory' as const };
+                    const promotedResult = this.cloneResult(commitResult, 'memory');
                     this.setMemoryCache(cacheKeyStr, promotedResult);
-                    return { ...commitResult, cache_layer: 'commit' as const };
+                    return this.cloneResult(commitResult, 'commit');
                 }
             }
         }
@@ -161,9 +165,9 @@ export class ResponseCache {
             if (fileHashResult && this.isValid(fileHashResult)) {
                 this.recordHit('file_hash');
                 // Promote to memory cache
-                const promotedResult = { ...fileHashResult, cache_layer: 'memory' as const };
+                const promotedResult = this.cloneResult(fileHashResult, 'memory');
                 this.setMemoryCache(cacheKeyStr, promotedResult);
-                return { ...fileHashResult, cache_layer: 'file_hash' as const };
+                return this.cloneResult(fileHashResult, 'file_hash');
             }
         }
 
@@ -181,24 +185,24 @@ export class ResponseCache {
      */
     set(key: CacheKey, findings: ReviewFinding[]): void {
         const cacheKeyStr = this.generateCacheKey(key);
-        const result: CachedReviewResult = {
-            findings,
-            cached_at: Date.now(),
-            cache_layer: 'memory',
-        };
+        const cachedAt = Date.now();
 
         // Store in all enabled cache layers
         if (this.config.enable_memory_cache) {
-            this.setMemoryCache(cacheKeyStr, result);
+            this.setMemoryCache(cacheKeyStr, this.createResult(findings, 'memory', cachedAt));
         }
 
         if (this.config.enable_commit_cache) {
-            this.setCommitCache(key.commit_hash, cacheKeyStr, result);
+            this.setCommitCache(
+                key.commit_hash,
+                cacheKeyStr,
+                this.createResult(findings, 'commit', cachedAt)
+            );
         }
 
         if (this.config.enable_file_hash_cache) {
             const fileHashKey = this.generateFileHashKey(key);
-            this.fileHashCache.set(fileHashKey, result);
+            this.fileHashCache.set(fileHashKey, this.createResult(findings, 'file_hash', cachedAt));
         }
     }
 
@@ -301,11 +305,41 @@ export class ResponseCache {
     }
 
     private generateFileHashKey(key: CacheKey): string {
-        return `${key.file_path}:${key.content_hash}`;
+        return `${key.file_path}:${key.content_hash}:${this.hashString(key.step_description)}`;
     }
 
     private hashString(str: string): string {
         return crypto.createHash('sha256').update(str).digest('hex').substring(0, 16);
+    }
+
+    private cloneFindings(findings: ReviewFinding[]): ReviewFinding[] {
+        if (typeof structuredClone === 'function') {
+            return structuredClone(findings);
+        }
+        return JSON.parse(JSON.stringify(findings)) as ReviewFinding[];
+    }
+
+    private cloneResult(
+        result: CachedReviewResult,
+        cacheLayer: CachedReviewResult['cache_layer'] = result.cache_layer
+    ): CachedReviewResult {
+        return {
+            findings: this.cloneFindings(result.findings),
+            cached_at: result.cached_at,
+            cache_layer: cacheLayer,
+        };
+    }
+
+    private createResult(
+        findings: ReviewFinding[],
+        cacheLayer: CachedReviewResult['cache_layer'],
+        cachedAt = Date.now()
+    ): CachedReviewResult {
+        return {
+            findings: this.cloneFindings(findings),
+            cached_at: cachedAt,
+            cache_layer: cacheLayer,
+        };
     }
 
     private isValid(result: CachedReviewResult): boolean {
@@ -355,10 +389,28 @@ export class ResponseCache {
     }
 
     private setCommitCache(commitHash: string, key: string, result: CachedReviewResult): void {
-        if (!this.commitCache.has(commitHash)) {
-            this.commitCache.set(commitHash, new Map());
+        if (this.config.max_commit_cache_commits <= 0) {
+            return;
         }
-        this.commitCache.get(commitHash)!.set(key, result);
+
+        while (!this.commitCache.has(commitHash) && this.commitCache.size >= this.config.max_commit_cache_commits) {
+            const oldestCommitHash = this.commitCache.keys().next().value;
+            if (!oldestCommitHash) {
+                break;
+            }
+            this.commitCache.delete(oldestCommitHash);
+        }
+
+        const entries = this.commitCache.get(commitHash) ?? new Map<string, CachedReviewResult>();
+        entries.set(key, result);
+        this.touchCommitCache(commitHash, entries);
+    }
+
+    private touchCommitCache(commitHash: string, entries: Map<string, CachedReviewResult>): void {
+        if (this.commitCache.has(commitHash)) {
+            this.commitCache.delete(commitHash);
+        }
+        this.commitCache.set(commitHash, entries);
     }
 }
 

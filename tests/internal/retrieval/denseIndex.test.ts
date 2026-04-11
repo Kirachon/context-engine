@@ -1,6 +1,10 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import {
+  createInternalEmbeddingReuse,
+  setInternalEmbeddingReuse,
+} from '../../../src/internal/handlers/performance.js';
 import { createHashEmbeddingRuntime } from '../../../src/internal/retrieval/embeddingRuntime.js';
 import { createWorkspaceDenseRetriever } from '../../../src/internal/retrieval/denseIndex.js';
 
@@ -16,6 +20,7 @@ describe('createWorkspaceDenseRetriever', () => {
     process.env = { ...originalEnv };
     delete process.env.CE_DENSE_REFRESH_MAX_DOCS;
     delete process.env.CE_DENSE_EMBED_BATCH_SIZE;
+    setInternalEmbeddingReuse(undefined);
   });
 
   it('builds and incrementally refreshes persisted dense index using index state hashes', async () => {
@@ -77,6 +82,87 @@ describe('createWorkspaceDenseRetriever', () => {
     expect(secondIndex.docs['src/a.ts'].content).toContain('updated');
     expect(secondIndex.embedding_model_id).toBe('hash-32');
     expect(secondIndex.vector_dimension).toBe(32);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('reuses persisted embeddings across retriever restarts and invalidates on runtime or content change', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-embedding-reuse-'));
+    const cachePath = path.join(tmp, '.context-engine-embedding-cache.json');
+    const denseIndexPath = path.join(tmp, '.context-engine-dense-index.json');
+    const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+    const fileA = path.join(tmp, 'src', 'a.ts');
+    fs.mkdirSync(path.dirname(fileA), { recursive: true });
+    fs.writeFileSync(fileA, 'export const alpha = "auth login";', 'utf8');
+    writeJson(indexStatePath, {
+      files: {
+        'src/a.ts': { hash: 'h1', indexed_at: new Date().toISOString() },
+      },
+    });
+
+    const createRuntime = (modelId: string) => ({
+      id: modelId,
+      modelId,
+      vectorDimension: 3,
+      embedQuery: jest.fn(async () => [1, 0, 0]),
+      embedDocuments: jest.fn(async (documents: string[]) => documents.map(() => [1, 0, 0])),
+    });
+    const createRetriever = (runtime: ReturnType<typeof createRuntime>) => createWorkspaceDenseRetriever({
+      workspacePath: tmp,
+      indexStatePath,
+      denseIndexPath,
+      embeddingRuntime: runtime as never,
+    });
+
+    setInternalEmbeddingReuse(createInternalEmbeddingReuse({
+      cachePath,
+      maxEntries: 64,
+      maxPersistedBytes: 512 * 1024,
+    }));
+    const runtimeA1 = createRuntime('runtime-a');
+    await createRetriever(runtimeA1).search('auth', 5);
+    expect(runtimeA1.embedDocuments).toHaveBeenCalledTimes(1);
+    expect(runtimeA1.embedQuery).toHaveBeenCalledTimes(1);
+    expect(fs.existsSync(cachePath)).toBe(true);
+
+    fs.rmSync(denseIndexPath, { force: true });
+    setInternalEmbeddingReuse(createInternalEmbeddingReuse({
+      cachePath,
+      maxEntries: 64,
+      maxPersistedBytes: 512 * 1024,
+    }));
+    const runtimeA2 = createRuntime('runtime-a');
+    await createRetriever(runtimeA2).search('auth', 5);
+    expect(runtimeA2.embedDocuments).toHaveBeenCalledTimes(0);
+    expect(runtimeA2.embedQuery).toHaveBeenCalledTimes(0);
+
+    fs.rmSync(denseIndexPath, { force: true });
+    setInternalEmbeddingReuse(createInternalEmbeddingReuse({
+      cachePath,
+      maxEntries: 64,
+      maxPersistedBytes: 512 * 1024,
+    }));
+    const runtimeB1 = createRuntime('runtime-b');
+    await createRetriever(runtimeB1).search('auth', 5);
+    expect(runtimeB1.embedDocuments).toHaveBeenCalledTimes(1);
+    expect(runtimeB1.embedQuery).toHaveBeenCalledTimes(1);
+
+    fs.writeFileSync(fileA, 'export const alpha = "auth changed";', 'utf8');
+    writeJson(indexStatePath, {
+      files: {
+        'src/a.ts': { hash: 'h2', indexed_at: new Date().toISOString() },
+      },
+    });
+    fs.rmSync(denseIndexPath, { force: true });
+    setInternalEmbeddingReuse(createInternalEmbeddingReuse({
+      cachePath,
+      maxEntries: 64,
+      maxPersistedBytes: 512 * 1024,
+    }));
+    const runtimeB2 = createRuntime('runtime-b');
+    await createRetriever(runtimeB2).search('auth', 5);
+    expect(runtimeB2.embedDocuments).toHaveBeenCalledTimes(1);
+    expect(runtimeB2.embedQuery).toHaveBeenCalledTimes(0);
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });

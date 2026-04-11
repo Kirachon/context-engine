@@ -2,6 +2,8 @@ import { retrieve } from '../../../src/internal/retrieval/retrieve.js';
 import { internalRetrieveCode } from '../../../src/internal/handlers/retrieval.js';
 import { setInternalCache } from '../../../src/internal/handlers/performance.js';
 import { FEATURE_FLAGS } from '../../../src/config/features.js';
+import { clearExpandQueryCacheForTests } from '../../../src/internal/retrieval/expandQuery.js';
+import { createRetrievalFlowContext } from '../../../src/internal/retrieval/flow.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -17,6 +19,7 @@ describe('retrieve internal pipeline', () => {
     process.env = { ...originalEnv };
     FEATURE_FLAGS.retrieval_quality_guard_v1 = originalQualityGuard;
     FEATURE_FLAGS.retrieval_lancedb_v1 = originalLanceDbFlag;
+    clearExpandQueryCacheForTests();
     setInternalCache(undefined);
   });
 
@@ -97,6 +100,46 @@ describe('retrieve internal pipeline', () => {
     expect(results).toHaveLength(1);
     expect((results[0] as any).retrievalSource).toBe('hybrid');
     expect((results[0] as any).denseScore).toBeGreaterThan(0);
+  });
+
+  it('leans lexical in fusion for identifier-like queries so source files outrank nearby tests', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        {
+          path: 'tests/ci/generateRetrievalQualityReport.test.ts',
+          content: 'test hit',
+          relevanceScore: 0.95,
+          lines: '1-2',
+        },
+      ]),
+      localKeywordSearch: jest.fn(async () => [
+        {
+          path: 'tests/ci/generateRetrievalQualityReport.test.ts',
+          content: 'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+          relevanceScore: 0.95,
+          lines: '1-2',
+        },
+        {
+          path: 'scripts/ci/generate-retrieval-quality-report.ts',
+          content: 'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+          relevanceScore: 0.8,
+          lines: '1-2',
+        },
+      ]),
+    } as any;
+
+    const results = await retrieve(
+      'generate-retrieval-quality-report synthetic_guard stable_fixture_token',
+      serviceClient,
+      {
+        enableExpansion: false,
+        enableLexical: true,
+        enableFusion: true,
+        topK: 5,
+      }
+    );
+
+    expect(results[0].path).toBe('scripts/ci/generate-retrieval-quality-report.ts');
   });
 
   it('uses default workspace dense retriever when enableDense is true and no provider is supplied', async () => {
@@ -269,6 +312,166 @@ describe('retrieve internal pipeline', () => {
     const results = await pending;
     expect(results).toEqual([]);
     expect(serviceClient.semanticSearch.mock.calls.length).toBeGreaterThan(1);
+  });
+
+  it('applies conservative memory-pressure guardrails before expensive fanout work', async () => {
+    process.env.CE_MEMORY_PRESSURE_HEAP_CRITICAL_RATIO = '0';
+
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/pressure.ts', content: 'pressure', relevanceScore: 0.9, lines: '1-1' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+    const reranker = {
+      id: 'guarded-reranker',
+      rerank: jest.fn(async (_query: string, candidates: any[]) => candidates),
+    };
+    const flow = createRetrievalFlowContext('auth login service flow');
+
+    const results = await retrieve('auth login service flow', serviceClient, {
+      enableExpansion: true,
+      rewriteMode: 'v2',
+      profile: 'rich',
+      maxVariants: 4,
+      fanoutConcurrency: 8,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      reranker,
+      topK: 5,
+      flow,
+    });
+
+    expect(results).toHaveLength(1);
+    expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
+    expect(reranker.rerank).not.toHaveBeenCalled();
+    expect(flow.metadata).toMatchObject({
+      memoryPressureLevel: 'critical',
+      requestedFanoutConcurrency: 8,
+      effectiveFanoutConcurrency: 1,
+      requestedMaxVariants: 4,
+      effectiveMaxVariants: 1,
+      requestedRerankEnabled: true,
+      effectiveRerankEnabled: false,
+      memoryPressureGuardrails: {
+        fanoutConcurrencyCap: 1,
+        maxVariantsCap: 1,
+        disableRerank: true,
+      },
+    });
+    expect(flow.stages).toEqual(expect.arrayContaining([
+      'memory_pressure:preflight:critical',
+      'memory_guardrail:preflight:fanout_concurrency_cap:1',
+      'memory_guardrail:preflight:max_variants_cap:1',
+      'memory_guardrail:preflight:rerank_disabled',
+    ]));
+  });
+
+  it('skips rerank when the rerank budget is already exhausted and preserves the current retrieval floor', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+    const denseProvider = {
+      id: 'dense:test',
+      search: jest.fn(async () => [
+        { path: 'src/dense-a.ts', content: 'dense a', relevanceScore: 0.9, lines: '1-2' },
+        { path: 'src/dense-b.ts', content: 'dense b', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+    };
+    const reranker = {
+      id: 'budgeted-reranker',
+      rerank: jest.fn(async (_query: string, candidates: any[]) => [candidates[1], candidates[0]]),
+    };
+    const flow = createRetrievalFlowContext('dense budget query');
+    flow.startedAtMs = Date.now() - 25;
+
+    const results = await retrieve('dense budget query', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableDense: true,
+      denseProvider,
+      enableFusion: false,
+      enableRerank: true,
+      reranker,
+      rerankBudgetMs: 10,
+      rerankTimeoutMs: 100,
+      topK: 5,
+      flow,
+    });
+
+    expect(denseProvider.search).toHaveBeenCalledTimes(1);
+    expect(reranker.rerank).not.toHaveBeenCalled();
+    expect(results.map((item) => item.path)).toEqual(['src/dense-a.ts', 'src/dense-b.ts']);
+    expect((results[0] as any).retrievalSource).toBe('dense');
+    expect(flow.metadata).toMatchObject({
+      degradationFloor: 'dense_retrieval',
+      effectiveRerankEnabled: false,
+      rerankBudgetExhausted: true,
+      rerankBudgetMs: 10,
+    });
+    expect(flow.metadata.budgetGuardrails).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stage: 'rerank',
+        reason: 'skip',
+        budgetMs: 10,
+      }),
+    ]));
+    expect(flow.stages).toEqual(expect.arrayContaining([
+      'budget_guardrail:rerank:skip',
+      'rerank:skipped:budget',
+    ]));
+  });
+
+  it('caps rerank timeout to the remaining rerank budget headroom', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/a.ts', content: 'a', relevanceScore: 0.9, lines: '1-2' },
+        { path: 'src/b.ts', content: 'b', relevanceScore: 0.8, lines: '1-2' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+    const reranker = {
+      id: 'slow-budgeted-reranker',
+      rerank: jest.fn(async (_query: string, candidates: any[]) => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return [candidates[1], candidates[0]];
+      }),
+    };
+    const flow = createRetrievalFlowContext('budget headroom query');
+    flow.startedAtMs = Date.now() - 45;
+
+    const results = await retrieve('budget headroom query', serviceClient, {
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      enableRerank: true,
+      reranker,
+      rerankBudgetMs: 50,
+      rerankTimeoutMs: 100,
+      topK: 5,
+      flow,
+    });
+
+    expect(reranker.rerank).toHaveBeenCalledTimes(1);
+    expect(results.map((item) => item.path)).toEqual(['src/a.ts', 'src/b.ts']);
+    expect(flow.metadata).toMatchObject({
+      effectiveRerankTimeoutMs: expect.any(Number),
+      rerankBudgetTimeoutCapped: true,
+    });
+    expect(Number(flow.metadata.effectiveRerankTimeoutMs)).toBeLessThan(100);
+    expect(flow.metadata.budgetGuardrails).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        stage: 'rerank',
+        reason: 'timeout_cap',
+        budgetMs: 50,
+      }),
+    ]));
+    expect(flow.stages).toEqual(expect.arrayContaining([
+      'budget_guardrail:rerank:timeout_cap',
+      'rerank:fail_open',
+    ]));
   });
 
   it('fails open when reranker throws', async () => {
@@ -457,6 +660,62 @@ describe('retrieve internal pipeline', () => {
 
     expect(fastProfileClient.semanticSearch).toHaveBeenCalledTimes(2);
     expect(richProfileClient.semanticSearch.mock.calls.length).toBeGreaterThan(2);
+  });
+
+  it('prioritizes the source script over nearby test files for identifier-like file queries', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => [
+        {
+          path: 'tests/ci/lunarRankingOrchestrator.test.ts',
+          content: 'assert checksum_guard drift_token',
+          relevanceScore: 0.92,
+          lines: '1-40',
+        },
+        {
+          path: 'scripts/ci/lunar-ranking-orchestrator.ts',
+          content: 'export function runOrchestrator() { return "checksum_guard drift_token"; }',
+          relevanceScore: 0.86,
+          lines: '1-40',
+        },
+      ]),
+      localKeywordSearch: jest.fn(async () => [
+        {
+          path: 'tests/ci/lunarRankingOrchestrator.test.ts',
+          content: 'assert checksum_guard drift_token',
+          relevanceScore: 0.95,
+          lines: '1-40',
+        },
+        {
+          path: 'scripts/ci/lunar-ranking-orchestrator.ts',
+          content: 'export function runOrchestrator() { return "checksum_guard drift_token"; }',
+          relevanceScore: 0.88,
+          lines: '1-40',
+        },
+      ]),
+    } as any;
+
+    const results = await retrieve(
+      'lunar-ranking-orchestrator checksum_guard drift_token',
+      serviceClient,
+      {
+        enableExpansion: true,
+        enableLexical: true,
+        enableFusion: true,
+        enableRerank: true,
+        rewriteMode: 'v2',
+        rankingMode: 'v3' as any,
+        profile: 'rich',
+        topK: 5,
+      }
+    );
+
+    expect(results[0]?.path).toBe('scripts/ci/lunar-ranking-orchestrator.ts');
+    expect(serviceClient.semanticSearch.mock.calls.map((call: [string]) => call[0])).toEqual(
+      expect.arrayContaining([
+        'lunar-ranking-orchestrator',
+        'lunar ranking orchestrator checksum guard drift token',
+      ])
+    );
   });
 
   it('keeps rankingMode=v2 ordering deterministic across identical runs', async () => {

@@ -14,11 +14,14 @@
     "quality_telemetry": "artifacts/bench/retrieval-quality-telemetry.json",
     "shadow_canary_gate": "artifacts/bench/retrieval-shadow-canary-gate.json"
   },
+  "quality_gate_perf_profile": "quality",
   "measurable_metrics": {
     "compare_metric_path": "payload.timing.p95_ms",
     "quality_ids": [
       "quality.ndcg_at_10",
-      "quality.mrr_at_10"
+      "quality.mrr_at_10",
+      "quality.recall_at_10",
+      "quality.p_at_1"
     ],
     "diagnostic_ids": [
       "telemetry.skipped_docs_rate_pct",

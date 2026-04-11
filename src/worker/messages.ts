@@ -1,3 +1,5 @@
+export type WorkerFailureKind = 'job_error' | 'runtime_error' | 'abnormal_exit';
+
 export type WorkerMessage =
   | { type: 'index_start'; files: string[] }
   | { type: 'index_progress'; current: number; total: number }
@@ -10,7 +12,12 @@ export type WorkerMessage =
       totalIndexable?: number;
       unchangedSkipped?: number;
     }
-  | { type: 'index_error'; error: string };
+  | {
+      type: 'index_error';
+      error: string;
+      failureKind?: WorkerFailureKind;
+      exitCode?: number;
+    };
 
 export interface WorkerPayload {
   workspacePath: string;

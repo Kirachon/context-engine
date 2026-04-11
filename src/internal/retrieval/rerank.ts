@@ -6,9 +6,16 @@ import {
 import {
   RANKING_V3_WEIGHT_SNAPSHOT,
 } from './rankingCalibration.js';
-
-type TransformersModule = typeof import('@huggingface/transformers');
-type TransformersLoader = () => Promise<TransformersModule>;
+import { buildIdentifierPathSignals } from './searchHeuristics.js';
+import {
+  clearSharedTransformersPipelineCacheForTests,
+  defaultLoadTransformersModule,
+  getSharedFeatureExtractionPipeline,
+  normalizeEmbeddingRows,
+  normalizeTransformerModelId,
+  type TransformersLoader,
+} from './transformersShared.js';
+import { featureEnabled } from '../../config/features.js';
 
 export interface RerankOptions {
   originalQuery?: string;
@@ -44,14 +51,19 @@ export interface TransformerRerankTrace {
 interface TransformerRuntime {
   id: string;
   modelId: string;
+  runtimeKind: 'embedding' | 'cross_encoder';
   scoreTexts: (texts: string[]) => Promise<number[][]>;
+  scorePairs?: (query: string, texts: string[]) => Promise<number[]>;
 }
 
-const DEFAULT_TRANSFORMER_MODEL_ID = 'Xenova/all-MiniLM-L6-v2';
 const MAX_CANDIDATE_TEXT_CHARS = 1600;
+const DEFAULT_CROSS_ENCODER_MODEL_ID = 'Xenova/ms-marco-MiniLM-L6-v2';
 
 const defaultTransformerRuntimeCache = new Map<string, Promise<TransformerRuntime | null>>();
 let customTransformerRuntimeCache = new WeakMap<TransformersLoader, Map<string, Promise<TransformerRuntime | null>>>();
+
+type TextClassificationResult = { label?: string; score?: number };
+type TextClassificationPipeline = (input: string | string[]) => Promise<unknown>;
 
 function resultSignature(result: InternalSearchResult): string {
   const lines = result.lines ?? '';
@@ -87,6 +99,11 @@ function buildPathTokenSet(path: string): Set<string> {
       .map(token => token.trim())
       .filter(Boolean)
   );
+}
+
+function normalizeCrossEncoderModelId(modelId: string | undefined): string {
+  const trimmed = modelId?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : DEFAULT_CROSS_ENCODER_MODEL_ID;
 }
 
 function overlapScore(queryTokens: string[], pathTokens: Set<string>): number {
@@ -125,11 +142,6 @@ function exactPathTailMatch(path: string, queryTokens: string[]): boolean {
     || queryTokens.some((token) => token.length >= 3 && normalizedPath.includes(`\\${token}\\`));
 }
 
-function normalizeModelId(modelId: string | undefined): string {
-  const trimmed = modelId?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : DEFAULT_TRANSFORMER_MODEL_ID;
-}
-
 function isFloat32TensorTypeError(error: unknown): boolean {
   if (!(error instanceof Error)) {
     return false;
@@ -137,35 +149,47 @@ function isFloat32TensorTypeError(error: unknown): boolean {
   return /float32 tensor/i.test(error.message) && /float32array/i.test(error.message);
 }
 
-function toNumericArray(values: unknown): number[] {
-  if (Array.isArray(values)) {
-    return values.map((value) => (typeof value === 'number' ? value : Number(value)));
-  }
-  if (ArrayBuffer.isView(values)) {
-    return Array.from(values as unknown as ArrayLike<number>, (value) => value);
-  }
-  return [];
-}
-
-function unwrapTensorLike(output: unknown): unknown {
-  if (output && typeof output === 'object' && 'tolist' in output && typeof (output as { tolist?: unknown }).tolist === 'function') {
-    return (output as { tolist: () => unknown }).tolist();
-  }
-  return output;
-}
-
-function normalizeEmbeddingRows(output: unknown): number[][] {
-  const unwrapped = unwrapTensorLike(output);
-  if (!Array.isArray(unwrapped)) {
+function normalizeClassificationResults(output: unknown): TextClassificationResult[][] {
+  if (!Array.isArray(output)) {
     return [];
   }
-  if (unwrapped.length === 0) {
+
+  return output.map((entry) => {
+    if (Array.isArray(entry)) {
+      return entry
+        .filter((item): item is TextClassificationResult => !!item && typeof item === 'object')
+        .map((item) => ({
+          label: typeof item.label === 'string' ? item.label : undefined,
+          score: typeof item.score === 'number' ? item.score : undefined,
+        }));
+    }
+
+    if (entry && typeof entry === 'object') {
+      const item = entry as TextClassificationResult;
+      return [{
+        label: typeof item.label === 'string' ? item.label : undefined,
+        score: typeof item.score === 'number' ? item.score : undefined,
+      }];
+    }
+
     return [];
+  });
+}
+
+function selectClassificationScore(results: TextClassificationResult[]): number {
+  if (results.length === 0) {
+    return 0;
   }
-  if (Array.isArray(unwrapped[0])) {
-    return unwrapped.map((row) => toNumericArray(row));
+
+  const positive = results.find((result) => /label_1|relevant|positive|true/i.test(result.label ?? ''));
+  if (positive?.score !== undefined) {
+    return positive.score;
   }
-  return [toNumericArray(unwrapped)];
+
+  return results.reduce((best, result) => {
+    const score = typeof result.score === 'number' ? result.score : 0;
+    return Math.max(best, score);
+  }, 0);
 }
 
 function cosineSimilarity(left: number[], right: number[]): number {
@@ -217,9 +241,9 @@ async function buildTransformerRuntime(
   modelId: string,
   loadTransformersModule: TransformersLoader
 ): Promise<TransformerRuntime> {
-  const transformers = await loadTransformersModule();
-  const extractor = await transformers.pipeline('feature-extraction', modelId, {
-    dtype: 'fp32',
+  const extractor = await getSharedFeatureExtractionPipeline({
+    modelId,
+    loadTransformersModule,
   });
   let batchExtractionSupported: boolean | null = null;
   let runtimeUsable = true;
@@ -227,6 +251,7 @@ async function buildTransformerRuntime(
   return {
     id: `transformers:${modelId}`,
     modelId,
+    runtimeKind: 'embedding',
     async scoreTexts(texts: string[]): Promise<number[][]> {
       if (texts.length === 0) {
         return [];
@@ -284,17 +309,52 @@ async function buildTransformerRuntime(
   };
 }
 
+async function buildCrossEncoderRuntime(
+  modelId: string,
+  loadTransformersModule: TransformersLoader
+): Promise<TransformerRuntime> {
+  const transformers = await loadTransformersModule();
+  const classifier = await transformers.pipeline('text-classification', modelId, {
+    dtype: 'fp32',
+  }) as TextClassificationPipeline;
+
+  return {
+    id: `cross-encoder:${modelId}`,
+    modelId,
+    runtimeKind: 'cross_encoder',
+    async scoreTexts(): Promise<number[][]> {
+      return [];
+    },
+    async scorePairs(query: string, texts: string[]): Promise<number[]> {
+      if (texts.length === 0) {
+        return [];
+      }
+
+      const outputs = await classifier(texts.map((text) => `${query} [SEP] ${text}`));
+      const normalized = normalizeClassificationResults(outputs);
+      return normalized.map((entry) => selectClassificationScore(entry));
+    },
+  };
+}
+
 async function resolveTransformerRuntime(options: TransformerRerankOptions): Promise<TransformerRuntime | null> {
-  const modelId = normalizeModelId(options.modelId);
+  const useCrossEncoder = featureEnabled('retrieval_cross_encoder_rerank_v1');
+  const modelId = useCrossEncoder
+    ? normalizeCrossEncoderModelId(options.modelId)
+    : normalizeTransformerModelId(options.modelId);
   const cache = getTransformerRuntimeCache(options.loadTransformersModule);
-  const cacheKey = modelId;
+  const cacheKey = `${useCrossEncoder ? 'cross-encoder' : 'embedding'}:${modelId}`;
   const existing = cache.get(cacheKey);
   if (existing) {
     return existing;
   }
 
-  const loadTransformersModule = options.loadTransformersModule ?? (async () => import('@huggingface/transformers'));
-  const runtimePromise = buildTransformerRuntime(modelId, loadTransformersModule).catch(() => null);
+  const loadTransformersModule = options.loadTransformersModule ?? defaultLoadTransformersModule;
+  const runtimePromise = (
+    useCrossEncoder
+      ? buildCrossEncoderRuntime(modelId, loadTransformersModule)
+      : buildTransformerRuntime(modelId, loadTransformersModule)
+  ).catch(() => null);
   cache.set(cacheKey, runtimePromise);
   return runtimePromise;
 }
@@ -346,10 +406,23 @@ export function rerankResults(
       const pathOverlap = overlapScore(queryTokens, buildPathTokenSet(result.path));
       const sourceConsensus = Math.max(0, (sourceStats.get(signature)?.size ?? 1) - 1);
       const exactSymbolBonus = hasExactSymbolMatch(result, queryTokens) ? 0.04 : 0;
+      const identifierSignals = buildIdentifierPathSignals(options.originalQuery ?? '', result.path);
+      const exactIdentifierBonus = identifierSignals.exactBasenameMatch
+        ? RANKING_V3_WEIGHT_SNAPSHOT.v2ExactSymbolBonus
+        : identifierSignals.pathTokenCoverage * (RANKING_V3_WEIGHT_SNAPSHOT.v2ExactSymbolBonus * 0.8);
+      const identifierTestPenalty = (
+        identifierSignals.isIdentifierQuery
+        && identifierSignals.isTestPath
+        && !identifierSignals.queryMentionsTest
+      )
+        ? RANKING_V3_WEIGHT_SNAPSHOT.v2ExactSymbolBonus * (identifierSignals.exactBasenameMatch ? 1.25 : 0.75)
+        : 0;
       combinedScore +=
         (pathOverlap * RANKING_V3_WEIGHT_SNAPSHOT.v2PathOverlapScale) +
         (sourceConsensus * RANKING_V3_WEIGHT_SNAPSHOT.v2SourceConsensusScale) +
-        (exactSymbolBonus ? RANKING_V3_WEIGHT_SNAPSHOT.v2ExactSymbolBonus : 0);
+        (exactSymbolBonus ? RANKING_V3_WEIGHT_SNAPSHOT.v2ExactSymbolBonus : 0) +
+        exactIdentifierBonus -
+        identifierTestPenalty;
     }
 
     if (mode === 'v3') {
@@ -358,14 +431,28 @@ export function rerankResults(
       const lineProximityBonus = Number.isFinite(lineStart) && lineStart < 120
         ? RANKING_V3_WEIGHT_SNAPSHOT.v3LineProximityBonus
         : 0;
-      const pathSpecificityBonus = exactPathTailMatch(result.path, queryTokens)
+      const identifierSignals = buildIdentifierPathSignals(options.originalQuery ?? '', result.path);
+      const pathSpecificityBonus = (
+        exactPathTailMatch(result.path, queryTokens)
+        || identifierSignals.exactBasenameMatch
+      )
         ? RANKING_V3_WEIGHT_SNAPSHOT.v3PathSpecificityBonus
+        : 0;
+      const identifierCoverageBonus = identifierSignals.pathTokenCoverage * (RANKING_V3_WEIGHT_SNAPSHOT.v3PathSpecificityBonus * 0.5);
+      const testPathPenalty = (
+        identifierSignals.isIdentifierQuery
+        && identifierSignals.isTestPath
+        && !identifierSignals.queryMentionsTest
+      )
+        ? RANKING_V3_WEIGHT_SNAPSHOT.v3PathSpecificityBonus * (identifierSignals.exactBasenameMatch ? 1.5 : 0.9)
         : 0;
       const depthPenalty = Math.max(0, pathDepth(result.path) - 8) * RANKING_V3_WEIGHT_SNAPSHOT.v3DepthPenaltyPerLevel;
       combinedScore +=
         (sourceConsensus * RANKING_V3_WEIGHT_SNAPSHOT.v3SourceConsensusScale) +
         lineProximityBonus +
+        identifierCoverageBonus +
         pathSpecificityBonus -
+        testPathPenalty -
         depthPenalty;
     }
 
@@ -432,7 +519,7 @@ export async function rerankCandidates(
       state: 'skipped',
       fallbackReason: 'none',
       reasonCode: 'single_candidate',
-      modelId: normalizeModelId(options.modelId),
+      modelId: normalizeTransformerModelId(options.modelId),
     });
     return results;
   }
@@ -446,7 +533,7 @@ export async function rerankCandidates(
       state: 'skipped',
       fallbackReason: 'none',
       reasonCode: 'empty_query',
-      modelId: normalizeModelId(options.modelId),
+      modelId: normalizeTransformerModelId(options.modelId),
     });
     return heuristicRanked;
   }
@@ -458,7 +545,7 @@ export async function rerankCandidates(
       state: 'skipped',
       fallbackReason: 'rerank_skipped',
       reasonCode: 'gate_skipped',
-      modelId: normalizeModelId(options.modelId),
+      modelId: normalizeTransformerModelId(options.modelId),
     });
     return heuristicRanked;
   }
@@ -471,7 +558,7 @@ export async function rerankCandidates(
       state: 'fail_open',
       fallbackReason: 'reranker_unavailable',
       reasonCode: 'runtime_unavailable',
-      modelId: normalizeModelId(options.modelId),
+      modelId: normalizeTransformerModelId(options.modelId),
     });
     return heuristicRanked;
   }
@@ -479,6 +566,73 @@ export async function rerankCandidates(
   try {
     const heuristicScores = getHeuristicScoreMap(results, options);
     const candidateTexts = results.map((result) => buildCandidateText(result));
+    if (runtime.runtimeKind === 'cross_encoder' && runtime.scorePairs) {
+      const candidateScores = await runtime.scorePairs(query, candidateTexts);
+      if (candidateScores.length !== results.length) {
+        emitTransformerTrace(results, options, {
+          selectedPath: 'transformer',
+          appliedPath: 'heuristic',
+          state: 'fail_open',
+          fallbackReason: 'rerank_error',
+          reasonCode: 'embedding_mismatch',
+          runtimeId: runtime.id,
+          modelId: runtime.modelId,
+        });
+        return heuristicRanked;
+      }
+
+      const scored = results.map((result, index) => {
+        const crossEncoderScore = candidateScores[index] ?? 0;
+        const signature = resultSignature(result);
+        const heuristicScore = heuristicScores.get(signature)?.combinedScore ?? result.combinedScore ?? result.relevanceScore ?? result.score ?? 0;
+        const baseScore = heuristicScores.get(signature)?.baseScore ?? result.relevanceScore ?? result.score ?? 0;
+
+        return {
+          result,
+          transformerScore: crossEncoderScore,
+          heuristicScore,
+          baseScore,
+          index,
+        };
+      });
+
+      scored.sort((a, b) => {
+        if (b.transformerScore !== a.transformerScore) {
+          return b.transformerScore - a.transformerScore;
+        }
+        if (b.heuristicScore !== a.heuristicScore) {
+          return b.heuristicScore - a.heuristicScore;
+        }
+        if (b.baseScore !== a.baseScore) {
+          return b.baseScore - a.baseScore;
+        }
+        if (a.result.path !== b.result.path) {
+          return a.result.path.localeCompare(b.result.path);
+        }
+        const lineA = parseStartLine(a.result.lines);
+        const lineB = parseStartLine(b.result.lines);
+        if (lineA !== lineB) {
+          return lineA - lineB;
+        }
+        return a.index - b.index;
+      });
+
+      const reranked = scored.map(({ result, transformerScore }) => ({
+        ...result,
+        combinedScore: transformerScore,
+      }));
+      emitTransformerTrace(results, options, {
+        selectedPath: 'transformer',
+        appliedPath: 'transformer',
+        state: 'invoked',
+        fallbackReason: 'none',
+        reasonCode: 'transformer_applied',
+        runtimeId: runtime.id,
+        modelId: runtime.modelId,
+      });
+      return reranked;
+    }
+
     const embeddings = await runtime.scoreTexts([query, ...candidateTexts]);
     const queryVector = embeddings[0] ?? [];
     const candidateVectors = embeddings.slice(1);
@@ -562,4 +716,5 @@ export async function rerankCandidates(
 export function clearRerankerRuntimeCacheForTests(): void {
   defaultTransformerRuntimeCache.clear();
   customTransformerRuntimeCache = new WeakMap<TransformersLoader, Map<string, Promise<TransformerRuntime | null>>>();
+  clearSharedTransformersPipelineCacheForTests();
 }
