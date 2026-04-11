@@ -11,6 +11,7 @@ import { indexStatusTool } from '../../src/mcp/tools/status.js';
 import { reindexWorkspaceTool, clearIndexTool } from '../../src/mcp/tools/lifecycle.js';
 import { toolManifestTool } from '../../src/mcp/tools/manifest.js';
 import { addMemoryTool, listMemoriesTool } from '../../src/mcp/tools/memory.js';
+import { reviewMemorySuggestionsTool } from '../../src/mcp/tools/memoryReview.js';
 import { createPlanTool, refinePlanTool, visualizePlanTool, executePlanTool } from '../../src/mcp/tools/plan.js';
 import { planManagementTools } from '../../src/mcp/tools/planManagement.js';
 import { reviewChangesTool } from '../../src/mcp/tools/codeReview.js';
@@ -75,6 +76,7 @@ function getRegisteredTools(): ToolDefinition[] {
     toolManifestTool,
     addMemoryTool,
     listMemoriesTool,
+    reviewMemorySuggestionsTool,
     createPlanTool,
     refinePlanTool,
     visualizePlanTool,

@@ -25,7 +25,8 @@
       "family": "memory",
       "fixtures": [
         { "tool": "add_memory", "args": { "category": "facts", "content": "Legacy fixture coverage seed" } },
-        { "tool": "list_memories", "args": {} }
+        { "tool": "list_memories", "args": {} },
+        { "tool": "review_memory_suggestions", "args": { "action": "list_batches", "session_id": "session_test" } }
       ]
     },
     {

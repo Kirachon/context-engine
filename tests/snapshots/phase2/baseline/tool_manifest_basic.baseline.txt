@@ -32,6 +32,7 @@
     "tool_manifest",
     "add_memory",
     "list_memories",
+    "review_memory_suggestions",
     "create_plan",
     "refine_plan",
     "visualize_plan",
@@ -282,6 +283,26 @@
         "related_surfaces": {
           "tools": [
             "add_memory"
+          ]
+        }
+      },
+      {
+        "id": "review_memory_suggestions",
+        "title": "Review Memory Suggestions",
+        "usage_hint": "Review isolated draft memory suggestions in small batches and promote approved entries through the durable memory path.",
+        "examples": [
+          "List draft batches for the current session.",
+          "Approve a small batch of high-confidence memory suggestions."
+        ],
+        "safety_hints": [
+          "Writes draft review state and may persist approved memories through the existing add_memory pathway.",
+          "Feature-flagged; enable CE_MEMORY_SUGGESTIONS_V1 before using in production workflows."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "add_memory",
+            "list_memories",
+            "get_context_for_prompt"
           ]
         }
       },
@@ -1094,6 +1115,19 @@
         "TypeScript typecheck via tsc (noEmit)",
         "Optional semgrep integration when available on PATH",
         "Deterministic output (no LLM) suitable for CI"
+      ]
+    },
+    "memory_suggestions": {
+      "description": "Draft-first vibe-coder memory suggestion review and promotion flow",
+      "version": "1.9.0",
+      "tools": [
+        "review_memory_suggestions"
+      ],
+      "features": [
+        "Batch review of isolated draft memory suggestions",
+        "Idempotent approve, dismiss, snooze, edit, and suppression actions",
+        "Promotion through the existing durable memory writer only",
+        "Draft isolation from default retrieval unless explicitly enabled"
       ]
     }
   }

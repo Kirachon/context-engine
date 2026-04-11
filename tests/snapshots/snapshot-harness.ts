@@ -29,6 +29,7 @@ import { handleIndexStatus } from '../../src/mcp/tools/status.js';
 import { handleToolManifest } from '../../src/mcp/tools/manifest.js';
 import { handleVisualizePlan } from '../../src/mcp/tools/plan.js';
 import { handleListMemories } from '../../src/mcp/tools/memory.js';
+import { reviewMemorySuggestionsTool } from '../../src/mcp/tools/memoryReview.js';
 import { indexWorkspaceTool } from '../../src/mcp/tools/index.js';
 import { codebaseRetrievalTool } from '../../src/mcp/tools/codebaseRetrieval.js';
 import { semanticSearchTool } from '../../src/mcp/tools/search.js';
@@ -226,6 +227,7 @@ function getRegisteredTools(): ToolDefinition[] {
     toolManifestTool,
     addMemoryTool,
     listMemoriesTool,
+    reviewMemorySuggestionsTool,
     createPlanTool,
     refinePlanTool,
     visualizePlanTool,
