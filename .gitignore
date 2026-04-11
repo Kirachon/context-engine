@@ -22,6 +22,9 @@ build/
 .augment-index-state.json
 .augment-plans/
 .context-engine/
+.context-engine-*.json
+.context-engine-*.sqlite
+.context-engine-startup.lock
 
 # Personal planning notes
 plan/
