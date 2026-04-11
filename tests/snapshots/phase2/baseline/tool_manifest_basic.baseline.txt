@@ -15,7 +15,9 @@
     "version_history",
     "code_review",
     "enterprise_review",
-    "static_analysis"
+    "static_analysis",
+    "resources",
+    "prompts"
   ],
   "tools": [
     "index_workspace",
@@ -61,6 +63,927 @@
     "scrub_secrets",
     "validate_content"
   ],
+  "discoverability": {
+    "tools": [
+      {
+        "id": "index_workspace",
+        "title": "Index Workspace",
+        "usage_hint": "Build or refresh the semantic search index for the current workspace.",
+        "examples": [
+          "Index the current workspace before running retrieval tools."
+        ],
+        "safety_hints": [
+          "Writes local index state and cache artifacts under the workspace."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "index_status",
+            "reindex_workspace"
+          ],
+          "resources": [
+            "context-engine://tool-manifest"
+          ]
+        }
+      },
+      {
+        "id": "codebase_retrieval",
+        "title": "Codebase Retrieval",
+        "usage_hint": "Use when you need semantic codebase discovery before opening files or editing.",
+        "examples": [
+          "Where is authentication handled?",
+          "What files shape the planning flow?"
+        ],
+        "safety_hints": [
+          "Read-only retrieval over the indexed workspace."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "semantic_search",
+            "get_context_for_prompt"
+          ],
+          "prompts": [
+            "enhance-request"
+          ]
+        }
+      },
+      {
+        "id": "semantic_search",
+        "title": "Semantic Search",
+        "usage_hint": "Search by intent or concept when you know what you need but not the exact symbol name.",
+        "examples": [
+          "Find retry logic for HTTP calls.",
+          "Show ranking heuristics for retrieval."
+        ],
+        "safety_hints": [
+          "Read-only retrieval over indexed code chunks."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "codebase_retrieval",
+            "get_file"
+          ]
+        }
+      },
+      {
+        "id": "get_file",
+        "title": "Get File",
+        "usage_hint": "Read the full contents of a known file or a targeted line range.",
+        "examples": [
+          "Open src/mcp/server.ts.",
+          "Read package.json to confirm scripts."
+        ],
+        "safety_hints": [
+          "Read-only file access within the workspace."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "codebase_retrieval",
+            "semantic_search"
+          ]
+        }
+      },
+      {
+        "id": "get_context_for_prompt",
+        "title": "Get Context For Prompt",
+        "usage_hint": "Assemble multi-file context and summaries before writing or refining a prompt.",
+        "examples": [
+          "Gather context for the MCP HTTP transport.",
+          "Show files relevant to plan execution."
+        ],
+        "safety_hints": [
+          "Read-only; may include external grounding only when explicitly requested."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "enhance_prompt",
+            "codebase_retrieval"
+          ],
+          "prompts": [
+            "enhance-request"
+          ]
+        }
+      },
+      {
+        "id": "enhance_prompt",
+        "title": "Enhance Prompt",
+        "usage_hint": "Turn a vague request into an actionable repo-grounded prompt with optional scope control.",
+        "examples": [
+          "Enhance a request to improve login UX.",
+          "Sharpen a refactor request with external docs."
+        ],
+        "safety_hints": [
+          "Read-only; enhancement may use external references only when provided explicitly."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "get_context_for_prompt",
+            "create_plan"
+          ],
+          "prompts": [
+            "enhance-request"
+          ]
+        }
+      },
+      {
+        "id": "index_status",
+        "title": "Index Status",
+        "usage_hint": "Check whether the semantic index is healthy or stale before running retrieval.",
+        "examples": [
+          "Inspect index health before a large search."
+        ],
+        "safety_hints": [
+          "Read-only status check."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "index_workspace",
+            "reindex_workspace",
+            "clear_index"
+          ]
+        }
+      },
+      {
+        "id": "reindex_workspace",
+        "title": "Reindex Workspace",
+        "usage_hint": "Force a full rebuild of the semantic index when incremental indexing is not enough.",
+        "examples": [
+          "Rebuild the entire index after structural codebase changes."
+        ],
+        "safety_hints": [
+          "Writes local index state and may take longer than incremental indexing."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "index_workspace",
+            "index_status",
+            "clear_index"
+          ]
+        }
+      },
+      {
+        "id": "clear_index",
+        "title": "Clear Index",
+        "usage_hint": "Remove current index state so the next indexing pass starts fresh.",
+        "examples": [
+          "Clear corrupted index state before reindexing."
+        ],
+        "safety_hints": [
+          "Destructive to local index/cache state; does not touch source files."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "index_status",
+            "reindex_workspace"
+          ]
+        }
+      },
+      {
+        "id": "tool_manifest",
+        "title": "Tool Manifest",
+        "usage_hint": "Inspect the server capability inventory and discoverability metadata.",
+        "examples": [
+          "List tools, prompts, resources, and feature groups exposed by the server."
+        ],
+        "safety_hints": [
+          "Read-only manifest inspection."
+        ],
+        "related_surfaces": {
+          "resources": [
+            "context-engine://tool-manifest"
+          ]
+        }
+      },
+      {
+        "id": "add_memory",
+        "title": "Add Memory",
+        "usage_hint": "Persist a durable project fact, preference, or decision for future sessions.",
+        "examples": [
+          "Store a project convention about naming or architecture."
+        ],
+        "safety_hints": [
+          "Writes a memory entry to workspace-managed storage."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "list_memories"
+          ]
+        }
+      },
+      {
+        "id": "list_memories",
+        "title": "List Memories",
+        "usage_hint": "Review saved facts, decisions, and preferences already captured for the project.",
+        "examples": [
+          "Show saved project decisions before proposing a refactor."
+        ],
+        "safety_hints": [
+          "Read-only memory inspection."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "add_memory"
+          ]
+        }
+      },
+      {
+        "id": "create_plan",
+        "title": "Create Plan",
+        "usage_hint": "Generate a scoped implementation plan with context gathering and validation guidance.",
+        "examples": [
+          "Plan an auth refactor.",
+          "Plan a safe MCP transport upgrade."
+        ],
+        "safety_hints": [
+          "May persist a saved plan when auto-save is enabled."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "refine_plan",
+            "visualize_plan",
+            "execute_plan"
+          ],
+          "prompts": [
+            "create-plan"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "refine_plan",
+        "title": "Refine Plan",
+        "usage_hint": "Adjust an existing plan using review feedback or clarification answers.",
+        "examples": [
+          "Refine a plan after architecture feedback."
+        ],
+        "safety_hints": [
+          "May update plan artifacts when paired with persistence tools."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "create_plan",
+            "view_history"
+          ],
+          "prompts": [
+            "refine-plan"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}",
+            "context-engine://plan-history/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "visualize_plan",
+        "title": "Visualize Plan",
+        "usage_hint": "Render a saved or in-memory plan into diagrams for faster review.",
+        "examples": [
+          "Show plan dependencies as a Mermaid graph."
+        ],
+        "safety_hints": [
+          "Read-only transformation of plan data."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "create_plan",
+            "refine_plan"
+          ]
+        }
+      },
+      {
+        "id": "execute_plan",
+        "title": "Execute Plan",
+        "usage_hint": "Generate or apply implementation work from a saved plan or JSON plan definition.",
+        "examples": [
+          "Execute the next ready plan step.",
+          "Preview full-plan changes without applying them."
+        ],
+        "safety_hints": [
+          "Can write code changes when apply_changes is enabled."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "create_plan",
+            "save_plan",
+            "view_progress"
+          ]
+        }
+      },
+      {
+        "id": "save_plan",
+        "title": "Save Plan",
+        "usage_hint": "Persist a plan artifact for later execution, review, or versioning.",
+        "examples": [
+          "Save a reviewed plan with a stable name and tags."
+        ],
+        "safety_hints": [
+          "Writes plan storage and may overwrite when explicitly requested."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "load_plan",
+            "list_plans",
+            "view_history"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}",
+            "context-engine://plan-history/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "load_plan",
+        "title": "Load Plan",
+        "usage_hint": "Fetch a persisted plan by ID or name before refinement or execution.",
+        "examples": [
+          "Load a saved rollout plan to continue execution."
+        ],
+        "safety_hints": [
+          "Read-only plan retrieval."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "save_plan",
+            "list_plans",
+            "execute_plan"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "list_plans",
+        "title": "List Plans",
+        "usage_hint": "Inspect persisted plans before loading, executing, or cleaning them up.",
+        "examples": [
+          "List active plans tagged for the current release."
+        ],
+        "safety_hints": [
+          "Read-only plan inventory access."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "load_plan",
+            "delete_plan"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "delete_plan",
+        "title": "Delete Plan",
+        "usage_hint": "Remove an obsolete saved plan from persistence.",
+        "examples": [
+          "Delete a superseded draft plan."
+        ],
+        "safety_hints": [
+          "Destructive to persisted plan data."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "list_plans",
+            "save_plan"
+          ]
+        }
+      },
+      {
+        "id": "request_approval",
+        "title": "Request Approval",
+        "usage_hint": "Open an approval gate for a plan or specific plan steps.",
+        "examples": [
+          "Request approval before executing a risky migration step."
+        ],
+        "safety_hints": [
+          "Writes approval workflow state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "respond_approval",
+            "view_progress"
+          ]
+        }
+      },
+      {
+        "id": "respond_approval",
+        "title": "Respond Approval",
+        "usage_hint": "Approve, reject, or request modifications for a pending plan approval.",
+        "examples": [
+          "Approve the next deployment step."
+        ],
+        "safety_hints": [
+          "Writes approval workflow state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "request_approval"
+          ]
+        }
+      },
+      {
+        "id": "start_step",
+        "title": "Start Step",
+        "usage_hint": "Mark a plan step as in progress before execution begins.",
+        "examples": [
+          "Start the dependency update step."
+        ],
+        "safety_hints": [
+          "Writes execution tracking state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "complete_step",
+            "fail_step",
+            "view_progress"
+          ]
+        }
+      },
+      {
+        "id": "complete_step",
+        "title": "Complete Step",
+        "usage_hint": "Record a step as finished with notes and modified files.",
+        "examples": [
+          "Complete the schema migration step after validation."
+        ],
+        "safety_hints": [
+          "Writes execution tracking state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "start_step",
+            "view_progress"
+          ]
+        }
+      },
+      {
+        "id": "fail_step",
+        "title": "Fail Step",
+        "usage_hint": "Record a step failure and decide whether to retry or skip dependents.",
+        "examples": [
+          "Fail a step after a blocked deployment dependency."
+        ],
+        "safety_hints": [
+          "Writes execution tracking state and may alter plan execution flow."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "start_step",
+            "view_progress"
+          ]
+        }
+      },
+      {
+        "id": "view_progress",
+        "title": "View Progress",
+        "usage_hint": "Check how far a saved plan has progressed before continuing execution.",
+        "examples": [
+          "Inspect plan completion after a worker run."
+        ],
+        "safety_hints": [
+          "Read-only progress inspection."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "start_step",
+            "complete_step",
+            "fail_step"
+          ]
+        }
+      },
+      {
+        "id": "view_history",
+        "title": "View History",
+        "usage_hint": "Inspect plan version history before rollback or review.",
+        "examples": [
+          "Show plan history after multiple refinement rounds."
+        ],
+        "safety_hints": [
+          "Read-only version history access."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "compare_plan_versions",
+            "rollback_plan"
+          ],
+          "resources": [
+            "context-engine://plan-history/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "compare_plan_versions",
+        "title": "Compare Plan Versions",
+        "usage_hint": "Diff two versions of the same saved plan.",
+        "examples": [
+          "Compare version 3 and 4 after a refinement round."
+        ],
+        "safety_hints": [
+          "Read-only version comparison."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "view_history",
+            "rollback_plan"
+          ]
+        }
+      },
+      {
+        "id": "rollback_plan",
+        "title": "Rollback Plan",
+        "usage_hint": "Restore a saved plan to a previous version when a later revision is no longer trusted.",
+        "examples": [
+          "Rollback to the last approved plan version."
+        ],
+        "safety_hints": [
+          "Destructive to current persisted plan state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "view_history",
+            "compare_plan_versions"
+          ]
+        }
+      },
+      {
+        "id": "review_changes",
+        "title": "Review Changes",
+        "usage_hint": "Review a provided diff with structured findings and confidence scores.",
+        "examples": [
+          "Review a patch for correctness and maintainability."
+        ],
+        "safety_hints": [
+          "Read-only analysis of supplied diff content."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_git_diff",
+            "review_diff",
+            "review_auto"
+          ],
+          "prompts": [
+            "review-diff"
+          ]
+        }
+      },
+      {
+        "id": "review_git_diff",
+        "title": "Review Git Diff",
+        "usage_hint": "Review git changes directly from the current workspace state.",
+        "examples": [
+          "Review staged changes before commit."
+        ],
+        "safety_hints": [
+          "Read-only review; inspects local git state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_changes",
+            "review_auto"
+          ]
+        }
+      },
+      {
+        "id": "review_diff",
+        "title": "Review Diff",
+        "usage_hint": "Run the deterministic diff-first review pipeline for CI-style review output.",
+        "examples": [
+          "Review a PR diff with enterprise preflight checks."
+        ],
+        "safety_hints": [
+          "Read-only diff analysis; optional local analyzers may run."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_changes",
+            "review_auto",
+            "check_invariants",
+            "run_static_analysis"
+          ],
+          "prompts": [
+            "review-diff"
+          ]
+        }
+      },
+      {
+        "id": "review_auto",
+        "title": "Review Auto",
+        "usage_hint": "Auto-select the best review mode based on a diff payload or current git state.",
+        "examples": [
+          "Review the current staged diff without choosing a review path manually."
+        ],
+        "safety_hints": [
+          "Read-only review orchestration."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_changes",
+            "review_git_diff",
+            "review_diff"
+          ]
+        }
+      },
+      {
+        "id": "check_invariants",
+        "title": "Check Invariants",
+        "usage_hint": "Run deterministic invariant rules against a diff for CI gating.",
+        "examples": [
+          "Check local invariants before opening a PR."
+        ],
+        "safety_hints": [
+          "Read-only deterministic analysis."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_diff",
+            "run_static_analysis"
+          ]
+        }
+      },
+      {
+        "id": "run_static_analysis",
+        "title": "Run Static Analysis",
+        "usage_hint": "Execute local analyzers like TypeScript or Semgrep and return structured findings.",
+        "examples": [
+          "Run type-checking on the files changed in a PR."
+        ],
+        "safety_hints": [
+          "Read-only code analysis; may be slower depending on analyzers."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_diff",
+            "check_invariants"
+          ]
+        }
+      },
+      {
+        "id": "reactive_review_pr",
+        "title": "Reactive Review PR",
+        "usage_hint": "Start a session-based pull request review with pause/resume and telemetry.",
+        "examples": [
+          "Launch a review session for a large PR."
+        ],
+        "safety_hints": [
+          "Creates review session state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "get_review_status",
+            "pause_review",
+            "resume_review",
+            "get_review_telemetry"
+          ]
+        }
+      },
+      {
+        "id": "get_review_status",
+        "title": "Get Review Status",
+        "usage_hint": "Check progress for an active reactive review session.",
+        "examples": [
+          "See how many review steps have completed."
+        ],
+        "safety_hints": [
+          "Read-only session status access."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "reactive_review_pr",
+            "pause_review",
+            "resume_review"
+          ]
+        }
+      },
+      {
+        "id": "pause_review",
+        "title": "Pause Review",
+        "usage_hint": "Pause an active reactive review session without discarding progress.",
+        "examples": [
+          "Pause a review to free worker capacity."
+        ],
+        "safety_hints": [
+          "Writes session state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "reactive_review_pr",
+            "resume_review"
+          ]
+        }
+      },
+      {
+        "id": "resume_review",
+        "title": "Resume Review",
+        "usage_hint": "Resume a paused reactive review session from its last checkpoint.",
+        "examples": [
+          "Resume a paused review after resolving an external blocker."
+        ],
+        "safety_hints": [
+          "Writes session state."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "reactive_review_pr",
+            "pause_review"
+          ]
+        }
+      },
+      {
+        "id": "get_review_telemetry",
+        "title": "Get Review Telemetry",
+        "usage_hint": "Inspect timing, cache, and token telemetry for a reactive review session.",
+        "examples": [
+          "Check review cache hit rate after a long session."
+        ],
+        "safety_hints": [
+          "Read-only telemetry inspection."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "reactive_review_pr",
+            "get_review_status"
+          ]
+        }
+      },
+      {
+        "id": "scrub_secrets",
+        "title": "Scrub Secrets",
+        "usage_hint": "Mask secrets before logs or snippets are reused in prompts or saved artifacts.",
+        "examples": [
+          "Scrub a config snippet before sending it to a model."
+        ],
+        "safety_hints": [
+          "Read-only transformation of provided content."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "validate_content"
+          ]
+        }
+      },
+      {
+        "id": "validate_content",
+        "title": "Validate Content",
+        "usage_hint": "Run deterministic validation checks for code or structured content before submission.",
+        "examples": [
+          "Validate generated YAML before saving it."
+        ],
+        "safety_hints": [
+          "Read-only validation of supplied content."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "scrub_secrets"
+          ]
+        }
+      }
+    ],
+    "prompts": [
+      {
+        "id": "create-plan",
+        "title": "Create Plan",
+        "usage_hint": "Generate a planning request using the repo planning templates.",
+        "examples": [
+          "Plan a feature rollout with mvp_only enabled."
+        ],
+        "safety_hints": [
+          "Prompt-only helper; it does not persist or execute plans by itself."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "create_plan",
+            "refine_plan"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "refine-plan",
+        "title": "Refine Plan",
+        "usage_hint": "Generate a refinement request for an existing plan JSON payload.",
+        "examples": [
+          "Refine a plan after architecture review feedback."
+        ],
+        "safety_hints": [
+          "Prompt-only helper; it does not modify stored plans directly."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "refine_plan",
+            "view_history"
+          ],
+          "resources": [
+            "context-engine://plans/{planId}",
+            "context-engine://plan-history/{planId}"
+          ]
+        }
+      },
+      {
+        "id": "review-diff",
+        "title": "Review Diff",
+        "usage_hint": "Generate a repo-aligned code-review request for a unified diff.",
+        "examples": [
+          "Prepare a review request focused on security and correctness."
+        ],
+        "safety_hints": [
+          "Prompt-only helper; it does not run the review tools by itself."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "review_changes",
+            "review_diff",
+            "review_auto"
+          ]
+        }
+      },
+      {
+        "id": "enhance-request",
+        "title": "Enhance Request",
+        "usage_hint": "Generate a repo-grounded prompt-enhancement request with optional scope and external references.",
+        "examples": [
+          "Enhance a vague feature request before planning it."
+        ],
+        "safety_hints": [
+          "Prompt-only helper; enhancement uses external references only when explicitly supplied."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "enhance_prompt",
+            "get_context_for_prompt",
+            "create_plan"
+          ]
+        }
+      }
+    ],
+    "resources": [
+      {
+        "id": "context-engine://tool-manifest",
+        "title": "Tool Manifest",
+        "usage_hint": "Read the server manifest and discoverability metadata from a resource URI.",
+        "examples": [
+          "Open the manifest resource in an MCP client inspector."
+        ],
+        "safety_hints": [
+          "Read-only JSON resource."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "tool_manifest"
+          ]
+        },
+        "uri_pattern": "context-engine://tool-manifest"
+      },
+      {
+        "id": "context-engine://plans/{planId}",
+        "title": "Saved Plan",
+        "usage_hint": "Read a persisted plan as JSON through the MCP resources surface.",
+        "examples": [
+          "Inspect a saved plan in a client without calling load_plan directly."
+        ],
+        "safety_hints": [
+          "Read-only JSON resource for an existing saved plan."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "load_plan",
+            "save_plan",
+            "create_plan"
+          ],
+          "prompts": [
+            "create-plan",
+            "refine-plan"
+          ]
+        },
+        "uri_pattern": "context-engine://plans/{planId}"
+      },
+      {
+        "id": "context-engine://plan-history/{planId}",
+        "title": "Plan History",
+        "usage_hint": "Read a saved plan history as JSON through the MCP resources surface.",
+        "examples": [
+          "Compare revisions of a saved plan in an MCP client."
+        ],
+        "safety_hints": [
+          "Read-only JSON resource for an existing plan history."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "view_history",
+            "compare_plan_versions",
+            "rollback_plan"
+          ],
+          "prompts": [
+            "refine-plan"
+          ]
+        },
+        "uri_pattern": "context-engine://plan-history/{planId}"
+      }
+    ]
+  },
   "features": {
     "planning": {
       "description": "AI-powered implementation planning with DAG analysis",
