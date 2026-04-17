@@ -1187,6 +1187,164 @@ describe('ContextServiceClient', () => {
     });
   });
 
+  describe('callRelationships', () => {
+    it('should return callers with enclosing function name', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-call-relationships-callers-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'foo.ts'),
+        ['export function foo(a, b) {', '  return a + b;', '}', ''].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'bar.ts'),
+        [
+          'import { foo } from "./foo";',
+          'export function bar() {',
+          '  const result = foo(1, 2);',
+          '  return result;',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.callRelationships('foo', {
+        direction: 'callers',
+        bypassCache: true,
+      });
+
+      expect(result.symbol).toBe('foo');
+      expect(result.callees).toEqual([]);
+      expect(result.metadata.direction).toBe('callers');
+      expect(result.callers.length).toBeGreaterThan(0);
+      const barCaller = result.callers.find((c) => c.file.includes('src/bar.ts'));
+      expect(barCaller).toBeDefined();
+      expect(barCaller?.callerSymbol).toBe('bar');
+      expect(barCaller?.snippet).toContain('foo(1, 2)');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should return callees inside the function body and exclude keywords and self', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-call-relationships-callees-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'bar.ts'),
+        [
+          'export function bar(x) {',
+          '  if (x) {',
+          '    foo(x);',
+          '    return baz(x);',
+          '  }',
+          '  return bar(x - 1);',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.callRelationships('bar', {
+        direction: 'callees',
+        bypassCache: true,
+      });
+
+      expect(result.symbol).toBe('bar');
+      expect(result.callers).toEqual([]);
+      const calleeNames = result.callees.map((c) => c.calleeSymbol);
+      expect(calleeNames).toEqual(expect.arrayContaining(['foo', 'baz']));
+      expect(calleeNames).not.toContain('if');
+      expect(calleeNames).not.toContain('return');
+      expect(calleeNames).not.toContain('bar');
+      expect(result.metadata.totalCallees).toBe(result.callees.length);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should return empty callees with no error when symbol is not found', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-call-relationships-missing-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'noop.ts'),
+        'export const unrelated = 1;\n',
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.callRelationships('nonExistentSymbolXyz', {
+        direction: 'callees',
+        bypassCache: true,
+      });
+
+      expect(result.callees).toEqual([]);
+      expect(result.callers).toEqual([]);
+      expect(result.metadata.totalCallees).toBe(0);
+      expect(result.metadata.totalCallers).toBe(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should not treat declaration-only lines as callers', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-call-relationships-declonly-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'foo.ts'),
+        ['export function foo() {}', ''].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.callRelationships('foo', {
+        direction: 'callers',
+        bypassCache: true,
+      });
+
+      expect(result.callers).toEqual([]);
+      expect(result.metadata.totalCallers).toBe(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should compute both callers and callees when direction is both', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-call-relationships-both-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'bar.ts'),
+        [
+          'export function bar() {',
+          '  return foo();',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'caller.ts'),
+        [
+          'import { bar } from "./bar";',
+          'export function outer() {',
+          '  return bar();',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.callRelationships('bar', {
+        bypassCache: true,
+      });
+
+      expect(result.metadata.direction).toBe('both');
+      expect(result.callers.some((c) => c.file.includes('src/caller.ts'))).toBe(true);
+      expect(result.callees.map((c) => c.calleeSymbol)).toContain('foo');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+  });
+
   describe('Semantic Search with openai_session provider', () => {
     it('should never initialize the removed legacy runtime when CE_AI_PROVIDER=openai_session', async () => {
       process.env.CE_AI_PROVIDER = 'openai_session';

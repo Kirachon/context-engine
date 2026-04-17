@@ -189,6 +189,151 @@ function buildSymbolReferenceSnippet(
   };
 }
 
+const CALL_RELATIONSHIPS_KEYWORD_BLOCKLIST = new Set<string>([
+  'if', 'else', 'for', 'while', 'switch', 'case', 'return', 'typeof', 'instanceof',
+  'await', 'new', 'function', 'class', 'super', 'this', 'throw', 'try', 'catch',
+  'finally', 'do', 'in', 'of', 'void', 'delete', 'yield', 'async', 'default',
+  'with', 'var', 'let', 'const', 'true', 'false', 'null', 'undefined', 'break',
+  'continue', 'import', 'export', 'from', 'as', 'extends', 'implements', 'interface',
+  'type', 'enum', 'public', 'private', 'protected', 'static', 'abstract', 'readonly',
+  'override', 'get', 'set', 'constructor',
+  'def', 'func', 'lambda', 'pass', 'raise', 'except', 'elif', 'fn', 'print',
+]);
+
+function buildCallSitePattern(symbol: string): RegExp {
+  return new RegExp(`(?<![A-Za-z0-9_$])${escapeRegExp(symbol)}\\s*\\(`);
+}
+
+function findEnclosingDeclaration(lines: string[], lineIndex: number): string | undefined {
+  for (let i = lineIndex; i >= 0; i -= 1) {
+    const trimmed = (lines[i] ?? '').trim();
+    if (!trimmed) continue;
+
+    let m: RegExpMatchArray | null;
+    m = trimmed.match(/^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)/);
+    if (m) return m[1];
+    m = trimmed.match(/^(?:export\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
+    if (m) return m[1];
+    m = trimmed.match(/^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*[:=]\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][A-Za-z0-9_$]*\s*=>)/);
+    if (m) return m[1];
+    m = trimmed.match(/^(?:public|private|protected|static|async|abstract|override|readonly)(?:\s+(?:public|private|protected|static|async|abstract|override|readonly))*\s+(?:[A-Za-z_$][A-Za-z0-9_$]*\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/);
+    if (m && !CALL_RELATIONSHIPS_KEYWORD_BLOCKLIST.has(m[1])) return m[1];
+    m = trimmed.match(/^(?:get|set)\s+([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/);
+    if (m) return m[1];
+    m = trimmed.match(/^def\s+([A-Za-z_$][A-Za-z0-9_$]*)/);
+    if (m) return m[1];
+    m = trimmed.match(/^func\s+(?:\([^)]*\)\s*)?([A-Za-z_$][A-Za-z0-9_$]*)/);
+    if (m) return m[1];
+    m = trimmed.match(/^(?:async\s+)?\*?([A-Za-z_$][A-Za-z0-9_$]*)\s*\([^)]*\)\s*\{?\s*$/);
+    if (m && !CALL_RELATIONSHIPS_KEYWORD_BLOCKLIST.has(m[1])) return m[1];
+  }
+  return undefined;
+}
+
+function extractCalleeIdentifiers(
+  bodyText: string,
+  excludeSymbol: string
+): Array<{ identifier: string; lineOffset: number; count: number }> {
+  const lines = bodyText.split(/\r?\n/);
+  const stats = new Map<string, { lineOffset: number; count: number }>();
+  const identifierRegex = /([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/g;
+
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    let match: RegExpExecArray | null;
+    identifierRegex.lastIndex = 0;
+    while ((match = identifierRegex.exec(line)) !== null) {
+      const identifier = match[1];
+      if (CALL_RELATIONSHIPS_KEYWORD_BLOCKLIST.has(identifier)) continue;
+      if (identifier === excludeSymbol) continue;
+      const before = line.slice(0, match.index);
+      if (/[A-Za-z0-9_$]$/.test(before)) continue;
+      const existing = stats.get(identifier);
+      if (existing) {
+        existing.count += 1;
+      } else {
+        stats.set(identifier, { lineOffset: i, count: 1 });
+      }
+    }
+  }
+
+  return [...stats.entries()].map(([identifier, info]) => ({
+    identifier,
+    lineOffset: info.lineOffset,
+    count: info.count,
+  }));
+}
+
+function extractFunctionBody(
+  lines: string[],
+  definitionLineIndex: number
+): { bodyText: string; bodyStartLineIndex: number } | undefined {
+  let depth = 0;
+  let started = false;
+  let bodyStartLineIndex = definitionLineIndex;
+  const bodyLines: string[] = [];
+
+  for (let i = definitionLineIndex; i < lines.length; i += 1) {
+    const line = lines[i] ?? '';
+    let lineToAppend = '';
+    for (let c = 0; c < line.length; c += 1) {
+      const ch = line[c];
+      if (!started) {
+        if (ch === '{') {
+          started = true;
+          depth = 1;
+          bodyStartLineIndex = i;
+          continue;
+        }
+      } else {
+        if (ch === '{') depth += 1;
+        else if (ch === '}') {
+          depth -= 1;
+          if (depth === 0) {
+            bodyLines.push(lineToAppend);
+            return { bodyText: bodyLines.join('\n'), bodyStartLineIndex };
+          }
+        }
+        lineToAppend += ch;
+      }
+    }
+    if (started) bodyLines.push(lineToAppend);
+  }
+
+  if (!started) return undefined;
+  return { bodyText: bodyLines.join('\n'), bodyStartLineIndex };
+}
+
+export type CallRelationshipDirection = 'callers' | 'callees' | 'both';
+
+export interface CallRelationshipsCallerEntry {
+  file: string;
+  line: number;
+  snippet: string;
+  score: number;
+  callerSymbol?: string;
+}
+
+export interface CallRelationshipsCalleeEntry {
+  file: string;
+  line: number;
+  snippet: string;
+  score: number;
+  calleeSymbol: string;
+}
+
+export interface CallRelationshipsResult {
+  symbol: string;
+  callers: CallRelationshipsCallerEntry[];
+  callees: CallRelationshipsCalleeEntry[];
+  metadata: {
+    symbol: string;
+    direction: CallRelationshipDirection;
+    totalCallers: number;
+    totalCallees: number;
+  };
+}
+
 export type SymbolDefinitionKind =
   | 'class'
   | 'function'
@@ -4149,6 +4294,186 @@ export class ContextServiceClient {
       snippet: best.candidate.snippet,
       score: Math.round(best.score * 100) / 100,
     };
+  }
+
+  /**
+   * Deterministic call-graph navigation for known function/method symbols.
+   * Returns callers (call-sites) and/or callees (identifiers invoked inside the body)
+   * based on local heuristics. Callee extraction supports brace-language bodies (TS/JS/Java/Go/C#);
+   * non-brace languages (e.g., Python) yield empty callee bodies in v1.
+   */
+  async callRelationships(
+    symbol: string,
+    options?: {
+      direction?: CallRelationshipDirection;
+      topK?: number;
+      bypassCache?: boolean;
+      includePaths?: string[];
+      excludePaths?: string[];
+      languageHint?: string;
+    }
+  ): Promise<CallRelationshipsResult> {
+    const trimmedSymbol = symbol.trim();
+    const direction: CallRelationshipDirection = options?.direction ?? 'both';
+    const topK = Math.max(1, Math.min(100, Math.floor(options?.topK ?? 20)));
+
+    const empty: CallRelationshipsResult = {
+      symbol: trimmedSymbol,
+      callers: [],
+      callees: [],
+      metadata: {
+        symbol: trimmedSymbol,
+        direction,
+        totalCallers: 0,
+        totalCallees: 0,
+      },
+    };
+
+    if (!trimmedSymbol) {
+      return empty;
+    }
+
+    let callers: CallRelationshipsCallerEntry[] = [];
+    let callees: CallRelationshipsCalleeEntry[] = [];
+
+    if (direction === 'callers' || direction === 'both') {
+      callers = await this.computeCallers(trimmedSymbol, topK, options);
+    }
+
+    if (direction === 'callees' || direction === 'both') {
+      callees = await this.computeCallees(trimmedSymbol, topK, options);
+    }
+
+    return {
+      symbol: trimmedSymbol,
+      callers,
+      callees,
+      metadata: {
+        symbol: trimmedSymbol,
+        direction,
+        totalCallers: callers.length,
+        totalCallees: callees.length,
+      },
+    };
+  }
+
+  private async computeCallers(
+    trimmedSymbol: string,
+    topK: number,
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
+  ): Promise<CallRelationshipsCallerEntry[]> {
+    const candidateLimit = Math.min(Math.max(topK * 12, 60), 200);
+    const keywordCandidates = await this.localKeywordSearch(trimmedSymbol, candidateLimit, {
+      bypassCache: options?.bypassCache,
+      includePaths: options?.includePaths,
+      excludePaths: options?.excludePaths,
+    });
+    if (keywordCandidates.length === 0) return [];
+
+    const callSitePattern = buildCallSitePattern(trimmedSymbol);
+    const seenPaths = new Set<string>();
+    type CallerCandidate = CallRelationshipsCallerEntry & { __score: number };
+    const out: CallerCandidate[] = [];
+
+    for (const keywordCandidate of keywordCandidates) {
+      const filePath = keywordCandidate.path;
+      if (seenPaths.has(filePath)) continue;
+      seenPaths.add(filePath);
+
+      let content: string;
+      try {
+        content = await this.getFile(filePath);
+      } catch {
+        continue;
+      }
+
+      const lines = content.split(/\r?\n/);
+      const normalizedPath = filePath.replace(/\\/g, '/');
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        if (!callSitePattern.test(line)) continue;
+        if (isDeclarationLikeSymbolLine(line, trimmedSymbol)) continue;
+
+        const snippet = buildSymbolReferenceSnippet(content, index);
+        const enclosing = findEnclosingDeclaration(lines, index - 1);
+
+        let score = 0;
+        if (normalizedPath.startsWith('src/')) score += 30;
+        if (normalizedPath.startsWith('tests/') || normalizedPath.startsWith('test/')) score -= 10;
+        if (/\/__tests__\//.test(normalizedPath)) score -= 5;
+        if (normalizedPath.includes('node_modules/')) score -= 50;
+        if (line.includes(trimmedSymbol)) score += 50;
+        score -= Math.min(20, normalizedPath.length / 8);
+
+        const entry: CallerCandidate = {
+          file: normalizedPath,
+          line: index + 1,
+          snippet: snippet.snippet,
+          score: Math.round(score * 100) / 100,
+          __score: score,
+        };
+        if (enclosing) entry.callerSymbol = enclosing;
+        out.push(entry);
+      }
+    }
+
+    return out
+      .sort((a, b) => b.__score - a.__score || a.file.localeCompare(b.file) || a.line - b.line)
+      .slice(0, topK)
+      .map(({ __score, ...entry }) => entry);
+  }
+
+  private async computeCallees(
+    trimmedSymbol: string,
+    topK: number,
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[]; languageHint?: string }
+  ): Promise<CallRelationshipsCalleeEntry[]> {
+    const definition = await this.symbolDefinition(trimmedSymbol, {
+      bypassCache: options?.bypassCache,
+      includePaths: options?.includePaths,
+      excludePaths: options?.excludePaths,
+      languageHint: options?.languageHint,
+    });
+    if (!definition.found) return [];
+
+    let content: string;
+    try {
+      content = await this.getFile(definition.file);
+    } catch {
+      return [];
+    }
+    const lines = content.split(/\r?\n/);
+    const definitionLineIndex = Math.max(0, definition.line - 1);
+    const body = extractFunctionBody(lines, definitionLineIndex);
+    if (!body) return [];
+
+    const identifiers = extractCalleeIdentifiers(body.bodyText, trimmedSymbol);
+    if (identifiers.length === 0) return [];
+
+    const normalizedPath = definition.file.replace(/\\/g, '/');
+    const callees: Array<CallRelationshipsCalleeEntry & { __score: number }> = identifiers.map((info) => {
+      const absoluteLineIndex = body.bodyStartLineIndex + info.lineOffset;
+      const snippet = buildSymbolReferenceSnippet(content, absoluteLineIndex);
+      const score = info.count * 10;
+      return {
+        file: normalizedPath,
+        line: absoluteLineIndex + 1,
+        snippet: snippet.snippet,
+        score: Math.round(score * 100) / 100,
+        calleeSymbol: info.identifier,
+        __score: score,
+      };
+    });
+
+    return callees
+      .sort(
+        (a, b) =>
+          b.__score - a.__score ||
+          a.calleeSymbol.localeCompare(b.calleeSymbol) ||
+          a.line - b.line
+      )
+      .slice(0, topK)
+      .map(({ __score, ...entry }) => entry);
   }
 
   private getConfiguredShadowCompareState(): { enabled: boolean; sampleRate: number } {

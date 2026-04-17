@@ -69,6 +69,17 @@ export interface SymbolDefinitionArgs {
   exclude_paths?: string[];
 }
 
+export interface CallRelationshipsArgs {
+  symbol: string;
+  direction?: 'callers' | 'callees' | 'both';
+  workspacePath?: string;
+  top_k?: number;
+  language_hint?: string;
+  bypass_cache?: boolean;
+  include_paths?: string[];
+  exclude_paths?: string[];
+}
+
 type FallbackDiagnostics = {
   filtersApplied?: string[];
   filteredPathsCount?: number;
@@ -681,6 +692,84 @@ export async function handleSymbolDefinition(
   return output;
 }
 
+export async function handleCallRelationships(
+  args: CallRelationshipsArgs,
+  serviceClient: ContextServiceClient
+): Promise<string> {
+  const {
+    symbol,
+    direction = 'both',
+    top_k = 20,
+    language_hint,
+    bypass_cache = false,
+    include_paths,
+    exclude_paths,
+  } = args;
+
+  const validSymbol = validateTrimmedNonEmptyString(symbol, 'Invalid symbol parameter: must be a non-empty string');
+  validateMaxLength(validSymbol, 200, 'Symbol too long: maximum 200 characters');
+  validateOneOf(
+    direction,
+    ['callers', 'callees', 'both'] as const,
+    'Invalid direction parameter: must be one of callers, callees, both'
+  );
+  validateFiniteNumberInRange(top_k, 1, 100, 'Invalid top_k parameter: must be a number between 1 and 100');
+  validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
+  if (language_hint !== undefined && typeof language_hint !== 'string') {
+    throw new Error('Invalid language_hint parameter: must be a string when provided');
+  }
+
+  const result = await serviceClient.callRelationships(validSymbol, {
+    direction,
+    topK: top_k,
+    bypassCache: bypass_cache,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
+    languageHint: typeof language_hint === 'string' ? language_hint : undefined,
+  });
+
+  let output = '# 🔁 Call Relationships\n\n';
+  output += `**Symbol:** "${result.symbol}"\n`;
+  output += `**Direction:** ${result.metadata.direction}\n`;
+  output += `**Callers:** ${result.metadata.totalCallers} | **Callees:** ${result.metadata.totalCallees}\n\n`;
+
+  if (direction === 'callers' || direction === 'both') {
+    output += '## Callers\n';
+    if (result.callers.length === 0) {
+      output += '_No callers found._\n\n';
+    } else {
+      for (const caller of result.callers) {
+        const callerLabel = caller.callerSymbol ? ` (in \`${caller.callerSymbol}\`)` : '';
+        output += `- \`${caller.file}\`:${caller.line}${callerLabel} — score ${caller.score}\n`;
+        output += '```\n';
+        output += caller.snippet.length > 400 ? `${caller.snippet.substring(0, 400)}...` : caller.snippet;
+        output += '\n```\n';
+      }
+      output += '\n';
+    }
+  }
+
+  if (direction === 'callees' || direction === 'both') {
+    output += '## Callees\n';
+    if (result.callees.length === 0) {
+      output += '_No callees found._\n\n';
+    } else {
+      for (const callee of result.callees) {
+        output += `- \`${callee.calleeSymbol}\` at \`${callee.file}\`:${callee.line} — score ${callee.score}\n`;
+        output += '```\n';
+        output += callee.snippet.length > 400 ? `${callee.snippet.substring(0, 400)}...` : callee.snippet;
+        output += '\n```\n';
+      }
+      output += '\n';
+    }
+  }
+
+  output += '---\n_Use `symbol_definition` to jump to the symbol declaration or `symbol_references` for non-declaration usages._\n';
+  return output;
+}
+
 export const semanticSearchTool = {
   name: 'semantic_search',
   description: `Perform semantic search across the codebase to find relevant code snippets.
@@ -837,6 +926,63 @@ Use this tool when you need to:
       workspacePath: {
         type: 'string',
         description: 'Optional workspace path. Defaults to the current workspace.',
+      },
+      language_hint: {
+        type: 'string',
+        description: 'Optional language hint (currently advisory; reserved for future use).',
+      },
+      bypass_cache: {
+        type: 'boolean',
+        description: 'When true, bypass caches for this call.',
+        default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+      },
+    },
+    required: ['symbol'],
+  },
+};
+
+export const callRelationshipsTool = {
+  name: 'call_relationships',
+  description: `Return deterministic local callers and/or callees of a known function or method symbol.
+
+Use this tool when you need to:
+- See which functions invoke a given symbol (callers) and where
+- Inspect which identifiers a function invokes inside its own body (callees)
+- Complement symbol_definition (single declaration site) and symbol_references (non-declaration usages)
+
+Caller heuristic: lines containing <symbol>( that are not declaration-like; the nearest enclosing declaration is reported as callerSymbol when detectable.
+Callee heuristic: locates the symbol's definition and scans the brace-delimited body for identifiers followed by '('. Brace-language only in v1; non-brace bodies (e.g., Python) yield empty callees.`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Function or method identifier whose call relationships you want to inspect.',
+      },
+      direction: {
+        type: 'string',
+        enum: ['callers', 'callees', 'both'],
+        description: 'Which side of the call graph to compute. Defaults to both.',
+        default: 'both',
+      },
+      workspacePath: {
+        type: 'string',
+        description: 'Optional workspace path. Defaults to the current workspace.',
+      },
+      top_k: {
+        type: 'number',
+        description: 'Maximum entries per side (1-100). Defaults to 20.',
+        default: 20,
       },
       language_hint: {
         type: 'string',

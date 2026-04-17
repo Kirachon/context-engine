@@ -141,6 +141,7 @@ describe('MCP HTTP transport', () => {
       'symbol_search',
       'symbol_references',
       'symbol_definition',
+      'call_relationships',
       'tool_manifest',
       'review_auto',
     ]));

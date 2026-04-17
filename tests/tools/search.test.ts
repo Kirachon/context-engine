@@ -10,14 +10,17 @@ import {
   handleSymbolSearch,
   handleSymbolReferencesSearch,
   handleSymbolDefinition,
+  handleCallRelationships,
   SemanticSearchArgs,
   SymbolSearchArgs,
   SymbolReferencesArgs,
   SymbolDefinitionArgs,
+  CallRelationshipsArgs,
   semanticSearchTool,
   symbolSearchTool,
   symbolReferencesTool,
   symbolDefinitionTool,
+  callRelationshipsTool,
 } from '../../src/mcp/tools/search.js';
 import { ContextServiceClient, SearchResult } from '../../src/mcp/serviceClient.js';
 
@@ -670,6 +673,107 @@ describe('symbol_definition Tool', () => {
     expect(symbolDefinitionTool.inputSchema.required).toContain('symbol');
     expect(Object.keys(symbolDefinitionTool.inputSchema.properties)).toEqual(
       expect.arrayContaining(['symbol', 'language_hint', 'bypass_cache', 'include_paths', 'exclude_paths'])
+    );
+  });
+});
+
+describe('call_relationships Tool', () => {
+  let mockServiceClient: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockServiceClient = {
+      callRelationships: jest.fn(),
+      getIndexStatus: jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: false,
+      })),
+      getLastSearchDiagnostics: jest.fn(() => null),
+    };
+  });
+
+  it('delegates trimmed symbols to local call relationships lookup', async () => {
+    mockServiceClient.callRelationships.mockResolvedValue({
+      symbol: 'resolveAIProviderId',
+      callers: [
+        {
+          file: 'src/handler.ts',
+          line: 42,
+          column: 5,
+          score: 80,
+          callerSymbol: 'handle',
+          snippet: '  resolveAIProviderId();',
+        },
+      ],
+      callees: [
+        {
+          calleeSymbol: 'lookup',
+          file: 'src/providers.ts',
+          line: 14,
+          column: 3,
+          score: 10,
+          snippet: '  lookup();',
+        },
+      ],
+      metadata: {
+        symbol: 'resolveAIProviderId',
+        direction: 'both',
+        totalCallers: 1,
+        totalCallees: 1,
+        consideredFiles: 5,
+        cacheBypassed: false,
+      },
+    });
+
+    const result = await handleCallRelationships(
+      {
+        symbol: '  resolveAIProviderId  ',
+        direction: 'both',
+        top_k: 10,
+        include_paths: ['./src/'],
+        exclude_paths: ['src/legacy/**'],
+      } satisfies CallRelationshipsArgs,
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.callRelationships).toHaveBeenCalledWith(
+      'resolveAIProviderId',
+      expect.objectContaining({
+        direction: 'both',
+        topK: 10,
+        includePaths: ['src/**'],
+        excludePaths: ['src/legacy/**'],
+      })
+    );
+    expect(result).toContain('# 🔁 Call Relationships');
+    expect(result).toContain('src/handler.ts');
+    expect(result).toContain('lookup');
+  });
+
+  it('requires a non-empty symbol', async () => {
+    await expect(handleCallRelationships({ symbol: '   ' }, mockServiceClient as any)).rejects.toThrow(/symbol/i);
+  });
+
+  it('rejects invalid direction values', async () => {
+    await expect(
+      handleCallRelationships({ symbol: 'foo', direction: 'sideways' as any }, mockServiceClient as any)
+    ).rejects.toThrow(/direction/i);
+  });
+
+  it('rejects out-of-range top_k', async () => {
+    await expect(
+      handleCallRelationships({ symbol: 'foo', top_k: 999 }, mockServiceClient as any)
+    ).rejects.toThrow(/top_k/i);
+  });
+
+  it('exposes the call_relationships schema', () => {
+    expect(callRelationshipsTool.name).toBe('call_relationships');
+    expect(callRelationshipsTool.inputSchema.required).toContain('symbol');
+    expect(Object.keys(callRelationshipsTool.inputSchema.properties)).toEqual(
+      expect.arrayContaining(['symbol', 'direction', 'top_k', 'language_hint', 'bypass_cache', 'include_paths', 'exclude_paths'])
     );
   });
 });

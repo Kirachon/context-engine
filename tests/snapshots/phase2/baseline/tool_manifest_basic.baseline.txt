@@ -27,6 +27,7 @@
     "symbol_search",
     "symbol_references",
     "symbol_definition",
+    "call_relationships",
     "get_file",
     "get_context_for_prompt",
     "enhance_prompt",
@@ -181,6 +182,25 @@
             "symbol_search",
             "symbol_references",
             "get_file"
+          ]
+        }
+      },
+      {
+        "id": "call_relationships",
+        "title": "Call Relationships",
+        "usage_hint": "List callers and/or callees of a known function or method symbol.",
+        "examples": [
+          "Who calls resolveAIProviderId?",
+          "What does handleSemanticSearch invoke?"
+        ],
+        "safety_hints": [
+          "Read-only deterministic local heuristic; brace-language only for callees in v1."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "symbol_definition",
+            "symbol_references",
+            "symbol_search"
           ]
         }
       },
@@ -1080,12 +1100,14 @@
       "tools": [
         "symbol_search",
         "symbol_references",
-        "symbol_definition"
+        "symbol_definition",
+        "call_relationships"
       ],
       "features": [
         "Exact and symbol-aware local ranking",
         "Reference-only lookup that filters declaration hits",
         "Single-best declaration lookup for canonical jump-to-definition",
+        "Caller and callee enumeration for known function symbols",
         "Scope filters via include_paths and exclude_paths",
         "Provider-independent navigation path for known identifiers"
       ]

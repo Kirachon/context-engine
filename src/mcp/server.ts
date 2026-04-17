@@ -40,10 +40,12 @@ import {
   symbolSearchTool,
   symbolReferencesTool,
   symbolDefinitionTool,
+  callRelationshipsTool,
   handleSemanticSearch,
   handleSymbolSearch,
   handleSymbolReferencesSearch,
   handleSymbolDefinition,
+  handleCallRelationships,
 } from './tools/search.js';
 import { getFileTool, handleGetFile } from './tools/file.js';
 import { getContextTool, handleGetContext } from './tools/context.js';
@@ -682,6 +684,7 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
     { tool: applyToolDiscoverability(symbolSearchTool), handler: (args) => handleSymbolSearch(args as any, serviceClient) },
     { tool: applyToolDiscoverability(symbolReferencesTool), handler: (args) => handleSymbolReferencesSearch(args as any, serviceClient) },
     { tool: applyToolDiscoverability(symbolDefinitionTool), handler: (args) => handleSymbolDefinition(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(callRelationshipsTool), handler: (args) => handleCallRelationships(args as any, serviceClient) },
     { tool: applyToolDiscoverability(getFileTool), handler: (args) => handleGetFile(args as any, serviceClient) },
     { tool: applyToolDiscoverability(getContextTool), handler: (args) => handleGetContext(args as any, serviceClient) },
     { tool: applyToolDiscoverability(enhancePromptTool), handler: (args, signal) => handleEnhancePrompt(args as any, serviceClient, signal) },

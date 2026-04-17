@@ -159,6 +159,7 @@ function asyncHandler(
  * - POST /api/v1/search - Semantic search
  * - POST /api/v1/symbol-search - Deterministic symbol-first search
  * - POST /api/v1/symbol-definition - Deterministic single-result symbol definition lookup
+ * - POST /api/v1/call-relationships - Deterministic callers and callees for a known symbol
  * - POST /api/v1/codebase-retrieval - Codebase retrieval (uses searchAndAsk)
  * - POST /api/v1/enhance-prompt - Enhance prompt (uses searchAndAsk)
  * - POST /api/v1/plan - Create implementation plan
@@ -350,6 +351,58 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 metadata: {
                     symbol,
                     found: result.found,
+                },
+            });
+        })
+    );
+
+    /**
+     * POST /call-relationships
+     * Deterministic callers/callees lookup for a known function or method symbol
+     * Body: { symbol: string, direction?: 'callers'|'callees'|'both', top_k?: number, workspacePath?: string, language_hint?: string, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[] }
+     */
+    router.post(
+        '/call-relationships',
+        asyncHandler(async (req, res) => {
+            const {
+                symbol,
+                direction = 'both',
+                top_k = 20,
+                language_hint,
+                bypass_cache = false,
+                include_paths,
+                exclude_paths,
+            } = req.body || {};
+
+            if (!symbol || typeof symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+            if (direction !== 'callers' && direction !== 'callees' && direction !== 'both') {
+                throw badRequest('direction must be one of callers, callees, both');
+            }
+            if (typeof top_k !== 'number' || !Number.isFinite(top_k) || top_k < 1 || top_k > 100) {
+                throw badRequest('top_k must be a number between 1 and 100');
+            }
+
+            const result = await withTimeout(
+                serviceClient.callRelationships(symbol, {
+                    direction,
+                    topK: top_k,
+                    bypassCache: bypass_cache === true,
+                    includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
+                    excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
+                    languageHint: typeof language_hint === 'string' ? language_hint : undefined,
+                }),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Call relationships'
+            );
+            res.json({
+                result,
+                metadata: {
+                    symbol,
+                    direction,
+                    totalCallers: result.metadata.totalCallers,
+                    totalCallees: result.metadata.totalCallees,
                 },
             });
         })

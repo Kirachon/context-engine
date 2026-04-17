@@ -19,6 +19,7 @@ type MockServiceClient = {
   symbolSearch: ReturnType<typeof jest.fn>;
   symbolReferencesSearch: ReturnType<typeof jest.fn>;
   symbolDefinition: ReturnType<typeof jest.fn>;
+  callRelationships: ReturnType<typeof jest.fn>;
   getContextForPrompt: ReturnType<typeof jest.fn>;
   getFile: ReturnType<typeof jest.fn>;
   searchAndAsk: ReturnType<typeof jest.fn>;
@@ -63,6 +64,37 @@ function createMockServiceClient(): MockServiceClient {
       kind: 'function' as const,
       snippet: 'export function login() {}',
       score: 123.45,
+    })),
+    callRelationships: jest.fn(async (symbol: string, options?: { direction?: string }) => ({
+      symbol,
+      callers: [
+        {
+          file: 'src/handler.ts',
+          line: 7,
+          column: 3,
+          score: 80,
+          callerSymbol: 'handle',
+          snippet: '  login();',
+        },
+      ],
+      callees: [
+        {
+          calleeSymbol: 'logEvent',
+          file: 'src/auth.ts',
+          line: 2,
+          column: 3,
+          score: 10,
+          snippet: '  logEvent();',
+        },
+      ],
+      metadata: {
+        symbol,
+        direction: (options?.direction ?? 'both') as 'callers' | 'callees' | 'both',
+        totalCallers: 1,
+        totalCallees: 1,
+        consideredFiles: 5,
+        cacheBypassed: false,
+      },
     })),
     getContextForPrompt: jest.fn(async (query: string, options: Record<string, unknown>) => ({
       query,
@@ -127,6 +159,7 @@ describe('HTTP compatibility harness', () => {
       'POST /api/v1/symbol-search',
       'POST /api/v1/symbol-references',
       'POST /api/v1/symbol-definition',
+      'POST /api/v1/call-relationships',
       'POST /api/v1/codebase-retrieval',
       'POST /api/v1/enhance-prompt',
       'POST /api/v1/plan',
@@ -187,6 +220,10 @@ describe('HTTP compatibility harness', () => {
       },
       {
         path: '/api/v1/symbol-definition',
+        expected: { error: 'symbol is required and must be a string', statusCode: 400 },
+      },
+      {
+        path: '/api/v1/call-relationships',
         expected: { error: 'symbol is required and must be a string', statusCode: 400 },
       },
       {
@@ -322,6 +359,56 @@ describe('HTTP compatibility harness', () => {
       metadata: {
         symbol: 'resolveAIProviderId',
         found: true,
+      },
+    });
+  });
+
+  it('preserves POST /api/v1/call-relationships response shape', async () => {
+    const { app } = createApp();
+
+    const response = await request(app).post('/api/v1/call-relationships').send({
+      symbol: 'login',
+      direction: 'both',
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      result: {
+        symbol: 'login',
+        callers: [
+          {
+            file: 'src/handler.ts',
+            line: 7,
+            column: 3,
+            score: 80,
+            callerSymbol: 'handle',
+            snippet: '  login();',
+          },
+        ],
+        callees: [
+          {
+            calleeSymbol: 'logEvent',
+            file: 'src/auth.ts',
+            line: 2,
+            column: 3,
+            score: 10,
+            snippet: '  logEvent();',
+          },
+        ],
+        metadata: {
+          symbol: 'login',
+          direction: 'both',
+          totalCallers: 1,
+          totalCallees: 1,
+          consideredFiles: 5,
+          cacheBypassed: false,
+        },
+      },
+      metadata: {
+        symbol: 'login',
+        direction: 'both',
+        totalCallers: 1,
+        totalCallees: 1,
       },
     });
   });

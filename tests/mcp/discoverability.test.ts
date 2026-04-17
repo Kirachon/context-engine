@@ -50,6 +50,7 @@ describe('MCP discoverability metadata', () => {
     const symbolMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_search');
     const symbolReferencesMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_references');
     const symbolDefinitionMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_definition');
+    const callRelationshipsMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'call_relationships');
 
     expect(enhanceMetadata).toEqual(
       expect.objectContaining({
@@ -96,6 +97,18 @@ describe('MCP discoverability metadata', () => {
         safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for the single best declaration site.']),
         related_surfaces: expect.objectContaining({
           tools: expect.arrayContaining(['symbol_search', 'symbol_references', 'get_file']),
+        }),
+      })
+    );
+
+    expect(callRelationshipsMetadata).toEqual(
+      expect.objectContaining({
+        id: 'call_relationships',
+        title: 'Call Relationships',
+        usage_hint: expect.stringContaining('callers'),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local heuristic; brace-language only for callees in v1.']),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['symbol_definition', 'symbol_references', 'symbol_search']),
         }),
       })
     );

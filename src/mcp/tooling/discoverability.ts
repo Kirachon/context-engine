@@ -161,6 +161,19 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       idempotentHint: true,
     },
   }),
+  call_relationships: toolMetadata('Call Relationships', {
+    usageHint: 'List callers and/or callees of a known function or method symbol.',
+    examples: ['Who calls resolveAIProviderId?', 'What does handleSemanticSearch invoke?'],
+    safetyHints: ['Read-only deterministic local heuristic; brace-language only for callees in v1.'],
+    related: {
+      tools: ['symbol_definition', 'symbol_references', 'symbol_search'],
+    },
+    annotations: {
+      title: 'Call Relationships',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+  }),
   get_file: toolMetadata('Get File', {
     usageHint: 'Read the full contents of a known file or a targeted line range.',
     examples: ['Open src/mcp/server.ts.', 'Read package.json to confirm scripts.'],
