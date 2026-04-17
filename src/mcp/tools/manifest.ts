@@ -17,6 +17,7 @@ export const toolManifest = {
   version: MCP_SERVER_VERSION,
   capabilities: [
     'semantic_search',
+    'symbol_navigation',
     'file_retrieval',
     'context_enhancement',
     'index_status',
@@ -39,6 +40,8 @@ export const toolManifest = {
     'index_workspace',
     'codebase_retrieval',
     'semantic_search',
+    'symbol_search',
+    'symbol_references',
     'get_file',
     'get_context_for_prompt',
     'enhance_prompt',
@@ -97,6 +100,17 @@ export const toolManifest = {
       description: 'AI-powered implementation planning with DAG analysis',
       version: '1.4.0',
       tools: ['create_plan', 'refine_plan', 'visualize_plan'],
+    },
+    symbol_navigation: {
+      description: 'Deterministic local symbol-first navigation for identifier queries',
+      version: '1.9.0',
+      tools: ['symbol_search', 'symbol_references'],
+      features: [
+        'Exact and symbol-aware local ranking',
+        'Reference-only lookup that filters declaration hits',
+        'Scope filters via include_paths and exclude_paths',
+        'Provider-independent navigation path for known identifiers',
+      ],
     },
     persistence: {
       description: 'Save, load, and manage execution plans',

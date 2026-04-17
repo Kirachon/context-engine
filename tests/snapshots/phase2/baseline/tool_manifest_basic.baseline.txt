@@ -2,6 +2,7 @@
   "version": "1.9.0",
   "capabilities": [
     "semantic_search",
+    "symbol_navigation",
     "file_retrieval",
     "context_enhancement",
     "index_status",
@@ -23,6 +24,8 @@
     "index_workspace",
     "codebase_retrieval",
     "semantic_search",
+    "symbol_search",
+    "symbol_references",
     "get_file",
     "get_context_for_prompt",
     "enhance_prompt",
@@ -121,6 +124,42 @@
         "related_surfaces": {
           "tools": [
             "codebase_retrieval",
+            "get_file"
+          ]
+        }
+      },
+      {
+        "id": "symbol_search",
+        "title": "Symbol Search",
+        "usage_hint": "Search by identifier when you know the exact or near-exact symbol name.",
+        "examples": [
+          "Find resolveAIProviderId.",
+          "Locate ContextServiceClientStrongTokenProof."
+        ],
+        "safety_hints": [
+          "Read-only deterministic local retrieval for identifier-style code navigation."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "semantic_search",
+            "get_file"
+          ]
+        }
+      },
+      {
+        "id": "symbol_references",
+        "title": "Symbol References",
+        "usage_hint": "Find non-declaration usages when you already know the identifier name.",
+        "examples": [
+          "Show usages of resolveAIProviderId.",
+          "Find where activeProvider is referenced."
+        ],
+        "safety_hints": [
+          "Read-only deterministic local retrieval for non-declaration symbol usages."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "symbol_search",
             "get_file"
           ]
         }
@@ -1013,6 +1052,20 @@
         "create_plan",
         "refine_plan",
         "visualize_plan"
+      ]
+    },
+    "symbol_navigation": {
+      "description": "Deterministic local symbol-first navigation for identifier queries",
+      "version": "1.9.0",
+      "tools": [
+        "symbol_search",
+        "symbol_references"
+      ],
+      "features": [
+        "Exact and symbol-aware local ranking",
+        "Reference-only lookup that filters declaration hits",
+        "Scope filters via include_paths and exclude_paths",
+        "Provider-independent navigation path for known identifiers"
       ]
     },
     "persistence": {

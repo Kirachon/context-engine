@@ -47,6 +47,8 @@ describe('MCP discoverability metadata', () => {
       };
     };
     const enhanceMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'enhance_prompt');
+    const symbolMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_search');
+    const symbolReferencesMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_references');
 
     expect(enhanceMetadata).toEqual(
       expect.objectContaining({
@@ -57,6 +59,30 @@ describe('MCP discoverability metadata', () => {
         related_surfaces: expect.objectContaining({
           prompts: expect.arrayContaining(['enhance-request']),
           tools: expect.arrayContaining(['create_plan']),
+        }),
+      })
+    );
+
+    expect(symbolMetadata).toEqual(
+      expect.objectContaining({
+        id: 'symbol_search',
+        title: 'Symbol Search',
+        usage_hint: expect.stringContaining('identifier'),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for identifier-style code navigation.']),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['semantic_search', 'get_file']),
+        }),
+      })
+    );
+
+    expect(symbolReferencesMetadata).toEqual(
+      expect.objectContaining({
+        id: 'symbol_references',
+        title: 'Symbol References',
+        usage_hint: expect.stringContaining('usages'),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for non-declaration symbol usages.']),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['symbol_search', 'get_file']),
         }),
       })
     );

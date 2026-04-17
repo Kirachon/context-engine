@@ -16,6 +16,8 @@ type MockServiceClient = {
   getIndexStatus: ReturnType<typeof jest.fn>;
   indexWorkspace: ReturnType<typeof jest.fn>;
   semanticSearch: ReturnType<typeof jest.fn>;
+  symbolSearch: ReturnType<typeof jest.fn>;
+  symbolReferencesSearch: ReturnType<typeof jest.fn>;
   getContextForPrompt: ReturnType<typeof jest.fn>;
   getFile: ReturnType<typeof jest.fn>;
   searchAndAsk: ReturnType<typeof jest.fn>;
@@ -49,6 +51,8 @@ function createMockServiceClient(): MockServiceClient {
       chunksCreated: 34,
     })),
     semanticSearch: jest.fn(async (_query: string, topK: number) => searchResults.slice(0, topK)),
+    symbolSearch: jest.fn(async (_symbol: string, topK: number) => searchResults.slice(0, topK)),
+    symbolReferencesSearch: jest.fn(async (_symbol: string, topK: number) => searchResults.slice(0, topK)),
     getContextForPrompt: jest.fn(async (query: string, options: Record<string, unknown>) => ({
       query,
       files: [{ path: 'README.md', relevanceScore: 0.88 }],
@@ -109,6 +113,8 @@ describe('HTTP compatibility harness', () => {
       'GET /api/v1/retrieval/status',
       'POST /api/v1/index',
       'POST /api/v1/search',
+      'POST /api/v1/symbol-search',
+      'POST /api/v1/symbol-references',
       'POST /api/v1/codebase-retrieval',
       'POST /api/v1/enhance-prompt',
       'POST /api/v1/plan',
@@ -158,6 +164,14 @@ describe('HTTP compatibility harness', () => {
       {
         path: '/api/v1/search',
         expected: { error: 'query is required and must be a string', statusCode: 400 },
+      },
+      {
+        path: '/api/v1/symbol-search',
+        expected: { error: 'symbol is required and must be a string', statusCode: 400 },
+      },
+      {
+        path: '/api/v1/symbol-references',
+        expected: { error: 'symbol is required and must be a string', statusCode: 400 },
       },
       {
         path: '/api/v1/codebase-retrieval',
@@ -212,6 +226,58 @@ describe('HTTP compatibility harness', () => {
       ],
       metadata: {
         query: 'auth flow',
+        top_k: 1,
+        resultCount: 1,
+      },
+    });
+  });
+
+  it('preserves POST /api/v1/symbol-search response shape', async () => {
+    const { app } = createApp();
+
+    const response = await request(app).post('/api/v1/symbol-search').send({
+      symbol: 'resolveAIProviderId',
+      top_k: 1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      results: [
+        {
+          path: 'src/auth.ts',
+          content: 'export function login() {}',
+          relevanceScore: 0.91,
+          lines: '1-1',
+        },
+      ],
+      metadata: {
+        symbol: 'resolveAIProviderId',
+        top_k: 1,
+        resultCount: 1,
+      },
+    });
+  });
+
+  it('preserves POST /api/v1/symbol-references response shape', async () => {
+    const { app } = createApp();
+
+    const response = await request(app).post('/api/v1/symbol-references').send({
+      symbol: 'resolveAIProviderId',
+      top_k: 1,
+    });
+
+    expect(response.status).toBe(200);
+    expect(response.body).toEqual({
+      results: [
+        {
+          path: 'src/auth.ts',
+          content: 'export function login() {}',
+          relevanceScore: 0.91,
+          lines: '1-1',
+        },
+      ],
+      metadata: {
+        symbol: 'resolveAIProviderId',
         top_k: 1,
         resultCount: 1,
       },

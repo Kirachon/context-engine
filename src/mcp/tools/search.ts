@@ -44,6 +44,22 @@ export interface SemanticSearchArgs {
   exclude_paths?: string[];
 }
 
+export interface SymbolSearchArgs {
+  symbol: string;
+  top_k?: number;
+  bypass_cache?: boolean;
+  include_paths?: string[];
+  exclude_paths?: string[];
+}
+
+export interface SymbolReferencesArgs {
+  symbol: string;
+  top_k?: number;
+  bypass_cache?: boolean;
+  include_paths?: string[];
+  exclude_paths?: string[];
+}
+
 type FallbackDiagnostics = {
   filtersApplied?: string[];
   filteredPathsCount?: number;
@@ -275,6 +291,79 @@ function resolveSearchProfile(mode: 'fast' | 'deep', profile?: RetrievalProfile)
   return mode === 'deep' ? 'rich' : 'fast';
 }
 
+function formatSimpleSearchResults(params: {
+  heading: string;
+  subjectLabel: string;
+  subjectValue: string;
+  results: Array<{
+    path: string;
+    content: string;
+    lines?: string;
+    relevanceScore?: number;
+    matchType?: string;
+    retrievedAt?: string;
+  }>;
+  statusWarning?: string;
+  emptyHint: string[];
+  footer: string;
+}): string {
+  const { heading, subjectLabel, subjectValue, results, statusWarning, emptyHint, footer } = params;
+  if (results.length === 0) {
+    let output = `${heading}\n\n`;
+    output += `**${subjectLabel}:** "${subjectValue}"\n\n`;
+    if (statusWarning) {
+      output += `${statusWarning}\n\n`;
+    }
+    output += `_No results found. Try:\n`;
+    for (const hint of emptyHint) {
+      output += `- ${hint}\n`;
+    }
+    output += '_\n';
+    return output;
+  }
+
+  let output = `${heading}\n\n`;
+  output += `**${subjectLabel}:** "${subjectValue}"\n`;
+  output += `**Found:** ${results.length} matching snippets\n\n`;
+  if (statusWarning) {
+    output += `${statusWarning}\n\n`;
+  }
+
+  const fileGroups = new Map<string, typeof results>();
+  for (const result of results) {
+    if (!fileGroups.has(result.path)) {
+      fileGroups.set(result.path, []);
+    }
+    fileGroups.get(result.path)!.push(result);
+  }
+
+  output += `## Results by File\n\n`;
+
+  let fileIndex = 0;
+  for (const [filePath, fileResults] of fileGroups) {
+    fileIndex += 1;
+    const topRelevance = Math.max(...fileResults.map((result) => result.relevanceScore || 0));
+    output += `### ${fileIndex}. \`${filePath}\` ${formatRelevance(topRelevance)}\n\n`;
+
+    for (const result of fileResults) {
+      if (result.lines) {
+        output += `**Lines ${result.lines}**`;
+      }
+      if (result.relevanceScore) {
+        output += ` (${(result.relevanceScore * 100).toFixed(0)}% match)`;
+      }
+      output += `\n\n`;
+      output += `Trace: ${formatResultTrace(result as unknown as ResultTraceCandidate)}\n\n`;
+      output += '```\n';
+      output += result.content.length > 300 ? `${result.content.substring(0, 300)}...` : result.content;
+      output += '\n```\n\n';
+    }
+  }
+
+  output += `---\n${footer}\n`;
+  return output;
+}
+
 export async function handleSemanticSearch(
   args: SemanticSearchArgs,
   serviceClient: ContextServiceClient
@@ -462,6 +551,78 @@ export async function handleSemanticSearch(
   return output;
 }
 
+export async function handleSymbolSearch(
+  args: SymbolSearchArgs,
+  serviceClient: ContextServiceClient
+): Promise<string> {
+  const { symbol, top_k = 10, bypass_cache = false, include_paths, exclude_paths } = args;
+
+  const validSymbol = validateTrimmedNonEmptyString(symbol, 'Invalid symbol parameter: must be a non-empty string');
+  validateMaxLength(validSymbol, 200, 'Symbol too long: maximum 200 characters');
+  validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
+  validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
+
+  const results = await serviceClient.symbolSearch(validSymbol, top_k, {
+    bypassCache: bypass_cache,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
+  });
+  const status = internalIndexStatus(serviceClient);
+  const freshnessWarning = getIndexFreshnessWarning(status, { prefix: '⚠️ ' });
+
+  return formatSimpleSearchResults({
+    heading: '# 🔎 Symbol Search Results',
+    subjectLabel: 'Symbol',
+    subjectValue: validSymbol,
+    results,
+    statusWarning: freshnessWarning ?? undefined,
+    emptyHint: [
+      'using the fully qualified identifier or class/function name',
+      'scoping the search with include_paths',
+      'checking if the workspace index is fresh',
+    ],
+    footer: '_Use `get_file` to inspect a matching file or `semantic_search` when you need broader concept-level exploration._',
+  });
+}
+
+export async function handleSymbolReferencesSearch(
+  args: SymbolReferencesArgs,
+  serviceClient: ContextServiceClient
+): Promise<string> {
+  const { symbol, top_k = 10, bypass_cache = false, include_paths, exclude_paths } = args;
+
+  const validSymbol = validateTrimmedNonEmptyString(symbol, 'Invalid symbol parameter: must be a non-empty string');
+  validateMaxLength(validSymbol, 200, 'Symbol too long: maximum 200 characters');
+  validateFiniteNumberInRange(top_k, 1, 50, 'Invalid top_k parameter: must be a number between 1 and 50');
+  validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
+
+  const results = await serviceClient.symbolReferencesSearch(validSymbol, top_k, {
+    bypassCache: bypass_cache,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
+  });
+  const status = internalIndexStatus(serviceClient);
+  const freshnessWarning = getIndexFreshnessWarning(status, { prefix: '⚠️ ' });
+
+  return formatSimpleSearchResults({
+    heading: '# 🔗 Symbol Reference Results',
+    subjectLabel: 'Symbol',
+    subjectValue: validSymbol,
+    results,
+    statusWarning: freshnessWarning ?? undefined,
+    emptyHint: [
+      'using the exact identifier spelling',
+      'scoping the search with include_paths to likely consumers',
+      'trying symbol_search first to confirm the declaration name',
+    ],
+    footer: '_Use `symbol_search` to jump to declarations or `get_file` to inspect a matching usage in full._',
+  });
+}
+
 export const semanticSearchTool = {
   name: 'semantic_search',
   description: `Perform semantic search across the codebase to find relevant code snippets.
@@ -517,5 +678,85 @@ For comprehensive context with file summaries and related files, use get_context
       },
     },
     required: ['query'],
+  },
+};
+
+export const symbolSearchTool = {
+  name: 'symbol_search',
+  description: `Perform deterministic symbol-first search across the codebase for identifier-style navigation.
+
+Use this tool when you need to:
+- Jump to files containing a known function, class, type, or constant name
+- Prefer exact/local symbol-aware ranking over broader semantic retrieval
+- Narrow navigation with include_paths or exclude_paths`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Identifier-style query such as a function, class, interface, type, or constant name.',
+      },
+      top_k: {
+        type: 'number',
+        description: 'Number of results to return (default: 10, max: 50)',
+        default: 10,
+      },
+      bypass_cache: {
+        type: 'boolean',
+        description: 'When true, bypass caches for this call.',
+        default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+      },
+    },
+    required: ['symbol'],
+  },
+};
+
+export const symbolReferencesTool = {
+  name: 'symbol_references',
+  description: `Find non-declaration usages of a known identifier across the local codebase.
+
+Use this tool when you need to:
+- Locate call sites or consumers of a known function, class, or constant
+- Exclude declaration hits from identifier-style navigation
+- Narrow usage lookup with include_paths or exclude_paths`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Identifier whose usages you want to locate.',
+      },
+      top_k: {
+        type: 'number',
+        description: 'Number of results to return (default: 10, max: 50)',
+        default: 10,
+      },
+      bypass_cache: {
+        type: 'boolean',
+        description: 'When true, bypass caches for this call.',
+        default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+      },
+    },
+    required: ['symbol'],
   },
 };

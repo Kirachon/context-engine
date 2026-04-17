@@ -15,7 +15,7 @@ import { handleReviewGitDiff, type ReviewGitDiffArgs } from '../../mcp/tools/git
 import { handleReviewAuto, type ReviewAutoArgs } from '../../mcp/tools/reviewAuto.js';
 import { badRequest, HttpError } from '../middleware/errorHandler.js';
 import { envMs } from '../../config/env.js';
-import { validateExternalSources } from '../../mcp/tooling/validation.js';
+import { validateExternalSources, validatePathScopeGlobs } from '../../mcp/tooling/validation.js';
 
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 const CONTEXT_TIMEOUT_MS = 60000;
@@ -157,6 +157,7 @@ function asyncHandler(
  * Endpoints:
  * - POST /api/v1/index - Index workspace
  * - POST /api/v1/search - Semantic search
+ * - POST /api/v1/symbol-search - Deterministic symbol-first search
  * - POST /api/v1/codebase-retrieval - Codebase retrieval (uses searchAndAsk)
  * - POST /api/v1/enhance-prompt - Enhance prompt (uses searchAndAsk)
  * - POST /api/v1/plan - Create implementation plan
@@ -226,6 +227,86 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 results,
                 metadata: {
                     query,
+                    top_k,
+                    resultCount: results.length,
+                },
+            });
+        })
+    );
+
+    /**
+     * POST /symbol-search
+     * Deterministic local symbol search
+     * Body: { symbol: string, top_k?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[] }
+     */
+    router.post(
+        '/symbol-search',
+        asyncHandler(async (req, res) => {
+            const {
+                symbol,
+                top_k = 10,
+                bypass_cache = false,
+                include_paths,
+                exclude_paths,
+            } = req.body || {};
+
+            if (!symbol || typeof symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            const results = await withTimeout(
+                serviceClient.symbolSearch(symbol, top_k, {
+                    bypassCache: bypass_cache === true,
+                    includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
+                    excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
+                }),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Symbol search'
+            );
+            res.json({
+                results,
+                metadata: {
+                    symbol,
+                    top_k,
+                    resultCount: results.length,
+                },
+            });
+        })
+    );
+
+    /**
+     * POST /symbol-references
+     * Deterministic local non-declaration symbol references
+     * Body: { symbol: string, top_k?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[] }
+     */
+    router.post(
+        '/symbol-references',
+        asyncHandler(async (req, res) => {
+            const {
+                symbol,
+                top_k = 10,
+                bypass_cache = false,
+                include_paths,
+                exclude_paths,
+            } = req.body || {};
+
+            if (!symbol || typeof symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            const results = await withTimeout(
+                serviceClient.symbolReferencesSearch(symbol, top_k, {
+                    bypassCache: bypass_cache === true,
+                    includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
+                    excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
+                }),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Symbol references'
+            );
+            res.json({
+                results,
+                metadata: {
+                    symbol,
                     top_k,
                     resultCount: results.length,
                 },

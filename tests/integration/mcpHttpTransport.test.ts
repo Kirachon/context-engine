@@ -138,6 +138,8 @@ describe('MCP HTTP transport', () => {
     expect(toolNames).toEqual(expect.arrayContaining([
       'index_workspace',
       'semantic_search',
+      'symbol_search',
+      'symbol_references',
       'tool_manifest',
       'review_auto',
     ]));

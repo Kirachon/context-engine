@@ -3,7 +3,7 @@ import * as path from 'path';
 
 import { indexWorkspaceTool } from '../../src/mcp/tools/index.js';
 import { codebaseRetrievalTool } from '../../src/mcp/tools/codebaseRetrieval.js';
-import { semanticSearchTool } from '../../src/mcp/tools/search.js';
+import { semanticSearchTool, symbolSearchTool, symbolReferencesTool } from '../../src/mcp/tools/search.js';
 import { getFileTool } from '../../src/mcp/tools/file.js';
 import { getContextTool } from '../../src/mcp/tools/context.js';
 import { enhancePromptTool } from '../../src/mcp/tools/enhance.js';
@@ -67,6 +67,8 @@ function getRegisteredTools(): ToolDefinition[] {
     indexWorkspaceTool,
     codebaseRetrievalTool,
     semanticSearchTool,
+    symbolSearchTool,
+    symbolReferencesTool,
     getFileTool,
     getContextTool,
     enhancePromptTool,

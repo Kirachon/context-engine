@@ -122,6 +122,32 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       idempotentHint: true,
     },
   }),
+  symbol_search: toolMetadata('Symbol Search', {
+    usageHint: 'Search by identifier when you know the exact or near-exact symbol name.',
+    examples: ['Find resolveAIProviderId.', 'Locate ContextServiceClientStrongTokenProof.'],
+    safetyHints: ['Read-only deterministic local retrieval for identifier-style code navigation.'],
+    related: {
+      tools: ['semantic_search', 'get_file'],
+    },
+    annotations: {
+      title: 'Symbol Search',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+  }),
+  symbol_references: toolMetadata('Symbol References', {
+    usageHint: 'Find non-declaration usages when you already know the identifier name.',
+    examples: ['Show usages of resolveAIProviderId.', 'Find where activeProvider is referenced.'],
+    safetyHints: ['Read-only deterministic local retrieval for non-declaration symbol usages.'],
+    related: {
+      tools: ['symbol_search', 'get_file'],
+    },
+    annotations: {
+      title: 'Symbol References',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+  }),
   get_file: toolMetadata('Get File', {
     usageHint: 'Read the full contents of a known file or a targeted line range.',
     examples: ['Open src/mcp/server.ts.', 'Read package.json to confirm scripts.'],

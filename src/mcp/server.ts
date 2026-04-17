@@ -35,7 +35,14 @@ import {
 import { normalizeIgnoredPatterns } from '../watcher/ignoreRules.js';
 
 import { ContextServiceClient } from './serviceClient.js';
-import { semanticSearchTool, handleSemanticSearch } from './tools/search.js';
+import {
+  semanticSearchTool,
+  symbolSearchTool,
+  symbolReferencesTool,
+  handleSemanticSearch,
+  handleSymbolSearch,
+  handleSymbolReferencesSearch,
+} from './tools/search.js';
 import { getFileTool, handleGetFile } from './tools/file.js';
 import { getContextTool, handleGetContext } from './tools/context.js';
 import { enhancePromptTool, handleEnhancePrompt } from './tools/enhance.js';
@@ -670,6 +677,8 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
     { tool: applyToolDiscoverability(indexWorkspaceTool), handler: (args) => handleIndexWorkspace(args as any, serviceClient) },
     { tool: applyToolDiscoverability(codebaseRetrievalTool), handler: (args) => handleCodebaseRetrieval(args as any, serviceClient) },
     { tool: applyToolDiscoverability(semanticSearchTool), handler: (args) => handleSemanticSearch(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(symbolSearchTool), handler: (args) => handleSymbolSearch(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(symbolReferencesTool), handler: (args) => handleSymbolReferencesSearch(args as any, serviceClient) },
     { tool: applyToolDiscoverability(getFileTool), handler: (args) => handleGetFile(args as any, serviceClient) },
     { tool: applyToolDiscoverability(getContextTool), handler: (args) => handleGetContext(args as any, serviceClient) },
     { tool: applyToolDiscoverability(enhancePromptTool), handler: (args, signal) => handleEnhancePrompt(args as any, serviceClient, signal) },

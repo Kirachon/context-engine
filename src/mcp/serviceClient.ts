@@ -139,6 +139,56 @@ export interface StartupAutoIndexResult {
   summary: string;
 }
 
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function buildSymbolUsagePattern(symbol: string): RegExp {
+  return new RegExp(`(^|[^A-Za-z0-9_$])${escapeRegExp(symbol)}([^A-Za-z0-9_$]|$)`);
+}
+
+function isDeclarationLikeSymbolLine(line: string, symbol: string): boolean {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return false;
+  }
+
+  const escapedSymbol = escapeRegExp(symbol);
+  if (/^import\b/.test(trimmed)) {
+    return true;
+  }
+
+  if (new RegExp(`^export\\s+(type\\s+)?\\{[^}]*\\b${escapedSymbol}\\b[^}]*\\}(\\s+from\\b.*)?;?$`).test(trimmed)) {
+    return true;
+  }
+
+  const declarationPatterns = [
+    new RegExp(`\\b(function|class|interface|type|enum|const|let|var)\\s+${escapedSymbol}\\b`),
+    new RegExp(`\\b(def|func)\\s+${escapedSymbol}\\b`),
+    new RegExp(`^(async\\s+)?\\*?${escapedSymbol}\\s*\\(`),
+    new RegExp(`^(get|set)\\s+${escapedSymbol}\\s*\\(`),
+    new RegExp(`\\b(public|private|protected|internal|static|async|abstract|virtual|override|readonly|final|sealed)\\b.*\\b${escapedSymbol}\\s*\\(`),
+    new RegExp(`\\b${escapedSymbol}\\s*[:=]\\s*(async\\s+)?function\\b`),
+  ];
+
+  return declarationPatterns.some((pattern) => pattern.test(trimmed));
+}
+
+function buildSymbolReferenceSnippet(
+  content: string,
+  referenceLineIndex: number,
+  windowRadius: number = 2
+): { snippet: string; startLine: number; endLine: number } {
+  const lines = content.split(/\r?\n/);
+  const startIndex = Math.max(0, referenceLineIndex - windowRadius);
+  const endIndex = Math.min(lines.length - 1, referenceLineIndex + windowRadius);
+  return {
+    snippet: lines.slice(startIndex, endIndex + 1).join('\n').trim(),
+    startLine: startIndex + 1,
+    endLine: endIndex + 1,
+  };
+}
+
 export interface WatcherStatus {
   enabled: boolean;
   watching: number;
@@ -3809,6 +3859,120 @@ export class ContextServiceClient {
       includePaths: options?.includePaths,
       excludePaths: options?.excludePaths,
     });
+  }
+
+  /**
+   * Deterministic symbol-first navigation path for identifier-style lookups.
+   * This intentionally bypasses semantic providers and relies on local exact/symbol-aware ranking.
+   */
+  async symbolSearch(
+    symbol: string,
+    topK: number = 10,
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
+  ): Promise<SearchResult[]> {
+    return this.localKeywordSearch(symbol, topK, {
+      bypassCache: options?.bypassCache,
+      includePaths: options?.includePaths,
+      excludePaths: options?.excludePaths,
+    });
+  }
+
+  /**
+   * Deterministic local reference lookup for known identifiers.
+   * Returns non-declaration usages only, keeping navigation focused on call sites and consumers.
+   */
+  async symbolReferencesSearch(
+    symbol: string,
+    topK: number = 10,
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
+  ): Promise<SearchResult[]> {
+    const trimmedSymbol = symbol.trim();
+    if (!trimmedSymbol) {
+      return [];
+    }
+
+    const candidateLimit = Math.min(Math.max(topK * 12, 60), 200);
+    const keywordCandidates = await this.localKeywordSearch(trimmedSymbol, candidateLimit, {
+      bypassCache: options?.bypassCache,
+      includePaths: options?.includePaths,
+      excludePaths: options?.excludePaths,
+    });
+    if (keywordCandidates.length === 0) {
+      return [];
+    }
+
+    const symbolPattern = buildSymbolUsagePattern(trimmedSymbol);
+    const retrievedAt = new Date().toISOString();
+    const candidates: Array<SearchResult & { __score: number }> = [];
+    const seenPaths = new Set<string>();
+
+    for (const keywordCandidate of keywordCandidates) {
+      const filePath = keywordCandidate.path;
+      if (seenPaths.has(filePath)) {
+        continue;
+      }
+      seenPaths.add(filePath);
+
+      let content: string;
+      try {
+        content = await this.getFile(filePath);
+      } catch {
+        continue;
+      }
+
+      const lines = content.split(/\r?\n/);
+      let firstReferenceLineIndex = -1;
+      let hitCount = 0;
+
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        if (!symbolPattern.test(line)) {
+          continue;
+        }
+        if (isDeclarationLikeSymbolLine(line, trimmedSymbol)) {
+          continue;
+        }
+        if (firstReferenceLineIndex === -1) {
+          firstReferenceLineIndex = index;
+        }
+        hitCount += 1;
+      }
+
+      if (firstReferenceLineIndex === -1) {
+        continue;
+      }
+
+      const snippet = buildSymbolReferenceSnippet(content, firstReferenceLineIndex);
+      const normalizedPath = filePath.replace(/\\/g, '/');
+      let score = hitCount * 10 + Math.round((keywordCandidate.relevanceScore ?? keywordCandidate.score ?? 0) * 20);
+      if (normalizedPath.startsWith('src/')) score += 12;
+      if (normalizedPath.startsWith('tests/') || normalizedPath.startsWith('test/')) score += 6;
+      if (/\/__tests__\//.test(normalizedPath)) score += 3;
+
+      candidates.push({
+        path: normalizedPath,
+        content: snippet.snippet,
+        lines: `${snippet.startLine}-${snippet.endLine}`,
+        relevanceScore: undefined,
+        matchType: 'keyword',
+        retrievedAt,
+        chunkId: `${normalizedPath}#ref-L${firstReferenceLineIndex + 1}`,
+        __score: score,
+      });
+    }
+
+    if (candidates.length === 0) {
+      return [];
+    }
+
+    const maxScore = Math.max(...candidates.map((candidate) => candidate.__score));
+    return candidates
+      .sort((a, b) => b.__score - a.__score || a.path.localeCompare(b.path))
+      .slice(0, Math.max(1, Math.min(50, Math.floor(topK))))
+      .map(({ __score, ...result }) => ({
+        ...result,
+        relevanceScore: maxScore > 0 ? Math.max(0, Math.min(1, __score / maxScore)) : 0,
+      }));
   }
 
   private getConfiguredShadowCompareState(): { enabled: boolean; sampleRate: number } {

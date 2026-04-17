@@ -7,6 +7,8 @@
         { "tool": "index_workspace", "args": {} },
         { "tool": "codebase_retrieval", "args": { "query": "auth flow", "top_k": 3 } },
         { "tool": "semantic_search", "args": { "query": "auth flow", "top_k": 3 } },
+        { "tool": "symbol_search", "args": { "symbol": "resolveAIProviderId", "top_k": 3 } },
+        { "tool": "symbol_references", "args": { "symbol": "resolveAIProviderId", "top_k": 3 } },
         { "tool": "get_file", "args": { "path": "README.md" } },
         { "tool": "get_context_for_prompt", "args": { "query": "auth flow", "max_files": 2, "token_budget": 1200 } },
         { "tool": "enhance_prompt", "args": { "prompt": "fix login bug" } }

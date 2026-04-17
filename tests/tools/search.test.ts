@@ -5,7 +5,17 @@
  */
 
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
-import { handleSemanticSearch, SemanticSearchArgs, semanticSearchTool } from '../../src/mcp/tools/search.js';
+import {
+  handleSemanticSearch,
+  handleSymbolSearch,
+  handleSymbolReferencesSearch,
+  SemanticSearchArgs,
+  SymbolSearchArgs,
+  SymbolReferencesArgs,
+  semanticSearchTool,
+  symbolSearchTool,
+  symbolReferencesTool,
+} from '../../src/mcp/tools/search.js';
 import { ContextServiceClient, SearchResult } from '../../src/mcp/serviceClient.js';
 
 describe('semantic_search Tool', () => {
@@ -16,6 +26,8 @@ describe('semantic_search Tool', () => {
     mockServiceClient = {
       getFile: jest.fn(),
       semanticSearch: jest.fn(),
+      symbolSearch: jest.fn(),
+      symbolReferencesSearch: jest.fn(),
       getContextForPrompt: jest.fn(),
       indexWorkspace: jest.fn(),
       clearCache: jest.fn(),
@@ -462,5 +474,136 @@ describe('semantic_search Tool', () => {
       expect(props).toContain('top_k');
       expect(props).toContain('profile');
     });
+  });
+});
+
+describe('symbol_search Tool', () => {
+  let mockServiceClient: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockServiceClient = {
+      symbolSearch: jest.fn(),
+      getIndexStatus: jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: false,
+      })),
+      getLastSearchDiagnostics: jest.fn(() => null),
+    };
+  });
+
+  it('delegates trimmed symbol queries to deterministic local symbol search', async () => {
+    mockServiceClient.symbolSearch.mockResolvedValue([
+      {
+        path: 'src/auth/provider.ts',
+        content: 'export function resolveAIProviderId() {}',
+        relevanceScore: 0.97,
+        lines: '1-1',
+        matchType: 'keyword',
+        retrievedAt: '2024-01-01T00:00:00.000Z',
+      },
+    ] satisfies SearchResult[]);
+
+    const result = await handleSymbolSearch(
+      {
+        symbol: '  resolveAIProviderId  ',
+        top_k: 5,
+        include_paths: ['./src/'],
+        exclude_paths: ['src/legacy/**'],
+      } satisfies SymbolSearchArgs,
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.symbolSearch).toHaveBeenCalledWith(
+      'resolveAIProviderId',
+      5,
+      expect.objectContaining({
+        includePaths: ['src/**'],
+        excludePaths: ['src/legacy/**'],
+      })
+    );
+    expect(result).toContain('# 🔎 Symbol Search Results');
+    expect(result).toContain('resolveAIProviderId');
+    expect(result).toContain('src/auth/provider.ts');
+  });
+
+  it('requires a non-empty symbol', async () => {
+    await expect(handleSymbolSearch({ symbol: '   ' }, mockServiceClient as any)).rejects.toThrow(/symbol/i);
+  });
+
+  it('exposes the symbol_search schema', () => {
+    expect(symbolSearchTool.name).toBe('symbol_search');
+    expect(symbolSearchTool.inputSchema.required).toContain('symbol');
+    expect(Object.keys(symbolSearchTool.inputSchema.properties)).toEqual(
+      expect.arrayContaining(['symbol', 'top_k', 'bypass_cache', 'include_paths', 'exclude_paths'])
+    );
+  });
+});
+
+describe('symbol_references Tool', () => {
+  let mockServiceClient: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockServiceClient = {
+      symbolReferencesSearch: jest.fn(),
+      getIndexStatus: jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: false,
+      })),
+      getLastSearchDiagnostics: jest.fn(() => null),
+    };
+  });
+
+  it('delegates trimmed symbols to local symbol reference search', async () => {
+    mockServiceClient.symbolReferencesSearch.mockResolvedValue([
+      {
+        path: 'src/caller.ts',
+        content: 'export const activeProvider = resolveAIProviderId();',
+        relevanceScore: 0.95,
+        lines: '2-2',
+        matchType: 'keyword',
+        retrievedAt: '2024-01-01T00:00:00.000Z',
+      },
+    ] satisfies SearchResult[]);
+
+    const result = await handleSymbolReferencesSearch(
+      {
+        symbol: '  resolveAIProviderId  ',
+        top_k: 5,
+        include_paths: ['./src/'],
+        exclude_paths: ['src/legacy/**'],
+      } satisfies SymbolReferencesArgs,
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.symbolReferencesSearch).toHaveBeenCalledWith(
+      'resolveAIProviderId',
+      5,
+      expect.objectContaining({
+        includePaths: ['src/**'],
+        excludePaths: ['src/legacy/**'],
+      })
+    );
+    expect(result).toContain('# 🔗 Symbol Reference Results');
+    expect(result).toContain('src/caller.ts');
+  });
+
+  it('requires a non-empty symbol', async () => {
+    await expect(handleSymbolReferencesSearch({ symbol: '   ' }, mockServiceClient as any)).rejects.toThrow(/symbol/i);
+  });
+
+  it('exposes the symbol_references schema', () => {
+    expect(symbolReferencesTool.name).toBe('symbol_references');
+    expect(symbolReferencesTool.inputSchema.required).toContain('symbol');
+    expect(Object.keys(symbolReferencesTool.inputSchema.properties)).toEqual(
+      expect.arrayContaining(['symbol', 'top_k', 'bypass_cache', 'include_paths', 'exclude_paths'])
+    );
   });
 });

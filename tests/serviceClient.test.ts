@@ -33,6 +33,7 @@ const { renderPrometheusMetrics } = await import('../src/metrics/metrics.js');
 const { snapshotRetrievalV2FeatureFlags } = await import('../src/internal/retrieval/v2Contracts.js');
 const { MemorySuggestionStore } = await import('../src/mcp/memorySuggestionStore.js');
 const { createDraftSuggestionRecord } = await import('../src/mcp/memorySuggestions.js');
+type SearchResult = Awaited<ReturnType<InstanceType<typeof ContextServiceClient>['symbolReferencesSearch']>>[number];
 
 describe('ContextServiceClient', () => {
   let client: InstanceType<typeof ContextServiceClient>;
@@ -996,6 +997,62 @@ describe('ContextServiceClient', () => {
       expect(results[0].path).toContain('src/localKeyword.ts');
       expect(results.every((result: { matchType?: string }) => result.matchType === 'keyword')).toBe(true);
       expect(results.every((result: { retrievedAt?: string }) => typeof result.retrievedAt === 'string')).toBe(true);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should return non-declaration symbol references from local reference search', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-references-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        'export function resolveAIProviderId() { return "openai_session"; }\n',
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'caller.ts'),
+        [
+          'import { resolveAIProviderId } from "./provider";',
+          'export const activeProvider = resolveAIProviderId();',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'importOnly.ts'),
+        [
+          'import { resolveAIProviderId } from "./provider";',
+          'export const providerLabel = "openai";',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'methodDeclaration.ts'),
+        [
+          'export class ProviderFactory {',
+          '  resolveAIProviderId() {',
+          '    return "openai_session";',
+          '  }',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const results = await fallbackClient.symbolReferencesSearch('resolveAIProviderId', 5, {
+        bypassCache: true,
+      });
+
+      expect(results.length).toBeGreaterThan(0);
+      expect(results.some((result: SearchResult) => result.path.includes('src/caller.ts'))).toBe(true);
+      expect(results.some((result: SearchResult) => result.path.includes('src/importOnly.ts'))).toBe(false);
+      expect(results.some((result: SearchResult) => result.path.includes('src/methodDeclaration.ts'))).toBe(false);
+      expect(results.some((result: SearchResult) => result.path.includes('src/provider.ts'))).toBe(false);
+      expect(
+        results.some((result: SearchResult) => result.content.includes('activeProvider = resolveAIProviderId()'))
+      ).toBe(true);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
