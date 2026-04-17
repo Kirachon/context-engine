@@ -189,6 +189,49 @@ function buildSymbolReferenceSnippet(
   };
 }
 
+export type SymbolDefinitionKind =
+  | 'class'
+  | 'function'
+  | 'interface'
+  | 'type'
+  | 'enum'
+  | 'const'
+  | 'method'
+  | 'unknown';
+
+export type SymbolDefinitionResult =
+  | { found: false; symbol: string }
+  | {
+      found: true;
+      symbol: string;
+      file: string;
+      line: number;
+      column?: number;
+      kind: SymbolDefinitionKind;
+      snippet: string;
+      score: number;
+    };
+
+function classifySymbolDefinitionKind(line: string, symbol: string): SymbolDefinitionKind {
+  const trimmed = line.trim();
+  const escapedSymbol = escapeRegExp(symbol);
+
+  if (new RegExp(`\\bclass\\s+${escapedSymbol}\\b`).test(trimmed)) return 'class';
+  if (new RegExp(`\\binterface\\s+${escapedSymbol}\\b`).test(trimmed)) return 'interface';
+  if (new RegExp(`\\benum\\s+${escapedSymbol}\\b`).test(trimmed)) return 'enum';
+  if (new RegExp(`\\btype\\s+${escapedSymbol}\\b`).test(trimmed)) return 'type';
+  if (new RegExp(`\\bfunction\\s+${escapedSymbol}\\b`).test(trimmed)) return 'function';
+  if (new RegExp(`\\b(def|func)\\s+${escapedSymbol}\\b`).test(trimmed)) return 'function';
+  if (new RegExp(`\\b${escapedSymbol}\\s*[:=]\\s*(async\\s+)?function\\b`).test(trimmed)) return 'function';
+  if (new RegExp(`\\b(const|let|var)\\s+${escapedSymbol}\\b`).test(trimmed)) return 'const';
+  if (new RegExp(`^(get|set)\\s+${escapedSymbol}\\s*\\(`).test(trimmed)) return 'method';
+  if (new RegExp(`\\b(public|private|protected|internal|static|async|abstract|virtual|override|readonly|final|sealed)\\b.*\\b${escapedSymbol}\\s*\\(`).test(trimmed)) {
+    return 'method';
+  }
+  if (new RegExp(`^(async\\s+)?\\*?${escapedSymbol}\\s*\\(`).test(trimmed)) return 'method';
+  return 'unknown';
+}
+
 export interface WatcherStatus {
   enabled: boolean;
   watching: number;
@@ -3973,6 +4016,139 @@ export class ContextServiceClient {
         ...result,
         relevanceScore: maxScore > 0 ? Math.max(0, Math.min(1, __score / maxScore)) : 0,
       }));
+  }
+
+  /**
+   * Deterministic single-result symbol definition lookup.
+   * Returns the single best canonical declaration site for a known identifier.
+   */
+  async symbolDefinition(
+    symbol: string,
+    options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[]; languageHint?: string }
+  ): Promise<SymbolDefinitionResult> {
+    const trimmedSymbol = symbol.trim();
+    if (!trimmedSymbol) {
+      return { found: false, symbol: trimmedSymbol };
+    }
+
+    const candidateLimit = 200;
+    const keywordCandidates = await this.localKeywordSearch(trimmedSymbol, candidateLimit, {
+      bypassCache: options?.bypassCache,
+      includePaths: options?.includePaths,
+      excludePaths: options?.excludePaths,
+    });
+    if (keywordCandidates.length === 0) {
+      return { found: false, symbol: trimmedSymbol };
+    }
+
+    const symbolPattern = buildSymbolUsagePattern(trimmedSymbol);
+
+    type DeclarationCandidate = {
+      path: string;
+      lineIndex: number;
+      column: number;
+      kind: SymbolDefinitionKind;
+      exactCase: boolean;
+      isImport: boolean;
+      snippet: string;
+      snippetStart: number;
+      snippetEnd: number;
+    };
+    const declarations: DeclarationCandidate[] = [];
+    const seenPaths = new Set<string>();
+
+    for (const keywordCandidate of keywordCandidates) {
+      const filePath = keywordCandidate.path;
+      if (seenPaths.has(filePath)) {
+        continue;
+      }
+      seenPaths.add(filePath);
+
+      let content: string;
+      try {
+        content = await this.getFile(filePath);
+      } catch {
+        continue;
+      }
+
+      const lines = content.split(/\r?\n/);
+      for (let index = 0; index < lines.length; index += 1) {
+        const line = lines[index] ?? '';
+        if (!symbolPattern.test(line)) {
+          continue;
+        }
+        if (!isDeclarationLikeSymbolLine(line, trimmedSymbol)) {
+          continue;
+        }
+
+        const trimmedLine = line.trim();
+        const isImport = /^import\b/.test(trimmedLine);
+        const exactCase = line.includes(trimmedSymbol);
+        const kind = isImport ? 'unknown' : classifySymbolDefinitionKind(line, trimmedSymbol);
+        const columnIndex = line.indexOf(trimmedSymbol);
+        const snippet = buildSymbolReferenceSnippet(content, index);
+        const normalizedPath = filePath.replace(/\\/g, '/');
+
+        declarations.push({
+          path: normalizedPath,
+          lineIndex: index,
+          column: columnIndex >= 0 ? columnIndex + 1 : 1,
+          kind,
+          exactCase,
+          isImport,
+          snippet: snippet.snippet,
+          snippetStart: snippet.startLine,
+          snippetEnd: snippet.endLine,
+        });
+        break;
+      }
+    }
+
+    if (declarations.length === 0) {
+      return { found: false, symbol: trimmedSymbol };
+    }
+
+    const scoreFor = (candidate: DeclarationCandidate): number => {
+      let score = 0;
+      if (!candidate.isImport && candidate.kind !== 'unknown') score += 100;
+      if (candidate.exactCase) score += 50;
+      const normalized = candidate.path;
+      if (normalized.startsWith('src/')) score += 30;
+      if (normalized.startsWith('tests/') || normalized.startsWith('test/')) score -= 10;
+      if (/\/__tests__\//.test(normalized)) score -= 5;
+      if (normalized.includes('node_modules/')) score -= 50;
+      score -= Math.min(20, normalized.length / 8);
+      score -= Math.min(15, candidate.lineIndex / 50);
+      return score;
+    };
+
+    const ranked = declarations
+      .map((candidate) => ({ candidate, score: scoreFor(candidate) }))
+      .sort((a, b) => {
+        if (b.score !== a.score) return b.score - a.score;
+        const aSrc = a.candidate.path.startsWith('src/') ? 0 : 1;
+        const bSrc = b.candidate.path.startsWith('src/') ? 0 : 1;
+        if (aSrc !== bSrc) return aSrc - bSrc;
+        if (a.candidate.path.length !== b.candidate.path.length) {
+          return a.candidate.path.length - b.candidate.path.length;
+        }
+        if (a.candidate.lineIndex !== b.candidate.lineIndex) {
+          return a.candidate.lineIndex - b.candidate.lineIndex;
+        }
+        return a.candidate.path.localeCompare(b.candidate.path);
+      });
+
+    const best = ranked[0];
+    return {
+      found: true,
+      symbol: trimmedSymbol,
+      file: best.candidate.path,
+      line: best.candidate.lineIndex + 1,
+      column: best.candidate.column,
+      kind: best.candidate.kind,
+      snippet: best.candidate.snippet,
+      score: Math.round(best.score * 100) / 100,
+    };
   }
 
   private getConfiguredShadowCompareState(): { enabled: boolean; sampleRate: number } {

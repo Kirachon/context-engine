@@ -42,6 +42,7 @@ export const toolManifest = {
     'semantic_search',
     'symbol_search',
     'symbol_references',
+    'symbol_definition',
     'get_file',
     'get_context_for_prompt',
     'enhance_prompt',
@@ -104,10 +105,11 @@ export const toolManifest = {
     symbol_navigation: {
       description: 'Deterministic local symbol-first navigation for identifier queries',
       version: '1.9.0',
-      tools: ['symbol_search', 'symbol_references'],
+      tools: ['symbol_search', 'symbol_references', 'symbol_definition'],
       features: [
         'Exact and symbol-aware local ranking',
         'Reference-only lookup that filters declaration hits',
+        'Single-best declaration lookup for canonical jump-to-definition',
         'Scope filters via include_paths and exclude_paths',
         'Provider-independent navigation path for known identifiers',
       ],

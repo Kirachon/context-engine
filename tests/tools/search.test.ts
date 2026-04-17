@@ -9,12 +9,15 @@ import {
   handleSemanticSearch,
   handleSymbolSearch,
   handleSymbolReferencesSearch,
+  handleSymbolDefinition,
   SemanticSearchArgs,
   SymbolSearchArgs,
   SymbolReferencesArgs,
+  SymbolDefinitionArgs,
   semanticSearchTool,
   symbolSearchTool,
   symbolReferencesTool,
+  symbolDefinitionTool,
 } from '../../src/mcp/tools/search.js';
 import { ContextServiceClient, SearchResult } from '../../src/mcp/serviceClient.js';
 
@@ -604,6 +607,69 @@ describe('symbol_references Tool', () => {
     expect(symbolReferencesTool.inputSchema.required).toContain('symbol');
     expect(Object.keys(symbolReferencesTool.inputSchema.properties)).toEqual(
       expect.arrayContaining(['symbol', 'top_k', 'bypass_cache', 'include_paths', 'exclude_paths'])
+    );
+  });
+});
+
+describe('symbol_definition Tool', () => {
+  let mockServiceClient: any;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockServiceClient = {
+      symbolDefinition: jest.fn(),
+      getIndexStatus: jest.fn(() => ({
+        workspace: '/tmp/workspace',
+        lastIndexed: '2024-01-01T00:00:00.000Z',
+        status: 'idle',
+        fileCount: 10,
+        isStale: false,
+      })),
+      getLastSearchDiagnostics: jest.fn(() => null),
+    };
+  });
+
+  it('delegates trimmed symbols to local symbol definition lookup', async () => {
+    mockServiceClient.symbolDefinition.mockResolvedValue({
+      found: true,
+      symbol: 'resolveAIProviderId',
+      file: 'src/providers.ts',
+      line: 12,
+      column: 1,
+      kind: 'function',
+      snippet: 'export function resolveAIProviderId() {}',
+      score: 195,
+    });
+
+    const result = await handleSymbolDefinition(
+      {
+        symbol: '  resolveAIProviderId  ',
+        include_paths: ['./src/'],
+        exclude_paths: ['src/legacy/**'],
+      } satisfies SymbolDefinitionArgs,
+      mockServiceClient as any
+    );
+
+    expect(mockServiceClient.symbolDefinition).toHaveBeenCalledWith(
+      'resolveAIProviderId',
+      expect.objectContaining({
+        includePaths: ['src/**'],
+        excludePaths: ['src/legacy/**'],
+      })
+    );
+    expect(result).toContain('# 📍 Symbol Definition');
+    expect(result).toContain('src/providers.ts');
+  });
+
+  it('requires a non-empty symbol', async () => {
+    await expect(handleSymbolDefinition({ symbol: '   ' }, mockServiceClient as any)).rejects.toThrow(/symbol/i);
+  });
+
+  it('exposes the symbol_definition schema', () => {
+    expect(symbolDefinitionTool.name).toBe('symbol_definition');
+    expect(symbolDefinitionTool.inputSchema.required).toContain('symbol');
+    expect(Object.keys(symbolDefinitionTool.inputSchema.properties)).toEqual(
+      expect.arrayContaining(['symbol', 'language_hint', 'bypass_cache', 'include_paths', 'exclude_paths'])
     );
   });
 });

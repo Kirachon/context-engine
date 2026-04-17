@@ -26,6 +26,7 @@
     "semantic_search",
     "symbol_search",
     "symbol_references",
+    "symbol_definition",
     "get_file",
     "get_context_for_prompt",
     "enhance_prompt",
@@ -160,6 +161,25 @@
         "related_surfaces": {
           "tools": [
             "symbol_search",
+            "get_file"
+          ]
+        }
+      },
+      {
+        "id": "symbol_definition",
+        "title": "Symbol Definition",
+        "usage_hint": "Jump to the canonical declaration site of a known identifier.",
+        "examples": [
+          "Where is resolveAIProviderId defined?",
+          "Find the declaration of ContextServiceClient."
+        ],
+        "safety_hints": [
+          "Read-only deterministic local retrieval for the single best declaration site."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "symbol_search",
+            "symbol_references",
             "get_file"
           ]
         }
@@ -1059,11 +1079,13 @@
       "version": "1.9.0",
       "tools": [
         "symbol_search",
-        "symbol_references"
+        "symbol_references",
+        "symbol_definition"
       ],
       "features": [
         "Exact and symbol-aware local ranking",
         "Reference-only lookup that filters declaration hits",
+        "Single-best declaration lookup for canonical jump-to-definition",
         "Scope filters via include_paths and exclude_paths",
         "Provider-independent navigation path for known identifiers"
       ]

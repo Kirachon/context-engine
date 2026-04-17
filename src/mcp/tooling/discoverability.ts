@@ -148,6 +148,19 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       idempotentHint: true,
     },
   }),
+  symbol_definition: toolMetadata('Symbol Definition', {
+    usageHint: 'Jump to the canonical declaration site of a known identifier.',
+    examples: ['Where is resolveAIProviderId defined?', 'Find the declaration of ContextServiceClient.'],
+    safetyHints: ['Read-only deterministic local retrieval for the single best declaration site.'],
+    related: {
+      tools: ['symbol_search', 'symbol_references', 'get_file'],
+    },
+    annotations: {
+      title: 'Symbol Definition',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+  }),
   get_file: toolMetadata('Get File', {
     usageHint: 'Read the full contents of a known file or a targeted line range.',
     examples: ['Open src/mcp/server.ts.', 'Read package.json to confirm scripts.'],

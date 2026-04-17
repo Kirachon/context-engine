@@ -49,6 +49,7 @@ describe('MCP discoverability metadata', () => {
     const enhanceMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'enhance_prompt');
     const symbolMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_search');
     const symbolReferencesMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_references');
+    const symbolDefinitionMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_definition');
 
     expect(enhanceMetadata).toEqual(
       expect.objectContaining({
@@ -83,6 +84,18 @@ describe('MCP discoverability metadata', () => {
         safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for non-declaration symbol usages.']),
         related_surfaces: expect.objectContaining({
           tools: expect.arrayContaining(['symbol_search', 'get_file']),
+        }),
+      })
+    );
+
+    expect(symbolDefinitionMetadata).toEqual(
+      expect.objectContaining({
+        id: 'symbol_definition',
+        title: 'Symbol Definition',
+        usage_hint: expect.stringContaining('declaration'),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for the single best declaration site.']),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['symbol_search', 'symbol_references', 'get_file']),
         }),
       })
     );

@@ -1056,6 +1056,135 @@ describe('ContextServiceClient', () => {
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
+
+    it('should return the canonical declaration for a known symbol via symbolDefinition', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          '// header comment',
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(true);
+      if (result.found) {
+        expect(result.symbol).toBe('resolveAIProviderId');
+        expect(result.file).toContain('src/provider.ts');
+        expect(result.line).toBe(2);
+        expect(result.kind).toBe('function');
+        expect(result.snippet).toContain('resolveAIProviderId');
+        expect(typeof result.score).toBe('number');
+      }
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should prefer src/ declarations over tests/ declarations in symbolDefinition', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-srcwin-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.mkdirSync(path.join(tempDir, 'tests'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'tests', 'provider.test.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "stub";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(true);
+      if (result.found) {
+        expect(result.file).toContain('src/provider.ts');
+        expect(result.file).not.toContain('tests/');
+      }
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should return found=false when no declaration exists', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-missing-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'noop.ts'),
+        'export const unrelated = 1;\n',
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.symbolDefinition('nonExistentSymbolXyz', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(false);
+      expect(result.symbol).toBe('nonExistentSymbolXyz');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should not return reference-only files as the definition', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-refonly-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'caller.ts'),
+        [
+          'import { resolveAIProviderId } from "./provider";',
+          'export const activeProvider = resolveAIProviderId();',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(true);
+      if (result.found) {
+        expect(result.file).toContain('src/provider.ts');
+        expect(result.file).not.toContain('src/caller.ts');
+      }
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
   });
 
   describe('Semantic Search with openai_session provider', () => {

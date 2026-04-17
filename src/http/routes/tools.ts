@@ -158,6 +158,7 @@ function asyncHandler(
  * - POST /api/v1/index - Index workspace
  * - POST /api/v1/search - Semantic search
  * - POST /api/v1/symbol-search - Deterministic symbol-first search
+ * - POST /api/v1/symbol-definition - Deterministic single-result symbol definition lookup
  * - POST /api/v1/codebase-retrieval - Codebase retrieval (uses searchAndAsk)
  * - POST /api/v1/enhance-prompt - Enhance prompt (uses searchAndAsk)
  * - POST /api/v1/plan - Create implementation plan
@@ -309,6 +310,46 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                     symbol,
                     top_k,
                     resultCount: results.length,
+                },
+            });
+        })
+    );
+
+    /**
+     * POST /symbol-definition
+     * Deterministic single-result symbol definition lookup
+     * Body: { symbol: string, workspacePath?: string, language_hint?: string, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[] }
+     */
+    router.post(
+        '/symbol-definition',
+        asyncHandler(async (req, res) => {
+            const {
+                symbol,
+                language_hint,
+                bypass_cache = false,
+                include_paths,
+                exclude_paths,
+            } = req.body || {};
+
+            if (!symbol || typeof symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            const result = await withTimeout(
+                serviceClient.symbolDefinition(symbol, {
+                    bypassCache: bypass_cache === true,
+                    includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
+                    excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
+                    languageHint: typeof language_hint === 'string' ? language_hint : undefined,
+                }),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Symbol definition'
+            );
+            res.json({
+                result,
+                metadata: {
+                    symbol,
+                    found: result.found,
                 },
             });
         })

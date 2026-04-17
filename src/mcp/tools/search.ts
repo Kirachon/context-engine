@@ -60,6 +60,15 @@ export interface SymbolReferencesArgs {
   exclude_paths?: string[];
 }
 
+export interface SymbolDefinitionArgs {
+  symbol: string;
+  workspacePath?: string;
+  language_hint?: string;
+  bypass_cache?: boolean;
+  include_paths?: string[];
+  exclude_paths?: string[];
+}
+
 type FallbackDiagnostics = {
   filtersApplied?: string[];
   filteredPathsCount?: number;
@@ -623,6 +632,55 @@ export async function handleSymbolReferencesSearch(
   });
 }
 
+export async function handleSymbolDefinition(
+  args: SymbolDefinitionArgs,
+  serviceClient: ContextServiceClient
+): Promise<string> {
+  const { symbol, language_hint, bypass_cache = false, include_paths, exclude_paths } = args;
+
+  const validSymbol = validateTrimmedNonEmptyString(symbol, 'Invalid symbol parameter: must be a non-empty string');
+  validateMaxLength(validSymbol, 200, 'Symbol too long: maximum 200 characters');
+  validateBoolean(bypass_cache, 'Invalid bypass_cache parameter: must be a boolean');
+  const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
+  const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
+  if (language_hint !== undefined && typeof language_hint !== 'string') {
+    throw new Error('Invalid language_hint parameter: must be a string when provided');
+  }
+
+  const result = await serviceClient.symbolDefinition(validSymbol, {
+    bypassCache: bypass_cache,
+    includePaths: normalizedIncludePaths,
+    excludePaths: normalizedExcludePaths,
+    languageHint: typeof language_hint === 'string' ? language_hint : undefined,
+  });
+
+  if (!result.found) {
+    let output = '# 📍 Symbol Definition\n\n';
+    output += `**Symbol:** "${validSymbol}"\n\n`;
+    output += '_No definition found. Try:\n';
+    output += '- using the exact identifier spelling\n';
+    output += '- scoping the search with include_paths to likely declaration sites\n';
+    output += '- running `symbol_search` to confirm the canonical declaration name\n';
+    output += '_\n';
+    return output;
+  }
+
+  let output = '# 📍 Symbol Definition\n\n';
+  output += `**Symbol:** "${result.symbol}"\n`;
+  output += `**File:** \`${result.file}\`\n`;
+  output += `**Line:** ${result.line}`;
+  if (result.column !== undefined) {
+    output += `, **Column:** ${result.column}`;
+  }
+  output += `\n**Kind:** ${result.kind}\n`;
+  output += `**Score:** ${result.score}\n\n`;
+  output += '```\n';
+  output += result.snippet.length > 600 ? `${result.snippet.substring(0, 600)}...` : result.snippet;
+  output += '\n```\n\n';
+  output += '---\n_Use `symbol_references` to find call sites or `get_file` to read the full file._\n';
+  return output;
+}
+
 export const semanticSearchTool = {
   name: 'semantic_search',
   description: `Perform semantic search across the codebase to find relevant code snippets.
@@ -740,6 +798,49 @@ Use this tool when you need to:
         type: 'number',
         description: 'Number of results to return (default: 10, max: 50)',
         default: 10,
+      },
+      bypass_cache: {
+        type: 'boolean',
+        description: 'When true, bypass caches for this call.',
+        default: false,
+      },
+      include_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to include matching paths only.',
+      },
+      exclude_paths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Optional workspace-relative glob filters to exclude matching paths after include filtering.',
+      },
+    },
+    required: ['symbol'],
+  },
+};
+
+export const symbolDefinitionTool = {
+  name: 'symbol_definition',
+  description: `Return the single best deterministic declaration site for a known identifier.
+
+Use this tool when you need to:
+- Jump straight to the canonical declaration of a function, class, type, interface, or constant
+- Get one definitive answer (file, line, kind, snippet) rather than a ranked list
+- Complement symbol_search (ranked) and symbol_references (non-declaration usages)`,
+  inputSchema: {
+    type: 'object',
+    properties: {
+      symbol: {
+        type: 'string',
+        description: 'Identifier whose declaration site you want to locate.',
+      },
+      workspacePath: {
+        type: 'string',
+        description: 'Optional workspace path. Defaults to the current workspace.',
+      },
+      language_hint: {
+        type: 'string',
+        description: 'Optional language hint (currently advisory; reserved for future use).',
       },
       bypass_cache: {
         type: 'boolean',

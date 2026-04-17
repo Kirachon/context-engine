@@ -140,6 +140,7 @@ describe('MCP HTTP transport', () => {
       'semantic_search',
       'symbol_search',
       'symbol_references',
+      'symbol_definition',
       'tool_manifest',
       'review_auto',
     ]));
