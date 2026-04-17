@@ -1,0 +1,76 @@
+{
+  "version": "1.0.0",
+  "contract_version": "v1",
+  "scope": "Phase 2.5 provider contract freeze. Acceptance criteria for any provider that claims ProviderContractV1 conformance. Gate is advisory in PR runs and blocking in the quality CI profile.",
+  "documentation": {
+    "contract": "docs/providers/contract.md",
+    "cancellation": "docs/providers/cancellation.md",
+    "privacy_boundary": "docs/providers/privacy-boundary.md"
+  },
+  "providers": {
+    "openai_session": {
+      "status": "reference",
+      "contract_version": "v1",
+      "privacy_class": "hosted",
+      "must_implement": ["generate", "health"],
+      "may_implement": ["embed", "rerank", "readiness", "dispose"]
+    }
+  },
+  "fence_tests": {
+    "capabilities": "tests/ai/contract/capabilities.test.ts",
+    "cancellation": "tests/ai/contract/cancellation.test.ts",
+    "privacy_boundary": "tests/ai/contract/privacyBoundary.test.ts"
+  },
+  "error_taxonomy": {
+    "required_codes": [
+      "provider_auth",
+      "provider_timeout",
+      "provider_unavailable",
+      "provider_exec_error",
+      "provider_parse_error",
+      "provider_aborted",
+      "provider_capability",
+      "provider_circuit_open"
+    ],
+    "retryable_defaults": {
+      "provider_auth": false,
+      "provider_timeout": true,
+      "provider_unavailable": true,
+      "provider_exec_error": false,
+      "provider_parse_error": false,
+      "provider_aborted": false,
+      "provider_capability": false,
+      "provider_circuit_open": true
+    }
+  },
+  "cancellation_contract": {
+    "must_honor_signal": true,
+    "must_honor_deadline_ms": true,
+    "deadline_includes_queue_wait": true,
+    "subprocess_terminated_on_abort": true,
+    "health_must_not_throw": true
+  },
+  "privacy_contract": {
+    "local_only_surfaces": [
+      "src/internal/retrieval",
+      "src/internal/index",
+      "src/internal/symbols",
+      "src/mcp"
+    ],
+    "egress_allowlist": [
+      "src/mcp/tooling/externalGrounding.ts"
+    ],
+    "every_response_must_carry_privacy_class": true
+  },
+  "rollback_triggers": [
+    "fence_test_regression_in_main",
+    "new_in_process_egress_in_local_only_surface",
+    "error_taxonomy_drift_without_doc_update",
+    "cancellation_contract_violation_in_provider"
+  ],
+  "ci_wiring": {
+    "advisory_in": ["pr"],
+    "blocking_in": ["quality"],
+    "test_command": "npm test -- tests/ai/contract --runInBand --silent"
+  }
+}
