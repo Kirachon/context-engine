@@ -106,6 +106,7 @@ describe('HTTP compatibility harness', () => {
     expect(collectRegisteredRoutes(app)).toEqual([
       'GET /health',
       'GET /api/v1/status',
+      'GET /api/v1/retrieval/status',
       'POST /api/v1/index',
       'POST /api/v1/search',
       'POST /api/v1/codebase-retrieval',

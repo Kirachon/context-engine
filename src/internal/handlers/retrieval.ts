@@ -3,6 +3,16 @@ import { featureEnabled } from '../../config/features.js';
 import { normalizePathScopeInput } from '../../mcp/tooling/pathScope.js';
 import { retrieve } from '../retrieval/retrieve.js';
 import { createRetrievalFlowContext, finalizeRetrievalFlow, noteRetrievalStage } from '../retrieval/flow.js';
+import {
+  computeQualityWarnings,
+  emitQualityWarnings,
+  type QualityWarning,
+} from '../retrieval/rankingCalibration.js';
+import {
+  describeEmbeddingRuntimeSelection,
+  describeEmbeddingRuntimeStatus,
+  type EmbeddingRuntimeStatus,
+} from '../retrieval/embeddingRuntime.js';
 import type {
   InternalRetrieveOptions,
   InternalRetrieveResult,
@@ -13,6 +23,34 @@ import type {
 import { getInternalCache } from './performance.js';
 
 const RETRIEVE_CACHE_KEY_VERSION = 'v2';
+
+/**
+ * Build an EmbeddingRuntimeStatus for quality-warning evaluation.
+ *
+ * When the transformer-embeddings feature flag is disabled, the hash runtime is the
+ * *intended* backend — not a fallback — so we return a synthesized healthy snapshot
+ * with configured === active (hash), which prevents `computeQualityWarnings` from
+ * emitting a spurious `embedding_hash_fallback` warning on every request.
+ *
+ * When the flag is enabled but no runtime has been initialized yet, we still return
+ * `undefined` so the guard will correctly flag the degraded-unknown state.
+ */
+function resolveRetrievalQualityStatus(): EmbeddingRuntimeStatus | undefined {
+  const transformerEnabled = featureEnabled('retrieval_transformer_embeddings_v1');
+  if (!transformerEnabled) {
+    const selection = describeEmbeddingRuntimeSelection(false);
+    return {
+      state: 'healthy',
+      configured: selection,
+      active: selection,
+      fallback: selection,
+      loadFailures: 0,
+      hashFallbackActive: false,
+      downgrade: null,
+    };
+  }
+  return describeEmbeddingRuntimeStatus(featureEnabled('retrieval_lancedb_v1'));
+}
 
 function stableValue(input: unknown): unknown {
   if (Array.isArray(input)) {
@@ -274,6 +312,24 @@ export async function internalRetrieveCode(
       rerankFallbackReason: flow.metadata.rerankFallbackReason,
     });
     noteRetrievalStage(flow, 'handler:complete');
+
+    // p2-calibrate quality guard: surface silent downgrades on every request.
+    // Computed here (post-retrieve) so we can observe the actual rerank gate
+    // state and embedding runtime status. Emitted via console.warn every call
+    // — no caching/suppression — so operators can grep for degraded runs.
+    const rerankGateState = resolveRerankGateState(flow.metadata.rerankGateState);
+    const rerankEnabled = rerankGateState === 'invoked' || rerankGateState === 'fail_open';
+    const rerankFallbackReason =
+      typeof flow.metadata.rerankFallbackReason === 'string'
+        ? (flow.metadata.rerankFallbackReason as string)
+        : undefined;
+    const qualityWarnings: QualityWarning[] = computeQualityWarnings({
+      embeddingRuntimeStatus: resolveRetrievalQualityStatus(),
+      rerankEnabled,
+      rerankFallbackReason,
+    });
+    emitQualityWarnings(qualityWarnings);
+
     return {
       query,
       elapsedMs: Date.now() - start,
@@ -289,6 +345,7 @@ export async function internalRetrieveCode(
         fallbackState,
         queryMode: signals.queryMode,
         rankingDiagnostics,
+        qualityWarnings,
       }),
     };
   };
@@ -311,11 +368,33 @@ export async function internalRetrieveCode(
     });
     noteRetrievalStage(cacheFlow, 'cache_hit');
     noteRetrievalStage(cacheFlow, 'complete');
+    // p2-calibrate: re-compute + re-emit quality warnings on every cache hit
+    // so silent downgrades stay visible even when the result payload itself
+    // comes from cache.
+    // Emit quality warnings on cache hits too, reading from rankingDiagnostics
+    // (which survives caching) rather than `flow` (which `stripFlowMetadata` removes).
+    const cachedRerankGateState = resolveRerankGateState(
+      cached.rankingDiagnostics?.rerankGateState
+    );
+    const cachedRerankEnabled =
+      cachedRerankGateState === 'invoked' || cachedRerankGateState === 'fail_open';
+    const cachedRerankFallbackReason =
+      typeof cached.rankingDiagnostics?.fallbackReason === 'string' &&
+      cached.rankingDiagnostics.fallbackReason !== 'none'
+        ? cached.rankingDiagnostics.fallbackReason
+        : undefined;
+    const cacheQualityWarnings: QualityWarning[] = computeQualityWarnings({
+      embeddingRuntimeStatus: resolveRetrievalQualityStatus(),
+      rerankEnabled: cachedRerankEnabled,
+      rerankFallbackReason: cachedRerankFallbackReason,
+    });
+    emitQualityWarnings(cacheQualityWarnings);
     return {
       ...cached,
       flow: finalizeRetrievalFlow(cacheFlow, {
         cacheHit: true,
         cacheKeyVersion: RETRIEVE_CACHE_KEY_VERSION,
+        qualityWarnings: cacheQualityWarnings,
       }),
     };
   }

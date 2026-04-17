@@ -31,6 +31,15 @@ export interface TreeSitterTreeLike {
   rootNode?: TreeSitterNodeLike;
 }
 
+export type TreeSitterLanguageId =
+  | 'typescript'
+  | 'tsx'
+  | 'python'
+  | 'go'
+  | 'rust'
+  | 'java'
+  | 'csharp';
+
 export interface TreeSitterRuntime {
   Parser: new () => {
     setLanguage: (language: unknown) => void;
@@ -38,13 +47,19 @@ export interface TreeSitterRuntime {
   };
   typescript: unknown;
   tsx: unknown;
+  languages?: Partial<Record<TreeSitterLanguageId, unknown>>;
 }
 
 export interface TreeSitterParserOptions {
   runtime?: TreeSitterRuntime | null;
 }
 
-const DECLARATION_NODE_TYPES = new Set([
+interface LanguageConfig {
+  declarations: Set<string>;
+  wrappers: Set<string>;
+}
+
+const TS_DECLARATIONS = new Set([
   'function_declaration',
   'class_declaration',
   'abstract_class_declaration',
@@ -55,7 +70,7 @@ const DECLARATION_NODE_TYPES = new Set([
   'variable_statement',
 ]);
 
-const WRAPPER_NODE_TYPES = new Set([
+const TS_WRAPPERS = new Set([
   'program',
   'export_statement',
   'ambient_declaration',
@@ -63,20 +78,120 @@ const WRAPPER_NODE_TYPES = new Set([
   'module_declaration',
 ]);
 
+const LANGUAGE_CONFIGS: Record<TreeSitterLanguageId, LanguageConfig> = {
+  typescript: { declarations: TS_DECLARATIONS, wrappers: TS_WRAPPERS },
+  tsx: { declarations: TS_DECLARATIONS, wrappers: TS_WRAPPERS },
+  python: {
+    declarations: new Set([
+      'function_definition',
+      'class_definition',
+      'decorated_definition',
+    ]),
+    wrappers: new Set(['module']),
+  },
+  go: {
+    declarations: new Set([
+      'function_declaration',
+      'method_declaration',
+      'type_declaration',
+    ]),
+    wrappers: new Set(['source_file']),
+  },
+  rust: {
+    declarations: new Set([
+      'function_item',
+      'struct_item',
+      'enum_item',
+      'union_item',
+      'impl_item',
+      'trait_item',
+      'mod_item',
+      'type_item',
+      'const_item',
+      'static_item',
+      'macro_definition',
+    ]),
+    wrappers: new Set(['source_file']),
+  },
+  java: {
+    declarations: new Set([
+      'class_declaration',
+      'interface_declaration',
+      'enum_declaration',
+      'record_declaration',
+      'annotation_type_declaration',
+      'method_declaration',
+      'constructor_declaration',
+    ]),
+    wrappers: new Set(['program']),
+  },
+  csharp: {
+    declarations: new Set([
+      'class_declaration',
+      'interface_declaration',
+      'struct_declaration',
+      'enum_declaration',
+      'record_declaration',
+      'delegate_declaration',
+      'method_declaration',
+      'constructor_declaration',
+    ]),
+    wrappers: new Set([
+      'compilation_unit',
+      'namespace_declaration',
+      'file_scoped_namespace_declaration',
+      'declaration_list',
+    ]),
+  },
+};
+
+type PolyglotLanguageId = Exclude<TreeSitterLanguageId, 'typescript' | 'tsx'>;
+
+const POLYGLOT_LANGUAGE_IDS: readonly PolyglotLanguageId[] = [
+  'python',
+  'go',
+  'rust',
+  'java',
+  'csharp',
+];
+
+const POLYGLOT_GRAMMAR_MODULES: Record<PolyglotLanguageId, string> = {
+  python: 'tree-sitter-python',
+  go: 'tree-sitter-go',
+  rust: 'tree-sitter-rust',
+  java: 'tree-sitter-java',
+  csharp: 'tree-sitter-c-sharp',
+};
+
 function normalizePath(value: string): string {
   return value.replace(/\\/g, '/').trim();
 }
 
-function isSupportedSourcePath(pathValue: string): boolean {
-  return /\.(c|m)?jsx?$/i.test(pathValue) || /\.(c|m)?tsx?$/i.test(pathValue);
+function inferLanguageId(pathValue: string): TreeSitterLanguageId | null {
+  if (/\.tsx$/i.test(pathValue)) return 'tsx';
+  if (/\.(c|m)?ts$/i.test(pathValue)) return 'typescript';
+  if (/\.(c|m)?jsx?$/i.test(pathValue)) return 'tsx';
+  if (/\.py$/i.test(pathValue)) return 'python';
+  if (/\.go$/i.test(pathValue)) return 'go';
+  if (/\.rs$/i.test(pathValue)) return 'rust';
+  if (/\.java$/i.test(pathValue)) return 'java';
+  if (/\.cs$/i.test(pathValue)) return 'csharp';
+  return null;
 }
 
-function inferTreeSitterLanguage(pathValue: string, runtime: TreeSitterRuntime): unknown | null {
-  if (/\.tsx?$/i.test(pathValue)) {
-    return runtime.typescript;
+function resolveLanguageGrammar(
+  runtime: TreeSitterRuntime,
+  languageId: TreeSitterLanguageId
+): unknown | null {
+  const fromMap = runtime.languages?.[languageId];
+  if (fromMap) {
+    return fromMap;
   }
-  if (/\.(jsx?|mjsx?|cjsx?)$/i.test(pathValue)) {
-    return runtime.tsx ?? runtime.typescript;
+  if (languageId === 'typescript') {
+    return runtime.typescript ?? null;
+  }
+  if (languageId === 'tsx') {
+    return runtime.tsx ?? runtime.typescript ?? null;
   }
   return null;
 }
@@ -167,14 +282,15 @@ function makeChunkFromNode(
 function collectTreeSitterChunks(
   rootNode: TreeSitterNodeLike,
   sourceLines: string[],
-  normalizedPath: string
+  normalizedPath: string,
+  config: LanguageConfig = { declarations: TS_DECLARATIONS, wrappers: TS_WRAPPERS }
 ): ChunkRecord[] {
   const chunks: ChunkRecord[] = [];
   const seen = new Set<string>();
 
   const visit = (node: TreeSitterNodeLike): void => {
     const type = getNodeType(node);
-    if (DECLARATION_NODE_TYPES.has(type)) {
+    if (config.declarations.has(type)) {
       const chunk = makeChunkFromNode(node, sourceLines, normalizedPath);
       if (chunk && !seen.has(chunk.chunkId)) {
         seen.add(chunk.chunkId);
@@ -183,7 +299,7 @@ function collectTreeSitterChunks(
       return;
     }
 
-    if (!WRAPPER_NODE_TYPES.has(type)) {
+    if (!config.wrappers.has(type)) {
       return;
     }
 
@@ -205,30 +321,98 @@ function collectTreeSitterChunks(
   });
 }
 
-function createTreeSitterRuntime(): TreeSitterRuntime | null {
+function tryRequire<T = unknown>(moduleId: string): T | null {
   try {
     const require = createRequire(import.meta.url);
-    const parserModule = require('tree-sitter') as Record<string, unknown>;
-    const languageModule = require('tree-sitter-typescript') as Record<string, unknown>;
-    const Parser = (parserModule.default ?? parserModule) as TreeSitterRuntime['Parser'];
-    const defaultLanguageModule = (languageModule.default as Record<string, unknown> | undefined) ?? {};
-    const typescript = languageModule.typescript ?? defaultLanguageModule.typescript ?? null;
-    const tsx = languageModule.tsx ?? defaultLanguageModule.tsx ?? typescript;
-
-    if (typeof Parser !== 'function' || !typescript || !tsx) {
-      return null;
-    }
-
-    return { Parser, typescript, tsx };
+    return require(moduleId) as T;
   } catch {
     return null;
   }
 }
 
+function extractDefault(mod: Record<string, unknown> | null): Record<string, unknown> {
+  if (!mod) return {};
+  const fallback = (mod.default as Record<string, unknown> | undefined) ?? undefined;
+  return fallback ?? mod;
+}
+
+function loadPolyglotGrammar(languageId: PolyglotLanguageId): unknown | null {
+  const moduleId = POLYGLOT_GRAMMAR_MODULES[languageId];
+  const mod = tryRequire<Record<string, unknown>>(moduleId);
+  if (!mod) return null;
+  const resolved = extractDefault(mod);
+  // Most grammar modules export the language directly as the module value.
+  // Some (like tree-sitter-typescript) expose named fields, but polyglot
+  // single-language packages are typically the language itself.
+  if (resolved && typeof resolved === 'object' && 'nodeTypeInfo' in (resolved as object)) {
+    return resolved;
+  }
+  if (mod && typeof mod === 'object' && 'nodeTypeInfo' in (mod as object)) {
+    return mod;
+  }
+  // Fallback: return the default export or the module itself; tree-sitter
+  // will throw at setLanguage time if invalid, which we catch below.
+  return resolved ?? mod ?? null;
+}
+
+function createTreeSitterRuntime(): TreeSitterRuntime | null {
+  const parserModule = tryRequire<Record<string, unknown>>('tree-sitter');
+  const languageModule = tryRequire<Record<string, unknown>>('tree-sitter-typescript');
+  if (!parserModule || !languageModule) {
+    return null;
+  }
+
+  const Parser = (parserModule.default ?? parserModule) as TreeSitterRuntime['Parser'];
+  const defaultLanguageModule = (languageModule.default as Record<string, unknown> | undefined) ?? {};
+  const typescript = languageModule.typescript ?? defaultLanguageModule.typescript ?? null;
+  const tsx = languageModule.tsx ?? defaultLanguageModule.tsx ?? typescript;
+
+  if (typeof Parser !== 'function' || !typescript || !tsx) {
+    return null;
+  }
+
+  const languages: Partial<Record<TreeSitterLanguageId, unknown>> = {
+    typescript,
+    tsx,
+  };
+
+  for (const languageId of POLYGLOT_LANGUAGE_IDS) {
+    const grammar = loadPolyglotGrammar(languageId);
+    if (grammar) {
+      languages[languageId] = grammar;
+    }
+  }
+
+  return { Parser, typescript, tsx, languages };
+}
+
+let cachedDefaultRuntime: TreeSitterRuntime | null | undefined;
+
+function getDefaultRuntime(): TreeSitterRuntime | null {
+  if (cachedDefaultRuntime === undefined) {
+    cachedDefaultRuntime = createTreeSitterRuntime();
+  }
+  return cachedDefaultRuntime;
+}
+
+export function listSupportedTreeSitterLanguages(): string[] {
+  const runtime = getDefaultRuntime();
+  if (!runtime) return [];
+  const ids: string[] = [];
+  if (runtime.typescript) ids.push('typescript');
+  if (runtime.tsx) ids.push('tsx');
+  for (const languageId of POLYGLOT_LANGUAGE_IDS) {
+    if (runtime.languages?.[languageId]) {
+      ids.push(languageId);
+    }
+  }
+  return ids;
+}
+
 export function createTreeSitterChunkParser(
   options?: TreeSitterParserOptions
 ): ChunkParser | null {
-  const runtime = options?.runtime ?? createTreeSitterRuntime();
+  const runtime = options?.runtime ?? getDefaultRuntime();
   if (!runtime) {
     return null;
   }
@@ -244,11 +428,13 @@ export function createTreeSitterChunkParser(
       if (!normalizedPath || !content.trim()) {
         return [];
       }
-      if (!isSupportedSourcePath(normalizedPath)) {
+
+      const languageId = inferLanguageId(normalizedPath);
+      if (!languageId) {
         return heuristicFallback.parse(content, options);
       }
 
-      const language = inferTreeSitterLanguage(normalizedPath, runtime);
+      const language = resolveLanguageGrammar(runtime, languageId);
       if (!language) {
         return heuristicFallback.parse(content, options);
       }
@@ -262,7 +448,8 @@ export function createTreeSitterChunkParser(
         }
 
         const sourceLines = content.split(/\r?\n/);
-        const chunks = collectTreeSitterChunks(rootNode, sourceLines, normalizedPath);
+        const config = LANGUAGE_CONFIGS[languageId];
+        const chunks = collectTreeSitterChunks(rootNode, sourceLines, normalizedPath, config);
         if (chunks.length > 0) {
           return chunks;
         }

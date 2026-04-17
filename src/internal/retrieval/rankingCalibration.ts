@@ -7,6 +7,139 @@ import type {
   RetrievalProfile,
   RetrievalRankingMode,
 } from './types.js';
+import type { EmbeddingRuntimeStatus } from './embeddingRuntime.js';
+
+/**
+ * Stable code set for the p2-calibrate quality guard. Operators watch for
+ * these codes to detect silent downgrades in retrieval quality
+ * (hash fallback, runtime degradation, reranker off, rerank fail-open).
+ */
+export type QualityWarningCode =
+  | 'embedding_hash_fallback'
+  | 'embedding_runtime_degraded'
+  | 'reranker_disabled'
+  | 'reranker_fallback';
+
+export type QualityWarningSeverity = 'info' | 'warn' | 'error';
+
+export interface QualityWarning {
+  code: QualityWarningCode;
+  severity: QualityWarningSeverity;
+  detail: string;
+}
+
+export interface QualityWarningContext {
+  /**
+   * Current embedding runtime status as reported by
+   * `describeEmbeddingRuntimeStatus`. When `undefined`, the transformer runtime
+   * is not configured and the hash provider is in effect (explicit fallback).
+   */
+  embeddingRuntimeStatus?: EmbeddingRuntimeStatus;
+  /**
+   * Whether the reranker is enabled for this request. `false` means the
+   * transformer rerank path was not used (feature-flagged off, gate skipped,
+   * or runtime unavailable) and results are effectively un-reranked.
+   */
+  rerankEnabled: boolean;
+  /**
+   * Populated when the reranker attempted to run and fell back to the
+   * heuristic path. Stable values come from the rerank tracer
+   * (e.g. 'rerank_error', 'reranker_unavailable', 'rerank_skipped').
+   */
+  rerankFallbackReason?: string;
+}
+
+const HASH_RUNTIME_IDS = new Set(['hash', 'hash-32', 'hash-128']);
+
+function isHashRuntime(id: string | undefined): boolean {
+  if (!id) return false;
+  return HASH_RUNTIME_IDS.has(id) || id.startsWith('hash');
+}
+
+/**
+ * Pure helper. Given a retrieval context, returns the ordered list of quality
+ * warnings that should be surfaced on the retrieval response. Never caches,
+ * never dedupes across calls — callers must treat this as a per-request
+ * signal.
+ */
+export function computeQualityWarnings(ctx: QualityWarningContext): QualityWarning[] {
+  const warnings: QualityWarning[] = [];
+  const status = ctx.embeddingRuntimeStatus;
+
+  if (!status) {
+    warnings.push({
+      code: 'embedding_hash_fallback',
+      severity: 'warn',
+      detail:
+        'Transformer embedding runtime is not configured; retrieval is using the hash embedding provider. Semantic quality is degraded.',
+    });
+  } else {
+    // Prefer the runtime's own authoritative signal when available, falling
+    // back to id inspection for older status shapes / test fixtures.
+    const hashFallback =
+      status.hashFallbackActive === true ||
+      (isHashRuntime(status.active.id) && !isHashRuntime(status.configured.id));
+
+    if (hashFallback) {
+      const downgradeReason = status.downgrade?.reason;
+      warnings.push({
+        code: 'embedding_hash_fallback',
+        severity: 'warn',
+        detail:
+          `Configured transformer runtime "${status.configured.id}" is unavailable; ` +
+          `active runtime fell back to hash provider "${status.active.id}" ` +
+          `(loadFailures=${status.loadFailures}` +
+          `${downgradeReason ? `, downgradeReason="${downgradeReason}"` : ''}` +
+          `${status.lastFailure ? `, lastFailure="${status.lastFailure}"` : ''}).`,
+      });
+    }
+
+    if (status.state === 'degraded') {
+      warnings.push({
+        code: 'embedding_runtime_degraded',
+        severity: 'warn',
+        detail:
+          `Embedding runtime "${status.configured.id}" is in degraded state ` +
+          `(loadFailures=${status.loadFailures}${status.lastFailure ? `, lastFailure="${status.lastFailure}"` : ''}).`,
+      });
+    }
+  }
+
+  if (!ctx.rerankEnabled) {
+    warnings.push({
+      code: 'reranker_disabled',
+      severity: 'warn',
+      detail:
+        'Transformer reranker is disabled for this request; results are ordered by heuristic scoring only.',
+    });
+  } else if (ctx.rerankFallbackReason && ctx.rerankFallbackReason !== 'none') {
+    warnings.push({
+      code: 'reranker_fallback',
+      severity: 'warn',
+      detail:
+        `Transformer reranker attempted but fell back to heuristic scoring (reason="${ctx.rerankFallbackReason}").`,
+    });
+  }
+
+  return warnings;
+}
+
+/**
+ * Side-effecting emit helper. Logs each warning with the stable
+ * `[retrieval:quality]` prefix so operators can grep for silent downgrades.
+ * Intentionally writes on every invocation — do NOT add caching or
+ * suppression here; the guard is meant to be noisy when degraded.
+ */
+export function emitQualityWarnings(warnings: readonly QualityWarning[]): void {
+  for (const warning of warnings) {
+    // Stable log shape: `[retrieval:quality] <code> severity=<s> detail=<d>`
+    // Using console.warn per spec — no new telemetry libs.
+    // eslint-disable-next-line no-console
+    console.warn(
+      `[retrieval:quality] ${warning.code} severity=${warning.severity} detail=${warning.detail}`
+    );
+  }
+}
 
 export interface RankingCalibrationWeights {
   frequencyBonusScale: number;
@@ -42,6 +175,14 @@ export const RANKING_V3_WEIGHT_SNAPSHOT: RankingCalibrationWeights = {
   v3DepthPenaltyPerLevel: 0.0025,
 };
 
+// p2-calibrate: rerank-acceptance / score-floor thresholds are intentionally
+// left at their current values. Tightening requires the fixture-pack baseline
+// (tracked separately) to avoid regressions in sibling retrieval tests. The
+// quality-guard warnings surfaced via `computeQualityWarnings` are the
+// telemetry hook that will drive the next bump.
+// TODO(p2-calibrate): once the fixture baseline is in place, reduce
+//   `maxTop1Top2Gap` and `maxTopKSpread` conservatively (~-10%) and raise
+//   `minCandidateCount` to tighten rerank acceptance.
 export const RANKING_HARD_QUERY_GATE: RankingGateThresholds = {
   minCandidateCount: 4,
   maxTop1Top2Gap: 0.08,

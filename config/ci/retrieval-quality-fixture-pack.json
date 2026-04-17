@@ -52,6 +52,116 @@
             "judgments": [
               { "path": "scripts/ci/generate-weekly-retrieval-trend-report.ts", "grade": 3 }
             ]
+          },
+          {
+            "id": "polyglot-python-compute-total",
+            "language": "python",
+            "kind": "function-locator",
+            "query": "python compute_total items price qty sum",
+            "file": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "gold_chunk_ranges": [{ "start_line": 4, "end_line": 8 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/python/sample.py", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-python-order-processor",
+            "language": "python",
+            "kind": "class-locator",
+            "query": "python OrderProcessor class tax_rate process",
+            "file": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "gold_chunk_ranges": [{ "start_line": 11, "end_line": 17 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/python/sample.py", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-go-compute-total",
+            "language": "go",
+            "kind": "function-locator",
+            "query": "go ComputeTotal items price qty aggregate",
+            "file": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "gold_chunk_ranges": [{ "start_line": 8, "end_line": 14 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/go/sample.go", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-go-order-processor",
+            "language": "go",
+            "kind": "struct-locator",
+            "query": "go OrderProcessor struct TaxRate Process method",
+            "file": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "gold_chunk_ranges": [{ "start_line": 16, "end_line": 22 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/go/sample.go", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-rust-compute-total",
+            "language": "rust",
+            "kind": "function-locator",
+            "query": "rust compute_total items price qty slice",
+            "file": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "gold_chunk_ranges": [{ "start_line": 6, "end_line": 12 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-rust-order-processor",
+            "language": "rust",
+            "kind": "struct-locator",
+            "query": "rust OrderProcessor struct tax_rate impl process",
+            "file": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "gold_chunk_ranges": [{ "start_line": 14, "end_line": 22 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-java-compute-total",
+            "language": "java",
+            "kind": "function-locator",
+            "query": "java computeTotal static method items price qty",
+            "file": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "gold_chunk_ranges": [{ "start_line": 7, "end_line": 15 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/java/Sample.java", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-java-order-processor",
+            "language": "java",
+            "kind": "class-locator",
+            "query": "java OrderProcessor class taxRate process",
+            "file": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "gold_chunk_ranges": [{ "start_line": 18, "end_line": 28 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/java/Sample.java", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-csharp-compute-total",
+            "language": "csharp",
+            "kind": "function-locator",
+            "query": "csharp ComputeTotal static method items price qty",
+            "file": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "gold_chunk_ranges": [{ "start_line": 5, "end_line": 14 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs", "grade": 3 }
+            ]
+          },
+          {
+            "id": "polyglot-csharp-order-processor",
+            "language": "csharp",
+            "kind": "class-locator",
+            "query": "csharp OrderProcessor class TaxRate Process",
+            "file": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "gold_chunk_ranges": [{ "start_line": 16, "end_line": 26 }],
+            "judgments": [
+              { "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs", "grade": 3 }
+            ]
           }
         ]
       }

@@ -25,6 +25,11 @@ export interface EmbeddingRuntimeSelection {
   vectorDimension: number;
 }
 
+export interface EmbeddingRuntimeDowngrade {
+  reason: string;
+  since: string | null;
+}
+
 export interface EmbeddingRuntimeStatus {
   state: 'uninitialized' | 'healthy' | 'degraded';
   configured: EmbeddingRuntimeSelection;
@@ -34,6 +39,8 @@ export interface EmbeddingRuntimeStatus {
   lastFailure?: string;
   lastFailureAt?: string;
   nextRetryAt?: string;
+  hashFallbackActive: boolean;
+  downgrade: EmbeddingRuntimeDowngrade | null;
 }
 
 export interface ConfiguredEmbeddingRuntimeOptions {
@@ -154,8 +161,34 @@ function selectionFromRuntime(runtime: Pick<EmbeddingRuntime, 'id' | 'modelId' |
   return createRuntimeSelection(runtime.id, runtime.modelId, runtime.vectorDimension);
 }
 
+function isHashRuntimeId(id: string): boolean {
+  return id.startsWith('hash-');
+}
+
+function computeHashFallbackActive(status: Pick<EmbeddingRuntimeStatus, 'active' | 'configured'>): boolean {
+  return isHashRuntimeId(status.active.id) && !isHashRuntimeId(status.configured.id);
+}
+
+function computeDowngrade(
+  status: Pick<EmbeddingRuntimeStatus, 'state' | 'active' | 'configured' | 'loadFailures' | 'lastFailureAt'>
+): EmbeddingRuntimeDowngrade | null {
+  if (status.active.id !== status.configured.id) {
+    return {
+      reason: `active runtime "${status.active.id}" differs from configured "${status.configured.id}"`,
+      since: status.lastFailureAt ?? null,
+    };
+  }
+  if (status.loadFailures > 0 && status.state !== 'healthy') {
+    return {
+      reason: `embedding runtime unavailable after ${status.loadFailures} load failure(s)`,
+      since: status.lastFailureAt ?? null,
+    };
+  }
+  return null;
+}
+
 function cloneRuntimeStatus(status: EmbeddingRuntimeStatus): EmbeddingRuntimeStatus {
-  return {
+  const base = {
     state: status.state,
     configured: cloneRuntimeSelection(status.configured),
     active: cloneRuntimeSelection(status.active),
@@ -164,6 +197,11 @@ function cloneRuntimeStatus(status: EmbeddingRuntimeStatus): EmbeddingRuntimeSta
     lastFailure: status.lastFailure,
     lastFailureAt: status.lastFailureAt,
     nextRetryAt: status.nextRetryAt,
+  };
+  return {
+    ...base,
+    hashFallbackActive: computeHashFallbackActive(base),
+    downgrade: computeDowngrade(base),
   };
 }
 
@@ -185,6 +223,8 @@ function ensureRuntimeStatus(
     active: cloneRuntimeSelection(configured),
     fallback: cloneRuntimeSelection(fallback),
     loadFailures: 0,
+    hashFallbackActive: false,
+    downgrade: null,
   };
   store.set(cacheKey, created);
   return created;
@@ -504,6 +544,8 @@ export function describeConfiguredEmbeddingRuntimeStatus(
     active: cloneRuntimeSelection(configuredSelection),
     fallback: selectionFromRuntime(fallbackRuntime),
     loadFailures: 0,
+    hashFallbackActive: false,
+    downgrade: null,
   };
 }
 
