@@ -16,6 +16,7 @@
     "test": "node --experimental-vm-modules node_modules/jest/bin/jest.js",
     "test:watch": "node --experimental-vm-modules node_modules/jest/bin/jest.js --watch",
     "test:coverage": "node --experimental-vm-modules node_modules/jest/bin/jest.js --coverage",
+    "install:polyglot-grammars": "npm install --no-save tree-sitter-python@0.21.0 tree-sitter-go@0.21.2 tree-sitter-rust@0.21.0 tree-sitter-java@0.21.0 tree-sitter-c-sharp@0.21.3",
     "verify": "node verify-setup.js",
     "index": "tsx src/index.ts --workspace . --index",
     "inspector": "npx @modelcontextprotocol/inspector tsx src/index.ts --workspace .",

@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const REPO_ROOT = resolve(__dirname, "..", "..");
+const PACKAGE_JSON_PATH = resolve(REPO_ROOT, "package.json");
 const FIXTURE_PATH = resolve(
   REPO_ROOT,
   "config",
@@ -13,6 +14,13 @@ const FIXTURE_PATH = resolve(
 );
 
 const NEW_LANGUAGES = ["python", "go", "rust", "java", "csharp"] as const;
+const EXPECTED_GRAMMAR_DEPENDENCIES: Record<(typeof NEW_LANGUAGES)[number], string> = {
+  python: "tree-sitter-python@0.21.0",
+  go: "tree-sitter-go@0.21.2",
+  rust: "tree-sitter-rust@0.21.0",
+  java: "tree-sitter-java@0.21.0",
+  csharp: "tree-sitter-c-sharp@0.21.3",
+};
 
 type Case = {
   id: string;
@@ -105,6 +113,20 @@ describe("polyglot retrieval fixture pack", () => {
     // Snapshot stable language coverage for downstream slicers.
     const covered = NEW_LANGUAGES.filter((l) => (distribution[l] ?? 0) > 0).sort();
     expect(covered).toEqual([...NEW_LANGUAGES].sort());
+  });
+
+  test("package.json exposes an opt-in polyglot grammar installer with pinned versions", () => {
+    const packageJson = JSON.parse(readFileSync(PACKAGE_JSON_PATH, "utf8")) as {
+      scripts?: Record<string, string>;
+    };
+    const installScript = packageJson.scripts?.["install:polyglot-grammars"];
+
+    expect(typeof installScript).toBe("string");
+    expect(installScript).toContain("npm install --no-save");
+
+    for (const lang of NEW_LANGUAGES) {
+      expect(installScript).toContain(EXPECTED_GRAMMAR_DEPENDENCIES[lang]);
+    }
   });
 
   test("existing TS/TSX-era cases are preserved (no language field mutation)", () => {

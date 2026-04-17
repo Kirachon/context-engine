@@ -1,10 +1,30 @@
 import { describe, expect, it } from '@jest/globals';
+import { createRequire } from 'node:module';
 import {
   createTreeSitterChunkParser,
   listSupportedTreeSitterLanguages,
   type TreeSitterRuntime,
 } from '../../src/internal/retrieval/treeSitterChunkParser.js';
 import { splitIntoChunks } from '../../src/internal/retrieval/chunking.js';
+
+const nodeRequire = createRequire(import.meta.url);
+
+const POLYGLOT_GRAMMAR_PACKAGES = {
+  python: 'tree-sitter-python',
+  go: 'tree-sitter-go',
+  rust: 'tree-sitter-rust',
+  java: 'tree-sitter-java',
+  csharp: 'tree-sitter-c-sharp',
+} as const;
+
+function isOptionalDependencyInstalled(packageName: string): boolean {
+  try {
+    nodeRequire.resolve(packageName);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 interface LanguageCase {
   id: 'python' | 'go' | 'rust' | 'java' | 'csharp';
@@ -126,16 +146,21 @@ describe('polyglot tree-sitter chunking', () => {
   const parser = createTreeSitterChunkParser();
 
   for (const testCase of LANGUAGE_CASES) {
+    const grammarPackage = POLYGLOT_GRAMMAR_PACKAGES[testCase.id];
+    const installedDependency = isOptionalDependencyInstalled(grammarPackage);
     const canRun = Boolean(parser) && supported.has(testCase.id);
-    const maybeIt = canRun ? it : it.skip;
+    const requireRuntime = installedDependency;
+    const maybeIt = canRun ? it : requireRuntime ? it : it.skip;
     const label = canRun
       ? `produces at least one declaration chunk for ${testCase.id}`
-      : `skips ${testCase.id}: grammar package not installed`;
+      : requireRuntime
+        ? `requires ${testCase.id} grammar at runtime when ${grammarPackage} is installed`
+        : `skips ${testCase.id}: grammar package not installed`;
 
     maybeIt(label, () => {
       if (!canRun) {
-        // eslint-disable-next-line no-console
-        console.log(`[polyglotChunking] skipping ${testCase.id}: grammar unavailable`);
+        expect(parser).toBeTruthy();
+        expect(supported.has(testCase.id)).toBe(true);
         return;
       }
       const filePath = `sample/sample.${testCase.extension}`;

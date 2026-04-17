@@ -13,38 +13,38 @@
 
 ## Enabling polyglot parsing
 
-The non-TypeScript grammar packages are **not** declared in `package.json` today
-because:
+The non-TypeScript grammar packages are pinned to the 0.21-era releases that
+match the repo's current `tree-sitter@^0.21.1` runtime:
 
-1. Tree-sitter grammars require native compilation (C toolchain + Python) that
-   many CI and developer environments do not have by default.
-2. Grammar versions at 0.23.x require a `tree-sitter` major bump from the current
-   `^0.21.1`; that bump needs its own validation pass against the existing TS/TSX
-   chunker baselines.
+- `tree-sitter-python@0.21.0`
+- `tree-sitter-go@0.21.2`
+- `tree-sitter-rust@0.21.0`
+- `tree-sitter-java@0.21.0`
+- `tree-sitter-c-sharp@0.21.3`
 
-Until that upgrade lands, operators who want polyglot parsing can install the
-grammars explicitly in their own environment:
+They remain opt-in because these grammar bindings can require native build
+tooling (for example Python + a C/C++ toolchain) during installation. Install
+them only when you need polyglot parsing:
 
 ```bash
-npm install --no-save \
-  tree-sitter-python \
-  tree-sitter-go \
-  tree-sitter-rust \
-  tree-sitter-java \
-  tree-sitter-c-sharp
+npm run install:polyglot-grammars
 ```
 
+The script uses `npm install --no-save`, so default installs avoid running the
+native grammar build steps and do not widen the baseline dependency surface.
+
 At runtime, `createTreeSitterRuntime()` attempts `require()` for each grammar; if
-the module is absent or fails to load, the chunker silently falls back to
-heuristic chunking for that file. `listSupportedTreeSitterLanguages()` returns
-the subset currently available.
+the module is absent or fails to load, the chunker falls back to heuristic
+chunking for that file. `listSupportedTreeSitterLanguages()` returns the subset
+currently available.
 
 ## Tests
 
-- `tests/retrieval/polyglotChunking.test.ts` exercises each grammar if installed
-  and `it.skip`s otherwise (the skip reason is logged). This is intentional — see
-  tracking item `p2-polyglot-deps` for the follow-up that declares the grammars
-  and upgrades `tree-sitter`.
+- `tests/retrieval/polyglotChunking.test.ts` now treats an installed grammar as
+  required at runtime: if `node_modules` contains the pinned optional dependency
+  but the parser still does not advertise support, the test fails loudly instead
+  of silently skipping. Environments that do not install the opt-in grammars
+  still skip cleanly.
 - `tests/retrieval/polyglotFixturePack.test.ts` validates that the retrieval
-  fixture pack's polyglot cases reference real fixture files on disk regardless
-  of grammar availability.
+  fixture pack's polyglot cases reference real fixture files on disk and that
+  the opt-in installer keeps the expected grammar versions pinned.
