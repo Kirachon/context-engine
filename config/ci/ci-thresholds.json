@@ -1,0 +1,9 @@
+{
+  "mcpInitializeP95RegressionPct": 20,
+  "enhancementMrr10RegressionPct": 3,
+  "enhancementEmptyContextRiseRatePct": 5,
+  "providerFailureRatePct": 1,
+  "providerFailureWindow": 500,
+  "requiredLaneCatchRateMinPct": 95,
+  "timeToFirstToolCallRegressionPct": 25
+}

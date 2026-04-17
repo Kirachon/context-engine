@@ -1,3 +1,7 @@
+# REQUIRED PR GATES (per context-engine-audit-response-swarm-plan.md § E.8):
+# - Phase 1 transport/cancellation checks
+# - Phase 2 retrieval no-silent-downgrade checks
+# - Phase 2.5/3 provider conformance checks
 name: Context Engine Review
 
 on:

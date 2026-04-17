@@ -15,6 +15,7 @@ import type { Server } from 'http';
 import { randomUUID } from 'node:crypto';
 import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import helmet from 'helmet';
 import {
     CallToolRequestSchema,
     GetPromptRequestSchema,
@@ -24,6 +25,7 @@ import {
     ReadResourceRequestSchema,
     isInitializeRequest,
 } from '@modelcontextprotocol/sdk/types.js';
+import { envString } from '../config/env.js';
 import { featureEnabled } from '../config/features.js';
 import type { ContextServiceClient } from '../mcp/serviceClient.js';
 import { MCP_SERVER_VERSION } from '../mcp/tools/manifest.js';
@@ -43,6 +45,9 @@ import {
     loggingMiddleware,
     errorHandler,
     HttpError,
+    createApiRateLimitMiddleware,
+    createMcpConnectionRateLimitMiddleware,
+    createRequestTimeoutMiddleware,
 } from './middleware/index.js';
 import { updateRequestContext } from '../telemetry/requestContext.js';
 import {
@@ -65,6 +70,16 @@ type McpHttpSession = {
     closed: boolean;
     closeServerPromise?: Promise<void>;
 };
+
+const DEFAULT_HTTP_BIND_HOST = '127.0.0.1';
+const API_JSON_LIMIT = '1mb';
+// MCP payloads can carry large prompts/context; keep the ceiling generous to
+// avoid breaking legitimate traffic. Per roadmap Appendix E.1 SSE carve-out:
+// /mcp must not inherit the /api/v1 body-size limit.
+const MCP_JSON_LIMIT = '16mb';
+const API_REQUEST_TIMEOUT_MS = 30_000;
+const SERVER_KEEP_ALIVE_TIMEOUT_MS = 65_000;
+const SERVER_HEADERS_TIMEOUT_MS = 70_000;
 
 function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
     const server = new McpServer(
@@ -121,6 +136,8 @@ function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
 export interface HttpServerOptions {
     /** Port to listen on (default: 3333) */
     port?: number;
+    /** Host interface to bind the HTTP server to (default: 127.0.0.1) */
+    bindHost?: string;
     /** Server version for health endpoint */
     version?: string;
     /** Optional auth hook for HTTP MCP routes. Disabled by default. */
@@ -137,6 +154,7 @@ export class ContextEngineHttpServer {
     private app: Express;
     private server: Server | null = null;
     private readonly port: number;
+    private readonly bindHost: string;
     private readonly version: string;
     private readonly authHook?: HttpAuthHook;
     private readonly mcpSessions = new Map<string, McpHttpSession>();
@@ -150,8 +168,9 @@ export class ContextEngineHttpServer {
                 ? (serviceClient as { getWorkspacePath: () => string }).getWorkspacePath()
                 : process.cwd();
         initializePlanManagementServices(workspacePath);
-        this.port = options.port || 3333;
-        this.version = options.version || '1.0.0';
+        this.port = options.port ?? 3333;
+        this.bindHost = options.bindHost ?? envString('CE_HTTP_HOST', DEFAULT_HTTP_BIND_HOST) ?? DEFAULT_HTTP_BIND_HOST;
+        this.version = options.version ?? '1.0.0';
         this.authHook = options.authHook;
         this.app = this.createApp();
     }
@@ -163,7 +182,6 @@ export class ContextEngineHttpServer {
         const app = express();
 
         // Middleware
-        app.use(express.json());
         app.use(createCorsMiddleware());
         app.use(loggingMiddleware);
 
@@ -184,8 +202,19 @@ export class ContextEngineHttpServer {
         }
 
         // API routes under /api/v1
+        app.use('/api/v1', createRequestTimeoutMiddleware(API_REQUEST_TIMEOUT_MS));
+        app.use('/api/v1', createApiRateLimitMiddleware());
+        app.use('/api/v1', express.json({ limit: API_JSON_LIMIT }));
+        app.use('/api/v1', helmet());
         app.use('/api/v1', createStatusRouter(this.serviceClient));
         app.use('/api/v1', createToolsRouter(this.serviceClient));
+        app.use('/mcp', express.json({ limit: MCP_JSON_LIMIT }));
+        app.use('/mcp', helmet({
+            contentSecurityPolicy: false,
+            crossOriginEmbedderPolicy: false,
+            crossOriginResourcePolicy: false,
+        }));
+        app.use('/mcp', createMcpConnectionRateLimitMiddleware());
         app.use('/mcp', async (req, _res, next) => {
             try {
                 await this.enforceMcpTransportPolicy(req);
@@ -223,13 +252,31 @@ export class ContextEngineHttpServer {
     async start(): Promise<void> {
         return new Promise((resolve, reject) => {
             try {
-                this.server = this.app.listen(this.port, () => {
-                    console.error(`[HTTP] Server listening on http://localhost:${this.port}`);
-                    console.error(`[HTTP] Health: http://localhost:${this.port}/health`);
-                    console.error(`[HTTP] API: http://localhost:${this.port}/api/v1/`);
-                    console.error(`[HTTP] MCP: http://localhost:${this.port}/mcp`);
+                if (this.bindHost === '0.0.0.0') {
+                    console.warn('[HTTP] WARNING: Binding to 0.0.0.0 exposes the HTTP transport to the network.');
+                }
+
+                this.server = this.app.listen(this.port, this.bindHost, () => {
+                    if (!this.server) {
+                        reject(new Error('HTTP server failed to initialize'));
+                        return;
+                    }
+
+                    // Server-level (Node http.Server) timeouts are shared across all routes
+                    // on this server. We intentionally pick SSE-safe values so `/mcp` streams
+                    // survive idle periods. The tighter `/api/v1` per-request timeout
+                    // (API_REQUEST_TIMEOUT_MS) is enforced by createRequestTimeoutMiddleware
+                    // at the route level, not via socket-level timeouts. See roadmap Appendix E.1.
+                    this.server.requestTimeout = 0;
+                    this.server.keepAliveTimeout = SERVER_KEEP_ALIVE_TIMEOUT_MS;
+                    this.server.headersTimeout = SERVER_HEADERS_TIMEOUT_MS;
+                    const displayHost = this.bindHost === '0.0.0.0' ? 'localhost' : this.bindHost;
+                    console.error(`[HTTP] Server listening on http://${displayHost}:${this.port}`);
+                    console.error(`[HTTP] Health: http://${displayHost}:${this.port}/health`);
+                    console.error(`[HTTP] API: http://${displayHost}:${this.port}/api/v1/`);
+                    console.error(`[HTTP] MCP: http://${displayHost}:${this.port}/mcp`);
                     if (featureEnabled('metrics') && featureEnabled('http_metrics')) {
-                        console.error(`[HTTP] Metrics: http://localhost:${this.port}/metrics`);
+                        console.error(`[HTTP] Metrics: http://${displayHost}:${this.port}/metrics`);
                     }
                     resolve();
                 });

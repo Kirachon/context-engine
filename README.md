@@ -225,13 +225,14 @@ npm run ci:check:legacy-capability-parity:strict
 
 ## Documentation Quick Links
 
+- Docs Map: [docs/README.md](docs/README.md)
 - Setup: [docs/MCP_CLIENT_SETUP.md](docs/MCP_CLIENT_SETUP.md)
 - Windows Deployment: [docs/WINDOWS_DEPLOYMENT_GUIDE.md](docs/WINDOWS_DEPLOYMENT_GUIDE.md)
 - Troubleshooting: [docs/archive/TROUBLESHOOTING.md](docs/archive/TROUBLESHOOTING.md)
 - Testing: [docs/archive/TESTING.md](docs/archive/TESTING.md)
 - Architecture: [ARCHITECTURE.md](ARCHITECTURE.md)
 - Memory Operations: [docs/MEMORY_OPERATIONS_RUNBOOK.md](docs/MEMORY_OPERATIONS_RUNBOOK.md)
-- All Docs: [docs/archive/INDEX.md](docs/archive/INDEX.md)
+- Archive: [docs/archive/INDEX.md](docs/archive/INDEX.md)
 
 ## Current Status
 

@@ -83,6 +83,9 @@ jobs:
             exit 1
           fi
 
+      # TODO(required-lane-fixture-pack): release lane should select the multilingual/
+      # polyglot ~144-case pack from Appendix E.10 once scripts/ci/release-bench.ts
+      # exposes an explicit fixture-pack input; current helper uses the default pack.
       - name: Run release benchmark gate
         shell: bash
         run: |

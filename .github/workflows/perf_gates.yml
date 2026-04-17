@@ -1,3 +1,7 @@
+# REQUIRED PR GATES (per context-engine-audit-response-swarm-plan.md § E.8):
+# - Phase 1 transport/cancellation checks
+# - Phase 2 retrieval no-silent-downgrade checks
+# - Phase 2.5/3 provider conformance checks
 name: Performance Gates
 
 on:
@@ -39,6 +43,8 @@ jobs:
       - name: Check brand detachment guard
         run: npm run ci:check:brand-detachment
 
+      # Fixture-pack lane: PR-blocking smoke stays on the small checked-in pack
+      # (config/ci/retrieval-quality-fixture-pack.json, currently 5 holdout cases).
       - name: Run benchmark suite and compare (PR mode)
         run: npm run bench:ci:pr
 
@@ -79,6 +85,9 @@ jobs:
       - name: Check brand detachment guard
         run: npm run ci:check:brand-detachment
 
+      # TODO(required-lane-fixture-pack): nightly should select the multilingual/polyglot
+      # ~144-case pack from Appendix E.10 once an explicit pack/file flag exists in the
+      # bench helper; current workflow still uses the default checked-in pack.
       - name: Run benchmark suite and compare (Nightly mode)
         run: npm run bench:ci:nightly
 

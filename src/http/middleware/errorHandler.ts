@@ -61,6 +61,25 @@ export function errorHandler(
         return;
     }
 
+    const expressStatusCode =
+        typeof (err as { statusCode?: unknown }).statusCode === 'number'
+            ? (err as unknown as { statusCode: number }).statusCode
+            : typeof (err as { status?: unknown }).status === 'number'
+                ? (err as unknown as { status: number }).status
+                : undefined;
+
+    if (expressStatusCode !== undefined) {
+        const sanitizedMessage = expressStatusCode >= 500
+            ? 'Internal server error'
+            : 'Request failed';
+
+        res.status(expressStatusCode).json({
+            error: sanitizedMessage,
+            statusCode: expressStatusCode,
+        });
+        return;
+    }
+
     // Default to 500 for unknown errors
     res.status(500).json({
         error: 'Internal server error',
