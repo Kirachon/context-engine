@@ -1522,6 +1522,29 @@ describe('ContextServiceClient', () => {
       expect(providerCall).toHaveBeenCalledTimes(1);
     });
 
+    it('should forward signal and deadline metadata to the provider call', async () => {
+      const providerCall = configureOpenAISemanticProvider(client, 'provider success');
+      const controller = new AbortController();
+      const startedAt = Date.now();
+
+      const result = await client.searchAndAsk('retry query', 'retry prompt', {
+        timeoutMs: 12_000,
+        signal: controller.signal,
+      });
+
+      expect(result).toBe('provider success');
+      expect(providerCall).toHaveBeenCalledTimes(1);
+      const request = providerCall.mock.calls[0][0] as {
+        timeoutMs: number;
+        signal?: AbortSignal;
+        deadlineMs?: number;
+      };
+      expect(request.timeoutMs).toBe(12_000);
+      expect(request.signal).toBe(controller.signal);
+      expect(typeof request.deadlineMs).toBe('number');
+      expect(request.deadlineMs).toBeGreaterThan(startedAt);
+    });
+
     it('should propagate provider errors', async () => {
       const providerCall = configureOpenAISemanticProvider(client, new Error('Network timeout'));
 

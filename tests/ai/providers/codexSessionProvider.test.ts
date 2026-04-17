@@ -6,7 +6,15 @@ type SpawnPlan = {
   stdout?: string;
   stderr?: string;
   error?: NodeJS.ErrnoException;
-  onSpawn?: (args: string[]) => void;
+  deferClose?: boolean;
+  onSpawn?: (
+    args: string[],
+    controls: {
+      close: (code?: number) => void;
+      error: (error: NodeJS.ErrnoException) => void;
+      kill: jest.Mock;
+    }
+  ) => void;
 };
 
 type SpawnCall = {
@@ -23,11 +31,17 @@ describe('CodexSessionProvider wrapper args', () => {
   const spawnMock = jest.fn((command: string, args: string[]) => {
     const plan = spawnPlans.shift() ?? {};
     spawnCalls.push({ command, args: [...args] });
-    plan.onSpawn?.(args);
 
     const stdoutHandlers: Array<(chunk: string) => void> = [];
     const stderrHandlers: Array<(chunk: string) => void> = [];
     const processHandlers: Record<string, ((code?: number) => void) | undefined> = {};
+    const kill = jest.fn();
+    const controls = {
+      close: (code?: number) => processHandlers.close?.(code),
+      error: (error: NodeJS.ErrnoException) => processHandlers.error?.(error as never),
+      kill,
+    };
+    plan.onSpawn?.(args, controls);
 
     return {
       pid: 4321,
@@ -45,8 +59,11 @@ describe('CodexSessionProvider wrapper args', () => {
         write: jest.fn(),
         end: jest.fn(() => {
           queueMicrotask(() => {
+            if (plan.deferClose) {
+              return;
+            }
             if (plan.error) {
-              processHandlers.error?.(plan.error as never);
+              controls.error(plan.error);
               return;
             }
             if (plan.stdout) {
@@ -55,14 +72,14 @@ describe('CodexSessionProvider wrapper args', () => {
             if (plan.stderr) {
               for (const handler of stderrHandlers) handler(plan.stderr);
             }
-            processHandlers.close?.(plan.exitCode ?? 0);
+            controls.close(plan.exitCode ?? 0);
           });
         }),
       },
       on: (event: string, handler: (code?: number) => void) => {
         processHandlers[event] = handler;
       },
-      kill: jest.fn(),
+      kill,
     };
   });
 
@@ -288,7 +305,7 @@ describe('CodexSessionProvider wrapper args', () => {
     const { AIProviderError } = await import('../../../src/ai/providers/types.js');
 
     const provider = new CodexSessionProvider();
-    jest.spyOn(provider as any, 'ensureSessionReady').mockRejectedValue(
+    jest.spyOn(provider as any, 'ensureSessionReadyWithTimeout').mockRejectedValue(
       new AIProviderError({
         code: 'provider_timeout',
         provider: 'openai_session',
@@ -317,7 +334,7 @@ describe('CodexSessionProvider wrapper args', () => {
     const { AIProviderError } = await import('../../../src/ai/providers/types.js');
 
     const provider = new CodexSessionProvider();
-    jest.spyOn(provider as any, 'ensureSessionReady').mockRejectedValue(
+    jest.spyOn(provider as any, 'ensureSessionReadyWithTimeout').mockRejectedValue(
       new AIProviderError({
         code: 'provider_unavailable',
         provider: 'openai_session',
@@ -335,5 +352,106 @@ describe('CodexSessionProvider wrapper args', () => {
       })
     ).rejects.toMatchObject({ code: 'provider_unavailable' });
     expect(spawnCalls).toHaveLength(0);
+  });
+
+  it('aborts an in-flight exec request and kills the spawned process', async () => {
+    const originalPlatform = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'linux' });
+    process.env.CE_OPENAI_SESSION_CMD = 'codex';
+
+    spawnPlans.push({ stdout: 'Logged in via ChatGPT' });
+    let execControls:
+      | {
+          close: (code?: number) => void;
+          error: (error: NodeJS.ErrnoException) => void;
+          kill: jest.Mock;
+        }
+      | undefined;
+    let resolveExecSpawned: (() => void) | undefined;
+    const execSpawned = new Promise<void>((resolve) => {
+      resolveExecSpawned = resolve;
+    });
+    spawnPlans.push({
+      deferClose: true,
+      onSpawn: (_args, controls) => {
+        execControls = controls;
+        controls.kill.mockImplementation(() => {
+          controls.close(1);
+        });
+        resolveExecSpawned?.();
+      },
+    });
+
+    try {
+      jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+      const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+
+      const provider = new CodexSessionProvider();
+      const controller = new AbortController();
+      const pending = provider.call({
+        searchQuery: 'abort me',
+        prompt: 'abort me',
+        timeoutMs: 20_000,
+        workspacePath: process.cwd(),
+        signal: controller.signal,
+      });
+
+      await execSpawned;
+      controller.abort();
+
+      await expect(pending).rejects.toMatchObject({ code: 'provider_aborted' });
+      expect(execControls).toBeDefined();
+      expect(execControls!.kill).toHaveBeenCalledTimes(1);
+    } finally {
+      Object.defineProperty(process, 'platform', { value: originalPlatform });
+    }
+  });
+
+  it('reports health without throwing when readiness succeeds', async () => {
+    process.env.CE_OPENAI_SESSION_CMD = 'codex';
+    spawnPlans.push({ stdout: 'Logged in via ChatGPT' });
+
+    jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+    const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+
+    const provider = new CodexSessionProvider();
+    await expect(provider.health?.()).resolves.toEqual({ ok: true });
+  });
+
+  it('uses the remaining absolute deadline budget for readiness and exec', async () => {
+    process.env.CE_OPENAI_SESSION_CMD = 'codex';
+    spawnPlans.push({ stdout: 'Logged in via ChatGPT' });
+    spawnPlans.push({
+      stdout: '{"ok":true}',
+      onSpawn: (args) => {
+        const outputIdx = args.indexOf('--output-last-message');
+        if (outputIdx >= 0 && args[outputIdx + 1]) {
+          fs.writeFileSync(args[outputIdx + 1], 'deadline budget output', 'utf-8');
+        }
+      },
+    });
+
+    jest.unstable_mockModule('node:child_process', () => ({ spawn: spawnMock }));
+    const { CodexSessionProvider } = await import('../../../src/ai/providers/codexSessionProvider.js');
+
+    const provider = new CodexSessionProvider();
+    const runSpy = jest.spyOn(provider as any, 'runWithCommandFallback');
+    const deadlineMs = Date.now() + 2_000;
+
+    const response = await provider.call({
+      searchQuery: 'deadline budget',
+      prompt: 'deadline budget',
+      timeoutMs: 20_000,
+      deadlineMs,
+      workspacePath: process.cwd(),
+    });
+
+    expect(response.text).toBe('deadline budget output');
+    expect(runSpy).toHaveBeenCalledTimes(2);
+    const readinessCall = runSpy.mock.calls[0]?.[0] as { timeoutMs: number } | undefined;
+    const execCall = runSpy.mock.calls[1]?.[0] as { timeoutMs: number } | undefined;
+    expect(readinessCall?.timeoutMs).toBeLessThanOrEqual(2_000);
+    expect(execCall?.timeoutMs).toBeLessThan(20_000);
+    expect(execCall?.timeoutMs).toBeGreaterThan(0);
   });
 });

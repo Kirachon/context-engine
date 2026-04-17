@@ -96,6 +96,7 @@ async function runCommand(args: {
   cwd: string;
   timeoutMs: number;
   stdin?: string;
+  signal?: AbortSignal;
 }): Promise<SpawnResult> {
   const normalizedCwd =
     process.platform === 'win32' && args.cwd.startsWith('\\\\?\\')
@@ -103,6 +104,17 @@ async function runCommand(args: {
       : args.cwd;
 
   return new Promise<SpawnResult>((resolve, reject) => {
+    if (args.signal?.aborted) {
+      reject(
+        new AIProviderError({
+          code: 'provider_aborted',
+          provider: 'openai_session',
+          message: 'Codex session request was aborted before the subprocess started.',
+        })
+      );
+      return;
+    }
+
     const proc = spawn(args.command, args.commandArgs, {
       cwd: normalizedCwd,
       shell: false,
@@ -114,9 +126,10 @@ async function runCommand(args: {
     let stderr = '';
     let settled = false;
     let timedOut = false;
+    let aborted = false;
+    const abortMessage = 'Codex session request was aborted.';
 
-    const timeoutId = setTimeout(() => {
-      timedOut = true;
+    const terminateProcess = (): void => {
       if (process.platform === 'win32' && typeof proc.pid === 'number') {
         const killer = spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], {
           windowsHide: true,
@@ -129,11 +142,39 @@ async function runCommand(args: {
       } else {
         proc.kill();
       }
+    };
+
+    const settleAbort = (message: string): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      args.signal?.removeEventListener('abort', onAbort);
+      reject(
+        new AIProviderError({
+          code: 'provider_aborted',
+          provider: 'openai_session',
+          message,
+        })
+      );
+    };
+
+    const onAbort = () => {
+      aborted = true;
+      terminateProcess();
+      setTimeout(() => {
+        settleAbort(abortMessage);
+      }, 3_000);
+    };
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      terminateProcess();
 
       // Some Windows process trees survive kill signals. Force-settle so callers don't hang.
       setTimeout(() => {
         if (settled) return;
         settled = true;
+        args.signal?.removeEventListener('abort', onAbort);
         resolve({
           exitCode: 1,
           stdout,
@@ -153,15 +194,25 @@ async function runCommand(args: {
 
     proc.on('error', (error) => {
       if (settled) return;
+      if (aborted) {
+        settleAbort(abortMessage);
+        return;
+      }
       settled = true;
       clearTimeout(timeoutId);
+      args.signal?.removeEventListener('abort', onAbort);
       reject(error);
     });
 
     proc.on('close', (code) => {
       if (settled) return;
+      if (aborted) {
+        settleAbort(abortMessage);
+        return;
+      }
       settled = true;
       clearTimeout(timeoutId);
+      args.signal?.removeEventListener('abort', onAbort);
       resolve({
         exitCode: typeof code === 'number' ? code : 1,
         stdout,
@@ -169,6 +220,14 @@ async function runCommand(args: {
         timedOut,
       });
     });
+
+    if (args.signal) {
+      args.signal.addEventListener('abort', onAbort, { once: true });
+      if (args.signal.aborted) {
+        onAbort();
+        return;
+      }
+    }
 
     if (args.stdin !== undefined) {
       proc.stdin.write(args.stdin);
@@ -189,6 +248,7 @@ export class CodexSessionProvider implements AIProvider {
   private readonly identityTtlMs: number;
   private identityCache: { checkedAt: number; isLoggedIn: boolean } | null = null;
   private selectedCommand: CommandSpec | null = null;
+  private lastWorkspacePath: string = process.cwd();
 
   constructor() {
     this.commandCandidates = this.buildCommandCandidates(process.env.CE_OPENAI_SESSION_CMD);
@@ -274,6 +334,7 @@ export class CodexSessionProvider implements AIProvider {
     cwd: string;
     timeoutMs: number;
     stdin?: string;
+    signal?: AbortSignal;
   }): Promise<SpawnResult> {
     const candidates = this.selectedCommand ? [this.selectedCommand] : this.commandCandidates;
     let lastNotFoundError: unknown;
@@ -299,6 +360,7 @@ export class CodexSessionProvider implements AIProvider {
           cwd: args.cwd,
           timeoutMs: args.timeoutMs,
           stdin: args.stdin,
+          signal: args.signal,
         });
         this.selectedCommand = candidate;
         return result;
@@ -314,7 +376,16 @@ export class CodexSessionProvider implements AIProvider {
     throw this.missingCommandError(lastNotFoundError);
   }
 
-  private async ensureSessionReady(workspacePath: string): Promise<void> {
+  private async ensureSessionReady(workspacePath: string, signal?: AbortSignal): Promise<void> {
+    const timeoutMs = this.healthcheckTimeoutMs;
+    return this.ensureSessionReadyWithTimeout(workspacePath, timeoutMs, signal);
+  }
+
+  private async ensureSessionReadyWithTimeout(
+    workspacePath: string,
+    timeoutMs: number,
+    signal?: AbortSignal
+  ): Promise<void> {
     const now = Date.now();
     if (
       this.refreshMode === 'ttl' &&
@@ -335,14 +406,15 @@ export class CodexSessionProvider implements AIProvider {
     const statusResult = await this.runWithCommandFallback({
       commandArgs: ['login', 'status'],
       cwd: workspacePath,
-      timeoutMs: this.healthcheckTimeoutMs,
+      timeoutMs,
+      signal,
     });
 
     if (statusResult.timedOut) {
       throw new AIProviderError({
         code: 'provider_timeout',
         provider: this.id,
-        message: `Codex login status check timed out after ${this.healthcheckTimeoutMs}ms.`,
+        message: `Codex login status check timed out after ${timeoutMs}ms.`,
         retryable: true,
       });
     }
@@ -366,9 +438,37 @@ export class CodexSessionProvider implements AIProvider {
     this.identityCache = { checkedAt: now, isLoggedIn: true };
   }
 
+  private getRemainingBudgetMs(
+    request: Pick<AIProviderRequest, 'timeoutMs' | 'deadlineMs'>,
+    operation: string
+  ): number {
+    const remainingMs =
+      typeof request.deadlineMs === 'number'
+        ? request.deadlineMs - Date.now()
+        : request.timeoutMs;
+    if (!Number.isFinite(remainingMs) || remainingMs <= 0) {
+      throw new AIProviderError({
+        code: 'provider_timeout',
+        provider: this.id,
+        message: `Codex session ${operation} timed out before execution started.`,
+        retryable: true,
+      });
+    }
+    return Math.max(1, Math.floor(remainingMs));
+  }
+
   async call(request: AIProviderRequest): Promise<AIProviderResponse> {
+    this.lastWorkspacePath = request.workspacePath;
+    const readinessTimeoutMs = Math.min(
+      this.healthcheckTimeoutMs,
+      this.getRemainingBudgetMs(request, 'request')
+    );
     try {
-      await this.ensureSessionReady(request.workspacePath);
+      await this.ensureSessionReadyWithTimeout(
+        request.workspacePath,
+        readinessTimeoutMs,
+        request.signal
+      );
     } catch (error) {
       // Some environments report inconsistent `login status` results.
       // Defer auth verdict to the actual `exec` call when readiness checks are inconclusive.
@@ -400,19 +500,21 @@ export class CodexSessionProvider implements AIProvider {
         '',
         request.prompt?.trim() || request.searchQuery,
       ].join('\n');
+      const execTimeoutMs = this.getRemainingBudgetMs(request, 'request');
 
       const result = await this.runWithCommandFallback({
         commandArgs,
         cwd: request.workspacePath,
-        timeoutMs: request.timeoutMs,
+        timeoutMs: execTimeoutMs,
         stdin: composedPrompt,
+        signal: request.signal,
       });
 
       if (result.timedOut) {
         throw new AIProviderError({
           code: 'provider_timeout',
           provider: this.id,
-          message: `Codex session request timed out after ${request.timeoutMs}ms.`,
+          message: `Codex session request timed out after ${execTimeoutMs}ms.`,
           retryable: true,
         });
       }
@@ -456,6 +558,18 @@ export class CodexSessionProvider implements AIProvider {
       });
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  async health(): Promise<{ ok: boolean; reason?: string }> {
+    try {
+      await this.ensureSessionReady(this.lastWorkspacePath);
+      return { ok: true };
+    } catch (error) {
+      return {
+        ok: false,
+        reason: error instanceof Error ? error.message : String(error),
+      };
     }
   }
 }

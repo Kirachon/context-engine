@@ -3904,6 +3904,7 @@ export class ContextServiceClient {
     const timeoutCandidate = options?.timeoutMs ?? defaultTimeoutMs;
     const requestedTimeoutMs = Number.isFinite(timeoutCandidate) ? timeoutCandidate : defaultTimeoutMs;
     const timeoutMs = Math.max(MIN_API_TIMEOUT_MS, Math.min(MAX_API_TIMEOUT_MS, requestedTimeoutMs));
+    const deadlineMs = Date.now() + timeoutMs;
     try {
       const admissionTimeoutError = this.getQueueTimeoutAdmissionError(timeoutMs, priority);
       if (admissionTimeoutError) {
@@ -3934,6 +3935,8 @@ export class ContextServiceClient {
             prompt,
             timeoutMs,
             workspacePath: this.workspacePath,
+            signal: options?.signal,
+            deadlineMs,
           });
           if (!innerResponse || typeof innerResponse !== 'object' || typeof innerResponse.text !== 'string') {
             throw new Error(
