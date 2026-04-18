@@ -9,15 +9,15 @@ import {
 } from '../../../src/ai/providers/registry.js';
 
 describe('provider descriptor registry', () => {
-  it('lists exactly one entry: openai_session, stable, all capabilities true', () => {
+  it('lists exactly one entry: openai_session, stable, with conservative adapter capabilities', () => {
     const arr = listProviderDescriptors();
     expect(arr).toHaveLength(1);
     const d = arr[0];
     expect(d.id).toBe('openai_session');
     expect(d.tier).toBe('stable');
-    expect(d.capabilities.streaming).toBe(true);
-    expect(d.capabilities.toolCalls).toBe(true);
-    expect(d.capabilities.structuredOutput).toBe(true);
+    expect(d.capabilities.streaming).toBe(false);
+    expect(d.capabilities.toolCalls).toBe(false);
+    expect(d.capabilities.structuredOutput).toBe(false);
   });
 
   it('returned array is frozen', () => {

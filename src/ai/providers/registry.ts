@@ -25,11 +25,11 @@ const OPENAI_SESSION: ProviderDescriptor = Object.freeze({
   displayName: 'OpenAI Codex Session',
   tier: 'stable' as const,
   capabilities: Object.freeze({
-    streaming: true,
-    toolCalls: true,
-    structuredOutput: true,
+    streaming: false,
+    toolCalls: false,
+    structuredOutput: false,
   }),
-  notes: 'Default and only stable provider. Backed by CodexSessionProvider.',
+  notes: 'Default and only stable provider. Backed by CodexSessionProvider via the conservative legacy adapter surface.',
 });
 
 const DESCRIPTORS: readonly ProviderDescriptor[] = Object.freeze([OPENAI_SESSION]);

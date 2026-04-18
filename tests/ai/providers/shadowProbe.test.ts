@@ -198,6 +198,27 @@ describe('runShadowProbe — per-provider outcomes', () => {
     expect(r.errors.some((e) => e.includes('timed out'))).toBe(true);
   });
 
+  it('aborts timed-out health checks via ProviderOperationOptions.signal', async () => {
+    let observedSignal: AbortSignal | undefined;
+    let observedDeadlineMs: number | undefined;
+    const health = jest.fn(async (options?: ProviderOperationOptions) => {
+      observedSignal = options?.signal;
+      observedDeadlineMs = options?.deadlineMs;
+      return await new Promise<ProviderHealthStatus>(() => undefined);
+    }) as HealthMock;
+    const stub = makeStubV1({ health });
+    const report = await runShadowProbe({
+      env: envOf(),
+      providers: [stub],
+      perCheckTimeoutMs: 20,
+    });
+    const r = report.results[0]!;
+    expect(r.outcome).toBe('unavailable');
+    expect(observedSignal).toBeDefined();
+    expect(observedSignal?.aborted).toBe(true);
+    expect(observedDeadlineMs).toBeGreaterThan(Date.now() - 1000);
+  });
+
   it('records readiness when defined and outcome stays ok', async () => {
     const readiness = jest.fn(async () => ({ ok: true })) as ReadinessMock;
     const stub = makeStubV1({ readiness });

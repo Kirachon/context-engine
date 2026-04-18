@@ -5,7 +5,7 @@
 // embed(), or rerank(); MUST NEVER access user prompts; and MUST NEVER
 // influence routing of real requests.
 
-import type { ProviderContractV1 } from './contract.js';
+import type { ProviderContractV1, ProviderHealthStatus, ProviderOperationOptions } from './contract.js';
 import type { ProviderEnvConfig } from './env.js';
 
 export type ShadowCheckOutcome = 'ok' | 'degraded' | 'unavailable' | 'skipped';
@@ -88,19 +88,23 @@ interface TimedOutcome {
 }
 
 async function runWithTimeout(
-  fn: () => Promise<{ ok: boolean; reason?: string }>,
+  fn: (options: ProviderOperationOptions) => Promise<ProviderHealthStatus>,
   timeoutMs: number,
 ): Promise<TimedOutcome> {
   const start = Date.now();
+  const controller = new AbortController();
+  const deadlineMs = start + timeoutMs;
+  const timeoutMessage = `probe timed out after ${timeoutMs}ms`;
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const timeoutPromise = new Promise<TimedOutcome>((resolve) => {
       timer = setTimeout(() => {
         resolve({
           status: 'timeout',
-          error: `probe timed out after ${timeoutMs}ms`,
+          error: timeoutMessage,
           latencyMs: Date.now() - start,
         });
+        controller.abort(new Error(timeoutMessage));
       }, timeoutMs);
       // Don't keep the event loop alive solely for this timer.
       if (typeof (timer as { unref?: () => void }).unref === 'function') {
@@ -110,7 +114,10 @@ async function runWithTimeout(
 
     const work: Promise<TimedOutcome> = (async () => {
       try {
-        const value = await fn();
+        const value = await fn({
+          signal: controller.signal,
+          deadlineMs,
+        });
         return {
           status: 'resolved',
           value: { ok: !!value?.ok, reason: value?.reason },
@@ -202,7 +209,7 @@ async function probeOne(
   let healthCallable = true;
   try {
     const fn = provider.health.bind(provider);
-    const outcome = await runWithTimeout(() => fn(), timeoutMs);
+    const outcome = await runWithTimeout(fn, timeoutMs);
     latencyMs.health = outcome.latencyMs;
     if (outcome.status === 'resolved' && outcome.value) {
       health = outcome.value;
@@ -262,7 +269,7 @@ async function probeOne(
   if (readinessPresent) {
     try {
       const readinessFn = provider.readiness!.bind(provider);
-      const outcome = await runWithTimeout(() => readinessFn(), timeoutMs);
+      const outcome = await runWithTimeout(readinessFn, timeoutMs);
       latencyMs.readiness = outcome.latencyMs;
       if (outcome.status === 'resolved' && outcome.value) {
         readiness = outcome.value;

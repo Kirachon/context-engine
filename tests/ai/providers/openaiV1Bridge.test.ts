@@ -272,6 +272,20 @@ describe('adaptV1ToLegacy', () => {
     expect(opts).toEqual({ signal, deadlineMs });
   });
 
+  it('derives a deadline from legacy timeoutMs when the caller does not provide one', async () => {
+    const { v1, generate } = makeStubV1();
+    const legacy = adaptV1ToLegacy(v1);
+    const before = Date.now();
+    await legacy.call({
+      searchQuery: 'q',
+      timeoutMs: 1000,
+      workspacePath: '/w',
+    });
+    const [, opts] = generate.mock.calls[0] ?? [];
+    expect(opts?.deadlineMs).toBeGreaterThanOrEqual(before + 900);
+    expect(opts?.deadlineMs).toBeLessThanOrEqual(before + 1500);
+  });
+
   it('falls back prompt to searchQuery when prompt is missing', async () => {
     const { v1, generate } = makeStubV1();
     const legacy = adaptV1ToLegacy(v1);

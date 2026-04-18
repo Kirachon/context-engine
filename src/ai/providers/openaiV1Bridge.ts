@@ -116,9 +116,13 @@ export function adaptV1ToLegacy(v1: ProviderContractV1): AIProvider {
         searchQuery: request.searchQuery,
         workspacePath: request.workspacePath,
       };
+      const derivedDeadlineMs =
+        typeof request.deadlineMs === 'number' && Number.isFinite(request.deadlineMs)
+          ? request.deadlineMs
+          : Date.now() + Math.max(1, request.timeoutMs);
       const opts: ProviderOperationOptions = {
         signal: request.signal,
-        deadlineMs: request.deadlineMs,
+        deadlineMs: derivedDeadlineMs,
       };
       const v1Resp = await v1.generate(v1Req, opts);
       const finishReason: AIProviderResponse['finishReason'] =

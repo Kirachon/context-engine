@@ -88,8 +88,16 @@ export async function runAbortableTool<T>(
     req: Request,
     timeoutMs: number,
     operation: string,
-    executor: (signal: AbortSignal) => Promise<T>
+    executor: (signal: AbortSignal) => Promise<T>,
+    res?: Pick<Response, 'setTimeout'>
 ): Promise<T> {
+    if (typeof req.setTimeout === 'function') {
+        req.setTimeout(timeoutMs);
+    }
+    if (res && typeof res.setTimeout === 'function') {
+        res.setTimeout(timeoutMs);
+    }
+
     const controller = new AbortController();
     const detach = attachRequestAbortSignal(req, controller, operation);
     const timeoutError = new HttpError(
@@ -476,7 +484,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                     },
                     serviceClient,
                     signal
-                )
+                ),
+                res
             );
 
             res.json({
@@ -508,7 +517,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                     args: CreatePlanArgs,
                     serviceClient: ContextServiceClient,
                     signal?: AbortSignal
-                ) => Promise<string>)(args, serviceClient, signal)
+                ) => Promise<string>)(args, serviceClient, signal),
+                res
             );
 
             res.json({ plan });
@@ -601,7 +611,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         { diff, file_contexts, options } as ReviewChangesArgs,
                         serviceClient,
                         signal
-                    )
+                    ),
+                res
             );
             const result = JSON.parse(resultJson);
             res.json(result);
@@ -631,7 +642,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         { target, base, include_patterns, options } as ReviewGitDiffArgs,
                         serviceClient,
                         signal
-                    )
+                    ),
+                res
             );
             const result = JSON.parse(resultJson);
             res.json(result);
@@ -657,7 +669,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         args: ReviewAutoArgs,
                         serviceClient: ContextServiceClient,
                         signal?: AbortSignal
-                    ) => Promise<string>)(args, serviceClient, signal)
+                    ) => Promise<string>)(args, serviceClient, signal),
+                res
             );
             const result = JSON.parse(resultJson);
             res.json(result);

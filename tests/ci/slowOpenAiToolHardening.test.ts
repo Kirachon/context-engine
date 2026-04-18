@@ -1,6 +1,6 @@
 import { EventEmitter } from 'events';
 import { spawnSync } from 'child_process';
-import type { Request } from 'express';
+import type { Request, Response } from 'express';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -236,5 +236,17 @@ describe('slow OpenAI tool hardening gate', () => {
       return 'done';
     });
     await expect(timeoutPromise).rejects.toThrow('timed out after 20ms');
+  });
+
+  it('extends request and response socket timeouts to match the tool budget', async () => {
+    const req = new EventEmitter() as Request & { setTimeout: jest.Mock };
+    const res = new EventEmitter() as Response & { setTimeout: jest.Mock };
+    req.setTimeout = jest.fn();
+    res.setTimeout = jest.fn();
+
+    await runAbortableTool(req, 250, 'Slow OpenAI tool', async () => 'done', res);
+
+    expect(req.setTimeout).toHaveBeenCalledWith(250);
+    expect(res.setTimeout).toHaveBeenCalledWith(250);
   });
 });
