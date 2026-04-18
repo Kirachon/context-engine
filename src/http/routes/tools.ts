@@ -19,7 +19,7 @@ import { validateExternalSources, validatePathScopeGlobs } from '../../mcp/tooli
 
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 const CONTEXT_TIMEOUT_MS = 60000;
-const AI_TOOL_TIMEOUT_MS = 120000;
+const AI_TOOL_TIMEOUT_MS = 300000;
 const INDEX_TIMEOUT_MS = 10 * 60 * 1000;
 const MIN_PLAN_TIMEOUT_MS = 30_000;
 const MAX_PLAN_TIMEOUT_MS = 30 * 60 * 1000;
