@@ -155,6 +155,11 @@ function run(): number {
         skipped_docs_rate_pct: envNum('CE_QA_DENSE_SKIPPED_DOCS_RATE_PCT', 0),
         embed_batch_p95_ms: envNum('CE_QA_DENSE_EMBED_BATCH_P95_MS', 45),
       },
+      routing_shadow: {
+        top1_overlap_rate_pct: envNum('CE_QA_SHADOW_TOP1_OVERLAP_RATE_PCT', 100),
+        symbol_route_activation_rate_pct: envNum('CE_QA_SYMBOL_ROUTE_ACTIVATION_RATE_PCT', 0),
+        symbol_route_misroute_rate_pct: envNum('CE_QA_SYMBOL_ROUTE_MISROUTE_RATE_PCT', 0),
+      },
       reproducibility_lock: {
         commit_sha: commitSha,
         dataset_id: datasetInfo.datasetId,

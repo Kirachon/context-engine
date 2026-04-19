@@ -12,10 +12,7 @@ type RetrievalCalibrationContract = {
     quality_ids: string[];
     diagnostic_ids: string[];
   };
-  diagnostic_receipts: {
-    skip_reasons: string;
-    truncation_reasons: string;
-  };
+  diagnostic_receipts: Record<string, string>;
   runtime_change_policy: {
     allow_default_profile_changes: boolean;
     allow_large_file_behavior_changes: boolean;
@@ -50,6 +47,7 @@ describe('config/ci/retrieval-calibration-contract.json', () => {
       holdout_check: 'artifacts/bench/retrieval-holdout-check.json',
       quality_report: 'artifacts/bench/retrieval-quality-report.json',
       quality_telemetry: 'artifacts/bench/retrieval-quality-telemetry.json',
+      routing_receipts: 'artifacts/bench/retrieval-routing-receipts.json',
       shadow_canary_gate: 'artifacts/bench/retrieval-shadow-canary-gate.json',
     });
     expect(contract.quality_gate_perf_profile).toBe('quality');
@@ -63,6 +61,9 @@ describe('config/ci/retrieval-calibration-contract.json', () => {
     expect(contract.measurable_metrics.diagnostic_ids).toEqual([
       'telemetry.skipped_docs_rate_pct',
       'telemetry.embed_batch_p95_ms',
+      'telemetry.shadow_top1_overlap_rate_pct',
+      'telemetry.symbol_route_activation_rate_pct',
+      'telemetry.symbol_route_misroute_rate_pct',
     ]);
     expect(contract.diagnostic_receipts).toEqual({
       skip_reasons: 'ContextServiceClient.IndexResult.skipReasons',
@@ -71,6 +72,7 @@ describe('config/ci/retrieval-calibration-contract.json', () => {
       file_outcome_total: 'ContextServiceClient.IndexResult.fileOutcomeTotal',
       truncation_reasons: 'ContextBundle.metadata.truncationReasons',
       memory_candidate_count: 'ContextBundle.metadata.memoryCandidates',
+      routing_diagnostics: 'ContextBundle.metadata.routingDiagnostics',
     });
     expect(contract.runtime_change_policy).toEqual({
       allow_default_profile_changes: false,

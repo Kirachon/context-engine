@@ -43,6 +43,8 @@ export interface FeatureFlags {
   retrieval_tree_sitter_v1: boolean;
   /** Enable chunk-aware exact search gating for the next retrieval phase. */
   retrieval_chunk_search_v1: boolean;
+  /** Enable explicit declaration-aware routing for definition/body/refactor context queries. */
+  retrieval_declaration_routing_v1: boolean;
   /** Enable SQLite FTS5 lexical search backend for keyword fallback. */
   retrieval_sqlite_fts5_v1: boolean;
   /** Enable LanceDB-backed vector search backend for the MVP vector path. */
@@ -78,6 +80,7 @@ const FEATURE_FLAG_ENV_VARS = {
   retrieval_shadow_control_v2: 'CE_RETRIEVAL_SHADOW_CONTROL_V2',
   retrieval_tree_sitter_v1: 'CE_RETRIEVAL_TREE_SITTER_V1',
   retrieval_chunk_search_v1: 'CE_RETRIEVAL_CHUNK_SEARCH_V1',
+  retrieval_declaration_routing_v1: 'CE_RETRIEVAL_DECLARATION_ROUTING_V1',
   retrieval_sqlite_fts5_v1: 'CE_RETRIEVAL_SQLITE_FTS5_V1',
   retrieval_lancedb_v1: 'CE_RETRIEVAL_LANCEDB_V1',
   retrieval_transformer_embeddings_v1: 'CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1',

@@ -24,6 +24,7 @@ const FEATURE_ENV_VARS = [
   'CE_RETRIEVAL_SHADOW_CONTROL_V2',
   'CE_RETRIEVAL_TREE_SITTER_V1',
   'CE_RETRIEVAL_CHUNK_SEARCH_V1',
+  'CE_RETRIEVAL_DECLARATION_ROUTING_V1',
   'CE_RETRIEVAL_SQLITE_FTS5_V1',
   'CE_RETRIEVAL_LANCEDB_V1',
   'CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1',
@@ -65,6 +66,7 @@ describe('feature flag env parsing', () => {
     expect(flags.retrieval_shadow_control_v2).toBe(false);
     expect(flags.retrieval_tree_sitter_v1).toBe(false);
     expect(flags.retrieval_chunk_search_v1).toBe(false);
+    expect(flags.retrieval_declaration_routing_v1).toBe(false);
     expect(flags.retrieval_sqlite_fts5_v1).toBe(false);
     expect(flags.retrieval_lancedb_v1).toBe(false);
     expect(flags.retrieval_transformer_embeddings_v1).toBe(false);
@@ -80,6 +82,7 @@ describe('feature flag env parsing', () => {
     process.env.CE_RETRIEVAL_SHADOW_CONTROL_V2 = 'yes';
     process.env.CE_RETRIEVAL_TREE_SITTER_V1 = 'on';
     process.env.CE_RETRIEVAL_CHUNK_SEARCH_V1 = 'on';
+    process.env.CE_RETRIEVAL_DECLARATION_ROUTING_V1 = 'true';
     process.env.CE_RETRIEVAL_SQLITE_FTS5_V1 = 'true';
     process.env.CE_RETRIEVAL_LANCEDB_V1 = 'true';
     process.env.CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1 = 'true';
@@ -95,6 +98,7 @@ describe('feature flag env parsing', () => {
     expect(flags.retrieval_shadow_control_v2).toBe(true);
     expect(flags.retrieval_tree_sitter_v1).toBe(true);
     expect(flags.retrieval_chunk_search_v1).toBe(true);
+    expect(flags.retrieval_declaration_routing_v1).toBe(true);
     expect(flags.retrieval_sqlite_fts5_v1).toBe(true);
     expect(flags.retrieval_lancedb_v1).toBe(true);
     expect(flags.retrieval_transformer_embeddings_v1).toBe(true);
@@ -110,6 +114,7 @@ describe('feature flag env parsing', () => {
     process.env.CE_RETRIEVAL_SHADOW_CONTROL_V2 = 'sometimes';
     process.env.CE_RETRIEVAL_TREE_SITTER_V1 = 'later';
     process.env.CE_RETRIEVAL_CHUNK_SEARCH_V1 = 'later';
+    process.env.CE_RETRIEVAL_DECLARATION_ROUTING_V1 = 'later';
     process.env.CE_RETRIEVAL_SQLITE_FTS5_V1 = 'later';
     process.env.CE_RETRIEVAL_LANCEDB_V1 = 'later';
     process.env.CE_RETRIEVAL_TRANSFORMER_EMBEDDINGS_V1 = 'later';
@@ -125,6 +130,7 @@ describe('feature flag env parsing', () => {
     expect(flags.retrieval_shadow_control_v2).toBe(false);
     expect(flags.retrieval_tree_sitter_v1).toBe(false);
     expect(flags.retrieval_chunk_search_v1).toBe(false);
+    expect(flags.retrieval_declaration_routing_v1).toBe(false);
     expect(flags.retrieval_sqlite_fts5_v1).toBe(false);
     expect(flags.retrieval_lancedb_v1).toBe(false);
     expect(flags.retrieval_transformer_embeddings_v1).toBe(false);

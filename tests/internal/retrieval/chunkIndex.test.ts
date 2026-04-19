@@ -6,6 +6,7 @@ import { createWorkspaceChunkSearchIndex } from '../../../src/internal/retrieval
 import {
   createHeuristicChunkParser,
   splitIntoChunks,
+  type ChunkParser,
 } from '../../../src/internal/retrieval/chunking.js';
 
 type IndexStateFile = {
@@ -28,6 +29,14 @@ function writeWorkspaceFile(workspacePath: string, relativePath: string, content
   const absolutePath = path.join(workspacePath, relativePath);
   fs.mkdirSync(path.dirname(absolutePath), { recursive: true });
   fs.writeFileSync(absolutePath, content, 'utf8');
+}
+
+function writeChunkIndex(workspacePath: string, payload: Record<string, unknown>): void {
+  fs.writeFileSync(
+    path.join(workspacePath, '.context-engine-chunk-index.json'),
+    JSON.stringify(payload, null, 2),
+    'utf8'
+  );
 }
 
 describe('chunking', () => {
@@ -71,11 +80,19 @@ describe('chunking', () => {
       chunkId: 'src/example.ts#L5-L8',
       lines: '5-8',
       kind: 'declaration',
+      symbolName: 'buildThing',
+      symbolKind: 'function',
+      parserSource: 'heuristic-boundary',
+      languageId: 'typescript',
     });
     expect(chunks[2]).toMatchObject({
       chunkId: 'src/example.ts#L9-L13',
       lines: '9-13',
       kind: 'declaration',
+      symbolName: 'Example',
+      symbolKind: 'class',
+      parserSource: 'heuristic-boundary',
+      languageId: 'typescript',
     });
     expect(chunks[1].content).toContain('buildThing');
     expect(chunks[2].content).toContain('class Example');
@@ -222,10 +239,10 @@ describe('workspace chunk search index', () => {
       'src/tree.ts': { hash: 'hash-tree-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
     });
 
-    const fakeParser = {
+    const fakeParser: ChunkParser = {
       id: 'tree-sitter-typescript',
       version: 1,
-      parse: (content: string, options: { path: string }) => [{
+      parse: (content, options) => [{
         chunkId: `${options.path}#L1-L3`,
         path: options.path,
         kind: 'declaration' as const,
@@ -234,6 +251,10 @@ describe('workspace chunk search index', () => {
         lines: '1-3',
         content,
         tokenCount: 4,
+        symbolName: 'treeMatch',
+        symbolKind: 'function',
+        parserSource: 'tree-sitter-typescript',
+        languageId: 'typescript',
       }],
     };
 
@@ -263,6 +284,107 @@ describe('workspace chunk search index', () => {
     };
     expect(persisted.parser).toEqual({ id: 'tree-sitter-typescript', version: 1 });
     expect(Object.keys(persisted.docs)).toEqual(['src/tree.ts']);
+  });
+
+  it('discards an incompatible persisted chunk index and reports why it was ignored', () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/current.ts',
+      [
+        'export function currentValue() {',
+        '  return "fresh";',
+        '}',
+      ].join('\n')
+    );
+    writeIndexState(tempDir, {
+      'src/current.ts': { hash: 'hash-current-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    const chunkIndexPath = path.join(tempDir, '.context-engine-chunk-index.json');
+    writeChunkIndex(tempDir, {
+      version: 2,
+      updatedAt: '2026-03-21T00:00:00.000Z',
+      workspaceFingerprint: 'stale-fingerprint',
+      parser: { id: 'heuristic-boundary', version: 1 },
+      chunking: {
+        version: 1,
+        maxChunkLines: 80,
+        maxChunkChars: 4000,
+      },
+      docs: {
+        'src/stale.ts': {
+          hash: 'hash-stale-v1',
+          indexedAt: '2026-03-21T00:00:00.000Z',
+          chunks: [],
+        },
+      },
+    });
+
+    const invalidations: Array<{ reason: string; chunkIndexPath: string }> = [];
+    createWorkspaceChunkSearchIndex({
+      workspacePath: tempDir,
+      onInvalidatedIndex: (details) => {
+        invalidations.push(details);
+      },
+    });
+
+    expect(invalidations).toEqual([
+      {
+        reason: 'chunking_config',
+        chunkIndexPath,
+      },
+    ]);
+    expect(fs.existsSync(chunkIndexPath)).toBe(false);
+  });
+
+  it('discards a persisted chunk index when the top-level schema version is stale', () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/current.ts',
+      [
+        'export function currentValue() {',
+        '  return "fresh";',
+        '}',
+      ].join('\n')
+    );
+
+    const initialIndex = createWorkspaceChunkSearchIndex({
+      workspacePath: tempDir,
+    });
+    const snapshot = initialIndex.getSnapshot();
+    const chunkIndexPath = path.join(tempDir, '.context-engine-chunk-index.json');
+    writeChunkIndex(tempDir, {
+      version: 1,
+      updatedAt: '2026-03-21T00:00:00.000Z',
+      workspaceFingerprint: snapshot.workspaceFingerprint,
+      parser: snapshot.parser,
+      chunking: {
+        version: 2,
+        maxChunkLines: 80,
+        maxChunkChars: 4000,
+      },
+      docs: {},
+    });
+
+    const invalidations: Array<{ reason: string; chunkIndexPath: string }> = [];
+    createWorkspaceChunkSearchIndex({
+      workspacePath: tempDir,
+      onInvalidatedIndex: (details) => {
+        invalidations.push(details);
+      },
+    });
+
+    expect(invalidations).toEqual([
+      {
+        reason: 'invalid_payload',
+        chunkIndexPath,
+      },
+    ]);
+    expect(fs.existsSync(chunkIndexPath)).toBe(false);
   });
 
   it('ranks exact chunk matches first and includes chunk metadata', async () => {
@@ -503,5 +625,76 @@ describe('workspace chunk search index', () => {
     expect(results.length).toBeGreaterThan(0);
     expect(results[0].path).toBe('src/recover.ts');
     expect(fs.existsSync(path.join(tempDir, '.context-engine-chunk-index.json'))).toBe(true);
+  });
+
+  it('rebuilds when a persisted chunk-index version is stale', async () => {
+    tempDir = createTempWorkspace();
+
+    writeWorkspaceFile(
+      tempDir,
+      'src/stale.ts',
+      [
+        'export function staleVersionTarget() {',
+        '  return "fresh";',
+        '}',
+      ].join('\n')
+    );
+
+    writeIndexState(tempDir, {
+      'src/stale.ts': { hash: 'hash-stale-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+    });
+
+    fs.writeFileSync(
+      path.join(tempDir, '.context-engine-chunk-index.json'),
+      JSON.stringify(
+        {
+          version: 1,
+          updatedAt: '2026-03-21T00:00:00.000Z',
+          workspaceFingerprint: 'deadbeefdeadbeef',
+          parser: { id: 'heuristic-boundary', version: 1 },
+          chunking: {
+            version: 1,
+            maxChunkLines: 80,
+            maxChunkChars: 4000,
+          },
+          docs: {
+            'src/stale.ts': {
+              hash: 'hash-stale-v1',
+              indexedAt: '2026-03-21T00:00:00.000Z',
+              chunks: [{
+                chunkId: 'src/stale.ts#L1-L1',
+                path: 'src/stale.ts',
+                kind: 'declaration',
+                startLine: 1,
+                endLine: 1,
+                lines: '1-1',
+                content: 'stale',
+                tokenCount: 1,
+              }],
+            },
+          },
+        },
+        null,
+        2
+      ),
+      'utf8'
+    );
+
+    const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+    const stats = await index.refresh();
+    const snapshot = index.getSnapshot();
+    const persisted = JSON.parse(
+      fs.readFileSync(path.join(tempDir, '.context-engine-chunk-index.json'), 'utf8')
+    ) as {
+      version: number;
+      chunking: { version: number };
+      docs: Record<string, { chunks: Array<{ content: string }> }>;
+    };
+
+    expect(stats.wroteIndex).toBe(true);
+    expect(snapshot.version).toBe(2);
+    expect(persisted.version).toBe(2);
+    expect(persisted.chunking.version).toBe(2);
+    expect(persisted.docs['src/stale.ts'].chunks[0]?.content).toContain('staleVersionTarget');
   });
 });

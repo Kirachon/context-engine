@@ -1,4 +1,5 @@
 export type ChunkKind = 'heading' | 'declaration' | 'paragraph' | 'tail';
+export type ChunkParserSource = 'heuristic-boundary' | 'tree-sitter-typescript';
 
 export interface ChunkRecord {
   chunkId: string;
@@ -9,6 +10,11 @@ export interface ChunkRecord {
   lines: string;
   content: string;
   tokenCount: number;
+  symbolName?: string;
+  symbolKind?: string;
+  parentSymbol?: string;
+  parserSource?: ChunkParserSource;
+  languageId?: string;
 }
 
 export interface ChunkingOptions {
@@ -45,6 +51,116 @@ function estimateTokenCount(text: string): number {
   return Math.max(1, tokenize(text).length);
 }
 
+export function inferChunkLanguageId(pathValue: string): string | undefined {
+  if (/\.tsx$/i.test(pathValue)) return 'tsx';
+  if (/\.(c|m)?ts$/i.test(pathValue)) return 'typescript';
+  if (/\.jsx$/i.test(pathValue)) return 'jsx';
+  if (/\.(c|m)?js$/i.test(pathValue)) return 'javascript';
+  if (/\.py$/i.test(pathValue)) return 'python';
+  if (/\.go$/i.test(pathValue)) return 'go';
+  if (/\.rs$/i.test(pathValue)) return 'rust';
+  if (/\.java$/i.test(pathValue)) return 'java';
+  if (/\.cs$/i.test(pathValue)) return 'csharp';
+  if (/\.md$/i.test(pathValue)) return 'markdown';
+  if (/\.json$/i.test(pathValue)) return 'json';
+  if (/\.(ya?ml)$/i.test(pathValue)) return 'yaml';
+  return undefined;
+}
+
+function inferSymbolKindFromDeclarationLine(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const patterns: Array<[RegExp, string | ((match: RegExpMatchArray) => string)]> = [
+    [/^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\b/, 'function'],
+    [/^(?:export\s+)?class\b/, 'class'],
+    [/^(?:export\s+)?interface\b/, 'interface'],
+    [/^(?:export\s+)?type\b/, 'type'],
+    [/^(?:export\s+)?enum\b/, 'enum'],
+    [/^(?:export\s+)?(?:const|let|var)\b/, (match) => match[0].trim().split(/\s+/).pop() ?? 'const'],
+    [/^def\b/, 'function'],
+    [/^class\b/, 'class'],
+    [/^func\s+\([^)]*\)\s*[A-Za-z_][A-Za-z0-9_]*\s*\(/, 'method'],
+    [/^func\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/, 'function'],
+    [/^(?:pub\s+)?fn\b/, 'function'],
+    [/^(?:pub\s+)?struct\b/, 'struct'],
+    [/^(?:pub\s+)?trait\b/, 'trait'],
+    [/^(?:pub\s+)?impl\b/, 'impl'],
+    [/^(?:public|private|protected|internal)?\s*(?:abstract\s+)?class\b/i, 'class'],
+    [/^(?:public|private|protected|internal)?\s*interface\b/i, 'interface'],
+    [/^(?:public|private|protected|internal)?\s*enum\b/i, 'enum'],
+    [/^(?:public|private|protected|internal)?\s*(?:static\s+)?[A-Za-z_<>\[\],?]+\s+[A-Za-z_][A-Za-z0-9_]*\s*\(/, 'method'],
+  ];
+
+  for (const [pattern, kind] of patterns) {
+    const match = trimmed.match(pattern);
+    if (match) {
+      return typeof kind === 'function' ? kind(match) : kind;
+    }
+  }
+
+  return undefined;
+}
+
+function inferSymbolNameFromDeclarationLine(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const patterns = [
+    /^(?:export\s+)?(?:default\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][A-Za-z0-9_$]*)/,
+    /^(?:export\s+)?class\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+    /^(?:export\s+)?interface\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+    /^(?:export\s+)?type\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+    /^(?:export\s+)?enum\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+    /^(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][A-Za-z0-9_$]*)/,
+    /^def\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^class\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^func\s+\([^)]*\)\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+    /^func\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+    /^(?:pub\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^(?:pub\s+)?struct\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^(?:pub\s+)?enum\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^(?:pub\s+)?trait\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^(?:pub\s+)?impl\s+([A-Za-z_][A-Za-z0-9_]*)/,
+    /^(?:public|private|protected|internal)?\s*(?:abstract\s+)?class\s+([A-Za-z_][A-Za-z0-9_]*)/i,
+    /^(?:public|private|protected|internal)?\s*interface\s+([A-Za-z_][A-Za-z0-9_]*)/i,
+    /^(?:public|private|protected|internal)?\s*enum\s+([A-Za-z_][A-Za-z0-9_]*)/i,
+    /^(?:public|private|protected|internal)?\s*(?:static\s+)?[A-Za-z_<>\[\],?]+\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
+  ];
+
+  for (const pattern of patterns) {
+    const match = trimmed.match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+  }
+
+  return undefined;
+}
+
+export function extractDeclarationMetadata(
+  content: string,
+  languageId?: string,
+  parserSource?: ChunkParserSource
+): Pick<ChunkRecord, 'symbolName' | 'symbolKind' | 'parentSymbol' | 'parserSource' | 'languageId'> {
+  const firstMeaningfulLine = content
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) ?? '';
+
+  return {
+    symbolName: inferSymbolNameFromDeclarationLine(firstMeaningfulLine),
+    symbolKind: inferSymbolKindFromDeclarationLine(firstMeaningfulLine),
+    parentSymbol: undefined,
+    parserSource,
+    languageId,
+  };
+}
+
 function isHeadingLine(line: string): boolean {
   return /^\s{0,3}#{1,6}\s+\S/.test(line);
 }
@@ -70,6 +186,7 @@ export function splitIntoChunks(content: string, options: ChunkingOptions): Chun
   if (!normalizedPath || !content.trim()) {
     return [];
   }
+  const languageId = inferChunkLanguageId(normalizedPath);
 
   const maxChunkLines = Math.max(1, Math.min(400, options.maxChunkLines ?? DEFAULT_MAX_CHUNK_LINES));
   const maxChunkChars = Math.max(64, Math.min(50_000, options.maxChunkChars ?? DEFAULT_MAX_CHUNK_CHARS));
@@ -123,6 +240,12 @@ export function splitIntoChunks(content: string, options: ChunkingOptions): Chun
       lines: `${startLine}-${chunkEndLine}`,
       content: chunkContent,
       tokenCount: estimateTokenCount(chunkContent),
+      ...(bufferKind === 'declaration'
+        ? extractDeclarationMetadata(chunkContent, languageId, HEURISTIC_CHUNK_PARSER_ID)
+        : {
+            parserSource: HEURISTIC_CHUNK_PARSER_ID,
+            languageId,
+          }),
     });
 
     buffer = [];

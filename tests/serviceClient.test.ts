@@ -103,6 +103,7 @@ describe('ContextServiceClient', () => {
     delete featureFlags.retrieval_sqlite_fts5_v1;
     delete featureFlags.retrieval_lancedb_v1;
     delete featureFlags.retrieval_transformer_embeddings_v1;
+    delete featureFlags.retrieval_declaration_routing_v1;
 
     // Reset feature flags that tests may override.
     FEATURE_FLAGS.index_state_store = false;
@@ -118,6 +119,7 @@ describe('ContextServiceClient', () => {
     featureFlags.retrieval_artifacts_v2 = false;
     featureFlags.retrieval_shadow_control_v2 = false;
     featureFlags.retrieval_tree_sitter_v1 = false;
+    featureFlags.retrieval_declaration_routing_v1 = false;
     featureFlags.retrieval_sqlite_fts5_v1 = false;
     featureFlags.retrieval_lancedb_v1 = false;
     featureFlags.retrieval_transformer_embeddings_v1 = false;
@@ -573,6 +575,7 @@ describe('ContextServiceClient', () => {
         'retrieval_shadow_control_v2',
         'retrieval_tree_sitter_v1',
         'retrieval_chunk_search_v1',
+        'retrieval_declaration_routing_v1',
         'retrieval_sqlite_fts5_v1',
         'retrieval_lancedb_v1',
         'retrieval_transformer_embeddings_v1',
@@ -591,6 +594,7 @@ describe('ContextServiceClient', () => {
         'index_state_store',
         'retrieval_artifacts_v2',
         'retrieval_chunk_search_v1',
+        'retrieval_declaration_routing_v1',
         'retrieval_hybrid_v1',
         'retrieval_lancedb_v1',
         'retrieval_provider_v2',
@@ -2605,6 +2609,349 @@ describe('ContextServiceClient', () => {
       expect(bundle.metadata.totalFiles).toBeGreaterThan(0);
     });
 
+    it('should route explicit definition queries through declaration lookup when declaration routing is enabled', async () => {
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-definition-routing-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const routedClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(routedClient, '[]');
+      const semanticSearchSpy = jest.spyOn(routedClient as any, 'semanticSearch').mockResolvedValue([]);
+
+      const bundle = await routedClient.getContextForPrompt('definition of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).not.toHaveBeenCalled();
+      expect(bundle.files[0]?.path).toBe('src/provider.ts');
+      expect(bundle.files[0]?.snippets[0]?.text).toContain('export function resolveAIProviderId()');
+      expect(bundle.files[0]?.snippets[0]?.text).toContain('return "openai_session"');
+      expect(bundle.metadata.routingDiagnostics).toEqual({
+        selectedIntent: 'definition',
+        selectedRoute: 'lookup_definition',
+        symbol: 'resolveAIProviderId',
+        symbolHit: true,
+        declarationHit: true,
+        parserSource: 'heuristic-boundary',
+        parserProvenance: ['heuristic-boundary'],
+        downgradeReason: null,
+        fallbackReason: null,
+        oversizedFileOutcome: null,
+      });
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should route explicit body queries through hydrated declaration bodies when declaration routing is enabled', async () => {
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-body-routing-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  const providerId = "openai_session";',
+          '  return providerId;',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const routedClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(routedClient, '[]');
+      const semanticSearchSpy = jest.spyOn(routedClient as any, 'semanticSearch').mockResolvedValue([]);
+
+      const bundle = await routedClient.getContextForPrompt('body of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).not.toHaveBeenCalled();
+      expect(bundle.files[0]?.path).toBe('src/provider.ts');
+      expect(bundle.files[0]?.snippets[0]?.text).toContain('const providerId = "openai_session"');
+      expect(bundle.files[0]?.snippets[0]?.text).toContain('return providerId;');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should treat one-line declarations with inline bodies as valid explicit body hits', async () => {
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-body-inline-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        'export function resolveAIProviderId() { return "openai_session"; }\n',
+        'utf-8'
+      );
+
+      const routedClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(routedClient, '[]');
+      const semanticSearchSpy = jest.spyOn(routedClient as any, 'semanticSearch').mockResolvedValue([]);
+
+      const bundle = await routedClient.getContextForPrompt('body of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).not.toHaveBeenCalled();
+      expect(bundle.files[0]?.path).toBe('src/provider.ts');
+      expect(bundle.files[0]?.snippets[0]?.text).toContain('return "openai_session";');
+      expect(bundle.metadata.routingDiagnostics).toEqual({
+        selectedIntent: 'body',
+        selectedRoute: 'lookup_body',
+        symbol: 'resolveAIProviderId',
+        symbolHit: true,
+        declarationHit: true,
+        parserSource: 'heuristic-boundary',
+        parserProvenance: ['heuristic-boundary'],
+        downgradeReason: null,
+        fallbackReason: null,
+        oversizedFileOutcome: null,
+      });
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should route explicit references queries through symbol reference search when declaration routing is enabled', async () => {
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const referenceResults = [
+        {
+          path: 'src/caller.ts',
+          content: 'export const activeProvider = resolveAIProviderId();',
+          relevanceScore: 0.92,
+          lines: '2-2',
+        },
+      ];
+      const referencesSpy = jest.spyOn(client as any, 'symbolReferencesSearch').mockResolvedValue(referenceResults);
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([]);
+
+      const bundle = await client.getContextForPrompt('references of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(referencesSpy).toHaveBeenCalledTimes(1);
+      expect(semanticSearchSpy).not.toHaveBeenCalled();
+      expect(bundle.files[0]?.path).toBe('src/caller.ts');
+      expect(bundle.files[0]?.snippets[0]?.text).toContain('resolveAIProviderId()');
+    });
+
+    it('should report deterministic fallback diagnostics when explicit body lookup falls back to semantic search', async () => {
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/fallback.ts',
+          content: 'fallback result',
+          relevanceScore: 0.91,
+          lines: '1-2',
+        },
+      ]);
+
+      const bundle = await client.getContextForPrompt('body of missingSymbol', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(semanticSearchSpy).toHaveBeenCalledTimes(1);
+      expect(bundle.files[0]?.path).toBe('src/fallback.ts');
+      expect(bundle.metadata.routingDiagnostics).toEqual({
+        selectedIntent: 'body',
+        selectedRoute: 'semantic_fallback',
+        symbol: 'missingSymbol',
+        symbolHit: false,
+        declarationHit: false,
+        parserSource: null,
+        parserProvenance: [],
+        downgradeReason: null,
+        fallbackReason: 'lookup_symbol_not_found',
+        oversizedFileOutcome: null,
+      });
+    });
+
+    it('should record shadow overlap receipts for explicit definition routing when shadow compare is enabled', async () => {
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
+      process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE = '1';
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-definition-shadow-overlap-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const routedClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(routedClient, '[]');
+      jest.spyOn(routedClient as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/provider.ts',
+          content: 'export function resolveAIProviderId() {\n  return "openai_session";\n}',
+          relevanceScore: 0.95,
+          lines: '1-3',
+        },
+      ]);
+
+      const bundle = await routedClient.getContextForPrompt('definition of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(bundle.metadata.routingDiagnostics?.shadowCompare).toEqual({
+        enabled: true,
+        executed: true,
+        sampleRate: 1,
+        primaryRoute: 'lookup_definition',
+        shadowRoute: 'semantic_discovery',
+        primaryResultCount: 1,
+        shadowResultCount: 1,
+        overlapCount: 1,
+        top1Overlap: true,
+        misrouteDetected: false,
+      });
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should record shadow misroute receipts when semantic shadow results disagree with explicit definition routing', async () => {
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
+      process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE = '1';
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-definition-shadow-misroute-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const routedClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(routedClient, '[]');
+      jest.spyOn(routedClient as any, 'semanticSearch').mockResolvedValue([
+        {
+          path: 'src/other.ts',
+          content: 'export const other = true;',
+          relevanceScore: 0.7,
+          lines: '1-1',
+        },
+      ]);
+
+      const bundle = await routedClient.getContextForPrompt('definition of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(bundle.metadata.routingDiagnostics?.shadowCompare).toEqual({
+        enabled: true,
+        executed: true,
+        sampleRate: 1,
+        primaryRoute: 'lookup_definition',
+        shadowRoute: 'semantic_discovery',
+        primaryResultCount: 1,
+        shadowResultCount: 1,
+        overlapCount: 0,
+        top1Overlap: false,
+        misrouteDetected: true,
+      });
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should not count a failed shadow compare as executed coverage for explicit definition routing', async () => {
+      process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED = 'true';
+      process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE = '1';
+      featureFlags.retrieval_declaration_routing_v1 = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-definition-shadow-error-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const routedClient = new ContextServiceClient(tempDir);
+      configureOpenAISemanticProvider(routedClient, '[]');
+      jest.spyOn(routedClient as any, 'semanticSearch').mockRejectedValue(new Error('shadow failed'));
+
+      const bundle = await routedClient.getContextForPrompt('definition of resolveAIProviderId', {
+        maxFiles: 1,
+        tokenBudget: 1200,
+        includeRelated: false,
+        includeMemories: false,
+        bypassCache: true,
+      });
+
+      expect(bundle.metadata.routingDiagnostics?.shadowCompare).toEqual({
+        enabled: true,
+        executed: false,
+        sampleRate: 1,
+        primaryRoute: 'lookup_definition',
+        shadowRoute: 'semantic_discovery',
+        primaryResultCount: 1,
+        shadowResultCount: 0,
+        overlapCount: 0,
+        top1Overlap: false,
+        misrouteDetected: false,
+      });
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
     it('should include a git metadata connector hint in context bundles', async () => {
       const semanticSearchSpy = jest.spyOn(client as any, 'semanticSearch').mockResolvedValue([
         {
@@ -2993,6 +3340,70 @@ describe('ContextServiceClient', () => {
       expect(status.fileCount).toBe(0);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('rotates the index fingerprint and clears persisted context bundles when a chunk index is discarded', () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-chunk-index-discard-'));
+      const fingerprintPath = path.join(tempDir, '.context-engine-index-fingerprint.json');
+      const contextCachePath = path.join(tempDir, '.context-engine-context-cache.json');
+      const chunkIndexPath = path.join(tempDir, '.context-engine-chunk-index.json');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
+      fs.writeFileSync(
+        fingerprintPath,
+        JSON.stringify({
+          version: 1,
+          fingerprint: 'stale-fingerprint',
+          updatedAt: '2026-03-21T00:00:00.000Z',
+        }),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        contextCachePath,
+        JSON.stringify({
+          version: 1,
+          entries: {
+            'fingerprint:stale-fingerprint:context:test': {
+              timestamp: Date.now(),
+              data: { summary: 'stale bundle' },
+            },
+          },
+        }),
+        'utf-8'
+      );
+
+      const client = new ContextServiceClient(tempDir);
+      (client as any).persistentContextCacheLoaded = true;
+      (client as any).persistentContextCache.set('fingerprint:stale-fingerprint:context:test', {
+        timestamp: Date.now(),
+        data: { summary: 'stale bundle' },
+      });
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      try {
+        const beforeFingerprint = (client as any).getIndexFingerprint();
+
+        (client as any).handleIncompatibleChunkIndex({
+          reason: 'chunking_config',
+          chunkIndexPath,
+        });
+        (client as any).handleIncompatibleChunkIndex({
+          reason: 'chunking_config',
+          chunkIndexPath,
+        });
+
+        const afterFingerprint = (client as any).getIndexFingerprint();
+        expect(beforeFingerprint).toBe('fingerprint:stale-fingerprint');
+        expect(afterFingerprint).not.toBe(beforeFingerprint);
+        expect(fs.existsSync(contextCachePath)).toBe(false);
+        expect((client as any).persistentContextCache.size).toBe(0);
+        expect(warnSpy).toHaveBeenCalledTimes(1);
+        expect(String(warnSpy.mock.calls[0]?.[0] ?? '')).toContain('Discarding incompatible chunk index');
+      } finally {
+        warnSpy.mockRestore();
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
   });
 

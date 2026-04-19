@@ -175,6 +175,8 @@ describe('polyglot tree-sitter chunking', () => {
         expect(chunk.endLine).toBeGreaterThanOrEqual(chunk.startLine);
         expect(chunk.endLine).toBeLessThanOrEqual(totalLines);
         expect(chunk.content.trim().length).toBeGreaterThan(0);
+        expect(chunk.parserSource).toBe('tree-sitter-typescript');
+        expect(chunk.languageId).toBe(testCase.id);
       }
 
       for (let index = 1; index < chunks.length; index += 1) {
@@ -211,6 +213,8 @@ describe('polyglot tree-sitter chunking', () => {
     }
     expect(chunks.some((chunk) => chunk.content.includes('class Example'))).toBe(true);
     expect(chunks.some((chunk) => chunk.content.includes('buildThing'))).toBe(true);
+    expect(chunks.every((chunk) => chunk.parserSource === 'tree-sitter-typescript')).toBe(true);
+    expect(chunks.every((chunk) => chunk.languageId === 'typescript')).toBe(true);
   });
 
   it('falls back without throwing when a polyglot grammar fails to load', () => {

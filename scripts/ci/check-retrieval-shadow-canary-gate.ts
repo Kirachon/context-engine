@@ -15,9 +15,14 @@ interface CliArgs {
   qualityReportPath: string;
   telemetryPath: string;
   holdoutPath: string;
+  routingReceiptsPath?: string;
   outPath: string;
   maxSkippedDocsRatePct: number;
   maxEmbedBatchP95Ms: number;
+  minShadowTop1OverlapRatePct: number;
+  minSymbolRouteActivationRatePct: number;
+  maxSymbolRouteMisrouteRatePct: number;
+  minRoutingReceiptCoveragePct: number;
 }
 
 interface JsonObj {
@@ -45,6 +50,10 @@ function parseArgs(argv: string[]): CliArgs {
     outPath: DEFAULT_OUT,
     maxSkippedDocsRatePct: 20,
     maxEmbedBatchP95Ms: 250,
+    minShadowTop1OverlapRatePct: 0,
+    minSymbolRouteActivationRatePct: 0,
+    maxSymbolRouteMisrouteRatePct: 100,
+    minRoutingReceiptCoveragePct: 0,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -60,9 +69,14 @@ Options:
   --quality-report <path>          (default: ${DEFAULT_QUALITY_REPORT})
   --telemetry <path>               (default: ${DEFAULT_TELEMETRY})
   --holdout <path>                 (default: ${DEFAULT_HOLDOUT})
+  --routing-receipts <path>        (optional aggregated routing diagnostics artifact)
   --out <path>                     (default: ${DEFAULT_OUT})
   --max-skipped-docs-rate-pct <n>  (default: 20)
   --max-embed-batch-p95-ms <n>     (default: 250)
+  --min-shadow-top1-overlap-rate-pct <n>      (default: 0)
+  --min-symbol-route-activation-rate-pct <n>  (default: 0)
+  --max-symbol-route-misroute-rate-pct <n>    (default: 100)
+  --min-routing-receipt-coverage-pct <n>      (default: 0)
 `);
       process.exit(0);
     }
@@ -90,6 +104,12 @@ Options:
       i += 1;
       continue;
     }
+    if (arg === '--routing-receipts') {
+      if (!next) throw new Error('Missing value for --routing-receipts');
+      args.routingReceiptsPath = next;
+      i += 1;
+      continue;
+    }
     if (arg === '--max-skipped-docs-rate-pct') {
       if (!next) throw new Error('Missing value for --max-skipped-docs-rate-pct');
       args.maxSkippedDocsRatePct = parseFiniteNonNegativeNumber('--max-skipped-docs-rate-pct', next);
@@ -99,6 +119,30 @@ Options:
     if (arg === '--max-embed-batch-p95-ms') {
       if (!next) throw new Error('Missing value for --max-embed-batch-p95-ms');
       args.maxEmbedBatchP95Ms = parseFiniteNonNegativeNumber('--max-embed-batch-p95-ms', next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--min-shadow-top1-overlap-rate-pct') {
+      if (!next) throw new Error('Missing value for --min-shadow-top1-overlap-rate-pct');
+      args.minShadowTop1OverlapRatePct = parseFiniteNonNegativeNumber('--min-shadow-top1-overlap-rate-pct', next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--min-symbol-route-activation-rate-pct') {
+      if (!next) throw new Error('Missing value for --min-symbol-route-activation-rate-pct');
+      args.minSymbolRouteActivationRatePct = parseFiniteNonNegativeNumber('--min-symbol-route-activation-rate-pct', next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--max-symbol-route-misroute-rate-pct') {
+      if (!next) throw new Error('Missing value for --max-symbol-route-misroute-rate-pct');
+      args.maxSymbolRouteMisrouteRatePct = parseFiniteNonNegativeNumber('--max-symbol-route-misroute-rate-pct', next);
+      i += 1;
+      continue;
+    }
+    if (arg === '--min-routing-receipt-coverage-pct') {
+      if (!next) throw new Error('Missing value for --min-routing-receipt-coverage-pct');
+      args.minRoutingReceiptCoveragePct = parseFiniteNonNegativeNumber('--min-routing-receipt-coverage-pct', next);
       i += 1;
       continue;
     }
@@ -149,6 +193,7 @@ function run(): number {
     const qualityReport = readJsonObject(args.qualityReportPath);
     const telemetry = readJsonObject(args.telemetryPath);
     const holdout = readJsonObject(args.holdoutPath);
+    const routingReceipts = args.routingReceiptsPath ? readJsonObject(args.routingReceiptsPath) : null;
     const reasons: string[] = [];
 
     const qualityStatus = (qualityReport.gate as JsonObj | undefined)?.status;
@@ -176,30 +221,101 @@ function run(): number {
       reasons.push(`abort threshold exceeded: dense_refresh.embed_batch_p95_ms=${embedBatchP95Ms} > ${args.maxEmbedBatchP95Ms}`);
     }
 
+    const shadowTop1OverlapRatePct = readNumberPath(telemetry, 'routing_shadow.top1_overlap_rate_pct');
+    const symbolRouteActivationRatePct = readNumberPath(telemetry, 'routing_shadow.symbol_route_activation_rate_pct');
+    const symbolRouteMisrouteRatePct = readNumberPath(telemetry, 'routing_shadow.symbol_route_misroute_rate_pct');
+    if (args.minShadowTop1OverlapRatePct > 0) {
+      if (shadowTop1OverlapRatePct === null) {
+        reasons.push('telemetry missing routing_shadow.top1_overlap_rate_pct');
+      } else if (shadowTop1OverlapRatePct < args.minShadowTop1OverlapRatePct) {
+        reasons.push(
+          `abort threshold exceeded: routing_shadow.top1_overlap_rate_pct=${shadowTop1OverlapRatePct} < ${args.minShadowTop1OverlapRatePct}`
+        );
+      }
+    }
+    if (args.minSymbolRouteActivationRatePct > 0) {
+      if (symbolRouteActivationRatePct === null) {
+        reasons.push('telemetry missing routing_shadow.symbol_route_activation_rate_pct');
+      } else if (symbolRouteActivationRatePct < args.minSymbolRouteActivationRatePct) {
+        reasons.push(
+          `abort threshold exceeded: routing_shadow.symbol_route_activation_rate_pct=${symbolRouteActivationRatePct} < ${args.minSymbolRouteActivationRatePct}`
+        );
+      }
+    }
+    if (args.maxSymbolRouteMisrouteRatePct < 100) {
+      if (symbolRouteMisrouteRatePct === null) {
+        reasons.push('telemetry missing routing_shadow.symbol_route_misroute_rate_pct');
+      } else if (symbolRouteMisrouteRatePct > args.maxSymbolRouteMisrouteRatePct) {
+        reasons.push(
+          `abort threshold exceeded: routing_shadow.symbol_route_misroute_rate_pct=${symbolRouteMisrouteRatePct} > ${args.maxSymbolRouteMisrouteRatePct}`
+        );
+      }
+    }
+
+    const symbolRouteCount = routingReceipts
+      ? readNumberPath(routingReceipts, 'routing_diagnostics.symbol_route_count')
+      : null;
+    const shadowCompareReceiptCount = routingReceipts
+      ? readNumberPath(routingReceipts, 'routing_diagnostics.shadow_compare_receipt_count')
+      : null;
+    const shadowCompareExecutedCount = routingReceipts
+      ? readNumberPath(routingReceipts, 'routing_diagnostics.shadow_compare_executed_count')
+      : null;
+    const routingReceiptCoveragePct = routingReceipts
+      ? (
+          symbolRouteCount !== null && shadowCompareExecutedCount !== null
+            ? (symbolRouteCount === 0 ? 100 : (shadowCompareExecutedCount / symbolRouteCount) * 100)
+            : null
+        )
+      : null;
+    if (args.minRoutingReceiptCoveragePct > 0) {
+      if (!routingReceipts) {
+        reasons.push('routing receipts artifact required for routing receipt coverage gate');
+      } else if (routingReceiptCoveragePct === null) {
+        reasons.push('routing receipts missing routing_diagnostics.symbol_route_count or shadow_compare_executed_count');
+      } else if (routingReceiptCoveragePct < args.minRoutingReceiptCoveragePct) {
+        reasons.push(
+          `abort threshold exceeded: routing receipt coverage=${routingReceiptCoveragePct} < ${args.minRoutingReceiptCoveragePct}`
+        );
+      }
+    }
+
     const qualityCommitSha = readStringPath(qualityReport, 'reproducibility_lock.commit_sha');
     const telemetryCommitSha = readStringPath(telemetry, 'reproducibility_lock.commit_sha');
+    const routingCommitSha = readStringPath(routingReceipts, 'reproducibility_lock.commit_sha');
     if (qualityCommitSha && telemetryCommitSha && qualityCommitSha !== telemetryCommitSha) {
       reasons.push(`reproducibility mismatch: commit_sha quality=${qualityCommitSha} telemetry=${telemetryCommitSha}`);
+    }
+    if (qualityCommitSha && routingCommitSha && qualityCommitSha !== routingCommitSha) {
+      reasons.push(`reproducibility mismatch: commit_sha quality=${qualityCommitSha} routing=${routingCommitSha}`);
     }
 
     const qualityDatasetId = readStringPath(qualityReport, 'reproducibility_lock.dataset_id');
     const telemetryDatasetId = readStringPath(telemetry, 'reproducibility_lock.dataset_id');
     const holdoutDatasetId = readStringPath(holdout, 'summary.dataset_id');
+    const routingDatasetId = readStringPath(routingReceipts, 'reproducibility_lock.dataset_id');
     if (qualityDatasetId && telemetryDatasetId && qualityDatasetId !== telemetryDatasetId) {
       reasons.push(`reproducibility mismatch: dataset_id quality=${qualityDatasetId} telemetry=${telemetryDatasetId}`);
     }
     if (qualityDatasetId && holdoutDatasetId && qualityDatasetId !== holdoutDatasetId) {
       reasons.push(`reproducibility mismatch: dataset_id quality=${qualityDatasetId} holdout=${holdoutDatasetId}`);
     }
+    if (qualityDatasetId && routingDatasetId && qualityDatasetId !== routingDatasetId) {
+      reasons.push(`reproducibility mismatch: dataset_id quality=${qualityDatasetId} routing=${routingDatasetId}`);
+    }
 
     const qualityDatasetHash = readStringPath(qualityReport, 'reproducibility_lock.dataset_hash');
     const telemetryDatasetHash = readStringPath(telemetry, 'reproducibility_lock.dataset_hash');
     const holdoutDatasetHash = readStringPath(holdout, 'summary.dataset_hash');
+    const routingDatasetHash = readStringPath(routingReceipts, 'reproducibility_lock.dataset_hash');
     if (qualityDatasetHash && telemetryDatasetHash && qualityDatasetHash !== telemetryDatasetHash) {
       reasons.push('reproducibility mismatch: dataset_hash quality!=telemetry');
     }
     if (qualityDatasetHash && holdoutDatasetHash && qualityDatasetHash !== holdoutDatasetHash) {
       reasons.push('reproducibility mismatch: dataset_hash quality!=holdout');
+    }
+    if (qualityDatasetHash && routingDatasetHash && qualityDatasetHash !== routingDatasetHash) {
+      reasons.push('reproducibility mismatch: dataset_hash quality!=routing');
     }
 
     const artifact = {
@@ -209,15 +325,33 @@ function run(): number {
         quality_report: path.resolve(args.qualityReportPath),
         telemetry: path.resolve(args.telemetryPath),
         holdout: path.resolve(args.holdoutPath),
+        routing_receipts: args.routingReceiptsPath ? path.resolve(args.routingReceiptsPath) : null,
         out: path.resolve(args.outPath),
       },
       thresholds: {
         max_skipped_docs_rate_pct: args.maxSkippedDocsRatePct,
         max_embed_batch_p95_ms: args.maxEmbedBatchP95Ms,
+        min_shadow_top1_overlap_rate_pct: args.minShadowTop1OverlapRatePct,
+        min_symbol_route_activation_rate_pct: args.minSymbolRouteActivationRatePct,
+        max_symbol_route_misroute_rate_pct: args.maxSymbolRouteMisrouteRatePct,
+        min_routing_receipt_coverage_pct: args.minRoutingReceiptCoveragePct,
       },
       observed: {
         skipped_docs_rate_pct: skippedDocsRate,
         embed_batch_p95_ms: embedBatchP95Ms,
+        routing_shadow: {
+          top1_overlap_rate_pct: shadowTop1OverlapRatePct,
+          symbol_route_activation_rate_pct: symbolRouteActivationRatePct,
+          symbol_route_misroute_rate_pct: symbolRouteMisrouteRatePct,
+        },
+        routing_receipts: routingReceipts
+          ? {
+              symbol_route_count: symbolRouteCount,
+              shadow_compare_receipt_count: shadowCompareReceiptCount,
+              shadow_compare_executed_count: shadowCompareExecutedCount,
+              receipt_coverage_pct: routingReceiptCoveragePct,
+            }
+          : null,
       },
       gate: {
         status: reasons.length === 0 ? 'pass' : 'fail',

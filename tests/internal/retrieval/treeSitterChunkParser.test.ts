@@ -84,16 +84,27 @@ describe('tree-sitter chunk parser', () => {
       chunkId: 'src/example.ts#L1-L3',
       lines: '1-3',
       kind: 'declaration',
+      symbolName: 'buildThing',
+      symbolKind: 'function',
+      parserSource: 'tree-sitter-typescript',
+      languageId: 'typescript',
     }));
     expect(chunks[1]).toEqual(expect.objectContaining({
       chunkId: 'src/example.ts#L5-L9',
       lines: '5-9',
       content: expect.stringContaining('class Example'),
+      symbolName: 'Example',
+      symbolKind: 'class',
+      parserSource: 'tree-sitter-typescript',
+      languageId: 'typescript',
     }));
     expect(chunks[2]).toEqual(expect.objectContaining({
       chunkId: 'src/example.ts#L13-L13',
       lines: '13-13',
       content: expect.stringContaining('topLevel'),
+      symbolName: 'topLevel',
+      parserSource: 'tree-sitter-typescript',
+      languageId: 'typescript',
     }));
   });
 

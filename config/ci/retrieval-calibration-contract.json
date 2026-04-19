@@ -12,6 +12,7 @@
     "holdout_check": "artifacts/bench/retrieval-holdout-check.json",
     "quality_report": "artifacts/bench/retrieval-quality-report.json",
     "quality_telemetry": "artifacts/bench/retrieval-quality-telemetry.json",
+    "routing_receipts": "artifacts/bench/retrieval-routing-receipts.json",
     "shadow_canary_gate": "artifacts/bench/retrieval-shadow-canary-gate.json"
   },
   "quality_gate_perf_profile": "quality",
@@ -25,7 +26,10 @@
     ],
     "diagnostic_ids": [
       "telemetry.skipped_docs_rate_pct",
-      "telemetry.embed_batch_p95_ms"
+      "telemetry.embed_batch_p95_ms",
+      "telemetry.shadow_top1_overlap_rate_pct",
+      "telemetry.symbol_route_activation_rate_pct",
+      "telemetry.symbol_route_misroute_rate_pct"
     ]
   },
   "diagnostic_receipts": {
@@ -34,7 +38,8 @@
     "file_outcomes": "ContextServiceClient.IndexResult.fileOutcomes",
     "file_outcome_total": "ContextServiceClient.IndexResult.fileOutcomeTotal",
     "truncation_reasons": "ContextBundle.metadata.truncationReasons",
-    "memory_candidate_count": "ContextBundle.metadata.memoryCandidates"
+    "memory_candidate_count": "ContextBundle.metadata.memoryCandidates",
+    "routing_diagnostics": "ContextBundle.metadata.routingDiagnostics"
   },
   "runtime_change_policy": {
     "allow_default_profile_changes": false,
@@ -50,6 +55,7 @@
       "tests/ci/runBenchSuite.test.ts",
       "tests/ci/generateRetrievalQualityReport.test.ts",
       "tests/ci/generateRetrievalQualityTelemetry.test.ts",
+      "tests/ci/generateRetrievalRoutingReceipts.test.ts",
       "tests/serviceClient.test.ts"
     ]
   }

@@ -2,6 +2,7 @@ import { createRequire } from 'module';
 import * as path from 'path';
 import {
   createHeuristicChunkParser,
+  extractDeclarationMetadata,
   splitIntoChunks,
   type ChunkParser,
   type ChunkRecord,
@@ -249,7 +250,8 @@ function buildChunkId(pathValue: string, startLine: number, endLine: number): st
 function makeChunkFromNode(
   node: TreeSitterNodeLike,
   sourceLines: string[],
-  normalizedPath: string
+  normalizedPath: string,
+  languageId: TreeSitterLanguageId
 ): ChunkRecord | null {
   const range = getNodeRange(node);
   if (!range) {
@@ -267,6 +269,8 @@ function makeChunkFromNode(
     return null;
   }
 
+  const metadata = extractDeclarationMetadata(content, languageId, TREE_SITTER_CHUNK_PARSER_ID);
+
   return {
     chunkId: buildChunkId(normalizedPath, range.startLine, range.endLine),
     path: normalizedPath,
@@ -276,6 +280,11 @@ function makeChunkFromNode(
     lines: `${range.startLine}-${range.endLine}`,
     content,
     tokenCount: estimateTokenCount(content),
+    symbolName: metadata.symbolName,
+    symbolKind: metadata.symbolKind ?? getNodeType(node),
+    parentSymbol: metadata.parentSymbol,
+    parserSource: TREE_SITTER_CHUNK_PARSER_ID,
+    languageId,
   };
 }
 
@@ -283,6 +292,7 @@ function collectTreeSitterChunks(
   rootNode: TreeSitterNodeLike,
   sourceLines: string[],
   normalizedPath: string,
+  languageId: TreeSitterLanguageId,
   config: LanguageConfig = { declarations: TS_DECLARATIONS, wrappers: TS_WRAPPERS }
 ): ChunkRecord[] {
   const chunks: ChunkRecord[] = [];
@@ -291,7 +301,7 @@ function collectTreeSitterChunks(
   const visit = (node: TreeSitterNodeLike): void => {
     const type = getNodeType(node);
     if (config.declarations.has(type)) {
-      const chunk = makeChunkFromNode(node, sourceLines, normalizedPath);
+      const chunk = makeChunkFromNode(node, sourceLines, normalizedPath, languageId);
       if (chunk && !seen.has(chunk.chunkId)) {
         seen.add(chunk.chunkId);
         chunks.push(chunk);
@@ -449,7 +459,7 @@ export function createTreeSitterChunkParser(
 
         const sourceLines = content.split(/\r?\n/);
         const config = LANGUAGE_CONFIGS[languageId];
-        const chunks = collectTreeSitterChunks(rootNode, sourceLines, normalizedPath, config);
+        const chunks = collectTreeSitterChunks(rootNode, sourceLines, normalizedPath, languageId, config);
         if (chunks.length > 0) {
           return chunks;
         }

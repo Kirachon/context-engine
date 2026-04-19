@@ -77,6 +77,11 @@ import {
   createConnectorRegistry,
   formatConnectorHint,
 } from '../internal/connectors/registry.js';
+import {
+  createHeuristicChunkParser,
+  type ChunkRecord,
+} from '../internal/retrieval/chunking.js';
+import { createTreeSitterChunkParser } from '../internal/retrieval/treeSitterChunkParser.js';
 import { isOperationalDocsQuery } from '../retrieval/providers/queryHeuristics.js';
 import type {
   RetrievalProviderCallbackContext,
@@ -187,6 +192,25 @@ function buildSymbolReferenceSnippet(
     startLine: startIndex + 1,
     endLine: endIndex + 1,
   };
+}
+
+function resolveLookupIntent(query: string): LookupIntentResolution {
+  const trimmed = query.trim();
+  if (!trimmed) {
+    return { intent: 'discovery' };
+  }
+
+  for (const candidate of LOOKUP_INTENT_PATTERNS) {
+    const match = trimmed.match(candidate.pattern);
+    if (match?.[1]) {
+      return {
+        intent: candidate.intent,
+        symbol: match[1],
+      };
+    }
+  }
+
+  return { intent: 'discovery' };
 }
 
 const CALL_RELATIONSHIPS_KEYWORD_BLOCKLIST = new Set<string>([
@@ -482,6 +506,7 @@ export interface ContextBundle {
     externalSourcesRequested?: number;
     externalSourcesUsed?: number;
     externalWarnings?: GroundingWarning[];
+    routingDiagnostics?: ContextRoutingDiagnostics;
   };
 }
 
@@ -503,11 +528,58 @@ export type IndexFileOutcome =
   | 'invalid_path'
   | 'unchanged';
 
+export interface ContextRoutingDiagnostics {
+  selectedIntent: LookupIntent;
+  selectedRoute: 'semantic_discovery' | 'lookup_definition' | 'lookup_references' | 'lookup_body' | 'semantic_fallback';
+  symbol: string | null;
+  symbolHit: boolean;
+  declarationHit: boolean;
+  parserSource: string | null;
+  parserProvenance: string[];
+  downgradeReason: 'definition_snippet' | null;
+  fallbackReason: 'lookup_symbol_not_found' | 'lookup_body_unavailable' | 'lookup_route_error' | null;
+  oversizedFileOutcome: IndexFileOutcome | null;
+  shadowCompare?: ContextRoutingShadowCompareReceipt;
+}
+
+export interface ContextRoutingShadowCompareReceipt {
+  enabled: boolean;
+  executed: boolean;
+  sampleRate: number;
+  primaryRoute: ContextRoutingDiagnostics['selectedRoute'];
+  shadowRoute: 'semantic_discovery';
+  primaryResultCount: number;
+  shadowResultCount: number;
+  overlapCount: number;
+  top1Overlap: boolean;
+  misrouteDetected: boolean;
+}
+
 type FileReadResult =
   | { content: string; outcome: 'full_content' | 'metadata_only'; skipReason?: undefined }
   | { content: null; outcome: 'size_skip' | 'binary_skip' | 'read_error'; skipReason: 'file_too_large' | 'binary_file' | 'read_error' };
 
 export type ContextTruncationReason = 'token_budget' | 'external_grounding';
+type LookupIntent = 'discovery' | 'definition' | 'references' | 'body';
+type LookupIntentResolution = { intent: LookupIntent; symbol?: string };
+type LookupRouteAttempt = {
+  results: SearchResult[];
+  selectedRoute: ContextRoutingDiagnostics['selectedRoute'];
+  symbolHit: boolean;
+  declarationHit: boolean;
+  parserSource: string | null;
+  parserProvenance: string[];
+  downgradeReason: ContextRoutingDiagnostics['downgradeReason'];
+  fallbackReason: ContextRoutingDiagnostics['fallbackReason'];
+  oversizedFileOutcome: ContextRoutingDiagnostics['oversizedFileOutcome'];
+};
+type HydratedDefinitionSearchResult = {
+  result: SearchResult | null;
+  declarationHit: boolean;
+  parserSource: string | null;
+  parserProvenance: string[];
+  downgradeReason: ContextRoutingDiagnostics['downgradeReason'];
+};
 
 export type PathScopeOptions = PathScopeInput;
 
@@ -541,6 +613,23 @@ export interface ContextOptions extends PathScopeInput {
   /** Optional normalized external references supplied by caller. */
   externalSources?: NormalizedExternalSource[];
 }
+
+const LOOKUP_INTENT_PATTERNS: ReadonlyArray<{ intent: LookupIntent; pattern: RegExp }> = [
+  {
+    intent: 'body',
+    pattern: /\b(?:show|get|find|inspect)?\s*(?:body|implementation|refactor(?:\s+target)?)\b(?:\s+(?:of|for))?\s+`?([A-Za-z_$][A-Za-z0-9_$]*)`?/i,
+  },
+  {
+    intent: 'definition',
+    pattern: /\b(?:definition|declaration)\b(?:\s+(?:of|for))?\s+`?([A-Za-z_$][A-Za-z0-9_$]*)`?/i,
+  },
+  {
+    intent: 'references',
+    pattern: /\breferences?\b(?:\s+(?:of|for))?\s+`?([A-Za-z_$][A-Za-z0-9_$]*)`?/i,
+  },
+];
+const MAX_HYDRATED_DECLARATION_LINES = 80;
+const MAX_HYDRATED_DECLARATION_CHARS = 4_000;
 
 export interface SearchDiagnostics {
   filters_applied: string[];
@@ -1427,6 +1516,11 @@ interface IndexFingerprintFile {
   updatedAt: string;
 }
 
+interface ChunkIndexInvalidationNotice {
+  reason: 'chunking_config' | 'workspace_fingerprint' | 'parser' | 'invalid_payload';
+  chunkIndexPath: string;
+}
+
 interface KeywordFallbackSearchInFlightRequest {
   generation: number;
   shouldCache: boolean;
@@ -1450,6 +1544,7 @@ export class ContextServiceClient {
   private indexStateProviderMismatchWarned = false;
   private indexStateSchemaWarningWarned = false;
   private indexStateCompatibilityWarned = false;
+  private chunkIndexCompatibilityWarned = false;
 
   /** LRU cache for search results */
   private searchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
@@ -2613,7 +2708,14 @@ export class ContextServiceClient {
     const workspacePath = this.workspacePath;
     const indexStatePath = path.join(this.workspacePath, '.context-engine-index-state.json');
     const chunkIndexPath = path.join(this.workspacePath, '.context-engine-chunk-index.json');
-    const moduleOptions = { workspacePath, indexStatePath, chunkIndexPath };
+    const moduleOptions = {
+      workspacePath,
+      indexStatePath,
+      chunkIndexPath,
+      onInvalidatedIndex: (details: ChunkIndexInvalidationNotice) => {
+        this.handleIncompatibleChunkIndex(details);
+      },
+    };
 
     const factoryCandidates = [
       moduleExports.createWorkspaceChunkSearchIndex,
@@ -2772,6 +2874,50 @@ export class ContextServiceClient {
     }
 
     return null;
+  }
+
+  private handleIncompatibleChunkIndex(details: ChunkIndexInvalidationNotice): void {
+    this.invalidatePersistentContextCacheArtifacts();
+
+    const statePath = this.getReadableStateFilePath();
+    if (fs.existsSync(statePath)) {
+      this.writeIndexFingerprintFile(crypto.randomUUID());
+    }
+
+    if (this.chunkIndexCompatibilityWarned) {
+      return;
+    }
+    this.chunkIndexCompatibilityWarned = true;
+    console.warn(
+      formatScopedLog(
+        `[ContextServiceClient] Discarding incompatible chunk index (${details.reason}) at ${details.chunkIndexPath}; semantic fallback will continue until the chunk index is rebuilt.`
+      )
+    );
+  }
+
+  private invalidatePersistentContextCacheArtifacts(): void {
+    this.persistentContextCache.clear();
+    this.persistentContextCacheLoaded = false;
+
+    if (this.persistentContextCacheWriteTimer) {
+      clearTimeout(this.persistentContextCacheWriteTimer);
+      this.persistentContextCacheWriteTimer = null;
+    }
+
+    const cachePaths = [
+      this.getPreferredWorkspaceArtifactPath(CONTEXT_CACHE_FILE_NAME),
+      this.getReadablePersistentContextCachePath(),
+    ];
+    for (const cachePath of new Set(cachePaths)) {
+      if (!fs.existsSync(cachePath)) {
+        continue;
+      }
+      try {
+        fs.unlinkSync(cachePath);
+      } catch {
+        // Best-effort cache invalidation only.
+      }
+    }
   }
 
   private getLexicalSqliteSearchEngine(): LexicalSearchEngine | null {
@@ -4296,6 +4442,255 @@ export class ContextServiceClient {
     };
   }
 
+  private async searchResultsForLookupIntent(
+    lookup: LookupIntentResolution,
+    scope?: NormalizedPathScope,
+    options?: { bypassCache?: boolean }
+  ): Promise<LookupRouteAttempt> {
+    const bypassCache = options?.bypassCache === true;
+    if (!lookup.symbol || lookup.intent === 'discovery') {
+      return {
+        results: [],
+        selectedRoute: 'semantic_fallback',
+        symbolHit: false,
+        declarationHit: false,
+        parserSource: null,
+        parserProvenance: [],
+        downgradeReason: null,
+        fallbackReason: 'lookup_route_error',
+        oversizedFileOutcome: null,
+      };
+    }
+
+    if (lookup.intent === 'references') {
+      const references = await this.symbolReferencesSearch(lookup.symbol, 10, {
+        bypassCache,
+        includePaths: scope?.includePaths,
+        excludePaths: scope?.excludePaths,
+      });
+      return references.length > 0
+        ? {
+            results: references,
+            selectedRoute: 'lookup_references',
+            symbolHit: true,
+            declarationHit: false,
+            parserSource: null,
+            parserProvenance: [],
+            downgradeReason: null,
+            fallbackReason: null,
+            oversizedFileOutcome: null,
+          }
+        : {
+            results: [],
+            selectedRoute: 'semantic_fallback',
+            symbolHit: false,
+            declarationHit: false,
+            parserSource: null,
+            parserProvenance: [],
+            downgradeReason: null,
+            fallbackReason: 'lookup_symbol_not_found',
+            oversizedFileOutcome: null,
+          };
+    }
+
+    const definition = await this.symbolDefinition(lookup.symbol, {
+      bypassCache,
+      includePaths: scope?.includePaths,
+      excludePaths: scope?.excludePaths,
+    });
+    if (!definition.found) {
+      return {
+        results: [],
+        selectedRoute: 'semantic_fallback',
+        symbolHit: false,
+        declarationHit: false,
+        parserSource: null,
+        parserProvenance: [],
+        downgradeReason: null,
+        fallbackReason: 'lookup_symbol_not_found',
+        oversizedFileOutcome: null,
+      };
+    }
+
+    const hydrated = await this.hydrateDefinitionSearchResult(definition, {
+      requireBody: lookup.intent === 'body',
+    });
+    if (!hydrated.result) {
+      return {
+        results: [],
+        selectedRoute: 'semantic_fallback',
+        symbolHit: true,
+        declarationHit: false,
+        parserSource: hydrated.parserSource,
+        parserProvenance: hydrated.parserProvenance,
+        downgradeReason: hydrated.downgradeReason,
+        fallbackReason: lookup.intent === 'body' ? 'lookup_body_unavailable' : 'lookup_route_error',
+        oversizedFileOutcome: null,
+      };
+    }
+
+    return {
+      results: [hydrated.result],
+      selectedRoute: lookup.intent === 'body' ? 'lookup_body' : 'lookup_definition',
+      symbolHit: true,
+      declarationHit: hydrated.declarationHit,
+      parserSource: hydrated.parserSource,
+      parserProvenance: hydrated.parserProvenance,
+      downgradeReason: hydrated.downgradeReason,
+      fallbackReason: null,
+      oversizedFileOutcome: null,
+    };
+  }
+
+  private async hydrateDefinitionSearchResult(
+    definition: Extract<SymbolDefinitionResult, { found: true }>,
+    options?: { requireBody?: boolean }
+  ): Promise<HydratedDefinitionSearchResult> {
+    const normalizedPath = definition.file.replace(/\\/g, '/');
+
+    try {
+      const content = await this.getFile(normalizedPath);
+      const { chunk: declarationChunk, parserProvenance } = this.findDeclarationChunkForSymbol(
+        content,
+        normalizedPath,
+        definition.symbol,
+        definition.line
+      );
+      if (declarationChunk && (!options?.requireBody || this.chunkContainsBody(declarationChunk))) {
+        const hydrated = this.clampDeclarationChunk(declarationChunk);
+        return {
+          result: {
+            path: normalizedPath,
+            content: hydrated.content,
+            lines: hydrated.lines,
+            relevanceScore: 1,
+            matchType: 'keyword',
+            retrievedAt: new Date().toISOString(),
+            chunkId: declarationChunk.chunkId,
+          },
+          declarationHit: true,
+          parserSource: declarationChunk.parserSource ?? null,
+          parserProvenance,
+          downgradeReason: null,
+        };
+      }
+
+      if (options?.requireBody) {
+        return {
+          result: null,
+          declarationHit: false,
+          parserSource: declarationChunk?.parserSource ?? null,
+          parserProvenance,
+          downgradeReason: null,
+        };
+      }
+    } catch {
+      // Fall back to the deterministic definition snippet below.
+    }
+
+    if (options?.requireBody) {
+      return {
+        result: null,
+        declarationHit: false,
+        parserSource: null,
+        parserProvenance: [],
+        downgradeReason: null,
+      };
+    }
+
+    const lineCount = definition.snippet.split(/\r?\n/).length;
+    const endLine = Math.max(definition.line, definition.line + lineCount - 1);
+    return {
+      result: {
+        path: normalizedPath,
+        content: definition.snippet,
+        lines: `${definition.line}-${endLine}`,
+        relevanceScore: 1,
+        matchType: 'keyword',
+        retrievedAt: new Date().toISOString(),
+        chunkId: `${normalizedPath}#def-L${definition.line}`,
+      },
+      declarationHit: true,
+      parserSource: null,
+      parserProvenance: [],
+      downgradeReason: 'definition_snippet',
+    };
+  }
+
+  private findDeclarationChunkForSymbol(
+    content: string,
+    filePath: string,
+    symbol: string,
+    line: number
+  ): { chunk: ChunkRecord | null; parserProvenance: string[] } {
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const parsers = [
+      featureEnabled('retrieval_tree_sitter_v1') ? createTreeSitterChunkParser() : null,
+      createHeuristicChunkParser(),
+    ].filter(Boolean) as Array<{ id: string; parse: (source: string, options: { path: string }) => ChunkRecord[] }>;
+    const parserProvenance = parsers.map((parser) => parser.id);
+
+    for (const parser of parsers) {
+      const chunks = parser.parse(content, { path: normalizedPath });
+      const declarationChunks = chunks.filter((chunk) => chunk.kind === 'declaration');
+      const exactWithLine = declarationChunks.find((chunk) =>
+        chunk.symbolName === symbol && line >= chunk.startLine && line <= chunk.endLine
+      );
+      if (exactWithLine) {
+        return { chunk: exactWithLine, parserProvenance };
+      }
+
+      const exact = declarationChunks.find((chunk) => chunk.symbolName === symbol);
+      if (exact) {
+        return { chunk: exact, parserProvenance };
+      }
+
+      const lineMatch = declarationChunks.find((chunk) => line >= chunk.startLine && line <= chunk.endLine);
+      if (lineMatch) {
+        return { chunk: lineMatch, parserProvenance };
+      }
+    }
+
+    return { chunk: null, parserProvenance };
+  }
+
+  private chunkContainsBody(chunk: ChunkRecord): boolean {
+    const lines = chunk.content.split(/\r?\n/).map((line) => line.trim());
+    const trimmed = chunk.content.trim();
+    if (lines.length <= 1) {
+      return /=>|=[^=]|\{.*\}/.test(trimmed);
+    }
+
+    return lines.slice(1).some((line) => line.length > 0 && !/^[)}\]};,]+$/.test(line));
+  }
+
+  private clampDeclarationChunk(chunk: ChunkRecord): { content: string; lines: string } {
+    let snippetLines = chunk.content.split(/\r?\n/);
+    let truncated = false;
+
+    if (snippetLines.length > MAX_HYDRATED_DECLARATION_LINES) {
+      snippetLines = snippetLines.slice(0, MAX_HYDRATED_DECLARATION_LINES);
+      truncated = true;
+    }
+
+    let snippetContent = snippetLines.join('\n').trimEnd();
+    while (snippetContent.length > MAX_HYDRATED_DECLARATION_CHARS && snippetLines.length > 1) {
+      snippetLines = snippetLines.slice(0, -1);
+      snippetContent = snippetLines.join('\n').trimEnd();
+      truncated = true;
+    }
+
+    if (truncated) {
+      snippetContent = `${snippetContent}\n... [truncated: declaration body exceeds limit]`;
+    }
+
+    const endLine = Math.max(chunk.startLine, chunk.startLine + snippetLines.length - 1);
+    return {
+      content: snippetContent,
+      lines: `${chunk.startLine}-${endLine}`,
+    };
+  }
+
   /**
    * Deterministic call-graph navigation for known function/method symbols.
    * Returns callers (call-sites) and/or callees (identifiers invoked inside the body)
@@ -4499,6 +4894,103 @@ export class ContextServiceClient {
     setImmediate(() => {
       void this.runRetrievalShadowCompare(query, topK, primaryResults, shadowCompare.sampleRate);
     });
+  }
+
+  private buildContextRoutingShadowCompareReceipt(
+    primaryRoute: ContextRoutingDiagnostics['selectedRoute'],
+    primaryResults: SearchResult[],
+    shadowResults: SearchResult[],
+    sampleRate: number
+  ): ContextRoutingShadowCompareReceipt {
+    const primaryPaths = new Set(primaryResults.map((result) => result.path));
+    const shadowPaths = new Set(shadowResults.map((result) => result.path));
+    let overlapCount = 0;
+    for (const candidate of primaryPaths) {
+      if (shadowPaths.has(candidate)) {
+        overlapCount += 1;
+      }
+    }
+
+    const top1Overlap = primaryResults.length > 0
+      && shadowResults.length > 0
+      && primaryResults[0]!.path === shadowResults[0]!.path;
+
+    return {
+      enabled: true,
+      executed: true,
+      sampleRate,
+      primaryRoute,
+      shadowRoute: 'semantic_discovery',
+      primaryResultCount: primaryResults.length,
+      shadowResultCount: shadowResults.length,
+      overlapCount,
+      top1Overlap,
+      misrouteDetected: primaryResults.length > 0 && shadowResults.length > 0 && !top1Overlap,
+    };
+  }
+
+  private async maybeBuildLookupRoutingShadowCompareReceipt(
+    query: string,
+    topK: number,
+    primaryRoute: ContextRoutingDiagnostics['selectedRoute'],
+    primaryResults: SearchResult[],
+    normalizedScope: NormalizedPathScope | undefined,
+    bypassCache: boolean,
+    priority: ContextOptions['priority']
+  ): Promise<ContextRoutingShadowCompareReceipt | undefined> {
+    const shadowCompare = this.getConfiguredShadowCompareState();
+    if (!shadowCompare.enabled) {
+      return undefined;
+    }
+
+    if (!shouldRunShadowCompare({
+      shadowCompareEnabled: shadowCompare.enabled,
+      shadowSampleRate: shadowCompare.sampleRate,
+    })) {
+      return {
+        enabled: true,
+        executed: false,
+        sampleRate: shadowCompare.sampleRate,
+        primaryRoute,
+        shadowRoute: 'semantic_discovery',
+        primaryResultCount: primaryResults.length,
+        shadowResultCount: 0,
+        overlapCount: 0,
+        top1Overlap: false,
+        misrouteDetected: false,
+      };
+    }
+
+    const semanticSearch = (q: string, k: number) =>
+      bypassCache
+        ? this.semanticSearch(q, k, { bypassCache: true, priority, ...normalizedScope })
+        : this.semanticSearch(q, k, { priority, ...normalizedScope });
+
+    const previousDiagnostics = this.getLastSearchDiagnostics();
+    try {
+      const shadowResults = await semanticSearch(query, topK);
+      return this.buildContextRoutingShadowCompareReceipt(
+        primaryRoute,
+        primaryResults,
+        shadowResults,
+        shadowCompare.sampleRate
+      );
+    } catch {
+      return {
+        enabled: true,
+        executed: false,
+        sampleRate: shadowCompare.sampleRate,
+        primaryRoute,
+        shadowRoute: 'semantic_discovery',
+        primaryResultCount: primaryResults.length,
+        shadowResultCount: 0,
+        overlapCount: 0,
+        top1Overlap: false,
+        misrouteDetected: false,
+      };
+    } finally {
+      this.setLastSearchDiagnostics(previousDiagnostics);
+    }
   }
 
   private async runRetrievalShadowCompare(
@@ -5640,15 +6132,106 @@ export class ContextServiceClient {
         : this.semanticSearch(q, k, { priority, ...normalizedScope });
 
     const useLocalKeywordSearchFirst = preferLocalSearch || isOperationalDocsQuery(query);
-    const searchResultsPromise = useLocalKeywordSearchFirst
-      ? this.localKeywordSearch(query, maxFiles * 3, normalizedScope)
-          .then(results => (results.length > 0 ? results : semanticSearch(query, maxFiles * 3)))
-          .catch(() => semanticSearch(query, maxFiles * 3))
-      : semanticSearch(query, maxFiles * 3);
+    const runDefaultSearch = () => (
+      useLocalKeywordSearchFirst
+        ? this.localKeywordSearch(query, maxFiles * 3, normalizedScope)
+            .then(results => (results.length > 0 ? results : semanticSearch(query, maxFiles * 3)))
+            .catch(() => semanticSearch(query, maxFiles * 3))
+        : semanticSearch(query, maxFiles * 3)
+    );
+    const explicitLookup = featureEnabled('retrieval_declaration_routing_v1')
+      ? resolveLookupIntent(query)
+      : { intent: 'discovery' as const };
+    const searchPlanPromise = (async (): Promise<{ results: SearchResult[]; routingDiagnostics?: ContextRoutingDiagnostics }> => {
+      if (!featureEnabled('retrieval_declaration_routing_v1')) {
+        return { results: await runDefaultSearch() };
+      }
+
+      if (explicitLookup.intent === 'discovery') {
+        return {
+          results: await runDefaultSearch(),
+          routingDiagnostics: {
+            selectedIntent: 'discovery',
+            selectedRoute: 'semantic_discovery',
+            symbol: null,
+            symbolHit: false,
+            declarationHit: false,
+            parserSource: null,
+            parserProvenance: [],
+            downgradeReason: null,
+            fallbackReason: null,
+            oversizedFileOutcome: null,
+          },
+        };
+      }
+
+      try {
+        const lookupAttempt = await this.searchResultsForLookupIntent(explicitLookup, normalizedScope, { bypassCache });
+        if (lookupAttempt.results.length > 0) {
+          const shadowCompare = await this.maybeBuildLookupRoutingShadowCompareReceipt(
+            query,
+            maxFiles * 3,
+            lookupAttempt.selectedRoute,
+            lookupAttempt.results,
+            normalizedScope,
+            bypassCache,
+            priority
+          );
+          return {
+            results: lookupAttempt.results,
+            routingDiagnostics: {
+              selectedIntent: explicitLookup.intent,
+              selectedRoute: lookupAttempt.selectedRoute,
+              symbol: explicitLookup.symbol ?? null,
+              symbolHit: lookupAttempt.symbolHit,
+              declarationHit: lookupAttempt.declarationHit,
+              parserSource: lookupAttempt.parserSource,
+              parserProvenance: [...lookupAttempt.parserProvenance],
+              downgradeReason: lookupAttempt.downgradeReason,
+              fallbackReason: lookupAttempt.fallbackReason,
+              oversizedFileOutcome: lookupAttempt.oversizedFileOutcome,
+              ...(shadowCompare ? { shadowCompare } : {}),
+            },
+          };
+        }
+
+        return {
+          results: await runDefaultSearch(),
+          routingDiagnostics: {
+            selectedIntent: explicitLookup.intent,
+            selectedRoute: 'semantic_fallback',
+            symbol: explicitLookup.symbol ?? null,
+            symbolHit: lookupAttempt.symbolHit,
+            declarationHit: lookupAttempt.declarationHit,
+            parserSource: lookupAttempt.parserSource,
+            parserProvenance: [...lookupAttempt.parserProvenance],
+            downgradeReason: lookupAttempt.downgradeReason,
+            fallbackReason: lookupAttempt.fallbackReason,
+            oversizedFileOutcome: lookupAttempt.oversizedFileOutcome,
+          },
+        };
+      } catch {
+        return {
+          results: await runDefaultSearch(),
+          routingDiagnostics: {
+            selectedIntent: explicitLookup.intent,
+            selectedRoute: 'semantic_fallback',
+            symbol: explicitLookup.symbol ?? null,
+            symbolHit: false,
+            declarationHit: false,
+            parserSource: null,
+            parserProvenance: [],
+            downgradeReason: null,
+            fallbackReason: 'lookup_route_error',
+            oversizedFileOutcome: null,
+          },
+        };
+      }
+    })();
 
     // Perform search and memory retrieval in parallel
-    const [searchResults, memoryRetrieval] = await Promise.all([
-      searchResultsPromise,
+    const [{ results: searchResults, routingDiagnostics }, memoryRetrieval] = await Promise.all([
+      searchPlanPromise,
       includeMemories
         ? this.getRelevantMemories(query, 5)
         : Promise.resolve({ selected: [], candidateCount: 0, startupPackCount: 0 }),
@@ -5881,6 +6464,9 @@ export class ContextServiceClient {
           : {}),
         ...(externalGrounding.warnings.length > 0
           ? { externalWarnings: externalGrounding.warnings }
+          : {}),
+        ...(routingDiagnostics
+          ? { routingDiagnostics }
           : {}),
       },
     };

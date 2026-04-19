@@ -24,7 +24,7 @@ const CHUNK_INDEX_FILE_NAME = '.context-engine-chunk-index.json';
 const LEGACY_CHUNK_INDEX_FILE_NAME = '.augment-chunk-index.json';
 const INDEX_STATE_FILE_NAME = '.context-engine-index-state.json';
 const LEGACY_INDEX_STATE_FILE_NAME = '.augment-index-state.json';
-const CHUNK_INDEX_VERSION = 1;
+const CHUNK_INDEX_VERSION = 2;
 const DEFAULT_MAX_CHUNK_LINES = 80;
 const DEFAULT_MAX_CHUNK_CHARS = 4_000;
 const DEFAULT_SNIPPET_WINDOW_LINES = 5;
@@ -63,6 +63,11 @@ interface ChunkIndexFile {
   docs: Record<string, ChunkIndexDocument>;
 }
 
+export interface ChunkIndexInvalidation {
+  reason: 'chunking_config' | 'workspace_fingerprint' | 'parser' | 'invalid_payload';
+  chunkIndexPath: string;
+}
+
 export interface WorkspaceChunkSearchIndexOptions {
   workspacePath: string;
   indexStatePath?: string;
@@ -70,6 +75,7 @@ export interface WorkspaceChunkSearchIndexOptions {
   maxChunkLines?: number;
   maxChunkChars?: number;
   chunkParserFactory?: () => ChunkParser | null;
+  onInvalidatedIndex?: (details: ChunkIndexInvalidation) => void;
 }
 
 export interface ChunkSearchOptions {
@@ -189,7 +195,7 @@ function readChunkIndex(
   parserSnapshot: ChunkIndexParserSnapshot,
   maxChunkLines: number,
   maxChunkChars: number
-): ChunkIndexFile {
+): { index: ChunkIndexFile; invalidation: ChunkIndexInvalidation | null } {
   const fallback: ChunkIndexFile = {
     version: CHUNK_INDEX_VERSION,
     updatedAt: new Date(0).toISOString(),
@@ -203,9 +209,41 @@ function readChunkIndex(
     docs: {},
   };
 
-  const parsed = safeReadJson<Partial<ChunkIndexFile>>(filePath, fallback);
+  if (!fs.existsSync(filePath)) {
+    return { index: fallback, invalidation: null };
+  }
+
+  let parsed: Partial<ChunkIndexFile>;
+  try {
+    parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as Partial<ChunkIndexFile>;
+  } catch {
+    return {
+      index: fallback,
+      invalidation: {
+        reason: 'invalid_payload',
+        chunkIndexPath: filePath,
+      },
+    };
+  }
+
   if (!parsed || typeof parsed !== 'object') {
-    return fallback;
+    return {
+      index: fallback,
+      invalidation: {
+        reason: 'invalid_payload',
+        chunkIndexPath: filePath,
+      },
+    };
+  }
+
+  if (parsed.version !== CHUNK_INDEX_VERSION) {
+    return {
+      index: fallback,
+      invalidation: {
+        reason: 'invalid_payload',
+        chunkIndexPath: filePath,
+      },
+    };
   }
 
   const parsedChunking = parsed.chunking;
@@ -216,14 +254,26 @@ function readChunkIndex(
     || parsedChunking.maxChunkLines !== maxChunkLines
     || parsedChunking.maxChunkChars !== maxChunkChars
   ) {
-    return fallback;
+    return {
+      index: fallback,
+      invalidation: {
+        reason: 'chunking_config',
+        chunkIndexPath: filePath,
+      },
+    };
   }
 
   const parsedWorkspaceFingerprint = typeof parsed.workspaceFingerprint === 'string'
     ? parsed.workspaceFingerprint
     : null;
   if (parsedWorkspaceFingerprint !== workspaceFingerprint) {
-    return fallback;
+    return {
+      index: fallback,
+      invalidation: {
+        reason: 'workspace_fingerprint',
+        chunkIndexPath: filePath,
+      },
+    };
   }
 
   const parsedParser = parsed.parser;
@@ -235,23 +285,45 @@ function readChunkIndex(
     || parsedParser.id !== parserSnapshot.id
     || parsedParser.version !== parserSnapshot.version
   ) {
-    return fallback;
+    return {
+      index: fallback,
+      invalidation: {
+        reason: 'parser',
+        chunkIndexPath: filePath,
+      },
+    };
   }
 
   return {
-    version: typeof parsed.version === 'number' ? parsed.version : CHUNK_INDEX_VERSION,
-    updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : fallback.updatedAt,
-    workspaceFingerprint,
-    parser: parserSnapshot,
-    chunking: {
-      version: CHUNK_INDEX_VERSION,
-      maxChunkLines,
-      maxChunkChars,
+    index: {
+      version: typeof parsed.version === 'number' ? parsed.version : CHUNK_INDEX_VERSION,
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : fallback.updatedAt,
+      workspaceFingerprint,
+      parser: parserSnapshot,
+      chunking: {
+        version: CHUNK_INDEX_VERSION,
+        maxChunkLines,
+        maxChunkChars,
+      },
+      docs: parsed.docs && typeof parsed.docs === 'object'
+        ? (parsed.docs as Record<string, ChunkIndexDocument>)
+        : {},
     },
-    docs: parsed.docs && typeof parsed.docs === 'object'
-      ? (parsed.docs as Record<string, ChunkIndexDocument>)
-      : {},
+    invalidation: null,
   };
+}
+
+function discardChunkIndexFiles(filePaths: string[]): void {
+  for (const filePath of new Set(filePaths)) {
+    if (!filePath || !fs.existsSync(filePath)) {
+      continue;
+    }
+    try {
+      fs.unlinkSync(filePath);
+    } catch {
+      // Best-effort discard only.
+    }
+  }
 }
 
 function readDocumentContent(workspacePath: string, relativePath: string): string | null {
@@ -493,6 +565,10 @@ function scoreChunk(chunk: ChunkRecord, context: ChunkSearchContext): number {
     if (symbol && lowerPath.includes(symbol)) {
       score += 2.4;
     }
+    if (symbol && chunk.symbolName?.toLowerCase() === symbol) {
+      score += 8;
+      matchedTokens += 1;
+    }
   }
 
   if (context.queryTokens.length > 0 && matchedTokens >= context.queryTokens.length) {
@@ -544,6 +620,9 @@ function scoreChunk(chunk: ChunkRecord, context: ChunkSearchContext): number {
 
   if (chunk.kind === 'declaration') {
     score += 0.35;
+    if (chunk.symbolName) {
+      score += 0.15;
+    }
   } else if (chunk.kind === 'heading') {
     score += 0.2;
   }
@@ -587,13 +666,18 @@ export function createWorkspaceChunkSearchIndex(
   const parser = resolveChunkParser(options);
   const workspaceFingerprint = buildWorkspaceFingerprint(workspacePath);
 
-  let currentIndex = readChunkIndex(
+  const initialIndexState = readChunkIndex(
     chunkIndexReadPath,
     workspaceFingerprint,
     { id: parser.id, version: parser.version },
     maxChunkLines,
     maxChunkChars
   );
+  let currentIndex = initialIndexState.index;
+  if (initialIndexState.invalidation) {
+    discardChunkIndexFiles([chunkIndexReadPath, chunkIndexWritePath]);
+    options.onInvalidatedIndex?.(initialIndexState.invalidation);
+  }
 
   const refresh = async (): Promise<ChunkSearchRefreshStats> => {
     const indexState = readIndexState(indexStatePath);
