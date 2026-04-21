@@ -213,6 +213,93 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  it('excludes generated artifacts and test files from offline retrieval eval ranking', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-excludes-'));
+    const workspace = path.join(tmp, 'workspace');
+    const fixturePath = path.join(workspace, 'config', 'ci', 'retrieval-quality-fixture-pack.json');
+    const holdoutArtifactPath = path.join(workspace, 'artifacts', 'bench', 'retrieval-holdout-check.json');
+    const outPath = path.join(workspace, 'artifacts', 'bench', 'retrieval-quality-report.json');
+
+    writeText(
+      path.join(workspace, 'src', 'benchSuiteModePolicy.ts'),
+      [
+        'export function buildProbeFailureMessage() {',
+        '  return "BENCH_SUITE_ALLOW_SCAN_FALLBACK";',
+        '}',
+        '',
+      ].join('\n')
+    );
+    writeText(
+      path.join(workspace, 'tests', 'ci', 'benchSuiteModePolicy.test.ts'),
+      [
+        'describe("bench suite mode policy", () => {',
+        '  it("mentions BENCH_SUITE_ALLOW_SCAN_FALLBACK", () => {});',
+        '});',
+        '',
+      ].join('\n')
+    );
+
+    writeJson(fixturePath, {
+      holdout: {
+        default_dataset_id: 'holdout_v1',
+        datasets: {
+          train_v1: {
+            queries: ['legacy training query'],
+          },
+          holdout_v1: {
+            cases: [
+              {
+                id: 'bench-suite-mode-policy',
+                query: 'buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK',
+                judgments: [{ path: 'src/benchSuiteModePolicy.ts', grade: 3 }],
+              },
+            ],
+          },
+        },
+        leakage_guard: {
+          training_dataset_id: 'train_v1',
+          holdout_dataset_id: 'holdout_v1',
+          normalization: 'trim_lower_whitespace_collapse',
+        },
+      },
+      checks: [
+        { id: 'quality.ndcg_at_10', kind: 'delta_pct_min', baseline: 0.5, metric: 'quality.ndcg_at_10', min_delta_pct: 50 },
+        { id: 'quality.mrr_at_10', kind: 'delta_pct_min', baseline: 0.5, metric: 'quality.mrr_at_10', min_delta_pct: 50 },
+        { id: 'quality.recall_at_10', kind: 'delta_pct_min', baseline: 0.5, metric: 'quality.recall_at_10', min_delta_pct: 50 },
+        { id: 'quality.p_at_1', kind: 'threshold_min', metric: 'quality.p_at_1', min: 1 },
+      ],
+      gate_rules: {
+        min_pass_rate: 1,
+        required_ids: ['quality.ndcg_at_10', 'quality.mrr_at_10', 'quality.recall_at_10', 'quality.p_at_1'],
+      },
+    });
+
+    writeJson(outPath, {
+      query: 'buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK',
+    });
+
+    const result = runGenerator([
+      '--fixture-pack',
+      fixturePath,
+      '--workspace',
+      workspace,
+      '--holdout-artifact',
+      holdoutArtifactPath,
+      '--out',
+      outPath,
+    ]);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain('gate_status=pass');
+
+    const artifact = JSON.parse(fs.readFileSync(outPath, 'utf8')) as Record<string, any>;
+    expect(artifact.offline_eval.aggregate_metrics.p_at_1).toBe(1);
+    expect(artifact.offline_eval.cases[0].actual_paths[0]).toBe('src/benchSuiteModePolicy.ts');
+    expect(artifact.offline_eval.cases[0].actual_paths).not.toContain('tests/ci/benchSuiteModePolicy.test.ts');
+    expect(artifact.offline_eval.cases[0].actual_paths).not.toContain('artifacts/bench/retrieval-quality-report.json');
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it('creates a fail report when required metrics fail', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-fail-'));
     const fixturePath = path.join(tmp, 'fixture.json');

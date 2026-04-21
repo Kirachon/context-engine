@@ -677,6 +677,36 @@ function buildRetrieveOptions(topK: number, retrieveMode: RetrieveMode, bypassCa
   };
 }
 
+function toWorkspaceRelativeGlob(workspace: string, filePath: string): string | null {
+  const resolvedWorkspace = path.resolve(workspace);
+  const resolvedFilePath = path.resolve(filePath);
+  const relativePath = path.relative(resolvedWorkspace, resolvedFilePath);
+  if (
+    relativePath.length === 0
+    || relativePath.startsWith('..')
+    || path.isAbsolute(relativePath)
+  ) {
+    return null;
+  }
+  return relativePath.split(path.sep).join('/');
+}
+
+function buildOfflineEvalExcludePaths(args: CliArgs): string[] {
+  const exclude = new Set<string>([
+    'artifacts/bench/**',
+    '**/*.test.*',
+  ]);
+
+  for (const candidate of [args.fixturePackPath, args.holdoutArtifactPath, args.outPath]) {
+    const relative = toWorkspaceRelativeGlob(args.workspace, candidate);
+    if (relative) {
+      exclude.add(relative);
+    }
+  }
+
+  return [...exclude];
+}
+
 function parseHoldoutArtifactSummary(filePath: string): HoldoutArtifactSummary | null {
   const parsed = tryReadJsonObject(filePath);
   if (!parsed) {
@@ -760,7 +790,10 @@ async function evaluateOfflineDataset(
     statusBefore.fileCount === 0;
 
   const indexReceipt = shouldRefreshIndex ? await client.indexWorkspace() : null;
-  const retrievalOptions = buildRetrieveOptions(args.topK, args.retrieveMode, args.bypassCache);
+  const retrievalOptions = {
+    ...buildRetrieveOptions(args.topK, args.retrieveMode, args.bypassCache),
+    excludePaths: buildOfflineEvalExcludePaths(args),
+  };
   const caseResults: RetrievalEvalCaseResult[] = [];
   for (const caseDef of cases) {
     const result = await internalRetrieveCode(caseDef.query, client, retrievalOptions);
