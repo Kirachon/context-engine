@@ -1,5 +1,11 @@
 import type { ContextServiceClient } from '../../mcp/serviceClient.js';
 import { createHash } from 'crypto';
+import {
+  createOpenAITaskRuntime,
+  getOpenAITaskRuntimeMetadata,
+  OpenAITaskRuntimeValidationError,
+} from '../../mcp/openaiTaskRuntime.js';
+import { getOpenAITaskPolicy, resolveOpenAITaskRuntimeOptions } from '../../mcp/taskPolicyRegistry.js';
 import { AUTO_SCOPE_INFERENCE_VERSION, resolveAutoScopeDecision, type AutoScopeDecision } from '../../mcp/tooling/autoScope.js';
 import {
   EXTERNAL_GROUNDING_PROVIDER_VERSION,
@@ -20,9 +26,7 @@ import { internalContextSnippet } from './context.js';
 import { incCounter, observeDurationMs } from '../../metrics/metrics.js';
 import { isOperationalDocsQuery } from '../../retrieval/providers/queryHeuristics.js';
 
-const DEFAULT_ENHANCE_TIMEOUT_MS = 120_000;
 const DEFAULT_RETRIEVAL_TIMEOUT_MS = 1_500;
-const DEFAULT_ENHANCE_RETRY_ATTEMPTS = 2;
 const DEFAULT_ENHANCE_RETRY_BACKOFF_MS = 750;
 const MAX_ENHANCE_RETRY_BACKOFF_MS = 5_000;
 const DEFAULT_ENHANCE_PROMPT_MODE: EnhancePromptMode = 'light';
@@ -36,7 +40,6 @@ const ENHANCED_PROMPT_PLACEHOLDER = 'enhanced prompt goes here';
 const DEFAULT_CONTEXT_TOP_K = 3;
 const DEFAULT_CONTEXT_MAX_FILES = 3;
 const DEFAULT_CONTEXT_MAX_CHARS = 1200;
-const ENHANCE_PROMPT_TEMPLATE_VERSION = '2.1.0';
 const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
 const REQUIRED_STRUCTURED_SECTIONS = [
@@ -117,12 +120,6 @@ function readEnhancePromptMode(): EnhancePromptMode {
 
 function normalizePromptCacheTtl(raw: string | undefined): number {
   return normalizeTimeout(raw, DEFAULT_SNIPPET_CACHE_TTL_MS, 0, 24 * 60 * 60 * 1000);
-}
-
-function normalizeEnhanceRetryAttempts(raw: string | undefined): number {
-  const parsed = raw ? Number(raw) : NaN;
-  if (!Number.isFinite(parsed)) return DEFAULT_ENHANCE_RETRY_ATTEMPTS;
-  return Math.max(0, Math.min(3, Math.floor(parsed)));
 }
 
 function createBudgetManager(totalBudgetMs: number, retrievalBudgetMs: number): BudgetManager {
@@ -359,25 +356,6 @@ function computeRetryBackoffMs(attempt: number, errorMessage: string): number {
   }
   const exponential = DEFAULT_ENHANCE_RETRY_BACKOFF_MS * Math.pow(2, attempt);
   return Math.max(250, Math.min(MAX_ENHANCE_RETRY_BACKOFF_MS, exponential));
-}
-
-async function sleepMs(durationMs: number, signal?: AbortSignal): Promise<void> {
-  if (durationMs <= 0) return;
-  if (signal?.aborted) {
-    throw createAbortError('Enhance prompt backoff');
-  }
-
-  await new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, durationMs);
-    const onAbort = () => {
-      clearTimeout(timer);
-      reject(createAbortError('Enhance prompt backoff'));
-    };
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
 }
 
 function parseStructuredHeadersIgnoringCodeFences(content: string): string[] {
@@ -667,6 +645,9 @@ export async function internalPromptEnhancerDetailed(
   signal?: AbortSignal,
   scope?: EnhancePromptScopeOptions
 ): Promise<PromptEnhancementResult> {
+  const primaryPolicy = getOpenAITaskPolicy('enhance_prompt');
+  const repairPolicy = getOpenAITaskPolicy('enhance_prompt_repair');
+  const templateVersion = primaryPolicy.templateVersion ?? primaryPolicy.responseSchemaVersion;
   const totalStartMs = Date.now();
   const flow = createRetrievalFlowContext('enhance_prompt', {
     metadata: {
@@ -683,12 +664,7 @@ export async function internalPromptEnhancerDetailed(
     1,
     'Total enhance_prompt attempts by mode.'
   );
-  const totalBudgetMs = normalizeTimeout(
-    process.env.CE_ENHANCE_PROMPT_TIMEOUT_MS,
-    DEFAULT_ENHANCE_TIMEOUT_MS,
-    1_000,
-    120_000
-  );
+  const totalBudgetMs = resolveOpenAITaskRuntimeOptions(primaryPolicy).timeoutMs;
   const retrievalBudgetMs = normalizeTimeout(
     process.env.CE_ENHANCE_RETRIEVAL_TIMEOUT_MS,
     DEFAULT_RETRIEVAL_TIMEOUT_MS,
@@ -696,8 +672,6 @@ export async function internalPromptEnhancerDetailed(
     10_000
   );
   const budget = createBudgetManager(totalBudgetMs, retrievalBudgetMs);
-  const retryAttempts = normalizeEnhanceRetryAttempts(process.env.CE_ENHANCE_PROMPT_RETRY_ATTEMPTS);
-  let lastTransientRetryAfterMs: number | undefined;
 
   throwIfSignalAborted(signal, 'Enhance prompt');
 
@@ -885,77 +859,68 @@ export async function internalPromptEnhancerDetailed(
 
   try {
     const modelStartMs = Date.now();
-    // Use searchAndAsk to get the enhancement with relevant codebase context.
-    // Retry transient failures (timeouts/queue pressure) before using fallback output.
-    let response = '';
-    let attemptPrompt = enhancementPrompt;
-    let lastTransientError: unknown = null;
-    for (let attempt = 0; attempt <= retryAttempts; attempt++) {
-      throwIfSignalAborted(signal, 'Enhance prompt');
-      const stageTimeoutMs = budget.stageBudgetMs('enhancement');
-      if (stageTimeoutMs <= 0) {
-        throw new Error('AI enhancement timed out');
-      }
-
-      try {
-        noteEnhancementFlowStage(flow, `model:attempt:${attempt + 1}`);
-        response = await withTimeout(
-          serviceClient.searchAndAsk(prompt, attemptPrompt, {
-            timeoutMs: stageTimeoutMs,
-            signal,
-          }),
-          stageTimeoutMs,
-          'AI enhancement',
-          signal
-        );
-        break;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        if (isAuthOrConfigError(errorMessage)) {
-          throw error;
-        }
-
-        const canRetry =
-          isFallbackEligibleError(errorMessage) &&
-          attempt < retryAttempts &&
-          budget.remainingMs() > 250;
-        if (!canRetry) {
-          throw error;
-        }
-
-        // Retry with a lean prompt to reduce model/context pressure.
-        noteEnhancementFlowStage(flow, `model:retry:${attempt + 1}`);
-        attemptPrompt = baseEnhancementPrompt;
-        lastTransientError = error;
-        const plannedBackoffMs = computeRetryBackoffMs(attempt, errorMessage);
-        const backoffMs = Math.min(plannedBackoffMs, Math.max(0, budget.remainingMs() - 100));
-        lastTransientRetryAfterMs = backoffMs > 0 ? backoffMs : extractRetryAfterMs(errorMessage);
-        incCounter(
-          'context_engine_enhance_prompt_retry_total',
-          { mode, reason: 'timeout_or_queue_or_transient' },
-          1,
-          'Enhance prompt transient retries before fallback.'
-        );
-        await sleepMs(backoffMs, signal);
-      }
+    const runtime = createOpenAITaskRuntime(serviceClient);
+    const stageTimeoutMs = budget.stageBudgetMs('enhancement');
+    if (stageTimeoutMs <= 0) {
+      throw new Error('AI enhancement timed out');
     }
-    if (!response && lastTransientError) {
-      throw lastTransientError;
-    }
+    const primaryRuntimeOptions = resolveOpenAITaskRuntimeOptions(primaryPolicy, {
+      timeoutCapMs: stageTimeoutMs,
+    });
+
+    noteEnhancementFlowStage(flow, 'model:attempt:1');
+    const primaryResult = await runtime.executeTask<string>({
+      taskName: primaryPolicy.taskName,
+      promptVersion: primaryPolicy.promptVersion,
+      searchQuery: prompt,
+      prompt: enhancementPrompt,
+      timeoutMs: primaryRuntimeOptions.timeoutMs,
+      responseSchemaVersion: primaryPolicy.responseSchemaVersion,
+      priority: primaryPolicy.priority,
+      signal,
+      retryPolicy: primaryRuntimeOptions.retryPolicy,
+      bypassDedupe: primaryRuntimeOptions.bypassDedupe,
+      allowValidationFailureResult: primaryRuntimeOptions.allowValidationFailureResult,
+      degradedModeOnValidationFailure: primaryRuntimeOptions.degradedModeOnValidationFailure,
+      dedupeContext: JSON.stringify({
+        prompt,
+        mode,
+        contextFiles,
+        appliedIncludePaths: scopeDecision.appliedIncludePaths,
+        excludePaths: scope?.excludePaths ?? [],
+        groundingSources: (scope?.externalSources ?? []).map((source) => source.url),
+      }),
+      validateResponse: (responseText) => {
+        const parsed = parseEnhancedPrompt(responseText);
+        if (!parsed) {
+          throw new OpenAITaskRuntimeValidationError(
+            'Enhanced prompt response format is invalid. Please retry.',
+            'missing_enhanced_prompt_tag',
+            responseText
+          );
+        }
+        return {
+          parsed,
+          parseStatus: 'enhanced_prompt_tag',
+        };
+      },
+      prepareRetry: ({ attempt, error }) => {
+        noteEnhancementFlowStage(flow, `model:retry:${attempt}`);
+        return {
+          prompt: baseEnhancementPrompt,
+        };
+      },
+      retryBackoffMs: ({ attempt, error }) => {
+        const errorMessage = error.message ?? String(error);
+        const plannedBackoffMs = computeRetryBackoffMs(attempt - 1, errorMessage);
+        return Math.min(plannedBackoffMs, Math.max(0, budget.remainingMs() - 100));
+      },
+    });
 
     const performValidation = (candidate: string): StructuredValidationResult =>
       validateStructuredEnhancedPrompt(candidate);
 
-    // Parse and validate enhanced prompt.
-    let enhanced = parseEnhancedPrompt(response);
-    if (!enhanced) {
-      noteEnhancementFlowStage(flow, 'model:validation_failed:no_tag');
-      throw new EnhancePromptError(
-        'VALIDATION_FAILED',
-        'Enhanced prompt response format is invalid. Please retry.',
-        true
-      );
-    }
+    let enhanced = primaryResult.parsed ?? parseEnhancedPrompt(primaryResult.text) ?? '';
 
     if (parseStructuredHeadersIgnoringCodeFences(enhanced).length === 0) {
       enhanced = buildStructuredPromptFromText(prompt, enhanced);
@@ -978,6 +943,9 @@ export async function internalPromptEnhancerDetailed(
           true
         );
       }
+      const repairRuntimeOptions = resolveOpenAITaskRuntimeOptions(repairPolicy, {
+        timeoutCapMs: repairTimeoutMs,
+      });
 
       incCounter(
         'context_engine_enhance_prompt_repair_attempted_total',
@@ -987,30 +955,41 @@ export async function internalPromptEnhancerDetailed(
       );
       noteEnhancementFlowStage(flow, 'repair:attempt');
 
-      const repairResponse = await withTimeout(
-        serviceClient.searchAndAsk(prompt, buildRepairEnhancementPrompt(prompt, enhanced), {
-          timeoutMs: repairTimeoutMs,
-          signal,
+      const repairResult = await runtime.executeTask<string>({
+        taskName: repairPolicy.taskName,
+        promptVersion: repairPolicy.promptVersion,
+        searchQuery: prompt,
+        prompt: buildRepairEnhancementPrompt(prompt, enhanced),
+        timeoutMs: repairRuntimeOptions.timeoutMs,
+        responseSchemaVersion: repairPolicy.responseSchemaVersion,
+        priority: repairPolicy.priority,
+        signal,
+        retryPolicy: repairRuntimeOptions.retryPolicy,
+        bypassDedupe: repairRuntimeOptions.bypassDedupe,
+        allowValidationFailureResult: repairRuntimeOptions.allowValidationFailureResult,
+        degradedModeOnValidationFailure: repairRuntimeOptions.degradedModeOnValidationFailure,
+        dedupeContext: JSON.stringify({
+          prompt,
+          enhanced,
+          mode,
+          scopeApplied: isScopeApplied,
         }),
-        repairTimeoutMs,
-        'Enhancement repair',
-        signal
-      );
-      const repaired = parseEnhancedPrompt(repairResponse);
-      if (!repaired) {
-        noteEnhancementFlowStage(flow, 'repair:parse_failed');
-        incCounter(
-          'context_engine_enhance_prompt_repair_failed_total',
-          { mode, reason: 'parse_failed' },
-          1,
-          'Enhance prompt repair failures.'
-        );
-        throw new EnhancePromptError(
-          'REPAIR_FAILED',
-          'Enhanced prompt repair failed due to invalid format. Please retry.',
-          true
-        );
-      }
+        validateResponse: (responseText) => {
+          const parsed = parseEnhancedPrompt(responseText);
+          if (!parsed) {
+            throw new OpenAITaskRuntimeValidationError(
+              'Enhanced prompt repair failed due to invalid format. Please retry.',
+              'missing_enhanced_prompt_tag',
+              responseText
+            );
+          }
+          return {
+            parsed,
+            parseStatus: 'enhanced_prompt_tag',
+          };
+        },
+      });
+      const repaired = repairResult.parsed ?? '';
 
       validation = performValidation(repaired);
       if (!validation.valid) {
@@ -1041,7 +1020,7 @@ export async function internalPromptEnhancerDetailed(
       return {
         enhancedPrompt: enhanced,
         source: 'ai',
-        templateVersion: ENHANCE_PROMPT_TEMPLATE_VERSION,
+        templateVersion,
         contextFiles,
         mode,
         scopeApplied: isScopeApplied,
@@ -1085,7 +1064,7 @@ export async function internalPromptEnhancerDetailed(
     return {
       enhancedPrompt: enhanced,
       source: 'ai',
-      templateVersion: ENHANCE_PROMPT_TEMPLATE_VERSION,
+      templateVersion,
       contextFiles,
       mode,
       scopeApplied: isScopeApplied,
@@ -1116,6 +1095,7 @@ export async function internalPromptEnhancerDetailed(
       throw error;
     }
     const errorMessage = error instanceof Error ? error.message : String(error);
+    const runtimeMetadata = getOpenAITaskRuntimeMetadata(error);
     console.error(`[AI Enhancement] Error: ${errorMessage}`);
 
     if (/usage limit|quota|more access now|try again at/i.test(errorMessage)) {
@@ -1154,7 +1134,7 @@ export async function internalPromptEnhancerDetailed(
 
     if (isFallbackEligibleError(errorMessage)) {
       console.error('[AI Enhancement] Returning transient upstream error (no fallback template output)');
-      const retryAfterMs = extractRetryAfterMs(errorMessage) ?? lastTransientRetryAfterMs;
+      const retryAfterMs = runtimeMetadata?.failure.retry_after_ms ?? extractRetryAfterMs(errorMessage);
       incCounter(
         'context_engine_enhance_prompt_transient_error_total',
         { mode, reason: 'timeout_or_queue_or_transient' },
@@ -1172,6 +1152,14 @@ export async function internalPromptEnhancerDetailed(
         'AI enhancement is temporarily unavailable (timeout, queue pressure, or transient upstream issue). Please retry shortly.',
         true,
         retryAfterMs
+      );
+    }
+
+    if (error instanceof OpenAITaskRuntimeValidationError || runtimeMetadata?.failure.category === 'validation') {
+      throw new EnhancePromptError(
+        'VALIDATION_FAILED',
+        'Enhanced prompt response format is invalid. Please retry.',
+        true
       );
     }
 

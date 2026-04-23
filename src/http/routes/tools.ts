@@ -8,11 +8,20 @@
 import type { Router, Request, Response, NextFunction } from 'express';
 import { Router as createRouter } from 'express';
 import type { ContextServiceClient, ContextOptions } from '../../mcp/serviceClient.js';
+import { buildActivePlanHandoff } from '../../mcp/handoff/activePlan.js';
 import { handleCreatePlan, type CreatePlanArgs } from '../../mcp/tools/plan.js';
 import { handleEnhancePrompt } from '../../mcp/tools/enhance.js';
+import { handleCodebaseRetrieval, type CodebaseRetrievalArgs } from '../../mcp/tools/codebaseRetrieval.js';
+import { handleFindCallers, type FindCallersArgs } from '../../mcp/tools/findCallers.js';
+import { handleFindCallees, type FindCalleesArgs } from '../../mcp/tools/findCallees.js';
+import { handleTraceSymbol, type TraceSymbolArgs } from '../../mcp/tools/traceSymbol.js';
+import { handleImpactAnalysis, type ImpactAnalysisArgs } from '../../mcp/tools/impactAnalysis.js';
+import { handleWhyThisContext, type WhyThisContextArgs } from '../../mcp/tools/whyThisContext.js';
 import { handleReviewChanges, type ReviewChangesArgs } from '../../mcp/tools/codeReview.js';
 import { handleReviewGitDiff, type ReviewGitDiffArgs } from '../../mcp/tools/gitReview.js';
 import { handleReviewAuto, type ReviewAutoArgs } from '../../mcp/tools/reviewAuto.js';
+import { getToolManifest } from '../../mcp/tools/manifest.js';
+import type { CodebaseRetrievalOutput } from '../../mcp/tools/codebaseRetrieval.js';
 import { badRequest, HttpError } from '../middleware/errorHandler.js';
 import { envMs } from '../../config/env.js';
 import { validateExternalSources, validatePathScopeGlobs } from '../../mcp/tooling/validation.js';
@@ -34,6 +43,37 @@ function parseExternalSourcesOrBadRequest(value: unknown) {
         return validateExternalSources(value, 'external_sources');
     } catch (error) {
         throw badRequest(error instanceof Error ? error.message : 'Invalid external_sources parameter');
+    }
+}
+
+type HttpContextHandoffMode = 'none' | 'active_plan';
+
+function parseContextHandoffModeOrBadRequest(value: unknown): HttpContextHandoffMode | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (value === 'none' || value === 'active_plan') {
+        return value;
+    }
+    throw badRequest('options.handoff_mode must be one of none, active_plan');
+}
+
+function parseContextPlanIdOrBadRequest(value: unknown): string | undefined {
+    if (value === undefined) {
+        return undefined;
+    }
+    if (typeof value !== 'string' || !value.trim()) {
+        throw badRequest('options.plan_id must be a non-empty string when provided');
+    }
+    return value.trim();
+}
+
+function parseJsonToolResult<T>(payload: string, operation: string): T {
+    try {
+        return JSON.parse(payload) as T;
+    } catch (error) {
+        const reason = error instanceof Error ? error.message : 'unknown parse error';
+        throw new HttpError(500, `${operation} returned non-JSON output: ${reason}`);
     }
 }
 
@@ -89,8 +129,17 @@ export async function runAbortableTool<T>(
     timeoutMs: number,
     operation: string,
     executor: (signal: AbortSignal) => Promise<T>,
-    res?: Pick<Response, 'setTimeout'>
+    res?: Pick<Response, 'setTimeout' | 'socket'>
 ): Promise<T> {
+    const previousRequestTimeoutMs =
+        typeof req.socket?.timeout === 'number' && Number.isFinite(req.socket.timeout)
+            ? req.socket.timeout
+            : undefined;
+    const previousResponseTimeoutMs =
+        typeof res?.socket?.timeout === 'number' && Number.isFinite(res.socket.timeout)
+            ? res.socket.timeout
+            : undefined;
+
     if (typeof req.setTimeout === 'function') {
         req.setTimeout(timeoutMs);
     }
@@ -113,6 +162,14 @@ export async function runAbortableTool<T>(
             if (timeoutId) {
                 clearTimeout(timeoutId);
                 timeoutId = undefined;
+            }
+            if (previousRequestTimeoutMs !== undefined) {
+                if (typeof req.setTimeout === 'function') {
+                    req.setTimeout(previousRequestTimeoutMs);
+                }
+            }
+            if (previousResponseTimeoutMs !== undefined && res && typeof res.setTimeout === 'function') {
+                res.setTimeout(previousResponseTimeoutMs);
             }
             detach();
             controller.signal.removeEventListener('abort', onAbort);
@@ -166,13 +223,19 @@ function asyncHandler(
  * - POST /api/v1/index - Index workspace
  * - POST /api/v1/search - Semantic search
  * - POST /api/v1/symbol-search - Deterministic symbol-first search
+ * - POST /api/v1/find-callers - Deterministic direct callers lookup
+ * - POST /api/v1/find-callees - Deterministic direct callees lookup
  * - POST /api/v1/symbol-definition - Deterministic single-result symbol definition lookup
  * - POST /api/v1/call-relationships - Deterministic callers and callees for a known symbol
+ * - POST /api/v1/trace-symbol - Deterministic combined symbol trace
+ * - POST /api/v1/impact-analysis - Deterministic direct impact analysis
  * - POST /api/v1/codebase-retrieval - Codebase retrieval (uses searchAndAsk)
  * - POST /api/v1/enhance-prompt - Enhance prompt (uses searchAndAsk)
  * - POST /api/v1/plan - Create implementation plan
  * - POST /api/v1/context - Get context for prompt
+ * - POST /api/v1/why-this-context - Explain context selection receipts
  * - POST /api/v1/file - Get file contents
+ * - POST /api/v1/tool-manifest - Tool manifest and discoverability metadata
  * - POST /api/v1/review-changes - Review code changes from diff
  * - POST /api/v1/review-git-diff - Review code changes from git automatically
  * - POST /api/v1/review-auto - Auto-select review tool (diff vs git)
@@ -192,7 +255,7 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
 
             if (background) {
                 // Start indexing in background and return immediately
-                serviceClient.indexWorkspace().catch((err) => {
+                serviceClient.indexWorkspaceInBackground().catch((err) => {
                     console.error('[HTTP] Background indexing failed:', err);
                 });
                 res.json({
@@ -325,6 +388,60 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
     );
 
     /**
+     * POST /find-callers
+     * Deterministic direct caller lookup for a known function or method symbol
+     * Body: { symbol: string, top_k?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[], language_hint?: string }
+     */
+    router.post(
+        '/find-callers',
+        asyncHandler(async (req, res) => {
+            const args = (req.body || {}) as FindCallersArgs;
+
+            if (!args.symbol || typeof args.symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            res.json(
+                parseJsonToolResult<Record<string, unknown>>(
+                    await withTimeout(
+                        handleFindCallers(args, serviceClient),
+                        DEFAULT_TOOL_TIMEOUT_MS,
+                        'Find callers'
+                    ),
+                    'Find callers'
+                )
+            );
+        })
+    );
+
+    /**
+     * POST /find-callees
+     * Deterministic direct callee lookup for a known function or method symbol
+     * Body: { symbol: string, top_k?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[], language_hint?: string }
+     */
+    router.post(
+        '/find-callees',
+        asyncHandler(async (req, res) => {
+            const args = (req.body || {}) as FindCalleesArgs;
+
+            if (!args.symbol || typeof args.symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            res.json(
+                parseJsonToolResult<Record<string, unknown>>(
+                    await withTimeout(
+                        handleFindCallees(args, serviceClient),
+                        DEFAULT_TOOL_TIMEOUT_MS,
+                        'Find callees'
+                    ),
+                    'Find callees'
+                )
+            );
+        })
+    );
+
+    /**
      * POST /symbol-definition
      * Deterministic single-result symbol definition lookup
      * Body: { symbol: string, workspacePath?: string, language_hint?: string, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[] }
@@ -417,6 +534,60 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
     );
 
     /**
+     * POST /trace-symbol
+     * Deterministic symbol trace across definition, references, callers, and callees
+     * Body: { symbol: string, top_k?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[], language_hint?: string }
+     */
+    router.post(
+        '/trace-symbol',
+        asyncHandler(async (req, res) => {
+            const args = (req.body || {}) as TraceSymbolArgs;
+
+            if (!args.symbol || typeof args.symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            res.json(
+                parseJsonToolResult<Record<string, unknown>>(
+                    await withTimeout(
+                        handleTraceSymbol(args, serviceClient),
+                        DEFAULT_TOOL_TIMEOUT_MS,
+                        'Trace symbol'
+                    ),
+                    'Trace symbol'
+                )
+            );
+        })
+    );
+
+    /**
+     * POST /impact-analysis
+     * Deterministic direct impact analysis for a known symbol
+     * Body: { symbol: string, top_k?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[], language_hint?: string }
+     */
+    router.post(
+        '/impact-analysis',
+        asyncHandler(async (req, res) => {
+            const args = (req.body || {}) as ImpactAnalysisArgs;
+
+            if (!args.symbol || typeof args.symbol !== 'string') {
+                throw badRequest('symbol is required and must be a string');
+            }
+
+            res.json(
+                parseJsonToolResult<Record<string, unknown>>(
+                    await withTimeout(
+                        handleImpactAnalysis(args, serviceClient),
+                        DEFAULT_TOOL_TIMEOUT_MS,
+                        'Impact analysis'
+                    ),
+                    'Impact analysis'
+                )
+            );
+        })
+    );
+
+    /**
      * POST /codebase-retrieval
      * Codebase retrieval using searchAndAsk
      * Body: { query: string, top_k?: number }
@@ -424,36 +595,32 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
     router.post(
         '/codebase-retrieval',
         asyncHandler(async (req, res) => {
-            const { query, top_k = 10 } = req.body || {};
+            const args = (req.body || {}) as CodebaseRetrievalArgs;
+            const { query, top_k = 10 } = args;
 
             if (!query || typeof query !== 'string') {
                 throw badRequest('query is required and must be a string');
             }
 
-            // Use semantic search for codebase retrieval
-            const searchResults = await withTimeout(
-                serviceClient.semanticSearch(query, top_k),
-                DEFAULT_TOOL_TIMEOUT_MS,
+            const toolResult = parseJsonToolResult<CodebaseRetrievalOutput>(
+                await withTimeout(
+                    handleCodebaseRetrieval(args, serviceClient),
+                    DEFAULT_TOOL_TIMEOUT_MS,
+                    'Codebase retrieval'
+                ),
                 'Codebase retrieval'
             );
-            const status = serviceClient.getIndexStatus();
-
-            const results = searchResults.map((r) => ({
-                path: r.path,
-                content: r.content,
-                score: r.relevanceScore || r.score || 0,
-                lines: r.lines,
-                reason: `Semantic match for: "${query}"`,
-            }));
 
             res.json({
-                results,
+                results: toolResult.results.map((result) => ({
+                    ...result,
+                    path: result.file,
+                })),
                 metadata: {
-                    workspace: status.workspace,
-                    lastIndexed: status.lastIndexed,
                     query,
                     top_k,
-                    resultCount: results.length,
+                    resultCount: toolResult.results.length,
+                    ...toolResult.metadata,
                 },
             });
         })
@@ -544,9 +711,30 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
             }
 
             const optionsRecord = (options ?? {}) as Record<string, unknown>;
+            const {
+                external_sources,
+                handoff_mode: _handoffMode,
+                plan_id: _planId,
+                ...remainingOptions
+            } = optionsRecord;
+            const normalizedHandoffMode = parseContextHandoffModeOrBadRequest(
+                optionsRecord.handoff_mode ?? optionsRecord.handoffMode
+            );
+            const normalizedPlanId = parseContextPlanIdOrBadRequest(
+                optionsRecord.plan_id ?? optionsRecord.planId
+            );
+            if (normalizedHandoffMode === 'active_plan' && !normalizedPlanId) {
+                throw badRequest('options.plan_id is required when options.handoff_mode is active_plan');
+            }
             const normalizedOptions = {
-                ...(optionsRecord as ContextOptions),
-                externalSources: parseExternalSourcesOrBadRequest(optionsRecord.external_sources),
+                ...(remainingOptions as ContextOptions),
+                externalSources: parseExternalSourcesOrBadRequest(external_sources),
+                ...(normalizedHandoffMode === 'active_plan'
+                    ? {
+                        includeMemories: false,
+                        includeDraftMemories: false,
+                    }
+                    : {}),
             } as ContextOptions;
 
             const context = await withTimeout(
@@ -554,7 +742,46 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 CONTEXT_TIMEOUT_MS,
                 'Context retrieval'
             );
+            if (normalizedHandoffMode === 'active_plan' && normalizedPlanId) {
+                const handoff = await withTimeout(
+                    buildActivePlanHandoff(serviceClient, normalizedPlanId),
+                    CONTEXT_TIMEOUT_MS,
+                    'Context handoff'
+                );
+                res.json({
+                    ...context,
+                    handoff,
+                });
+                return;
+            }
             res.json(context);
+        })
+    );
+
+    /**
+     * POST /why-this-context
+     * Explain why files were selected into a context bundle
+     * Body: { query: string, max_files?: number, token_budget?: number, include_related?: boolean, min_relevance?: number, bypass_cache?: boolean, include_paths?: string[], exclude_paths?: string[] }
+     */
+    router.post(
+        '/why-this-context',
+        asyncHandler(async (req, res) => {
+            const args = (req.body || {}) as WhyThisContextArgs;
+
+            if (!args.query || typeof args.query !== 'string') {
+                throw badRequest('query is required and must be a string');
+            }
+
+            res.json(
+                parseJsonToolResult<Record<string, unknown>>(
+                    await withTimeout(
+                        handleWhyThisContext(args, serviceClient),
+                        CONTEXT_TIMEOUT_MS,
+                        'Why this context'
+                    ),
+                    'Why this context'
+                )
+            );
         })
     );
 
@@ -581,6 +808,17 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 path: filePath,
                 content,
             });
+        })
+    );
+
+    /**
+     * POST /tool-manifest
+     * Return the MCP tool manifest and discoverability metadata over REST
+     */
+    router.post(
+        '/tool-manifest',
+        asyncHandler(async (_req, res) => {
+            res.json(getToolManifest());
         })
     );
 

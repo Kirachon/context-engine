@@ -648,7 +648,7 @@ index 1234567..abcdefg 100644
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
           'Review code changes for issues',
           expect.any(String),
-          { timeoutMs: 65000 }
+          expect.objectContaining({ timeoutMs: 65000, priority: 'background' })
         );
       } finally {
         if (previous === undefined) delete process.env.CE_REVIEW_AI_TIMEOUT_MS;
@@ -677,7 +677,7 @@ index 1234567..abcdefg 100644
         expect(mockServiceClient.searchAndAsk).toHaveBeenCalledWith(
           'Review code changes for issues',
           expect.any(String),
-          { timeoutMs: 120000 }
+          expect.objectContaining({ timeoutMs: 120000, priority: 'background' })
         );
       } finally {
         if (previous === undefined) delete process.env.CE_REVIEW_AI_TIMEOUT_MS;

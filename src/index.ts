@@ -24,6 +24,7 @@ import { envBool } from './config/env.js';
 import { FEATURE_FLAGS, validateFlagCombinations } from './config/features.js';
 import { resolveWorkspacePath, type WorkspaceResolutionResult } from './workspace/resolveWorkspace.js';
 import { acquireWorkspaceStartupLock } from './runtime/workspaceLock.js';
+import { shutdownObservability, startObservability } from './observability/otel.js';
 import * as path from 'path';
 import * as fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -177,13 +178,68 @@ Examples:
   console.error('');
 
   try {
+    await startObservability();
     const startupLock = acquireWorkspaceStartupLock(workspacePath);
     if (startupLock.warning) {
       console.warn(startupLock.warning);
     }
-    process.once('exit', startupLock.release);
+    let server: ContextEngineMCPServer | undefined;
+    let httpServer: ContextEngineHttpServer | undefined;
+    let shuttingDown = false;
+    let shutdownResolve: (() => void) | undefined;
+    const waitForShutdown = new Promise<void>((resolve) => {
+      shutdownResolve = resolve;
+    });
 
-    const server = new ContextEngineMCPServer(workspacePath, 'context-engine', {
+    const shutdown = async (reason: string, exitCode: number = 0): Promise<void> => {
+      if (shuttingDown) {
+        return;
+      }
+      shuttingDown = true;
+
+      console.error(`\nReceived ${reason}, shutting down gracefully...`);
+
+      try {
+        if (httpServer?.isRunning()) {
+          await httpServer.stop();
+        }
+        if (server) {
+          await server.shutdown(reason);
+        }
+      } catch (error) {
+        exitCode = 1;
+        console.error('Error during shutdown:', error);
+      } finally {
+        startupLock.release();
+        await shutdownObservability();
+        shutdownResolve?.();
+        process.exit(exitCode);
+      }
+    };
+
+    process.once('SIGINT', () => {
+      void shutdown('SIGINT', 0);
+    });
+    process.once('SIGTERM', () => {
+      void shutdown('SIGTERM', 0);
+    });
+    process.once('uncaughtException', (error) => {
+      console.error('Uncaught exception:', error);
+      void shutdown('uncaughtException', 1);
+    });
+    process.on('unhandledRejection', (reason) => {
+      console.error('Unhandled rejection:', reason);
+    });
+    if (!httpOnly && process.stdin) {
+      process.stdin.once('end', () => {
+        void shutdown('stdio_end', 0);
+      });
+      process.stdin.once('close', () => {
+        void shutdown('stdio_closed', 0);
+      });
+    }
+
+    server = new ContextEngineMCPServer(workspacePath, 'context-engine', {
       enableWatcher,
     });
     const serviceClient = server.getServiceClient();
@@ -224,7 +280,7 @@ Examples:
     // Start HTTP server if enabled
     if (enableHttp) {
       // Get the shared service client from the MCP server
-      const httpServer = new ContextEngineHttpServer(
+      httpServer = new ContextEngineHttpServer(
         server.getServiceClient(),
         {
           port: httpPort,
@@ -249,25 +305,15 @@ Examples:
     // Start stdio MCP server unless http-only mode
     if (!httpOnly) {
       console.error('Starting MCP server (stdio)...');
-      const runPromise = server.run();
+      await server.run();
       maybeStartAutoIndex();
-      await runPromise;
     } else {
       maybeStartAutoIndex();
       console.error('Running in HTTP-only mode. Press Ctrl+C to stop.');
-      // Keep process running with proper signal handling
-      await new Promise<void>(resolve => {
-        process.on('SIGINT', () => {
-          console.error('\nReceived SIGINT, shutting down gracefully...');
-          resolve();
-        });
-        process.on('SIGTERM', () => {
-          console.error('\nReceived SIGTERM, shutting down gracefully...');
-          resolve();
-        });
-      });
     }
+    await waitForShutdown;
   } catch (error) {
+    await shutdownObservability();
     console.error('Failed to start server:', error);
     process.exit(1);
   }

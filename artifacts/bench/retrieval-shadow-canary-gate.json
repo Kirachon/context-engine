@@ -1,27 +1,43 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-13T10:30:22.520Z",
+  "generated_at": "2026-04-21T06:00:25.120Z",
   "inputs": {
     "quality_report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json",
     "telemetry": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-telemetry.json",
     "holdout": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
+    "routing_receipts": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-routing-receipts.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-shadow-canary-gate.json"
   },
   "thresholds": {
     "max_skipped_docs_rate_pct": 20,
-    "max_embed_batch_p95_ms": 250
+    "max_embed_batch_p95_ms": 250,
+    "min_shadow_top1_overlap_rate_pct": 0,
+    "min_symbol_route_activation_rate_pct": 0,
+    "max_symbol_route_misroute_rate_pct": 100,
+    "min_routing_receipt_coverage_pct": 0
   },
   "observed": {
     "skipped_docs_rate_pct": 0,
-    "embed_batch_p95_ms": 45
+    "embed_batch_p95_ms": 45,
+    "routing_shadow": {
+      "top1_overlap_rate_pct": 100,
+      "symbol_route_activation_rate_pct": 0,
+      "symbol_route_misroute_rate_pct": 0
+    },
+    "routing_receipts": {
+      "symbol_route_count": 0,
+      "shadow_compare_receipt_count": 0,
+      "shadow_compare_executed_count": 0,
+      "receipt_coverage_pct": 100
+    }
   },
   "gate": {
     "status": "pass",
     "reasons": []
   },
   "reproducibility_lock": {
-    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
+    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
     "dataset_id": "holdout_v1",
-    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716"
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb"
   }
 }

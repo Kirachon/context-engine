@@ -37,6 +37,8 @@ export interface GitDiffResult {
   command: string;
 }
 
+export type GitDiffStats = GitDiffResult['stats'];
+
 export interface GitStatusResult {
   /** Whether the directory is a git repository */
   is_git_repo: boolean;
@@ -62,7 +64,6 @@ export function execGitCommand(
   return new Promise((resolve) => {
     const proc = spawn('git', args, {
       cwd: workspacePath,
-      shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -253,9 +254,15 @@ export async function getBranchDiff(
  */
 export async function getCommitDiff(
   workspacePath: string,
-  commitHash: string
+  commitHash: string,
+  options: Pick<GitDiffOptions, 'pathPatterns' | 'contextLines'> = {}
 ): Promise<GitDiffResult> {
-  const args = ['show', commitHash, '--format=', '--unified=3'];
+  const { pathPatterns = [], contextLines = 3 } = options;
+  const args = ['show', commitHash, '--format=', `--unified=${contextLines}`];
+  if (pathPatterns.length > 0) {
+    args.push('--');
+    args.push(...pathPatterns);
+  }
   const command = `git ${args.join(' ')}`;
   const result = await execGitCommand(args, workspacePath);
 
@@ -274,4 +281,3 @@ export async function getCommitDiff(
     command,
   };
 }
-

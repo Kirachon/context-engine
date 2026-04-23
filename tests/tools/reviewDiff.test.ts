@@ -1,5 +1,7 @@
 import { describe, it, expect } from '@jest/globals';
 import { handleReviewDiff } from '../../src/mcp/tools/reviewDiff.js';
+import { createReviewDiffContext } from '../../src/reviewer/context/diffContext.js';
+import { runReviewAnalyzers } from '../../src/reviewer/pipeline/analyzerOrchestrator.js';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -109,6 +111,85 @@ index 1234567..abcdefg 100644
     expect(result.stats.files_changed).toBe(1);
     expect(result.stats.lines_added).toBe(0);
     expect(result.stats.lines_removed).toBe(0);
+  });
+
+  it('accepts rename-only diffs without hunks', async () => {
+    const diff = `diff --git a/src/old-name.ts b/src/new-name.ts
+similarity index 100%
+rename from src/old-name.ts
+rename to src/new-name.ts
+`;
+
+    const resultStr = await handleReviewDiff(
+      { diff },
+      { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+    );
+    const result = JSON.parse(resultStr);
+    expect(result.stats.files_changed).toBe(1);
+    expect(result.stats.lines_added).toBe(0);
+    expect(result.stats.lines_removed).toBe(0);
+  });
+
+  it('surfaces binary diff findings without failing parsing', async () => {
+    const diff = `diff --git a/assets/logo.png b/assets/logo.png
+Binary files a/assets/logo.png and b/assets/logo.png differ
+`;
+
+    const resultStr = await handleReviewDiff(
+      { diff },
+      { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+    );
+    const result = JSON.parse(resultStr);
+    expect(result.stats.files_changed).toBe(1);
+    expect(result.findings.some((finding: any) => finding.id === 'PRE004')).toBe(true);
+  });
+
+  it('builds a changed-line map that rejects unchanged ranges and unknown files', () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1,3 +1,4 @@
+ export const a = 1;
+-export const b = 2;
++export const b = 3;
++export const c = 4;
+ export const d = 5;
+`;
+
+    const context = createReviewDiffContext(diff);
+    expect(context.changedLineMap.getChangedLines('src/a.ts')).toEqual([2, 3]);
+    expect(context.changedLineMap.hasRange('src/a.ts', 2, 3)).toBe(true);
+    expect(context.changedLineMap.hasRange('src/a.ts', 1, 1)).toBe(false);
+    expect(context.changedLineMap.hasRange('src/missing.ts', 1, 10)).toBe(false);
+  });
+
+  it('keeps analyzer stages separately testable when scope prerequisites are missing', async () => {
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const analyzerResults = await runReviewAnalyzers(createReviewDiffContext(diff), {
+      diff,
+      options: {
+        invariants_path: '.review-invariants.yml',
+        enable_static_analysis: true,
+      },
+    });
+
+    expect(analyzerResults.invariantFindings).toEqual([]);
+    expect(analyzerResults.staticFindings).toEqual([]);
+    expect(analyzerResults.warnings).toContain(
+      'invariants_path provided but workspace_path was not provided; skipping invariants'
+    );
+    expect(analyzerResults.warnings).toContain(
+      'enable_static_analysis was true but workspace_path was not provided; skipping static analysis'
+    );
   });
 
   it('does not require provider/model resolution when enable_llm is false', async () => {
@@ -286,6 +367,36 @@ index 1234567..abcdefg 100644
       if (previous === undefined) delete process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS;
       else process.env.CE_REVIEW_DIFF_LLM_TIMEOUT_MS = previous;
     }
+  });
+
+  it('turns runtime JSON validation failures into review warnings instead of throwing', async () => {
+    const diff = `diff --git a/src/mcp/tools/x.ts b/src/mcp/tools/x.ts
+index 1234567..abcdefg 100644
+--- a/src/mcp/tools/x.ts
++++ b/src/mcp/tools/x.ts
+@@ -1,2 +1,3 @@
+ export const x = 1;
++export const y = 2;
+`;
+
+    const resultStr = await handleReviewDiff(
+      {
+        diff,
+        options: { enable_llm: true, two_pass: true, risk_threshold: 3 },
+      },
+      {
+        getWorkspacePath: () => process.cwd(),
+        getFile: async () => `export const x = 1;\nexport const y = 2;\n`,
+        getActiveAIModelLabel: () => 'test-model',
+        searchAndAsk: async () => 'no json here',
+      } as any
+    );
+
+    const result = JSON.parse(resultStr);
+    expect(result.stats.llm_passes_executed).toBe(2);
+    expect(result.metadata.warnings).toContain('Failed to extract JSON from LLM response');
+    expect(Array.isArray(result.findings)).toBe(true);
+    expect(result.findings.length).toBeGreaterThan(0);
   });
 
   it('sets should_fail when a CRITICAL invariant is violated', async () => {

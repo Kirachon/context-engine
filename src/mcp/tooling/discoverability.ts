@@ -14,8 +14,28 @@ type BaseDiscoverabilityMetadata = {
   related?: RelatedSurfaceMetadata;
 };
 
+export type RestApiTransportMetadata = {
+  method: 'POST';
+  path: `/api/v1/${string}`;
+};
+
+export type ToolSharedContractMetadata = {
+  latency_class: 'interactive' | 'extended' | 'background';
+  index_requirement: 'none' | 'recommended' | 'required';
+  graph_requirement: 'none' | 'preferred' | 'required';
+  git_requirement: 'none' | 'optional' | 'required';
+  provenance_availability: 'none' | 'fallback_receipts' | 'selection_receipts' | 'review_receipts';
+  explainability_fields?: string[];
+  transport: {
+    stdio_mcp: true;
+    streamable_http_mcp: true;
+    rest_api?: RestApiTransportMetadata;
+  };
+};
+
 type ToolDiscoverabilityMetadata = BaseDiscoverabilityMetadata & {
   annotations?: ToolAnnotations;
+  sharedContract?: ToolSharedContractMetadata;
 };
 
 export type PromptDiscoverabilityMetadata = BaseDiscoverabilityMetadata;
@@ -30,6 +50,7 @@ export type ManifestDiscoverabilityEntry = {
   examples?: string[];
   safety_hints?: string[];
   related_surfaces?: RelatedSurfaceMetadata;
+  shared_contract?: ToolSharedContractMetadata;
 };
 
 export type ManifestResourceDiscoverabilityEntry = ManifestDiscoverabilityEntry & {
@@ -61,9 +82,28 @@ function cloneRelated(related?: RelatedSurfaceMetadata): RelatedSurfaceMetadata 
   };
 }
 
+function cloneSharedContract(sharedContract?: ToolSharedContractMetadata): ToolSharedContractMetadata | undefined {
+  if (!sharedContract) {
+    return undefined;
+  }
+
+  return {
+    ...sharedContract,
+    ...(sharedContract.explainability_fields
+      ? { explainability_fields: [...sharedContract.explainability_fields] }
+      : {}),
+    transport: {
+      ...sharedContract.transport,
+      ...(sharedContract.transport.rest_api
+        ? { rest_api: { ...sharedContract.transport.rest_api } }
+        : {}),
+    },
+  };
+}
+
 function toManifestEntry(
   id: string,
-  metadata: BaseDiscoverabilityMetadata
+  metadata: BaseDiscoverabilityMetadata & { sharedContract?: ToolSharedContractMetadata }
 ): ManifestDiscoverabilityEntry {
   return {
     id,
@@ -72,6 +112,7 @@ function toManifestEntry(
     ...(metadata.examples ? { examples: [...metadata.examples] } : {}),
     ...(metadata.safetyHints ? { safety_hints: [...metadata.safetyHints] } : {}),
     ...(metadata.related ? { related_surfaces: cloneRelated(metadata.related) } : {}),
+    ...(metadata.sharedContract ? { shared_contract: cloneSharedContract(metadata.sharedContract) } : {}),
   };
 }
 
@@ -80,6 +121,31 @@ function toolMetadata(
   overrides: Omit<ToolDiscoverabilityMetadata, 'title'> = {}
 ): ToolDiscoverabilityMetadata {
   return { title, ...overrides };
+}
+
+function sharedContract(
+  overrides: Omit<Partial<ToolSharedContractMetadata>, 'transport'> & {
+    transport?: {
+      rest_api?: RestApiTransportMetadata;
+    };
+  } = {}
+): ToolSharedContractMetadata {
+  return {
+    latency_class: overrides.latency_class ?? 'interactive',
+    index_requirement: overrides.index_requirement ?? 'none',
+    graph_requirement: overrides.graph_requirement ?? 'none',
+    git_requirement: overrides.git_requirement ?? 'none',
+    provenance_availability: overrides.provenance_availability ?? 'none',
+    ...(overrides.explainability_fields
+      ? { explainability_fields: [...overrides.explainability_fields] }
+      : {}),
+    transport: {
+      stdio_mcp: true,
+      streamable_http_mcp: true,
+      ...overrides.transport,
+      ...(overrides.transport?.rest_api ? { rest_api: { ...overrides.transport.rest_api } } : {}),
+    },
+  };
 }
 
 const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
@@ -94,6 +160,13 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
     annotations: {
       title: 'Index Workspace',
     },
+    sharedContract: sharedContract({
+      latency_class: 'background',
+      index_requirement: 'none',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/index' },
+      },
+    }),
   }),
   codebase_retrieval: toolMetadata('Codebase Retrieval', {
     usageHint: 'Use when you need semantic codebase discovery before opening files or editing.',
@@ -108,6 +181,16 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      latency_class: 'interactive',
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'selection_receipts',
+      explainability_fields: ['trace', 'provenance', 'explainability'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/codebase-retrieval' },
+      },
+    }),
   }),
   semantic_search: toolMetadata('Semantic Search', {
     usageHint: 'Search by intent or concept when you know what you need but not the exact symbol name.',
@@ -121,11 +204,17 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/search' },
+      },
+    }),
   }),
   symbol_search: toolMetadata('Symbol Search', {
-    usageHint: 'Search by identifier when you know the exact or near-exact symbol name.',
+    usageHint: 'Search by identifier when you know the exact or near-exact symbol name; prefers graph-backed symbol records and falls back deterministically when graph data is unavailable.',
     examples: ['Find resolveAIProviderId.', 'Locate ContextServiceClientStrongTokenProof.'],
-    safetyHints: ['Read-only deterministic local retrieval for identifier-style code navigation.'],
+    safetyHints: ['Read-only deterministic local retrieval for identifier-style code navigation with explicit graph fallback receipts.'],
     related: {
       tools: ['semantic_search', 'get_file'],
     },
@@ -134,11 +223,20 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['backend', 'graph_status', 'graph_degraded_reason', 'fallback_reason'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/symbol-search' },
+      },
+    }),
   }),
   symbol_references: toolMetadata('Symbol References', {
-    usageHint: 'Find non-declaration usages when you already know the identifier name.',
+    usageHint: 'Find non-declaration usages when you already know the identifier name; uses graph references first and reports when it had to fall back.',
     examples: ['Show usages of resolveAIProviderId.', 'Find where activeProvider is referenced.'],
-    safetyHints: ['Read-only deterministic local retrieval for non-declaration symbol usages.'],
+    safetyHints: ['Read-only deterministic local retrieval for non-declaration symbol usages with explicit graph fallback receipts.'],
     related: {
       tools: ['symbol_search', 'get_file'],
     },
@@ -147,11 +245,20 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['backend', 'graph_status', 'graph_degraded_reason', 'fallback_reason'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/symbol-references' },
+      },
+    }),
   }),
   symbol_definition: toolMetadata('Symbol Definition', {
-    usageHint: 'Jump to the canonical declaration site of a known identifier.',
+    usageHint: 'Jump to the canonical declaration site of a known identifier; graph definitions are preferred and fallback reasons are surfaced when needed.',
     examples: ['Where is resolveAIProviderId defined?', 'Find the declaration of ContextServiceClient.'],
-    safetyHints: ['Read-only deterministic local retrieval for the single best declaration site.'],
+    safetyHints: ['Read-only deterministic local retrieval for the single best declaration site with explicit graph fallback receipts.'],
     related: {
       tools: ['symbol_search', 'symbol_references', 'get_file'],
     },
@@ -160,11 +267,20 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['metadata.backend', 'metadata.graph_status', 'metadata.graph_degraded_reason', 'metadata.fallback_reason'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/symbol-definition' },
+      },
+    }),
   }),
   call_relationships: toolMetadata('Call Relationships', {
-    usageHint: 'List callers and/or callees of a known function or method symbol.',
+    usageHint: 'List callers and/or callees of a known function or method symbol using graph edges first with explicit fallback reasons when graph coverage is incomplete.',
     examples: ['Who calls resolveAIProviderId?', 'What does handleSemanticSearch invoke?'],
-    safetyHints: ['Read-only deterministic local heuristic; brace-language only for callees in v1.'],
+    safetyHints: ['Read-only deterministic local retrieval; graph-backed when available with controlled heuristic fallback.'],
     related: {
       tools: ['symbol_definition', 'symbol_references', 'symbol_search'],
     },
@@ -173,6 +289,128 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['metadata.resolutionBackend', 'metadata.graphStatus', 'metadata.graphDegradedReason', 'metadata.fallbackReason'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/call-relationships' },
+      },
+    }),
+  }),
+  find_callers: toolMetadata('Find Callers', {
+    usageHint: 'Return only direct callers for a known function or method symbol; uses persisted graph call edges first and surfaces degraded-mode receipts explicitly.',
+    examples: ['Find callers of resolveAIProviderId.', 'Show who invokes handleReviewDiff.'],
+    safetyHints: ['Read-only deterministic local retrieval for direct caller navigation with explicit graph fallback receipts.'],
+    related: {
+      tools: ['call_relationships', 'trace_symbol', 'impact_analysis'],
+    },
+    annotations: {
+      title: 'Find Callers',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['metadata.graph_backed', 'metadata.degraded', 'metadata.degraded_reasons', 'metadata.diagnostics'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/find-callers' },
+      },
+    }),
+  }),
+  find_callees: toolMetadata('Find Callees', {
+    usageHint: 'Return only direct callees for a known function or method symbol; prefers persisted graph call edges and reports when it had to fall back.',
+    examples: ['Find callees of handleSemanticSearch.', 'Show what reviewDiff invokes.'],
+    safetyHints: ['Read-only deterministic local retrieval for direct callee navigation with explicit graph fallback receipts.'],
+    related: {
+      tools: ['call_relationships', 'trace_symbol', 'impact_analysis'],
+    },
+    annotations: {
+      title: 'Find Callees',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    sharedContract: sharedContract({
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['metadata.graph_backed', 'metadata.degraded', 'metadata.degraded_reasons', 'metadata.diagnostics'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/find-callees' },
+      },
+    }),
+  }),
+  trace_symbol: toolMetadata('Trace Symbol', {
+    usageHint: 'Assemble the direct definition, references, callers, and callees for one symbol in a single deterministic graph-aware response.',
+    examples: ['Trace resolveAIProviderId.', 'Trace ContextEngineMCPServer.'],
+    safetyHints: ['Read-only deterministic local retrieval composed from graph-backed navigation surfaces with explicit stage diagnostics.'],
+    related: {
+      tools: ['symbol_definition', 'symbol_references', 'find_callers', 'find_callees', 'impact_analysis'],
+    },
+    annotations: {
+      title: 'Trace Symbol',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['trace_summary', 'metadata.graph_backed_operations', 'metadata.degraded', 'metadata.diagnostics'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/trace-symbol' },
+      },
+    }),
+  }),
+  impact_analysis: toolMetadata('Impact Analysis', {
+    usageHint: 'Estimate the direct change surface for one symbol using graph-backed definition, reference, and call-edge data.',
+    examples: ['Estimate the impact of changing resolveAIProviderId.', 'What is the direct blast radius of handleReviewDiff?'],
+    safetyHints: ['Read-only deterministic local analysis bounded to direct references and call edges; degraded mode is reported explicitly.'],
+    related: {
+      tools: ['trace_symbol', 'find_callers', 'find_callees', 'symbol_definition'],
+    },
+    annotations: {
+      title: 'Impact Analysis',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'fallback_receipts',
+      explainability_fields: ['impact_summary', 'metadata.degraded', 'metadata.diagnostics'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/impact-analysis' },
+      },
+    }),
+  }),
+  why_this_context: toolMetadata('Why This Context', {
+    usageHint: 'Explain why files were selected into a context bundle using the same retrieval provenance and explainability receipts exposed by graph-aware retrieval.',
+    examples: ['Why was this login flow context selected?', 'Explain the files chosen for this planning query.'],
+    safetyHints: ['Read-only deterministic explanation of existing context-selection receipts; degraded mode is surfaced explicitly when receipts are missing or stale.'],
+    related: {
+      tools: ['get_context_for_prompt', 'codebase_retrieval'],
+    },
+    annotations: {
+      title: 'Why This Context',
+      readOnlyHint: true,
+      idempotentHint: true,
+    },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'selection_receipts',
+      explainability_fields: ['files[].explainability', 'files[].provenance', 'metadata.degraded_reasons'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/why-this-context' },
+      },
+    }),
   }),
   get_file: toolMetadata('Get File', {
     usageHint: 'Read the full contents of a known file or a targeted line range.',
@@ -186,10 +424,19 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/file' },
+      },
+    }),
   }),
   get_context_for_prompt: toolMetadata('Get Context For Prompt', {
-    usageHint: 'Assemble multi-file context and summaries before writing or refining a prompt.',
-    examples: ['Gather context for the MCP HTTP transport.', 'Show files relevant to plan execution.'],
+    usageHint: 'Assemble multi-file context and summaries before writing or refining a prompt, with optional active-plan handoff inputs.',
+    examples: [
+      'Gather context for the MCP HTTP transport.',
+      'Show files relevant to plan execution.',
+      'Request context for an active plan handoff with handoff_mode="active_plan" and a plan_id.',
+    ],
     safetyHints: ['Read-only; may include external grounding only when explicitly requested.'],
     related: {
       prompts: ['enhance-request'],
@@ -200,6 +447,16 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      index_requirement: 'required',
+      graph_requirement: 'preferred',
+      provenance_availability: 'selection_receipts',
+      explainability_fields: ['files[].selectionExplainability', 'files[].selectionProvenance', 'handoff'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/context' },
+      },
+    }),
   }),
   enhance_prompt: toolMetadata('Enhance Prompt', {
     usageHint: 'Turn a vague request into an actionable repo-grounded prompt with optional scope control.',
@@ -214,6 +471,13 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      index_requirement: 'recommended',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/enhance-prompt' },
+      },
+    }),
   }),
   index_status: toolMetadata('Index Status', {
     usageHint: 'Check whether the semantic index is healthy or stale before running retrieval.',
@@ -263,6 +527,12 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      explainability_fields: ['discoverability', 'features', 'capabilities'],
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/tool-manifest' },
+      },
+    }),
   }),
   add_memory: toolMetadata('Add Memory', {
     usageHint: 'Persist a durable project fact, preference, or decision for future sessions.',
@@ -314,6 +584,13 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
     annotations: {
       title: 'Create Plan',
     },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      index_requirement: 'recommended',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/plan' },
+      },
+    }),
   }),
   refine_plan: toolMetadata('Refine Plan', {
     usageHint: 'Adjust an existing plan using review feedback or clarification answers.',
@@ -524,6 +801,14 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      git_requirement: 'none',
+      provenance_availability: 'review_receipts',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/review-changes' },
+      },
+    }),
   }),
   review_git_diff: toolMetadata('Review Git Diff', {
     usageHint: 'Review git changes directly from the current workspace state.',
@@ -537,6 +822,14 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      git_requirement: 'required',
+      provenance_availability: 'review_receipts',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/review-git-diff' },
+      },
+    }),
   }),
   review_diff: toolMetadata('Review Diff', {
     usageHint: 'Run the deterministic diff-first review pipeline for CI-style review output.',
@@ -564,6 +857,14 @@ const TOOL_DISCOVERABILITY: Record<string, ToolDiscoverabilityMetadata> = {
       readOnlyHint: true,
       idempotentHint: true,
     },
+    sharedContract: sharedContract({
+      latency_class: 'extended',
+      git_requirement: 'optional',
+      provenance_availability: 'review_receipts',
+      transport: {
+        rest_api: { method: 'POST', path: '/api/v1/review-auto' },
+      },
+    }),
   }),
   check_invariants: toolMetadata('Check Invariants', {
     usageHint: 'Run deterministic invariant rules against a diff for CI gating.',
@@ -767,6 +1068,7 @@ export function getToolDiscoverabilityMetadata(name: string): ToolDiscoverabilit
     ...(metadata.safetyHints ? { safetyHints: [...metadata.safetyHints] } : {}),
     ...(metadata.related ? { related: cloneRelated(metadata.related) } : {}),
     ...(metadata.annotations ? { annotations: { ...metadata.annotations } } : {}),
+    ...(metadata.sharedContract ? { sharedContract: cloneSharedContract(metadata.sharedContract) } : {}),
   };
 }
 
@@ -867,6 +1169,24 @@ export function buildManifestDiscoverability() {
       uri_pattern: metadata.uriPattern,
     })) as ManifestResourceDiscoverabilityEntry[],
   };
+}
+
+export function listRestApiToolMappings(): Array<{
+  tool: string;
+  method: 'POST';
+  path: `/api/v1/${string}`;
+}> {
+  return Object.entries(TOOL_DISCOVERABILITY)
+    .flatMap(([tool, metadata]) =>
+      metadata.sharedContract?.transport.rest_api
+        ? [{
+            tool,
+            method: metadata.sharedContract.transport.rest_api.method,
+            path: metadata.sharedContract.transport.rest_api.path,
+          }]
+        : []
+    )
+    .sort((left, right) => left.path.localeCompare(right.path));
 }
 
 export function getDefaultDiscoverabilityTitle(identifier: string): string {

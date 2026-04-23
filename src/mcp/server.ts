@@ -47,6 +47,11 @@ import {
   handleSymbolDefinition,
   handleCallRelationships,
 } from './tools/search.js';
+import { findCallersTool, handleFindCallers } from './tools/findCallers.js';
+import { findCalleesTool, handleFindCallees } from './tools/findCallees.js';
+import { traceSymbolTool, handleTraceSymbol } from './tools/traceSymbol.js';
+import { impactAnalysisTool, handleImpactAnalysis } from './tools/impactAnalysis.js';
+import { whyThisContextTool, handleWhyThisContext } from './tools/whyThisContext.js';
 import { getFileTool, handleGetFile } from './tools/file.js';
 import { getContextTool, handleGetContext } from './tools/context.js';
 import { enhancePromptTool, handleEnhancePrompt } from './tools/enhance.js';
@@ -136,7 +141,13 @@ import {
   getDefaultDiscoverabilityTitle,
 } from './tooling/discoverability.js';
 import { validateExternalSources, validatePathScopeGlobs } from './tooling/validation.js';
-import { formatRequestLogPrefix } from '../telemetry/requestContext.js';
+import {
+  createRequestContext,
+  formatRequestLogPrefix,
+  getRequestContext,
+  runWithRequestContext,
+} from '../telemetry/requestContext.js';
+import { runWithObservabilitySpan, setActiveSpanAttributes } from '../observability/otel.js';
 
 type ToolRegistryEntry = {
   tool: { name: string };
@@ -278,45 +289,62 @@ async function executeToolCallWithSignal(params: {
   const { name, args, toolHandlers, signal } = params;
   const now = params.now ?? Date.now;
   const log = params.log ?? console.error;
-  const startTime = now();
+  const requestContext = getRequestContext();
 
-  log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool: ${name}`);
-
-  try {
-    const handler = toolHandlers.get(name);
-    if (!handler) {
-      throw new Error(`Unknown tool: ${name}`);
-    }
-
-    const result = await handler(args, signal);
-    const elapsedMs = now() - startTime;
-    log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool ${name} completed in ${elapsedMs}ms`);
-
-    return {
-      response: formatToolExecutionResponse(result).response,
-      result: 'success',
-      elapsedMs,
-    };
-  } catch (error) {
-    const elapsedMs = now() - startTime;
-    const errorMessage = error instanceof Error ? error.message : String(error);
-
-    log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool ${name} failed after ${elapsedMs}ms: ${errorMessage}`);
-
-    return {
-      response: {
-        content: [
-          {
-            type: 'text',
-            text: `Error: ${errorMessage}`,
-          },
-        ],
-        isError: true,
+  return await runWithObservabilitySpan(
+    'mcp.tool',
+    {
+      attributes: {
+        'context_engine.request_id': requestContext?.requestId,
+        'context_engine.transport': requestContext?.transport ?? 'stdio',
+        'context_engine.tool': name,
+        'context_engine.operation': 'tool_call',
       },
-      result: 'error',
-      elapsedMs,
-    };
-  }
+    },
+    async (span) => {
+      const startTime = now();
+
+      log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool: ${name}`);
+
+      try {
+        const handler = toolHandlers.get(name);
+        if (!handler) {
+          throw new Error(`Unknown tool: ${name}`);
+        }
+
+        const result = await handler(args, signal);
+        const elapsedMs = now() - startTime;
+        span?.setAttribute('context_engine.outcome', 'success');
+        log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool ${name} completed in ${elapsedMs}ms`);
+
+        return {
+          response: formatToolExecutionResponse(result).response,
+          result: 'success' as const,
+          elapsedMs,
+        };
+      } catch (error) {
+        const elapsedMs = now() - startTime;
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        span?.setAttribute('context_engine.outcome', 'error');
+
+        log(`${formatRequestLogPrefix()} [${new Date().toISOString()}] Tool ${name} failed after ${elapsedMs}ms: ${errorMessage}`);
+
+        return {
+          response: {
+            content: [
+              {
+                type: 'text',
+                text: `Error: ${errorMessage}`,
+              },
+            ],
+            isError: true,
+          },
+          result: 'error' as const,
+          elapsedMs,
+        };
+      }
+    }
+  );
 }
 
 function buildPlanResourceUri(planId: string): string {
@@ -685,6 +713,11 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
     { tool: applyToolDiscoverability(symbolReferencesTool), handler: (args) => handleSymbolReferencesSearch(args as any, serviceClient) },
     { tool: applyToolDiscoverability(symbolDefinitionTool), handler: (args) => handleSymbolDefinition(args as any, serviceClient) },
     { tool: applyToolDiscoverability(callRelationshipsTool), handler: (args) => handleCallRelationships(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findCallersTool), handler: (args) => handleFindCallers(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(findCalleesTool), handler: (args) => handleFindCallees(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(traceSymbolTool), handler: (args) => handleTraceSymbol(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(impactAnalysisTool), handler: (args) => handleImpactAnalysis(args as any, serviceClient) },
+    { tool: applyToolDiscoverability(whyThisContextTool), handler: (args) => handleWhyThisContext(args as any, serviceClient) },
     { tool: applyToolDiscoverability(getFileTool), handler: (args) => handleGetFile(args as any, serviceClient) },
     { tool: applyToolDiscoverability(getContextTool), handler: (args) => handleGetContext(args as any, serviceClient) },
     { tool: applyToolDiscoverability(enhancePromptTool), handler: (args, signal) => handleEnhancePrompt(args as any, serviceClient, signal) },
@@ -760,6 +793,32 @@ export function buildToolRegistryEntries(serviceClient: ContextServiceClient): T
   ];
 }
 
+export async function runWithStdioRequestContext<T>(
+  method: string,
+  fn: () => Promise<T> | T
+): Promise<T> {
+  const requestContext = createRequestContext({
+    transport: 'stdio',
+    method,
+    path: 'stdio',
+  });
+
+  return await runWithRequestContext(requestContext, () =>
+    runWithObservabilitySpan(
+      'mcp.stdio.request',
+      {
+        attributes: {
+          'context_engine.request_id': requestContext.requestId,
+          'context_engine.transport': requestContext.transport,
+          'context_engine.route': 'stdio',
+          'context_engine.operation': method,
+        },
+      },
+      async () => await fn()
+    )
+  );
+}
+
 export class ContextEngineMCPServer {
   private server: Server;
   private serviceClient: ContextServiceClient;
@@ -792,7 +851,6 @@ export class ContextEngineMCPServer {
     );
 
     this.setupHandlers();
-    this.setupGracefulShutdown();
 
     if (this.enableWatcher) {
       // Get ignore patterns from serviceClient to sync with indexing behavior
@@ -844,51 +902,6 @@ export class ContextEngineMCPServer {
     }
   }
 
-  /**
-   * Set up graceful shutdown handlers
-   */
-  private setupGracefulShutdown(): void {
-    const shutdown = async (signal: string) => {
-      if (this.isShuttingDown) return;
-      this.isShuttingDown = true;
-
-      console.error(`\nReceived ${signal}, shutting down gracefully...`);
-
-      try {
-        // Clear caches
-        this.serviceClient.clearCache();
-
-        // Stop watcher if running
-        if (this.fileWatcher) {
-          await this.fileWatcher.stop();
-        }
-
-        // Close server connection
-        await this.server.close();
-
-        console.error('Server shutdown complete');
-        process.exit(0);
-      } catch (error) {
-        console.error('Error during shutdown:', error);
-        process.exit(1);
-      }
-    };
-
-    process.on('SIGTERM', () => shutdown('SIGTERM'));
-    process.on('SIGINT', () => shutdown('SIGINT'));
-
-    // Handle uncaught errors
-    process.on('uncaughtException', (error) => {
-      console.error('Uncaught exception:', error);
-      shutdown('uncaughtException');
-    });
-
-    process.on('unhandledRejection', (reason) => {
-      console.error('Unhandled rejection:', reason);
-      // Don't exit on unhandled rejection, just log
-    });
-  }
-
   private setupHandlers(): void {
     const toolRegistryEntries = buildToolRegistryEntries(this.serviceClient);
 
@@ -899,35 +912,39 @@ export class ContextEngineMCPServer {
     this.runtimeToolCount = tools.length;
 
     // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => {
-      return {
-        tools,
-      };
-    });
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => await runWithStdioRequestContext('tools/list', async () => ({
+      tools,
+    })));
 
-    this.server.setRequestHandler(ListResourcesRequestSchema, async () => {
-      return {
-        resources: await buildResourceList(),
-      };
-    });
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => await runWithStdioRequestContext('resources/list', async () => ({
+      resources: await buildResourceList(),
+    })));
 
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => await runWithStdioRequestContext('resources/read', async () => {
+      setActiveSpanAttributes({
+        'context_engine.operation': 'resources/read',
+      });
       return await readResourceByUri(request.params.uri);
-    });
+    }));
 
-    this.server.setRequestHandler(ListPromptsRequestSchema, async () => {
-      return {
-        prompts: PROMPT_DEFINITIONS,
-      };
-    });
+    this.server.setRequestHandler(ListPromptsRequestSchema, async () => await runWithStdioRequestContext('prompts/list', async () => ({
+      prompts: PROMPT_DEFINITIONS,
+    })));
 
-    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => {
+    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => await runWithStdioRequestContext('prompts/get', async () => {
+      setActiveSpanAttributes({
+        'context_engine.operation': 'prompts/get',
+      });
       return buildPromptByName(request.params.name, request.params.arguments ?? {});
-    });
+    }));
 
     // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
+    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => await runWithStdioRequestContext('tools/call', async () => {
       const { name, arguments: args } = request.params;
+      setActiveSpanAttributes({
+        'context_engine.tool': name,
+        'context_engine.operation': 'tools/call',
+      });
       const execution = await executeToolCallWithSignal({
         name,
         args,
@@ -950,7 +967,7 @@ export class ContextEngineMCPServer {
       );
 
       return execution.response;
-    });
+    }));
   }
 
   async run(): Promise<void> {
@@ -1006,5 +1023,27 @@ export class ContextEngineMCPServer {
    */
   getServiceClient(): ContextServiceClient {
     return this.serviceClient;
+  }
+
+  async shutdown(reason: string = 'shutdown'): Promise<void> {
+    if (this.isShuttingDown) {
+      return;
+    }
+    this.isShuttingDown = true;
+
+    console.error(`Shutting down MCP server (${reason})...`);
+
+    try {
+      this.serviceClient.clearCache();
+
+      if (this.fileWatcher) {
+        await this.fileWatcher.stop();
+      }
+
+      await this.server.close();
+      console.error('Server shutdown complete');
+    } finally {
+      this.isShuttingDown = false;
+    }
   }
 }

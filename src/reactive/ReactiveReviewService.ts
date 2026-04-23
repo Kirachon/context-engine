@@ -18,6 +18,7 @@ import { ExecutionTrackingService, StepExecutor, StepExecutionResult } from '../
 import { PlanPersistenceService } from '../mcp/services/planPersistenceService.js';
 import { CodeReviewService } from '../mcp/services/codeReviewService.js';
 import { EnhancedPlanOutput } from '../mcp/types/planning.js';
+import { getReviewDiffSource } from '../mcp/tooling/reviewDiffSource.js';
 import {
     PRMetadata,
     ReviewSession,
@@ -742,14 +743,20 @@ export class ReactiveReviewService {
 
                 console.error(`[ReactiveReviewService] Step ${stepNumber} reviewing ${filesToReview.length} files: ${filesToReview.slice(0, 3).join(', ')}${filesToReview.length > 3 ? '...' : ''}`);
 
-                // Generate a diff for the files in this step
-                // For now, we'll use a placeholder diff since actual git operations would require shell access
-                // In production, this would be replaced with actual git diff generation
-                const diffPlaceholder = this.generateFileDiffPlaceholder(filesToReview, prMetadata);
+                const diffResult = await this.buildStepDiff(filesToReview, prMetadata);
+                if (!diffResult.diff.trim() || diffResult.changed_files.length === 0) {
+                    return {
+                        success: false,
+                        error:
+                            `No git diff content found for step ${stepNumber}. ` +
+                            `base_ref=${prMetadata.base_ref}, commit_hash=${prMetadata.commit_hash}, ` +
+                            `scope_empty_reason=${diffResult.scope_empty_reason ?? 'no_changes_for_target'}`,
+                    };
+                }
 
                 // Perform the code review
                 const reviewResult = await codeReviewService.reviewChanges({
-                    diff: diffPlaceholder,
+                    diff: diffResult.diff,
                     options: {
                         categories: ['correctness', 'security', 'performance', 'maintainability'],
                         max_findings: 10,
@@ -763,7 +770,7 @@ export class ReactiveReviewService {
 
                 // Estimate tokens used (rough approximation)
                 const tokensUsed = this.sessionTokensUsed.get(sessionId) || 0;
-                const estimatedTokens = diffPlaceholder.length / 4; // Rough token estimate
+                const estimatedTokens = diffResult.diff.length / 4; // Rough token estimate
                 this.sessionTokensUsed.set(sessionId, tokensUsed + estimatedTokens);
 
                 // Track activity after review
@@ -815,24 +822,24 @@ export class ReactiveReviewService {
     }
 
     /**
-     * Generate a placeholder diff for the given files.
-     * In production, this would use actual git operations.
+     * Build a real git diff for the files assigned to a review step.
      */
-    private generateFileDiffPlaceholder(files: string[], prMetadata: PRMetadata): string {
-        // Generate a placeholder diff that includes file paths
-        // The CodeReviewService will use this as context
-        const diffLines: string[] = [];
-
-        for (const file of files) {
-            diffLines.push(`diff --git a/${file} b/${file}`);
-            diffLines.push(`--- a/${file}`);
-            diffLines.push(`+++ b/${file}`);
-            diffLines.push(`@@ -1,1 +1,1 @@`);
-            diffLines.push(`-// Placeholder for actual file content`);
-            diffLines.push(`+// Modified in commit ${prMetadata.commit_hash.substring(0, 8)}`);
-        }
-
-        return diffLines.join('\n');
+    private async buildStepDiff(
+        files: string[],
+        prMetadata: PRMetadata
+    ): Promise<{ diff: string; changed_files: string[]; scope_empty_reason?: string }> {
+        const workspacePath = this.contextClient.getWorkspacePath();
+        const diffResult = await getReviewDiffSource({
+            workspacePath,
+            target: prMetadata.commit_hash,
+            base: prMetadata.base_ref,
+            include_patterns: files,
+        });
+        return {
+            diff: diffResult.diff,
+            changed_files: diffResult.changed_files,
+            scope_empty_reason: diffResult.scope_empty_reason,
+        };
     }
 
     /**

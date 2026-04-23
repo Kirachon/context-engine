@@ -114,6 +114,11 @@ describe('index_status Tool', () => {
         loadFailures: 2,
         lastFailure: 'model unavailable',
         nextRetryAt: '2025-01-11T00:01:00.000Z',
+        hashFallbackActive: true,
+        downgrade: {
+          reason: 'active runtime "hash-32" differs from configured "transformers:Xenova/all-MiniLM-L6-v2"',
+          since: null,
+        },
       },
     };
     mockServiceClient.getIndexStatus.mockReturnValue(degradedStatus);

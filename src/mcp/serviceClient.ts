@@ -52,22 +52,16 @@ import {
   type IndexStateLoadMetadata,
 } from './indexStateStore.js';
 import { isMemorySuggestionPath, MEMORY_SUGGESTIONS_DIR, MemorySuggestionStore } from './memorySuggestionStore.js';
-import { createAIProvider, resolveAIProviderId } from '../ai/providers/factory.js';
+import { resolveAIProviderId } from '../ai/providers/factory.js';
 import type { AIProvider, AIProviderId } from '../ai/providers/types.js';
 import { createRetrievalProvider } from '../retrieval/providers/factory.js';
 import { resolveRetrievalProviderId, shouldRunShadowCompare } from '../retrieval/providers/env.js';
 import {
   parseFormattedResults as parseFormattedSemanticResults,
-  searchWithSemanticRuntime,
 } from '../retrieval/providers/semanticRuntime.js';
-import {
-  describeEmbeddingRuntimeSelection,
-  describeEmbeddingRuntimeStatus,
-  type EmbeddingRuntimeStatus,
-} from '../internal/retrieval/embeddingRuntime.js';
+import { describeEmbeddingRuntimeStatus, type EmbeddingRuntimeStatus } from '../internal/retrieval/embeddingRuntime.js';
 import { scoreLexicalCandidates } from '../internal/retrieval/lexical.js';
 import {
-  buildRetrievalArtifactV2Metadata,
   snapshotRetrievalV2FeatureFlags,
   type RetrievalArtifactV2Metadata,
   type RetrievalFallbackDomain,
@@ -82,11 +76,28 @@ import {
   type ChunkRecord,
 } from '../internal/retrieval/chunking.js';
 import { createTreeSitterChunkParser } from '../internal/retrieval/treeSitterChunkParser.js';
+import {
+  type GraphDegradedReason,
+  type GraphPayloadFile,
+  type GraphStatus,
+  type GraphStoreSnapshot,
+} from '../internal/graph/persistentGraphStore.js';
 import { isOperationalDocsQuery } from '../retrieval/providers/queryHeuristics.js';
+import {
+  ServiceClientGraphAccess,
+  type ServiceClientGraphNavigationSnapshot,
+} from './serviceClientGraphAccess.js';
+import {
+  clearLocalNativeIndexLifecycle,
+  finalizeLocalNativeIndexLifecycle,
+} from './serviceClientLifecycle.js';
+import {
+  ServiceClientRuntimeAccess,
+} from './serviceClientRuntimeAccess.js';
+import { ServiceClientRetrievalAccess } from './serviceClientRetrievalAccess.js';
+import { getConfiguredShadowCompareState } from './serviceClientRetrievalRuntime.js';
 import type {
-  RetrievalProviderCallbackContext,
   RetrievalProvider,
-  RetrievalProviderCallbacks,
   RetrievalProviderId,
 } from '../retrieval/providers/types.js';
 
@@ -355,6 +366,10 @@ export interface CallRelationshipsResult {
     direction: CallRelationshipDirection;
     totalCallers: number;
     totalCallees: number;
+    resolutionBackend?: SymbolNavigationBackend;
+    fallbackReason?: SymbolNavigationFallbackReason;
+    graphStatus?: GraphStatus | 'unavailable';
+    graphDegradedReason?: GraphDegradedReason | null;
   };
 }
 
@@ -369,7 +384,7 @@ export type SymbolDefinitionKind =
   | 'unknown';
 
 export type SymbolDefinitionResult =
-  | { found: false; symbol: string }
+  | { found: false; symbol: string; metadata?: SymbolNavigationDiagnostics }
   | {
       found: true;
       symbol: string;
@@ -379,6 +394,7 @@ export type SymbolDefinitionResult =
       kind: SymbolDefinitionKind;
       snippet: string;
       score: number;
+      metadata?: SymbolNavigationDiagnostics;
     };
 
 function classifySymbolDefinitionKind(line: string, symbol: string): SymbolDefinitionKind {
@@ -637,6 +653,29 @@ export interface SearchDiagnostics {
   second_pass_used: boolean;
 }
 
+export type SymbolNavigationBackend = 'graph' | 'heuristic_fallback';
+
+export type SymbolNavigationFallbackReason =
+  | GraphDegradedReason
+  | 'graph_symbol_not_found'
+  | 'graph_definition_not_found'
+  | 'graph_reference_not_found'
+  | 'graph_call_edge_not_found'
+  | 'graph_scope_filtered'
+  | null;
+
+export interface SymbolNavigationDiagnostics {
+  tool:
+    | 'symbol_search'
+    | 'symbol_references'
+    | 'symbol_definition'
+    | 'call_relationships';
+  backend: SymbolNavigationBackend;
+  graph_status: GraphStatus | 'unavailable';
+  graph_degraded_reason: GraphDegradedReason | null;
+  fallback_reason: SymbolNavigationFallbackReason;
+}
+
 interface MemoryRetrievalResult {
   selected: MemoryEntry[];
   candidateCount: number;
@@ -783,19 +822,9 @@ const CACHE_TTL_MS = envMs('CE_SEARCH_CACHE_TTL_MS', 60_000, { min: 0 });
 
 /** Default timeout for AI API calls in milliseconds (2 minutes) */
 const DEFAULT_API_TIMEOUT_MS = 120000;
-const MIN_API_TIMEOUT_MS = 1_000;
-const MAX_API_TIMEOUT_MS = 30 * 60 * 1000;
-const DEFAULT_RATE_LIMIT_MAX_RETRIES = 2;
-const DEFAULT_RATE_LIMIT_BACKOFF_MS = 1000;
-const MIN_RATE_LIMIT_BACKOFF_MS = 100;
-const MAX_RATE_LIMIT_BACKOFF_MS = 60_000;
 const DEFAULT_SEARCH_QUEUE_MAX = 50;
-const SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD = 2;
 const SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS = 2500;
 const SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS = 2000;
-const SEARCH_AND_ASK_TOTAL_DURATION_METRIC = 'context_engine_search_and_ask_duration_seconds';
-const SEARCH_AND_ASK_QUEUE_WAIT_METRIC = 'context_engine_search_and_ask_queue_wait_seconds';
-const SEARCH_AND_ASK_EXECUTION_METRIC = 'context_engine_search_and_ask_execution_seconds';
 const FALLBACK_DISCOVER_FILES_CACHE_TTL_MS = envMs('CE_FALLBACK_DISCOVER_FILES_CACHE_TTL_MS', 30_000, {
   min: 0,
   max: 5 * 60_000,
@@ -879,18 +908,6 @@ class SearchQueueFullError extends Error {
     );
     this.name = 'SearchQueueFullError';
     this.retryAfterMs = retryAfterMs;
-  }
-}
-
-class SearchQueuePressureTimeoutError extends Error {
-  readonly code = 'SEARCH_QUEUE_PRESSURE_TIMEOUT';
-
-  constructor(timeoutMs: number, queueDepth: number, minimumBudgetMs: number, lane: SearchAndAskPriority) {
-    super(
-      `searchAndAsk timeout budget (${timeoutMs}ms) is too small for ${lane} lane queue depth (${queueDepth}). ` +
-      `Estimated minimum budget: ${minimumBudgetMs}ms. Retry with a larger timeout or when queue pressure is lower.`
-    );
-    this.name = 'SearchQueuePressureTimeoutError';
   }
 }
 
@@ -1562,6 +1579,7 @@ export class ContextServiceClient {
   private chunkSearchEngineLoadAttempted = false;
   private lexicalSqliteSearchEngine: LexicalSearchEngine | null = null;
   private lexicalSqliteSearchEngineLoadAttempted = false;
+  private readonly graphAccess: ServiceClientGraphAccess;
 
   /** Persistent context bundle cache (best-effort). */
   private persistentContextCache: Map<string, CacheEntry<ContextBundle>> = new Map();
@@ -1625,9 +1643,12 @@ export class ContextServiceClient {
   private readonly aiProviderId: AIProviderId;
   private readonly retrievalProviderId: RetrievalProviderId;
   private readonly retrievalProvider: RetrievalProvider;
+  private readonly runtimeAccess: ServiceClientRuntimeAccess;
+  private readonly retrievalAccess: ServiceClientRetrievalAccess;
   private readonly connectorRegistry = createConnectorRegistry();
   private aiProvider: AIProvider | null = null;
   private lastSearchDiagnostics: SearchDiagnostics | null = null;
+  private lastSymbolNavigationDiagnostics: SymbolNavigationDiagnostics | null = null;
   private fallbackDiscoverFilesCache: {
     cacheKey: string;
     cachedAt: number;
@@ -1640,8 +1661,32 @@ export class ContextServiceClient {
 
   constructor(workspacePath: string) {
     this.workspacePath = workspacePath;
+    this.graphAccess = new ServiceClientGraphAccess({
+      workspacePath,
+      debugSearch: process.env.CE_DEBUG_SEARCH === 'true',
+      logWarning: (message) => console.warn(message),
+    });
     this.aiProviderId = resolveAIProviderId();
+    this.runtimeAccess = new ServiceClientRuntimeAccess({
+      workspacePath,
+      getAIProviderId: () => this.aiProviderId,
+      getCachedProvider: () => this.aiProvider,
+      setCachedProvider: (provider) => {
+        this.aiProvider = provider;
+      },
+    });
     const activeRetrievalProviderId = resolveRetrievalProviderId();
+    this.retrievalAccess = new ServiceClientRetrievalAccess({
+      retrievalProviderId: activeRetrievalProviderId,
+      workspacePath,
+      getIndexFingerprint: () => this.getIndexFingerprint(),
+      searchAndAsk: (searchQuery, prompt, options) => this.searchAndAsk(searchQuery, prompt, options),
+      keywordFallbackSearch: (query, topK, options) => this.keywordFallbackSearch(query, topK, options),
+      indexWorkspaceLocalNativeFallback: () => this.indexWorkspaceLocalNativeFallback(),
+      indexFilesLocalNativeFallback: (filePaths) => this.indexFilesLocalNativeFallback(filePaths),
+      clearIndexWithProviderRuntime: (options) => this.clearIndexWithProviderRuntime(options),
+      getIndexStatus: async () => this.getIndexStatus(),
+    });
     this.retrievalProvider = createRetrievalProvider({
       providerId: activeRetrievalProviderId,
       callbacks: this.createRetrievalProviderCallbacks(),
@@ -1657,7 +1702,7 @@ export class ContextServiceClient {
   }
 
   getActiveAIProviderId(): AIProviderId {
-    return this.aiProviderId;
+    return this.runtimeAccess.getActiveAIProviderId();
   }
 
   getActiveRetrievalProviderId(): RetrievalProviderId {
@@ -1665,48 +1710,17 @@ export class ContextServiceClient {
   }
 
   getRetrievalRuntimeMetadata(): RetrievalRuntimeMetadata {
-    const shadowCompare = this.getConfiguredShadowCompareState();
-    return {
-      providerId: this.retrievalProviderId,
-      shadowCompare,
-      v2: {
-        retrievalRewriteV2: featureEnabled('retrieval_rewrite_v2'),
-        retrievalRankingV2: featureEnabled('retrieval_ranking_v2'),
-        retrievalRankingV3: featureEnabled('retrieval_ranking_v3'),
-        retrievalRequestMemoV2: featureEnabled('retrieval_request_memo_v2'),
-      },
-    };
+    return this.retrievalAccess.getRuntimeMetadata();
   }
 
   getRetrievalArtifactMetadata(
     options?: RetrievalArtifactMetadataOptions
   ): RetrievalArtifactObservability {
-    const shadowCompare = this.getConfiguredShadowCompareState();
-    const retrievalEngineVersion = featureEnabled('retrieval_lancedb_v1')
-      ? 'lancedb-vector-v1'
-      : 'local-native-v1';
-    const embeddingRuntime = describeEmbeddingRuntimeSelection(featureEnabled('retrieval_lancedb_v1'));
-    return {
-      ...buildRetrievalArtifactV2Metadata({
-      retrieval_provider: this.retrievalProviderId,
-      workspace_path: this.workspacePath,
-      index_fingerprint: this.getIndexFingerprint(),
-      feature_flags_snapshot: snapshotRetrievalV2FeatureFlags(),
-      retrieval_engine_version: retrievalEngineVersion,
-      embedding_model_id: embeddingRuntime.modelId,
-      vector_dimension: embeddingRuntime.vectorDimension,
-      fallback_domain: options?.fallbackDomain ?? 'unknown',
-      fallback_reason: options?.fallbackReason ?? null,
-      }),
-      shadow_compare: {
-        enabled: shadowCompare.enabled,
-        sampleRate: shadowCompare.sampleRate,
-      },
-    } as RetrievalArtifactObservability;
+    return this.retrievalAccess.getArtifactMetadata(options);
   }
 
   getActiveAIModelLabel(): string {
-    return this.getAIProvider().modelLabel;
+    return this.runtimeAccess.getActiveAIModelLabel();
   }
 
   getLastSearchDiagnostics(): SearchDiagnostics | null {
@@ -1724,35 +1738,19 @@ export class ContextServiceClient {
     this.lastSearchDiagnostics = next;
   }
 
-  private createRetrievalProviderCallbacks(): RetrievalProviderCallbacks {
-    return {
-      localNative: {
-        search: (
-          query: string,
-          topK: number,
-          options?: {
-            bypassCache?: boolean;
-            maxOutputLength?: number;
-            includePaths?: string[];
-            excludePaths?: string[];
-          }
-        ) => this.searchWithProviderRuntime(query, topK, options),
-        indexWorkspace: () => this.indexWorkspaceLocalNativeFallback(),
-        indexFiles: (filePaths: string[]) => this.indexFilesLocalNativeFallback(filePaths),
-        clearIndex: () => this.clearIndexWithProviderRuntime({ localNative: true }),
-        getIndexStatus: async () => this.getIndexStatus(),
-        health: async (context?: RetrievalProviderCallbackContext) => ({
-          ok: true,
-          details: `retrieval_provider=${this.getRetrievalProviderCallbackProviderId(context)}`,
-        }),
-      },
-    };
+  getLastSymbolNavigationDiagnostics(): SymbolNavigationDiagnostics | null {
+    if (!this.lastSymbolNavigationDiagnostics) {
+      return null;
+    }
+    return { ...this.lastSymbolNavigationDiagnostics };
   }
 
-  private getRetrievalProviderCallbackProviderId(
-    context?: RetrievalProviderCallbackContext
-  ): RetrievalProviderId {
-    return context?.providerId ?? this.retrievalProviderId;
+  private setLastSymbolNavigationDiagnostics(next: SymbolNavigationDiagnostics | null): void {
+    this.lastSymbolNavigationDiagnostics = next ? { ...next } : null;
+  }
+
+  private createRetrievalProviderCallbacks() {
+    return this.retrievalAccess.createProviderCallbacks();
   }
 
   private normalizePathScopeOptions(scope?: PathScopeOptions): NormalizedPathScope | undefined {
@@ -1836,37 +1834,6 @@ export class ContextServiceClient {
     }
 
     return files;
-  }
-
-  private getAIProvider(): AIProvider {
-    if (!this.aiProvider) {
-      try {
-        this.aiProvider = createAIProvider({
-          providerId: this.aiProviderId,
-          getProviderContext: async () => {
-            throw new Error('OpenAI-only provider policy: legacy retrieval runtime path is disabled.');
-          },
-          maxRateLimitRetries: envInt('CE_AI_RATE_LIMIT_MAX_RETRIES', DEFAULT_RATE_LIMIT_MAX_RETRIES, {
-            min: 0,
-            max: 10,
-          }),
-          baseRateLimitBackoffMs: envMs('CE_AI_RATE_LIMIT_BACKOFF_MS', DEFAULT_RATE_LIMIT_BACKOFF_MS, {
-            min: MIN_RATE_LIMIT_BACKOFF_MS,
-            max: MAX_RATE_LIMIT_BACKOFF_MS,
-          }),
-          maxRateLimitBackoffMs: MAX_RATE_LIMIT_BACKOFF_MS,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        console.error(
-          formatScopedLog(
-            `[ContextServiceClient] Failed to initialize AI provider (${this.aiProviderId}): ${message}`
-          )
-        );
-        throw new Error(`AI provider initialization failed (${this.aiProviderId}): ${message}`);
-      }
-    }
-    return this.aiProvider;
   }
 
   private getIndexStateStore(): JsonIndexStateStore | null {
@@ -2119,10 +2086,7 @@ export class ContextServiceClient {
    * Determine whether offline-only policy is enabled via env var.
    */
   private isOfflineMode(): boolean {
-    const flag = process.env.CONTEXT_ENGINE_OFFLINE_ONLY;
-    if (!flag) return false;
-    const normalized = flag.toLowerCase();
-    return normalized === '1' || normalized === 'true' || normalized === 'yes' || normalized === 'on';
+    return this.runtimeAccess.isOfflineMode();
   }
 
   /**
@@ -2672,6 +2636,81 @@ export class ContextServiceClient {
     }
   }
 
+  private clearGraphStoreCache(): void {
+    this.graphAccess.clearCache();
+  }
+
+  private getGraphStore() {
+    return this.graphAccess.getStore();
+  }
+
+  private async refreshGraphStore(
+    options?: { indexedFiles?: Record<string, { hash: string; indexed_at?: string }> }
+  ): Promise<void> {
+    await this.graphAccess.refresh(options);
+  }
+
+  private getGraphNavigationSnapshot(): ServiceClientGraphNavigationSnapshot {
+    return this.graphAccess.getNavigationSnapshot();
+  }
+
+  private buildSymbolNavigationDiagnostics(
+    tool: SymbolNavigationDiagnostics['tool'],
+    backend: SymbolNavigationBackend,
+    graphState: { snapshot: GraphStoreSnapshot | null; fallbackReason: GraphDegradedReason | 'graph_missing' | null },
+    fallbackReason: SymbolNavigationFallbackReason
+  ): SymbolNavigationDiagnostics {
+    return {
+      tool,
+      backend,
+      graph_status: graphState.snapshot?.graph_status ?? 'unavailable',
+      graph_degraded_reason: graphState.snapshot?.degraded_reason ?? null,
+      fallback_reason: fallbackReason,
+    };
+  }
+
+  private normalizeGraphPath(value: string): string {
+    return value.replace(/\\/g, '/');
+  }
+
+  private readSnippetFromFile(
+    fileCache: Map<string, string>,
+    filePath: string,
+    lineNumber: number
+  ): Promise<{ snippet: string; startLine: number; endLine: number } | null> {
+    return (async () => {
+      const normalizedPath = this.normalizeGraphPath(filePath);
+      let content = fileCache.get(normalizedPath);
+      if (content === undefined) {
+        try {
+          content = await this.getFile(normalizedPath);
+        } catch {
+          return null;
+        }
+        fileCache.set(normalizedPath, content);
+      }
+      return buildSymbolReferenceSnippet(content, Math.max(0, lineNumber - 1));
+    })();
+  }
+
+  private scoreGraphPath(pathValue: string): number {
+    const normalizedPath = this.normalizeGraphPath(pathValue);
+    let score = 0;
+    if (normalizedPath.startsWith('src/')) score += 30;
+    if (normalizedPath.startsWith('tests/') || normalizedPath.startsWith('test/')) score -= 10;
+    if (/\/__tests__\//.test(normalizedPath)) score -= 5;
+    if (normalizedPath.includes('node_modules/')) score -= 50;
+    score -= Math.min(20, normalizedPath.length / 8);
+    return score;
+  }
+
+  private findDefinitionRecordForSymbol(
+    payload: GraphPayloadFile,
+    symbolId: string
+  ) {
+    return payload.definitions.find((definition) => definition.symbol_id === symbolId) ?? null;
+  }
+ 
   private async refreshLexicalSqliteSearchEngine(changes?: WorkspaceFileChange[]): Promise<void> {
     if (!this.isLexicalSqliteSearchEnabled()) {
       return;
@@ -3469,15 +3508,18 @@ export class ContextServiceClient {
       });
     }
 
-    this.writeLocalNativeStateMarker(indexedAtIso);
-    this.writeIndexFingerprintFile(crypto.randomUUID());
-    this.updateIndexStatus({
-      status: 'idle',
-      lastIndexed: indexedAtIso,
+    await finalizeLocalNativeIndexLifecycle({
+      indexedAtIso,
       fileCount: store ? Object.keys(nextFiles).length : filePaths.length - skipped,
+      status: 'idle',
       lastError: undefined,
+      writeStateMarker: (nextIndexedAtIso) => this.writeLocalNativeStateMarker(nextIndexedAtIso),
+      writeFingerprint: () => this.writeIndexFingerprintFile(crypto.randomUUID()),
+      updateIndexStatus: (partial) => this.updateIndexStatus(partial),
+      clearCache: () => this.clearCache(),
+      refreshGraphStore: (graphOptions) => this.refreshGraphStore(graphOptions),
+      graphIndexedFiles: store ? nextFiles : undefined,
     });
-    this.clearCache();
 
     const skipReasonTotal = Object.values(skipReasons).reduce((sum, count) => sum + (count ?? 0), 0);
     const fileOutcomeTotal = Object.values(fileOutcomes).reduce((sum, count) => sum + (count ?? 0), 0);
@@ -3576,15 +3618,19 @@ export class ContextServiceClient {
       });
     }
 
-    this.writeLocalNativeStateMarker(indexedAtIso);
-    this.writeIndexFingerprintFile(crypto.randomUUID());
-    this.updateIndexStatus({
-      status: indexed > 0 ? 'idle' : 'error',
-      lastIndexed: indexed > 0 ? indexedAtIso : undefined,
+    await finalizeLocalNativeIndexLifecycle({
+      indexedAtIso,
       fileCount: store ? Object.keys(nextFiles).length : Math.max(this.indexStatus.fileCount, indexed),
+      status: indexed > 0 ? 'idle' : 'error',
       lastError: indexed > 0 ? undefined : 'No indexable file changes provided',
+      writeStateMarker: (nextIndexedAtIso) => this.writeLocalNativeStateMarker(nextIndexedAtIso),
+      writeFingerprint: () => this.writeIndexFingerprintFile(crypto.randomUUID()),
+      updateIndexStatus: (partial) => this.updateIndexStatus(partial),
+      clearCache: () => this.clearCache(),
+      refreshGraphStore: (graphOptions) => this.refreshGraphStore(graphOptions),
+      graphIndexedFiles: store ? nextFiles : undefined,
+      shouldRefreshGraph: indexed > 0,
     });
-    this.clearCache();
 
     const skipReasonTotal = Object.values(skipReasons).reduce((sum, count) => sum + (count ?? 0), 0);
     const fileOutcomeTotal = Object.values(fileOutcomes).reduce((sum, count) => sum + (count ?? 0), 0);
@@ -3894,12 +3940,17 @@ export class ContextServiceClient {
       feature_flags_snapshot: this.getCurrentIndexStateFeatureFlagsSnapshot(),
       files: nextFiles,
     });
-    this.writeLocalNativeStateMarker(updatedAtIso);
-    this.writeIndexFingerprintFile(crypto.randomUUID());
-    this.updateIndexStatus({
-      status: 'idle',
-      lastIndexed: updatedAtIso,
+    await finalizeLocalNativeIndexLifecycle({
+      indexedAtIso: updatedAtIso,
       fileCount: Object.keys(nextFiles).length,
+      status: 'idle',
+      lastError: undefined,
+      writeStateMarker: (nextIndexedAtIso) => this.writeLocalNativeStateMarker(nextIndexedAtIso),
+      writeFingerprint: () => this.writeIndexFingerprintFile(crypto.randomUUID()),
+      updateIndexStatus: (partial) => this.updateIndexStatus(partial),
+      clearCache: () => this.clearCache(),
+      refreshGraphStore: (graphOptions) => this.refreshGraphStore(graphOptions),
+      graphIndexedFiles: nextFiles,
     });
 
     return removed;
@@ -3911,58 +3962,25 @@ export class ContextServiceClient {
     }
     this.indexStatusDiskHydrated = false;
 
-    const fingerprintPath = path.join(this.workspacePath, INDEX_FINGERPRINT_FILE_NAME);
-    if (fs.existsSync(fingerprintPath)) {
-      try {
-        fs.unlinkSync(fingerprintPath);
-        console.error(`Deleted index fingerprint file: ${fingerprintPath}`);
-      } catch (error) {
-        console.error('Failed to delete index fingerprint file:', error);
-      }
-    }
-
-    const stateStorePaths = [
-      path.join(this.workspacePath, '.context-engine-index-state.json'),
-      path.join(this.workspacePath, '.augment-index-state.json'),
-    ];
-    for (const stateStorePath of stateStorePaths) {
-      if (!fs.existsSync(stateStorePath)) {
-        continue;
-      }
-      try {
-        fs.unlinkSync(stateStorePath);
-        console.error(`Deleted index state store file: ${stateStorePath}`);
-      } catch (error) {
-        console.error('Failed to delete index state store file:', error);
-      }
-    }
-
-    const stateFilePaths = [
-      this.getStateFilePath(),
-      this.getReadableStateFilePath(),
-    ];
-    for (const stateFilePath of stateFilePaths) {
-      if (!fs.existsSync(stateFilePath)) {
-        continue;
-      }
-      try {
-        fs.unlinkSync(stateFilePath);
-        console.error(`Deleted retrieval state marker file: ${stateFilePath}`);
-      } catch (error) {
-        console.error('Failed to delete retrieval state marker file:', error);
-      }
-    }
-
-    // Clear caches
-    this.clearCache();
-    this.ignorePatternsLoaded = false;
-    this.ignorePatterns = [];
-
-    this.updateIndexStatus({
-      status: 'idle',
-      lastIndexed: null,
-      fileCount: 0,
-      lastError: undefined,
+    await clearLocalNativeIndexLifecycle({
+      fingerprintPath: path.join(this.workspacePath, INDEX_FINGERPRINT_FILE_NAME),
+      stateStorePaths: [
+        path.join(this.workspacePath, '.context-engine-index-state.json'),
+        path.join(this.workspacePath, '.augment-index-state.json'),
+      ],
+      stateFilePaths: [
+        this.getStateFilePath(),
+        this.getReadableStateFilePath(),
+      ],
+      clearCache: () => this.clearCache(),
+      resetIgnorePatterns: () => {
+        this.ignorePatternsLoaded = false;
+        this.ignorePatterns = [];
+      },
+      clearGraphArtifacts: () => this.graphAccess.clearArtifacts(),
+      updateIndexStatus: (partial) => this.updateIndexStatus(partial),
+      logInfo: (message) => console.error(message),
+      logError: (message, error) => console.error(message, error),
     });
   }
 
@@ -4154,30 +4172,11 @@ export class ContextServiceClient {
       bypassCache?: boolean;
       maxOutputLength?: number;
       priority?: 'interactive' | 'background';
-      includePaths?: string[];
-      excludePaths?: string[];
-    }
+        includePaths?: string[];
+        excludePaths?: string[];
+      }
   ): Promise<SearchResult[]> {
-    const semanticTimeoutMs = envMs('CE_SEMANTIC_SEARCH_AI_TIMEOUT_MS', 30_000, {
-      min: MIN_API_TIMEOUT_MS,
-      max: MAX_API_TIMEOUT_MS,
-    });
-    return searchWithSemanticRuntime(query, topK, {
-      ...options,
-      timeoutMs: semanticTimeoutMs,
-    }, {
-      searchAndAsk: (searchQuery, prompt, runtimeOptions) =>
-        this.searchAndAsk(searchQuery, prompt, {
-          timeoutMs: runtimeOptions?.timeoutMs ?? semanticTimeoutMs,
-          priority: options?.priority === 'background' ? 'background' : 'interactive',
-          signal: runtimeOptions?.signal,
-        }),
-      keywordFallbackSearch: (fallbackQuery, fallbackTopK) =>
-        this.keywordFallbackSearch(fallbackQuery, fallbackTopK, {
-          includePaths: options?.includePaths,
-          excludePaths: options?.excludePaths,
-        }),
-    });
+    return this.retrievalAccess.searchWithProviderRuntime(query, topK, options);
   }
 
   /**
@@ -4204,11 +4203,89 @@ export class ContextServiceClient {
     topK: number = 10,
     options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
   ): Promise<SearchResult[]> {
-    return this.localKeywordSearch(symbol, topK, {
+    const trimmedSymbol = symbol.trim();
+    this.setLastSymbolNavigationDiagnostics(null);
+    if (!trimmedSymbol) {
+      return [];
+    }
+
+    const graphState = this.getGraphNavigationSnapshot();
+    if (graphState.payload) {
+      const scope = normalizePathScopeInput({
+        includePaths: options?.includePaths,
+        excludePaths: options?.excludePaths,
+      });
+      const fileCache = new Map<string, string>();
+      const matchingSymbols = graphState.payload.symbols
+        .filter((candidate) => {
+          if (!matchesNormalizedPathScope(candidate.path, scope)) {
+            return false;
+          }
+          if (candidate.name === trimmedSymbol) {
+            return true;
+          }
+          if (candidate.name.toLowerCase() === trimmedSymbol.toLowerCase()) {
+            return true;
+          }
+          return candidate.name.includes(trimmedSymbol);
+        })
+        .map((candidate) => ({
+          symbol: candidate,
+          definition: this.findDefinitionRecordForSymbol(graphState.payload!, candidate.id),
+        }))
+        .filter((candidate) => candidate.definition)
+        .sort((left, right) => {
+          const leftExact = left.symbol.name === trimmedSymbol ? 2 : left.symbol.name.toLowerCase() === trimmedSymbol.toLowerCase() ? 1 : 0;
+          const rightExact = right.symbol.name === trimmedSymbol ? 2 : right.symbol.name.toLowerCase() === trimmedSymbol.toLowerCase() ? 1 : 0;
+          if (rightExact !== leftExact) return rightExact - leftExact;
+          const leftScore = this.scoreGraphPath(left.symbol.path) - left.symbol.start_line / 50;
+          const rightScore = this.scoreGraphPath(right.symbol.path) - right.symbol.start_line / 50;
+          if (rightScore !== leftScore) return rightScore - leftScore;
+          return left.symbol.path.localeCompare(right.symbol.path);
+        });
+
+      if (matchingSymbols.length > 0) {
+        const limited = matchingSymbols.slice(0, Math.max(1, Math.min(50, Math.floor(topK))));
+        const scored = limited.map((entry, index) => {
+          const exactness = entry.symbol.name === trimmedSymbol ? 40 : entry.symbol.name.toLowerCase() === trimmedSymbol.toLowerCase() ? 20 : 10;
+          return {
+            entry,
+            score: Math.max(1, 100 + exactness + this.scoreGraphPath(entry.symbol.path) - entry.symbol.start_line / 50 - index),
+          };
+        });
+        const maxScore = Math.max(...scored.map((entry) => entry.score));
+        const results = await Promise.all(scored.map(async ({ entry, score }) => {
+          const snippet = await this.readSnippetFromFile(fileCache, entry.symbol.path, entry.definition!.start_line);
+          return {
+            path: this.normalizeGraphPath(entry.symbol.path),
+            content: snippet?.snippet ?? entry.symbol.name,
+            lines: `${entry.definition!.start_line}-${entry.definition!.end_line}`,
+            relevanceScore: maxScore > 0 ? Math.max(0, Math.min(1, score / maxScore)) : 0,
+            matchType: 'keyword' as const,
+            retrievedAt: new Date().toISOString(),
+            chunkId: `${this.normalizeGraphPath(entry.symbol.path)}#graph-symbol-${entry.definition!.start_line}`,
+          };
+        }));
+
+        this.setLastSymbolNavigationDiagnostics(
+          this.buildSymbolNavigationDiagnostics('symbol_search', 'graph', graphState, null)
+        );
+        return results;
+      }
+    }
+
+    const fallbackReason = graphState.payload
+      ? (scopeApplied({ includePaths: options?.includePaths, excludePaths: options?.excludePaths }) ? 'graph_scope_filtered' : 'graph_symbol_not_found')
+      : graphState.fallbackReason;
+    const results = await this.localKeywordSearch(trimmedSymbol, topK, {
       bypassCache: options?.bypassCache,
       includePaths: options?.includePaths,
       excludePaths: options?.excludePaths,
     });
+    this.setLastSymbolNavigationDiagnostics(
+      this.buildSymbolNavigationDiagnostics('symbol_search', 'heuristic_fallback', graphState, fallbackReason)
+    );
+    return results;
   }
 
   /**
@@ -4221,8 +4298,61 @@ export class ContextServiceClient {
     options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[] }
   ): Promise<SearchResult[]> {
     const trimmedSymbol = symbol.trim();
+    this.setLastSymbolNavigationDiagnostics(null);
     if (!trimmedSymbol) {
       return [];
+    }
+
+    const graphState = this.getGraphNavigationSnapshot();
+    if (graphState.payload) {
+      const scope = normalizePathScopeInput({
+        includePaths: options?.includePaths,
+        excludePaths: options?.excludePaths,
+      });
+      const fileCache = new Map<string, string>();
+      const definitionBySymbolId = new Map(
+        graphState.payload.definitions.map((definition) => [definition.symbol_id, definition] as const)
+      );
+      const referenceCandidates = graphState.payload.references
+        .filter((reference) =>
+          reference.symbol_name === trimmedSymbol
+          && matchesNormalizedPathScope(reference.path, scope)
+          && !(
+            reference.symbol_id
+            && reference.source_symbol_id === reference.symbol_id
+            && reference.line === (definitionBySymbolId.get(reference.symbol_id)?.start_line ?? -1)
+          )
+        )
+        .map((reference) => {
+          const definition = reference.symbol_id ? definitionBySymbolId.get(reference.symbol_id) ?? null : null;
+          let score = 60 + reference.confidence * 20 + this.scoreGraphPath(reference.path);
+          if (reference.source_symbol_id) score += 10;
+          if (definition && definition.path !== reference.path) score += 12;
+          return { reference, score };
+        })
+        .sort((left, right) => right.score - left.score || left.reference.path.localeCompare(right.reference.path) || left.reference.line - right.reference.line)
+        .slice(0, Math.max(1, Math.min(50, Math.floor(topK))));
+
+      if (referenceCandidates.length > 0) {
+        const maxScore = Math.max(...referenceCandidates.map((entry) => entry.score));
+        const results = await Promise.all(referenceCandidates.map(async ({ reference, score }) => {
+          const snippet = await this.readSnippetFromFile(fileCache, reference.path, reference.line);
+          return {
+            path: this.normalizeGraphPath(reference.path),
+            content: snippet?.snippet ?? trimmedSymbol,
+            lines: snippet ? `${snippet.startLine}-${snippet.endLine}` : `${reference.line}-${reference.line}`,
+            relevanceScore: maxScore > 0 ? Math.max(0, Math.min(1, score / maxScore)) : 0,
+            matchType: 'keyword' as const,
+            retrievedAt: new Date().toISOString(),
+            chunkId: `${this.normalizeGraphPath(reference.path)}#graph-ref-L${reference.line}`,
+          };
+        }));
+
+        this.setLastSymbolNavigationDiagnostics(
+          this.buildSymbolNavigationDiagnostics('symbol_references', 'graph', graphState, null)
+        );
+        return results;
+      }
     }
 
     const candidateLimit = Math.min(Math.max(topK * 12, 60), 200);
@@ -4296,17 +4426,34 @@ export class ContextServiceClient {
     }
 
     if (candidates.length === 0) {
+      this.setLastSymbolNavigationDiagnostics(
+        this.buildSymbolNavigationDiagnostics(
+          'symbol_references',
+          'heuristic_fallback',
+          graphState,
+          graphState.payload ? 'graph_reference_not_found' : graphState.fallbackReason
+        )
+      );
       return [];
     }
 
     const maxScore = Math.max(...candidates.map((candidate) => candidate.__score));
-    return candidates
+    const results = candidates
       .sort((a, b) => b.__score - a.__score || a.path.localeCompare(b.path))
       .slice(0, Math.max(1, Math.min(50, Math.floor(topK))))
       .map(({ __score, ...result }) => ({
         ...result,
         relevanceScore: maxScore > 0 ? Math.max(0, Math.min(1, __score / maxScore)) : 0,
       }));
+    this.setLastSymbolNavigationDiagnostics(
+      this.buildSymbolNavigationDiagnostics(
+        'symbol_references',
+        'heuristic_fallback',
+        graphState,
+        graphState.payload ? 'graph_reference_not_found' : graphState.fallbackReason
+      )
+    );
+    return results;
   }
 
   /**
@@ -4318,8 +4465,58 @@ export class ContextServiceClient {
     options?: { bypassCache?: boolean; includePaths?: string[]; excludePaths?: string[]; languageHint?: string }
   ): Promise<SymbolDefinitionResult> {
     const trimmedSymbol = symbol.trim();
+    this.setLastSymbolNavigationDiagnostics(null);
     if (!trimmedSymbol) {
       return { found: false, symbol: trimmedSymbol };
+    }
+
+    const graphState = this.getGraphNavigationSnapshot();
+    if (graphState.payload) {
+      const scope = normalizePathScopeInput({
+        includePaths: options?.includePaths,
+        excludePaths: options?.excludePaths,
+      });
+      const definitionCandidates = graphState.payload.symbols
+        .filter((candidate) =>
+          candidate.name === trimmedSymbol
+          && matchesNormalizedPathScope(candidate.path, scope)
+        )
+        .map((candidate) => ({
+          symbol: candidate,
+          definition: this.findDefinitionRecordForSymbol(graphState.payload!, candidate.id),
+        }))
+        .filter((candidate) => candidate.definition)
+        .map((candidate) => {
+          let score = 100;
+          if (candidate.symbol.name === trimmedSymbol) score += 50;
+          if (candidate.symbol.kind !== 'unknown') score += 40;
+          score += this.scoreGraphPath(candidate.symbol.path);
+          score -= Math.min(15, candidate.symbol.start_line / 50);
+          return { ...candidate, score };
+        })
+        .sort((left, right) =>
+          right.score - left.score
+          || left.symbol.path.localeCompare(right.symbol.path)
+          || left.symbol.start_line - right.symbol.start_line
+        );
+
+      if (definitionCandidates.length > 0) {
+        const best = definitionCandidates[0]!;
+        const snippet = await this.readSnippetFromFile(new Map<string, string>(), best.symbol.path, best.definition!.start_line);
+        const metadata = this.buildSymbolNavigationDiagnostics('symbol_definition', 'graph', graphState, null);
+        this.setLastSymbolNavigationDiagnostics(metadata);
+        return {
+          found: true,
+          symbol: trimmedSymbol,
+          file: this.normalizeGraphPath(best.symbol.path),
+          line: best.definition!.start_line,
+          column: 1,
+          kind: classifySymbolDefinitionKind(snippet?.snippet ?? best.symbol.name, trimmedSymbol) || 'unknown',
+          snippet: snippet?.snippet ?? best.symbol.name,
+          score: Math.round(best.score * 100) / 100,
+          metadata,
+        };
+      }
     }
 
     const candidateLimit = 200;
@@ -4329,7 +4526,14 @@ export class ContextServiceClient {
       excludePaths: options?.excludePaths,
     });
     if (keywordCandidates.length === 0) {
-      return { found: false, symbol: trimmedSymbol };
+      const metadata = this.buildSymbolNavigationDiagnostics(
+        'symbol_definition',
+        'heuristic_fallback',
+        graphState,
+        graphState.payload ? 'graph_definition_not_found' : graphState.fallbackReason
+      );
+      this.setLastSymbolNavigationDiagnostics(metadata);
+      return { found: false, symbol: trimmedSymbol, metadata };
     }
 
     const symbolPattern = buildSymbolUsagePattern(trimmedSymbol);
@@ -4396,7 +4600,14 @@ export class ContextServiceClient {
     }
 
     if (declarations.length === 0) {
-      return { found: false, symbol: trimmedSymbol };
+      const metadata = this.buildSymbolNavigationDiagnostics(
+        'symbol_definition',
+        'heuristic_fallback',
+        graphState,
+        graphState.payload ? 'graph_definition_not_found' : graphState.fallbackReason
+      );
+      this.setLastSymbolNavigationDiagnostics(metadata);
+      return { found: false, symbol: trimmedSymbol, metadata };
     }
 
     const scoreFor = (candidate: DeclarationCandidate): number => {
@@ -4430,6 +4641,13 @@ export class ContextServiceClient {
       });
 
     const best = ranked[0];
+    const metadata = this.buildSymbolNavigationDiagnostics(
+      'symbol_definition',
+      'heuristic_fallback',
+      graphState,
+      graphState.payload ? 'graph_definition_not_found' : graphState.fallbackReason
+    );
+    this.setLastSymbolNavigationDiagnostics(metadata);
     return {
       found: true,
       symbol: trimmedSymbol,
@@ -4439,6 +4657,7 @@ export class ContextServiceClient {
       kind: best.candidate.kind,
       snippet: best.candidate.snippet,
       score: Math.round(best.score * 100) / 100,
+      metadata,
     };
   }
 
@@ -4723,9 +4942,49 @@ export class ContextServiceClient {
         totalCallees: 0,
       },
     };
+    this.setLastSymbolNavigationDiagnostics(null);
 
     if (!trimmedSymbol) {
       return empty;
+    }
+
+    const graphState = this.getGraphNavigationSnapshot();
+    if (graphState.payload) {
+      const graphScope = normalizePathScopeInput({
+        includePaths: options?.includePaths,
+        excludePaths: options?.excludePaths,
+      });
+      const fileCache = new Map<string, string>();
+      let callers: CallRelationshipsCallerEntry[] = [];
+      let callees: CallRelationshipsCalleeEntry[] = [];
+
+      if (direction === 'callers' || direction === 'both') {
+        callers = await this.computeGraphCallers(graphState.payload, trimmedSymbol, topK, graphScope, fileCache);
+      }
+
+      if (direction === 'callees' || direction === 'both') {
+        callees = await this.computeGraphCallees(graphState.payload, trimmedSymbol, topK, graphScope, fileCache);
+      }
+
+      if (callers.length > 0 || callees.length > 0) {
+        const metadata = this.buildSymbolNavigationDiagnostics('call_relationships', 'graph', graphState, null);
+        this.setLastSymbolNavigationDiagnostics(metadata);
+        return {
+          symbol: trimmedSymbol,
+          callers,
+          callees,
+          metadata: {
+            symbol: trimmedSymbol,
+            direction,
+            totalCallers: callers.length,
+            totalCallees: callees.length,
+            resolutionBackend: metadata.backend,
+            fallbackReason: metadata.fallback_reason,
+            graphStatus: metadata.graph_status,
+            graphDegradedReason: metadata.graph_degraded_reason,
+          },
+        };
+      }
     }
 
     let callers: CallRelationshipsCallerEntry[] = [];
@@ -4739,6 +4998,13 @@ export class ContextServiceClient {
       callees = await this.computeCallees(trimmedSymbol, topK, options);
     }
 
+    const metadata = this.buildSymbolNavigationDiagnostics(
+      'call_relationships',
+      'heuristic_fallback',
+      graphState,
+      graphState.payload ? 'graph_call_edge_not_found' : graphState.fallbackReason
+    );
+    this.setLastSymbolNavigationDiagnostics(metadata);
     return {
       symbol: trimmedSymbol,
       callers,
@@ -4748,8 +5014,114 @@ export class ContextServiceClient {
         direction,
         totalCallers: callers.length,
         totalCallees: callees.length,
+        resolutionBackend: metadata.backend,
+        fallbackReason: metadata.fallback_reason,
+        graphStatus: metadata.graph_status,
+        graphDegradedReason: metadata.graph_degraded_reason,
       },
     };
+  }
+
+  private async computeGraphCallers(
+    payload: GraphPayloadFile,
+    trimmedSymbol: string,
+    topK: number,
+    scope: NormalizedPathScope,
+    fileCache: Map<string, string>
+  ): Promise<CallRelationshipsCallerEntry[]> {
+    const symbolIds = new Set(
+      payload.symbols
+        .filter((candidate) => candidate.name === trimmedSymbol)
+        .map((candidate) => candidate.id)
+    );
+    const symbolById = new Map(payload.symbols.map((candidate) => [candidate.id, candidate] as const));
+    const candidates = payload.call_edges
+      .filter((edge) =>
+        matchesNormalizedPathScope(edge.path, scope)
+        && (edge.target_symbol_name === trimmedSymbol || (edge.target_symbol_id !== null && symbolIds.has(edge.target_symbol_id)))
+      )
+      .sort((left, right) =>
+        right.confidence - left.confidence
+        || this.scoreGraphPath(right.path) - this.scoreGraphPath(left.path)
+        || left.path.localeCompare(right.path)
+        || left.line - right.line
+      )
+      .slice(0, Math.max(1, Math.min(200, topK * 6)));
+
+    const withSnippets = await Promise.all(candidates.map(async (edge) => {
+      const snippet = await this.readSnippetFromFile(fileCache, edge.path, edge.line);
+      const sourceSymbol = edge.source_symbol_id ? symbolById.get(edge.source_symbol_id) ?? null : null;
+      const score = 70 + edge.confidence * 20 + this.scoreGraphPath(edge.path) + (sourceSymbol ? 10 : 0);
+      return {
+        file: this.normalizeGraphPath(edge.path),
+        line: edge.line,
+        snippet: snippet?.snippet ?? `${trimmedSymbol}(...)`,
+        score: Math.round(score * 100) / 100,
+        callerSymbol: sourceSymbol?.name,
+        __score: score,
+      };
+    }));
+
+    return withSnippets
+      .sort((left, right) => right.__score - left.__score || left.file.localeCompare(right.file) || left.line - right.line)
+      .slice(0, topK)
+      .map(({ __score, ...entry }) => entry);
+  }
+
+  private async computeGraphCallees(
+    payload: GraphPayloadFile,
+    trimmedSymbol: string,
+    topK: number,
+    scope: NormalizedPathScope,
+    fileCache: Map<string, string>
+  ): Promise<CallRelationshipsCalleeEntry[]> {
+    const sourceCandidates = payload.symbols
+      .filter((candidate) => candidate.name === trimmedSymbol && matchesNormalizedPathScope(candidate.path, scope))
+      .map((candidate) => ({
+        symbol: candidate,
+        definition: this.findDefinitionRecordForSymbol(payload, candidate.id),
+      }))
+      .filter((candidate) => candidate.definition)
+      .sort((left, right) =>
+        this.scoreGraphPath(right.symbol.path) - this.scoreGraphPath(left.symbol.path)
+        || left.symbol.start_line - right.symbol.start_line
+      );
+
+    const source = sourceCandidates[0]?.symbol;
+    if (!source) {
+      return [];
+    }
+
+    const candidates = payload.call_edges
+      .filter((edge) => edge.source_symbol_id === source.id && matchesNormalizedPathScope(edge.path, scope))
+      .sort((left, right) =>
+        right.confidence - left.confidence
+        || left.line - right.line
+        || left.target_symbol_name.localeCompare(right.target_symbol_name)
+      )
+      .slice(0, Math.max(1, Math.min(200, topK * 6)));
+
+    const withSnippets = await Promise.all(candidates.map(async (edge) => {
+      const snippet = await this.readSnippetFromFile(fileCache, edge.path, edge.line);
+      const score = 50 + edge.confidence * 20;
+      return {
+        file: this.normalizeGraphPath(edge.path),
+        line: edge.line,
+        snippet: snippet?.snippet ?? `${edge.target_symbol_name}(...)`,
+        score: Math.round(score * 100) / 100,
+        calleeSymbol: edge.target_symbol_name,
+        __score: score,
+      };
+    }));
+
+    return withSnippets
+      .sort((left, right) =>
+        right.__score - left.__score
+        || left.calleeSymbol.localeCompare(right.calleeSymbol)
+        || left.line - right.line
+      )
+      .slice(0, topK)
+      .map(({ __score, ...entry }) => entry);
   }
 
   private async computeCallers(
@@ -4872,14 +5244,7 @@ export class ContextServiceClient {
   }
 
   private getConfiguredShadowCompareState(): { enabled: boolean; sampleRate: number } {
-    const rawSampleRate = Number.parseFloat(process.env.CE_RETRIEVAL_SHADOW_SAMPLE_RATE ?? '0');
-    const sampleRate = Number.isFinite(rawSampleRate)
-      ? Math.max(0, Math.min(1, rawSampleRate))
-      : 0;
-    return {
-      enabled: process.env.CE_RETRIEVAL_SHADOW_COMPARE_ENABLED === 'true',
-      sampleRate,
-    };
+    return getConfiguredShadowCompareState();
   }
 
   private maybeRunRetrievalShadowCompare(query: string, topK: number, primaryResults: SearchResult[]): void {
@@ -5038,161 +5403,14 @@ export class ContextServiceClient {
     prompt?: string,
     options?: { timeoutMs?: number; priority?: SearchAndAskPriority; signal?: AbortSignal }
   ): Promise<string> {
-    const metricsStart = Date.now();
-    const providerId = this.getActiveAIProviderId();
-    const priority: SearchAndAskPriority = options?.priority === 'background' ? 'background' : 'interactive';
-    const searchQueue = this.searchQueues[priority];
-    if (this.isOfflineMode()) {
-      throw new Error(
-        'Offline mode enforced (CONTEXT_ENGINE_OFFLINE_ONLY=1) does not allow CE_AI_PROVIDER=openai_session. Disable offline mode to use openai_session.'
-      );
-    }
-
-    this.publishSearchQueueDepthMetrics();
-    incCounter('context_engine_search_and_ask_total', undefined, 1, 'Total searchAndAsk calls.');
-
-    // Use the search queue to serialize searchAndAsk calls
-    // This prevents potential SDK concurrency issues while allowing
-    // other operations (file reads, semantic search) to run in parallel
-    const defaultTimeoutMs = envMs('CE_AI_REQUEST_TIMEOUT_MS', DEFAULT_API_TIMEOUT_MS, {
-      min: MIN_API_TIMEOUT_MS,
-      max: MAX_API_TIMEOUT_MS,
+    return this.runtimeAccess.searchAndAsk({
+      searchQuery,
+      prompt,
+      timeoutMs: options?.timeoutMs,
+      priority: options?.priority,
+      signal: options?.signal,
+      searchQueues: this.searchQueues,
     });
-    const timeoutCandidate = options?.timeoutMs ?? defaultTimeoutMs;
-    const requestedTimeoutMs = Number.isFinite(timeoutCandidate) ? timeoutCandidate : defaultTimeoutMs;
-    const timeoutMs = Math.max(MIN_API_TIMEOUT_MS, Math.min(MAX_API_TIMEOUT_MS, requestedTimeoutMs));
-    const deadlineMs = Date.now() + timeoutMs;
-    try {
-      const admissionTimeoutError = this.getQueueTimeoutAdmissionError(timeoutMs, priority);
-      if (admissionTimeoutError) {
-        throw admissionTimeoutError;
-      }
-
-      const queuedAt = Date.now();
-      const response = await searchQueue.enqueue(async () => {
-        const queueWaitMs = Date.now() - queuedAt;
-        observeDurationMs(
-          SEARCH_AND_ASK_QUEUE_WAIT_METRIC,
-          { lane: priority },
-          queueWaitMs,
-          { help: 'searchAndAsk queue wait duration in seconds.' }
-        );
-        const providerExecutionStart = Date.now();
-        try {
-          const queueLength = searchQueue.length;
-          console.error(
-            formatScopedLog(
-              `[searchAndAsk] Provider=${providerId}; lane=${priority}; query=${searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
-            )
-          );
-
-          const provider = this.getAIProvider();
-          const innerResponse = await provider.call({
-            searchQuery,
-            prompt,
-            timeoutMs,
-            workspacePath: this.workspacePath,
-            signal: options?.signal,
-            deadlineMs,
-          });
-          if (!innerResponse || typeof innerResponse !== 'object' || typeof innerResponse.text !== 'string') {
-            throw new Error(
-              `AI provider (${provider.id}) returned invalid response: expected object with string text property`
-            );
-          }
-          console.error(formatScopedLog(`[searchAndAsk] Response length: ${innerResponse.text.length}`));
-          return innerResponse.text;
-        } catch (error) {
-          console.error(formatScopedLog('[searchAndAsk] Failed:'), error);
-          throw error;
-        } finally {
-          observeDurationMs(
-            SEARCH_AND_ASK_EXECUTION_METRIC,
-            { lane: priority },
-            Date.now() - providerExecutionStart,
-            { help: 'searchAndAsk provider execution duration in seconds.' }
-          );
-        }
-      }, timeoutMs, options?.signal);
-      observeDurationMs(
-        SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
-        { result: 'success' },
-        Date.now() - metricsStart,
-        { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
-      );
-      return response;
-    } catch (e) {
-      if (e instanceof SearchQueueFullError) {
-        incCounter(
-          'context_engine_search_and_ask_rejected_total',
-          { reason: 'queue_full' },
-          1,
-          'Total searchAndAsk calls rejected before execution.'
-        );
-        observeDurationMs(
-          SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
-          { result: 'queue_full' },
-          Date.now() - metricsStart,
-          { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
-        );
-      } else if (e instanceof SearchQueuePressureTimeoutError) {
-        incCounter(
-          'context_engine_search_and_ask_rejected_total',
-          { reason: 'queue_timeout_budget' },
-          1,
-          'Total searchAndAsk calls rejected before execution.'
-        );
-        observeDurationMs(
-          SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
-          { result: 'queue_timeout_budget' },
-          Date.now() - metricsStart,
-          { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
-        );
-      } else {
-        incCounter('context_engine_search_and_ask_errors_total', undefined, 1, 'Total searchAndAsk failures.');
-        observeDurationMs(
-          SEARCH_AND_ASK_TOTAL_DURATION_METRIC,
-          { result: 'error' },
-          Date.now() - metricsStart,
-          { help: 'searchAndAsk end-to-end duration in seconds (includes queue wait time).' }
-        );
-      }
-      throw e;
-    } finally {
-      this.publishSearchQueueDepthMetrics();
-    }
-  }
-
-  private publishSearchQueueDepthMetrics(): void {
-    const interactiveDepth = this.searchQueues.interactive.depth;
-    const backgroundDepth = this.searchQueues.background.depth;
-    const helpText = 'Number of searchAndAsk requests in-flight or waiting in the queue.';
-
-    setGauge('context_engine_search_and_ask_queue_depth', undefined, interactiveDepth + backgroundDepth, helpText);
-    setGauge('context_engine_search_and_ask_queue_depth', { lane: 'interactive' }, interactiveDepth, helpText);
-    setGauge('context_engine_search_and_ask_queue_depth', { lane: 'background' }, backgroundDepth, helpText);
-  }
-
-  /**
-   * Conservative queue-admission heuristic for fast-fail timeout budgeting.
-   * This avoids spending very small request budgets in high queue pressure scenarios.
-   */
-  private getQueueTimeoutAdmissionError(
-    timeoutMs: number,
-    priority: SearchAndAskPriority
-  ): SearchQueuePressureTimeoutError | null {
-    const queueDepth = this.searchQueues[priority].depth;
-    if (queueDepth < SEARCH_QUEUE_TIMEOUT_ADMISSION_DEPTH_THRESHOLD) {
-      return null;
-    }
-
-    const estimatedQueueDelayMs = Math.max(0, queueDepth - 1) * SEARCH_QUEUE_TIMEOUT_ADMISSION_SLOT_MS;
-    const minimumBudgetMs = estimatedQueueDelayMs + SEARCH_QUEUE_TIMEOUT_EXECUTION_FLOOR_MS;
-    if (timeoutMs >= minimumBudgetMs) {
-      return null;
-    }
-
-    return new SearchQueuePressureTimeoutError(timeoutMs, queueDepth, minimumBudgetMs, priority);
   }
 
   /**

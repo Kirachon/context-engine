@@ -3,7 +3,7 @@
  *
  * Service layer for AI-powered software planning and architecture design.
  * Integrates with the ContextServiceClient to leverage codebase context
- * and uses the legacy runtime's searchAndAsk for AI-powered plan generation.
+ * and uses the shared OpenAI task runtime for AI-backed planning flows.
  *
  * Responsibilities:
  * - Generate structured implementation plans
@@ -43,14 +43,12 @@ import {
   buildStepExecutionPrompt,
   type PlanningPromptProfile,
 } from '../prompts/planning.js';
-import { envMs } from '../../config/env.js';
+import { createOpenAITaskRuntime, OpenAITaskRuntimeValidationError } from '../openaiTaskRuntime.js';
+import { resolveOpenAITaskRuntimeOptions, resolvePlanningTaskPolicies } from '../taskPolicyRegistry.js';
 
 // ============================================================================
 // Constants
 // ============================================================================
-
-/** Maximum retries for JSON parsing failures */
-const MAX_PARSE_RETRIES = 2;
 
 /** Default options for plan generation */
 type ResolvedPlanGenerationOptions = Omit<
@@ -78,10 +76,6 @@ const DEFAULT_OPTIONS: ResolvedPlanGenerationOptions = {
   include_paths: undefined,
   exclude_paths: undefined,
 };
-
-const DEFAULT_PLAN_AI_TIMEOUT_MS = 5 * 60 * 1000;
-const MIN_PLAN_AI_TIMEOUT_MS = 30_000;
-const MAX_PLAN_AI_TIMEOUT_MS = 30 * 60 * 1000;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
@@ -146,6 +140,33 @@ export class PlanningService {
     const compactScore = compactSignals.filter(Boolean).length;
     const deepScore = deepSignals.filter(Boolean).length;
     return deepScore >= 3 ? 'deep' : 'compact';
+  }
+
+  private parseRuntimeJsonResponse<TParsed>(responseText: string, parseErrorPrefix: string): {
+    parsed: TParsed;
+    parseStatus: string;
+  } {
+    const jsonStr = extractJsonFromResponse(responseText);
+    if (!jsonStr) {
+      throw new OpenAITaskRuntimeValidationError(
+        'Failed to extract JSON from LLM response',
+        'json_missing',
+        responseText
+      );
+    }
+
+    try {
+      return {
+        parsed: JSON.parse(jsonStr) as TParsed,
+        parseStatus: 'json_extracted',
+      };
+    } catch (error) {
+      throw new OpenAITaskRuntimeValidationError(
+        `${parseErrorPrefix}: ${error instanceof Error ? error.message : String(error)}`,
+        'json_invalid',
+        responseText
+      );
+    }
   }
 
   // ==========================================================================
@@ -226,13 +247,24 @@ export class PlanningService {
       throwIfAborted(signal);
 
       // Step 4: Call AI to generate the plan
-      const response = await this.contextClient.searchAndAsk(task, fullPrompt, {
-        timeoutMs: envMs('CE_PLAN_AI_REQUEST_TIMEOUT_MS', DEFAULT_PLAN_AI_TIMEOUT_MS, {
-          min: MIN_PLAN_AI_TIMEOUT_MS,
-          max: MAX_PLAN_AI_TIMEOUT_MS,
-        }),
-        priority: 'background',
+      const runtime = createOpenAITaskRuntime(this.contextClient);
+      const planningPolicies = resolvePlanningTaskPolicies(promptProfile, promptProfile);
+      const runtimeOptions = resolveOpenAITaskRuntimeOptions(planningPolicies.generate);
+      const runtimeResult = await runtime.executeTask<Record<string, unknown>>({
+        taskName: planningPolicies.generate.taskName,
+        promptVersion: planningPolicies.generate.promptVersion,
+        searchQuery: task,
+        prompt: fullPrompt,
+        timeoutMs: runtimeOptions.timeoutMs,
+        responseSchemaVersion: planningPolicies.generate.responseSchemaVersion,
         signal,
+        priority: planningPolicies.generate.priority,
+        retryPolicy: runtimeOptions.retryPolicy,
+        bypassDedupe: runtimeOptions.bypassDedupe,
+        allowValidationFailureResult: runtimeOptions.allowValidationFailureResult,
+        degradedModeOnValidationFailure: runtimeOptions.degradedModeOnValidationFailure,
+        validateResponse: (responseText) =>
+          this.parseRuntimeJsonResponse<Record<string, unknown>>(responseText, 'Failed to parse plan JSON'),
       });
 
       // =========================================================================
@@ -246,17 +278,9 @@ export class PlanningService {
       // =========================================================================
 
       // Step 5: Early JSON extraction for parallel processing
-      const jsonStr = extractJsonFromResponse(response);
-      if (!jsonStr) {
-        throw new Error('Failed to extract JSON from LLM response');
-      }
-
-      // Parse JSON once and share between validation and dependency analysis
-      let parsedJson: Record<string, unknown>;
-      try {
-        parsedJson = JSON.parse(jsonStr);
-      } catch (error) {
-        throw new Error(`Failed to parse plan JSON: ${error instanceof Error ? error.message : String(error)}`);
+      const parsedJson = runtimeResult.parsed;
+      if (!parsedJson) {
+        throw new Error('Failed to parse plan JSON: missing parsed runtime payload');
       }
 
       // Step 6: Concurrent post-processing using Promise.all
@@ -349,17 +373,32 @@ export class PlanningService {
       throwIfAborted(signal);
 
       // Call AI to refine
-      const response = await this.contextClient.searchAndAsk(currentPlan.goal, fullPrompt, {
-        timeoutMs: envMs('CE_PLAN_AI_REQUEST_TIMEOUT_MS', DEFAULT_PLAN_AI_TIMEOUT_MS, {
-          min: MIN_PLAN_AI_TIMEOUT_MS,
-          max: MAX_PLAN_AI_TIMEOUT_MS,
-        }),
-        priority: 'background',
+      const runtime = createOpenAITaskRuntime(this.contextClient);
+      const planningPolicies = resolvePlanningTaskPolicies(profile, profile);
+      const runtimeOptions = resolveOpenAITaskRuntimeOptions(planningPolicies.refine);
+      const runtimeResult = await runtime.executeTask<Record<string, unknown>>({
+        taskName: planningPolicies.refine.taskName,
+        promptVersion: planningPolicies.refine.promptVersion,
+        searchQuery: currentPlan.goal,
+        prompt: fullPrompt,
+        timeoutMs: runtimeOptions.timeoutMs,
+        responseSchemaVersion: planningPolicies.refine.responseSchemaVersion,
         signal,
+        priority: planningPolicies.refine.priority,
+        retryPolicy: runtimeOptions.retryPolicy,
+        bypassDedupe: runtimeOptions.bypassDedupe,
+        allowValidationFailureResult: runtimeOptions.allowValidationFailureResult,
+        degradedModeOnValidationFailure: runtimeOptions.degradedModeOnValidationFailure,
+        validateResponse: (responseText) =>
+          this.parseRuntimeJsonResponse<Record<string, unknown>>(responseText, 'Failed to parse plan JSON'),
       });
 
       // Parse the refined plan
-      const refinedPlan = await this.parseAndValidatePlan(response, null, currentPlan);
+      const parsedPlan = runtimeResult.parsed;
+      if (!parsedPlan) {
+        throw new Error('Failed to parse plan JSON: missing parsed runtime payload');
+      }
+      const refinedPlan = await this.parseAndValidatePlanFromJson(parsedPlan, null, currentPlan);
 
       // Ensure version is incremented
       refinedPlan.version = currentPlan.version + 1;
@@ -1467,26 +1506,30 @@ export class PlanningService {
       throwIfAborted(signal);
 
       // Call AI to generate the code
-      const response = await this.contextClient.searchAndAsk(contextQuery, fullPrompt, {
-        timeoutMs: envMs('CE_PLAN_AI_REQUEST_TIMEOUT_MS', DEFAULT_PLAN_AI_TIMEOUT_MS, {
-          min: MIN_PLAN_AI_TIMEOUT_MS,
-          max: MAX_PLAN_AI_TIMEOUT_MS,
-        }),
-        priority: 'background',
+      const runtime = createOpenAITaskRuntime(this.contextClient);
+      const planningPolicies = resolvePlanningTaskPolicies(executionProfile, executionProfile);
+      const runtimeOptions = resolveOpenAITaskRuntimeOptions(planningPolicies.executeStep);
+      const runtimeResult = await runtime.executeTask<Record<string, unknown>>({
+        taskName: planningPolicies.executeStep.taskName,
+        promptVersion: planningPolicies.executeStep.promptVersion,
+        searchQuery: contextQuery,
+        prompt: fullPrompt,
+        timeoutMs: runtimeOptions.timeoutMs,
+        responseSchemaVersion: planningPolicies.executeStep.responseSchemaVersion,
         signal,
+        priority: planningPolicies.executeStep.priority,
+        retryPolicy: runtimeOptions.retryPolicy,
+        bypassDedupe: runtimeOptions.bypassDedupe,
+        allowValidationFailureResult: runtimeOptions.allowValidationFailureResult,
+        degradedModeOnValidationFailure: runtimeOptions.degradedModeOnValidationFailure,
+        validateResponse: (responseText) =>
+          this.parseRuntimeJsonResponse<Record<string, unknown>>(responseText, 'Failed to parse execution response'),
       });
 
       // Parse the response
-      const jsonStr = extractJsonFromResponse(response);
-      if (!jsonStr) {
-        throw new Error('Failed to extract JSON from LLM response');
-      }
-
-      let parsed: Record<string, unknown>;
-      try {
-        parsed = JSON.parse(jsonStr);
-      } catch (error) {
-        throw new Error(`Failed to parse execution response: ${error instanceof Error ? error.message : String(error)}`);
+      const parsed = runtimeResult.parsed;
+      if (!parsed) {
+        throw new Error('Failed to parse execution response: missing parsed runtime payload');
       }
 
       // Validate and extract changes

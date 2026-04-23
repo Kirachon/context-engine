@@ -4,22 +4,28 @@
  * Tests the Layer 3 - MCP Interface functionality for context enhancement
  */
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import { jest, describe, it, expect, beforeEach } from '@jest/globals';
 import { handleGetContext, GetContextArgs, getContextTool } from '../../src/mcp/tools/context.js';
 import { ContextServiceClient, ContextBundle, FileContext } from '../../src/mcp/serviceClient.js';
 import { FEATURE_FLAGS } from '../../src/config/features.js';
+import { getPlanPersistenceService, initializePlanManagementServices } from '../../src/mcp/tools/planManagement.js';
 
 describe('get_context_for_prompt Tool', () => {
   let mockServiceClient: any;
   const originalContextPacksV2 = FEATURE_FLAGS.context_packs_v2;
 
   beforeEach(() => {
+    jest.restoreAllMocks();
     jest.clearAllMocks();
     FEATURE_FLAGS.context_packs_v2 = originalContextPacksV2;
     mockServiceClient = {
       getFile: jest.fn(),
       semanticSearch: jest.fn(),
       getContextForPrompt: jest.fn(),
+      getWorkspacePath: jest.fn(() => process.cwd()),
       indexWorkspace: jest.fn(),
       clearCache: jest.fn(),
       getIndexStatus: jest.fn(() => ({
@@ -93,6 +99,37 @@ describe('get_context_for_prompt Tool', () => {
       await expect(
         handleGetContext({ query: 'test', include_paths: ['C:/tmp/**'] as any }, mockServiceClient as any)
       ).rejects.toThrow(/invalid include_paths/i);
+    });
+
+    it('should reject invalid handoff_mode', async () => {
+      await expect(
+        handleGetContext({ query: 'test', handoff_mode: 'plan' as any }, mockServiceClient as any)
+      ).rejects.toThrow(/invalid handoff_mode/i);
+    });
+
+    it('should require plan_id when handoff_mode is active_plan', async () => {
+      await expect(
+        handleGetContext({ query: 'test', handoff_mode: 'active_plan' }, mockServiceClient as any)
+      ).rejects.toThrow(/plan_id is required when handoff_mode is active_plan/i);
+    });
+
+    it('should accept active_plan handoff inputs without changing default context retrieval', async () => {
+      const mockBundle: ContextBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      await expect(handleGetContext({
+        query: 'test query',
+        handoff_mode: 'active_plan',
+        plan_id: 'plan_123',
+      }, mockServiceClient as any)).resolves.toBeDefined();
+
+      expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+        'test query',
+        expect.not.objectContaining({
+          handoff_mode: expect.anything(),
+          plan_id: expect.anything(),
+        })
+      );
     });
 
     it('should accept valid parameters', async () => {
@@ -241,6 +278,88 @@ describe('get_context_for_prompt Tool', () => {
       expect(result).toContain('External auth guidance');
     });
 
+    it('renders active handoff details and disables generic memory retrieval in active_plan mode', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+      const tempDir = await createHandoffWorkspace('plan-123');
+      mockServiceClient.getWorkspacePath.mockReturnValue(tempDir);
+
+      try {
+        const result = await handleGetContext({
+          query: 'test',
+          handoff_mode: 'active_plan',
+          plan_id: 'plan-123',
+          include_draft_memories: true,
+          draft_session_id: 'session-1',
+        }, mockServiceClient as any);
+
+        expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+          'test',
+          expect.objectContaining({
+            includeMemories: false,
+            includeDraftMemories: false,
+          })
+        );
+        expect(result).toContain('## 🔁 Active Handoff');
+        expect(result).toContain('Deliver the shared handoff core slice');
+        expect(result).toContain('Linked review finding');
+        expect(result).toContain('Continue step 1: Add shared adapters');
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('renders structured handoff diagnostics when active plan lookup fails', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-handoff-missing-plan-'));
+      initializePlanManagementServices(tempDir);
+      mockServiceClient.getWorkspacePath.mockReturnValue(tempDir);
+
+      try {
+        const result = await handleGetContext({
+          query: 'test',
+          handoff_mode: 'active_plan',
+          plan_id: 'plan-missing',
+        }, mockServiceClient as any);
+
+        expect(result).toContain('## 🔁 Active Handoff');
+        expect(result).toContain('plan_not_found');
+        expect(result).toContain('No persisted plan metadata found for plan-missing.');
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
+    it('builds handoff outside cached retrieval so plan changes do not reuse stale handoff state', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+      const firstWorkspace = await createHandoffWorkspace('plan-cache-a');
+      const secondWorkspace = await createHandoffWorkspace('plan-cache-b');
+
+      try {
+        mockServiceClient.getWorkspacePath.mockReturnValue(firstWorkspace);
+        const first = await handleGetContext({
+          query: 'cache handoff proof',
+          handoff_mode: 'active_plan',
+          plan_id: 'plan-cache-a',
+        }, mockServiceClient as any);
+
+        mockServiceClient.getWorkspacePath.mockReturnValue(secondWorkspace);
+        const second = await handleGetContext({
+          query: 'cache handoff proof',
+          handoff_mode: 'active_plan',
+          plan_id: 'plan-cache-b',
+        }, mockServiceClient as any);
+
+        expect(first).toContain('`plan-cache-a`');
+        expect(second).toContain('`plan-cache-b`');
+      } finally {
+        fs.rmSync(firstWorkspace, { recursive: true, force: true });
+        fs.rmSync(secondWorkspace, { recursive: true, force: true });
+      }
+    });
+
     it('should render higher-relevance files first in overview and detailed context', async () => {
       FEATURE_FLAGS.context_packs_v2 = true;
       const mockBundle: ContextBundle = {
@@ -287,6 +406,31 @@ describe('get_context_for_prompt Tool', () => {
       expect(result).not.toContain('\\\\n');
     });
 
+    it('renders additive selection explainability when file context carries provenance receipts', async () => {
+      const mockBundle = createMockContextBundle();
+      (mockBundle.files[0] as any).selectionExplainability = {
+        selectedBecause: ['graph seed symbol matched loginService'],
+        scoreBreakdown: {
+          baseScore: 0.71,
+          graphScore: 0.1,
+          combinedScore: 0.81,
+        },
+      };
+      (mockBundle.files[0] as any).selectionProvenance = {
+        graphStatus: 'ready',
+        seedSymbols: ['loginService'],
+        neighborPaths: ['src/auth/loginService.ts'],
+      };
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: 'login service' }, mockServiceClient as any);
+
+      expect(result).toContain('Selection Signals');
+      expect(result).toContain('graph seed symbol matched loginService');
+      expect(result).toContain('Graph status: `ready`');
+      expect(result).toContain('Seed symbols: `loginService`');
+    });
+
     it('should show empty state message when no results', async () => {
       const emptyBundle: ContextBundle = {
         summary: 'No results',
@@ -326,6 +470,24 @@ describe('get_context_for_prompt Tool', () => {
       expect(props).toContain('token_budget');
       expect(props).toContain('include_related');
       expect(props).toContain('min_relevance');
+      expect(props).toContain('handoff_mode');
+      expect(props).toContain('plan_id');
+    });
+
+    it('should expose additive handoff schema without changing required args', () => {
+      expect(getContextTool.inputSchema.required).toEqual(['query']);
+      expect(getContextTool.inputSchema.properties.handoff_mode).toEqual(
+        expect.objectContaining({
+          type: 'string',
+          enum: ['none', 'active_plan'],
+          default: 'none',
+        })
+      );
+      expect(getContextTool.inputSchema.properties.plan_id).toEqual(
+        expect.objectContaining({
+          type: 'string',
+        })
+      );
     });
   });
 });
@@ -388,5 +550,144 @@ function createFileContext(
         codeType: 'function',
       },
     ],
+  };
+}
+
+async function createHandoffWorkspace(planId: string): Promise<string> {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-handoff-context-'));
+  initializePlanManagementServices(tempDir);
+  const saveResult = await getPlanPersistenceService().savePlan(createPersistedPlan(planId), { overwrite: true });
+  if (!saveResult.success) {
+    throw new Error(saveResult.error ?? `Failed to save plan ${planId}`);
+  }
+
+  fs.mkdirSync(path.join(tempDir, '.memories'), { recursive: true });
+  fs.writeFileSync(
+    path.join(tempDir, '.memories', 'decisions.md'),
+    [
+      '# Decisions',
+      '',
+      'This file stores architecture decisions.',
+      '',
+      '### [2026-04-17] Shared handoff contract',
+      '- Keep the handoff payload fixed.',
+      `- [meta] linked_plans: ${planId}`,
+      '- [meta] created_at: 2026-04-17T00:00:00.000Z',
+      '- [meta] updated_at: 2026-04-17T00:00:00.000Z',
+      '',
+      '### [2026-04-18] Linked review finding',
+      '- Retrieval routing must not change.',
+      '- [meta] subtype: review_finding',
+      `- [meta] linked_plans: ${planId}`,
+      '- [meta] linked_files: src/mcp/serviceClient.ts',
+      '- [meta] updated_at: 2026-04-18T12:00:00.000Z',
+      '- [meta] created_at: 2026-04-18T12:00:00.000Z',
+      '',
+    ].join('\n'),
+    'utf-8'
+  );
+
+  return tempDir;
+}
+
+function createPersistedPlan(id: string) {
+  return {
+    id,
+    version: 3,
+    created_at: '2026-04-19T00:00:00.000Z',
+    updated_at: '2026-04-19T12:00:00.000Z',
+    goal: 'Deliver the shared handoff core slice',
+    scope: {
+      included: ['shared handoff composer', 'durable adapters'],
+      excluded: ['HTTP route edits'],
+      assumptions: ['plan services are initialized'],
+      constraints: ['keep retrieval routing unchanged', 'exclude draft suggestions'],
+    },
+    mvp_features: [],
+    nice_to_have_features: [],
+    architecture: {
+      notes: 'Keep composition above ContextServiceClient.',
+      patterns_used: ['adapter', 'composer'],
+      diagrams: [],
+    },
+    risks: [
+      {
+        issue: 'Shared payload drifts from fixed contract',
+        mitigation: 'Snapshot the top-level keys',
+        likelihood: 'medium' as const,
+        impact: 'handoff consumers break',
+      },
+    ],
+    milestones: [],
+    steps: [
+      {
+        step_number: 1,
+        id: 'step-1',
+        title: 'Add shared adapters',
+        description: 'Create read-only plan and memory adapters.',
+        files_to_modify: [{
+          path: 'src/mcp/tools/planManagement.ts',
+          change_type: 'modify' as const,
+          estimated_loc: 25,
+          complexity: 'simple' as const,
+          reason: 'read-only export',
+        }],
+        files_to_create: [{
+          path: 'src/mcp/handoff/sharedCore.ts',
+          change_type: 'create' as const,
+          estimated_loc: 160,
+          complexity: 'moderate' as const,
+          reason: 'shared composer',
+        }],
+        files_to_delete: [],
+        depends_on: [],
+        blocks: [2],
+        can_parallel_with: [],
+        priority: 'high' as const,
+        estimated_effort: '1h',
+        acceptance_criteria: ['Adapters normalize failures'],
+      },
+      {
+        step_number: 2,
+        id: 'step-2',
+        title: 'Compose fixed payload',
+        description: 'Assemble the active handoff payload from durable records.',
+        files_to_modify: [{
+          path: 'src/mcp/handoff/sharedCore.ts',
+          change_type: 'modify' as const,
+          estimated_loc: 80,
+          complexity: 'moderate' as const,
+          reason: 'payload assembly',
+        }],
+        files_to_create: [],
+        files_to_delete: [],
+        depends_on: [1],
+        blocks: [],
+        can_parallel_with: [],
+        priority: 'high' as const,
+        estimated_effort: '1h',
+        acceptance_criteria: ['Payload includes all fixed fields'],
+      },
+    ],
+    dependency_graph: {
+      nodes: [
+        { id: 'step-1', step_number: 1 },
+        { id: 'step-2', step_number: 2 },
+      ],
+      edges: [{ from: 'step-1', to: 'step-2', type: 'blocks' as const }],
+      critical_path: [1, 2],
+      parallel_groups: [[1], [2]],
+      execution_order: [1, 2],
+    },
+    testing_strategy: {
+      unit: 'Add focused adapter and composer tests.',
+      integration: 'Wire shared core in later tasks.',
+      coverage_target: '80%',
+    },
+    acceptance_criteria: [],
+    confidence_score: 0.83,
+    questions_for_clarification: [],
+    context_files: ['src/mcp/tools/planManagement.ts', 'src/mcp/serviceClient.ts'],
+    codebase_insights: ['Plan persistence and memory parsing already exist.'],
   };
 }

@@ -1,16 +1,21 @@
 {
-  "generated_at": "2026-04-11T13:40:12.641Z",
+  "generated_at": "2026-04-21T05:57:01.663Z",
   "dense_refresh": {
     "skipped_docs_rate_pct": 0,
     "embed_batch_p95_ms": 45
   },
+  "routing_shadow": {
+    "top1_overlap_rate_pct": 100,
+    "symbol_route_activation_rate_pct": 0,
+    "symbol_route_misroute_rate_pct": 0
+  },
   "reproducibility_lock": {
-    "commit_sha": "31ef6baef6cca4e1a2fc014df461c4b1e4a62d84",
+    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
     "dataset_id": "holdout_v1",
-    "dataset_hash": "d393e407c4e9304fd3994d8fc1fbfc40b51a5c9c59a3d064b2118ac687acbf39",
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
     "dataset_hash_length": 64,
     "dataset_source": "artifact",
-    "config_snapshot_hash": "9417e2253ff0305c7c981cfca90e9d5ec1d59627be40e3f6856009c6e0716701",
+    "config_snapshot_hash": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643",
     "config_key_count": 6,
     "config_snapshot": {
       "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",

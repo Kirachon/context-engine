@@ -109,4 +109,65 @@ describe('review_git_diff tool', () => {
       /No changes found for review_git_diff target "staged".*review is blocked/i
     );
   });
+
+  it('blocks review when include_patterns exclude all matching changes', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-git-diff-scope-empty-'));
+
+    sh('git', ['init'], tmp);
+    sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+    sh('git', ['config', 'user.name', 'CI'], tmp);
+
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+    sh('git', ['commit', '-m', 'base'], tmp);
+
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 2;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+
+    const mockServiceClient = { getWorkspacePath: () => tmp, searchAndAsk: async () => '' } as any;
+    await expect(
+      handleReviewGitDiff(
+        { target: 'staged', include_patterns: ['tests/**/*.ts'] },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/scope is empty \(path_scope_excluded_all_changes\)/i);
+  });
+
+  it('keeps commit-target reviews scoped by include_patterns without falsely emptying the diff', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-git-diff-commit-scope-'));
+
+    sh('git', ['init'], tmp);
+    sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+    sh('git', ['config', 'user.name', 'CI'], tmp);
+
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+    sh('git', ['commit', '-m', 'base'], tmp);
+
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 2;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+    sh('git', ['commit', '-m', 'update a'], tmp);
+    const headCommit = sh('git', ['rev-parse', 'HEAD'], tmp).trim();
+
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () =>
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'correct',
+          overall_explanation: 'Mocked output.',
+          overall_confidence_score: 0.9,
+        }),
+    } as any;
+
+    const resultStr = await handleReviewGitDiff(
+      { target: headCommit, include_patterns: ['src/a.ts'] },
+      mockServiceClient
+    );
+
+    const parsed = JSON.parse(resultStr);
+    expect(parsed.git_info.target).toBe(headCommit);
+    expect(parsed.git_info.files_changed).toEqual(['src/a.ts']);
+    expect(parsed.review.changes_summary.files_changed).toBe(1);
+  });
 });

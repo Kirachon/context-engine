@@ -21,6 +21,7 @@ import { ContextServiceClient, ContextOptions } from '../serviceClient.js';
 import { internalContextBundle } from '../../internal/handlers/context.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { featureEnabled } from '../../config/features.js';
+import { buildActivePlanHandoff, type ActivePlanHandoffEnvelope } from '../handoff/activePlan.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateBoolean,
@@ -28,8 +29,12 @@ import {
   validateFiniteNumberInRange,
   validateMaxLength,
   validatePathScopeGlobs,
+  validateOneOf,
   validateTrimmedNonEmptyString,
 } from '../tooling/validation.js';
+
+const HANDOFF_MODES = ['none', 'active_plan'] as const;
+type HandoffMode = (typeof HANDOFF_MODES)[number];
 
 export interface GetContextArgs {
   query: string;
@@ -43,6 +48,8 @@ export interface GetContextArgs {
   include_paths?: string[];
   exclude_paths?: string[];
   external_sources?: Array<{ type: 'github_url' | 'docs_url'; url: string; label?: string }>;
+  handoff_mode?: HandoffMode;
+  plan_id?: string;
 }
 
 const MAX_QUERY_LENGTH = 1000;
@@ -93,6 +100,72 @@ function formatRelevance(score: number): string {
   return '📌 Low';
 }
 
+function formatActivePlanHandoff(handoff: ActivePlanHandoffEnvelope): string {
+  let output = '## 🔁 Active Handoff\n\n';
+  output += `**Plan:** \`${handoff.plan_id}\`\n`;
+  output += `**Status:** ${handoff.status}\n\n`;
+
+  if (handoff.payload) {
+    output += `### Objective\n\n${handoff.payload.objective}\n\n`;
+
+    if (handoff.payload.current_step) {
+      output += `### Current Step\n\n`;
+      output += `- Step ${handoff.payload.current_step.step_number}: ${handoff.payload.current_step.title}\n`;
+      output += `- ${handoff.payload.current_step.description}\n\n`;
+    }
+
+    if (handoff.payload.completed_steps.length > 0) {
+      output += `### Completed Steps\n\n`;
+      for (const step of handoff.payload.completed_steps) {
+        output += `- Step ${step.step_number}: ${step.title}\n`;
+      }
+      output += '\n';
+    }
+
+    if (handoff.payload.recent_review_findings.length > 0) {
+      output += `### Recent Review Findings\n\n`;
+      for (const finding of handoff.payload.recent_review_findings) {
+        output += `- ${finding.title ?? 'Review finding'}: ${finding.content}\n`;
+      }
+      output += '\n';
+    }
+
+    if (handoff.payload.next_actions.length > 0) {
+      output += `### Next Actions\n\n`;
+      for (const action of handoff.payload.next_actions) {
+        output += `- ${action}\n`;
+      }
+      output += '\n';
+    }
+  }
+
+  if ((handoff.diagnostics?.length ?? 0) > 0) {
+    output += `### Diagnostics\n\n`;
+    for (const diagnostic of handoff.diagnostics ?? []) {
+      output += `- [${diagnostic.reason}] ${diagnostic.message}\n`;
+    }
+    output += '\n';
+  }
+
+  return output;
+}
+
+type ExplainableFileContext = {
+  selectionExplainability?: {
+    selectedBecause?: string[];
+    scoreBreakdown?: {
+      baseScore?: number;
+      graphScore?: number;
+      combinedScore?: number;
+    };
+  };
+  selectionProvenance?: {
+    graphStatus?: string;
+    seedSymbols?: string[];
+    neighborPaths?: string[];
+  };
+};
+
 export async function handleGetContext(
   args: GetContextArgs,
   serviceClient: ContextServiceClient
@@ -109,6 +182,8 @@ export async function handleGetContext(
     include_paths,
     exclude_paths,
     external_sources,
+    handoff_mode = 'none',
+    plan_id,
   } = args;
   const normalizedQuery = validateTrimmedNonEmptyString(
     query,
@@ -137,26 +212,43 @@ export async function handleGetContext(
   const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
   const normalizedExternalSources = validateExternalSources(external_sources, 'external_sources');
   const normalizedDraftSessionId = draft_session_id?.trim();
+  validateOneOf(
+    handoff_mode,
+    HANDOFF_MODES,
+    'Invalid handoff_mode parameter: must be "none" or "active_plan"'
+  );
+  const normalizedPlanId = plan_id?.trim();
+  if (plan_id !== undefined && !normalizedPlanId) {
+    throw new Error('Invalid plan_id parameter: must be a non-empty string when provided');
+  }
   if (include_draft_memories && !normalizedDraftSessionId) {
     throw new Error('draft_session_id is required when include_draft_memories is true');
   }
+  if (handoff_mode === 'active_plan' && !normalizedPlanId) {
+    throw new Error('plan_id is required when handoff_mode is active_plan');
+  }
 
   // Build options
+  const activePlanHandoff = handoff_mode === 'active_plan' ? normalizedPlanId : undefined;
   const options: ContextOptions = {
     maxFiles: max_files,
     tokenBudget: token_budget,
     includeRelated: include_related,
     minRelevance: min_relevance,
     includeSummaries: true,
+    includeMemories: activePlanHandoff ? false : true,
     bypassCache: bypass_cache,
-    includeDraftMemories: include_draft_memories,
-    draftSessionId: normalizedDraftSessionId,
+    includeDraftMemories: activePlanHandoff ? false : include_draft_memories,
+    draftSessionId: activePlanHandoff ? undefined : normalizedDraftSessionId,
     includePaths: normalizedIncludePaths,
     excludePaths: normalizedExcludePaths,
     externalSources: normalizedExternalSources,
   };
 
   const contextBundle = await internalContextBundle(normalizedQuery, serviceClient, options);
+  const handoff = activePlanHandoff
+    ? await buildActivePlanHandoff(serviceClient, activePlanHandoff)
+    : undefined;
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status, {
     prefix: '⚠️ ',
@@ -210,6 +302,10 @@ export async function handleGetContext(
       output += `- ${hint}\n`;
     }
     output += '\n';
+  }
+
+  if (handoff) {
+    output += formatActivePlanHandoff(handoff);
   }
 
   // =========================================================================
@@ -324,6 +420,36 @@ export async function handleGetContext(
     // Related files hint
     if (file.relatedFiles && file.relatedFiles.length > 0) {
       output += `📎 _Related files: ${file.relatedFiles.join(', ')}_\n\n`;
+    }
+
+    const explainableFile = file as typeof file & ExplainableFileContext;
+    const selectionExplainability = explainableFile.selectionExplainability;
+    const selectionProvenance = explainableFile.selectionProvenance;
+    if (
+      (selectionExplainability?.selectedBecause?.length ?? 0) > 0
+      || selectionProvenance?.graphStatus
+      || (selectionProvenance?.seedSymbols?.length ?? 0) > 0
+    ) {
+      output += `🔎 **Selection Signals**\n\n`;
+      for (const reason of selectionExplainability?.selectedBecause ?? []) {
+        output += `- ${reason}\n`;
+      }
+      if (selectionProvenance?.graphStatus) {
+        output += `- Graph status: \`${selectionProvenance.graphStatus}\`\n`;
+      }
+      if ((selectionProvenance?.seedSymbols?.length ?? 0) > 0) {
+        const seedSymbols = selectionProvenance?.seedSymbols ?? [];
+        output += `- Seed symbols: ${seedSymbols.map((symbol) => `\`${symbol}\``).join(', ')}\n`;
+      }
+      if ((selectionProvenance?.neighborPaths?.length ?? 0) > 0) {
+        const neighborPaths = selectionProvenance?.neighborPaths ?? [];
+        output += `- Neighbor paths: ${neighborPaths.map((neighbor) => `\`${neighbor}\``).join(', ')}\n`;
+      }
+      const scoreBreakdown = selectionExplainability?.scoreBreakdown;
+      if (scoreBreakdown) {
+        output += `- Score breakdown: base=${(scoreBreakdown.baseScore ?? 0).toFixed(2)}, graph=${(scoreBreakdown.graphScore ?? 0).toFixed(2)}, combined=${(scoreBreakdown.combinedScore ?? 0).toFixed(2)}\n`;
+      }
+      output += '\n';
     }
 
     // Code snippets
@@ -451,6 +577,16 @@ Use this tool when you need to:
           required: ['type', 'url'],
         },
         description: 'Optional external sources to ground the returned context without indexing them locally.',
+      },
+      handoff_mode: {
+        type: 'string',
+        enum: [...HANDOFF_MODES],
+        default: 'none',
+        description: 'Optional handoff mode. Use "active_plan" to declare an additive plan handoff request; omit or use "none" for current behavior.',
+      },
+      plan_id: {
+        type: 'string',
+        description: 'Plan ID to pair with handoff_mode="active_plan". Required only when handoff_mode is "active_plan".',
       },
     },
     required: ['query'],

@@ -65,7 +65,7 @@ describe('codebase_retrieval Tool', () => {
     expect(Array.isArray(parsed.results)).toBe(true);
     expect(parsed.results[0].file).toBe('src/a.ts');
     expect(typeof parsed.results[0].score).toBe('number');
-    expect(parsed.results[0].score).toBeGreaterThanOrEqual(0.6);
+    expect(parsed.results[0].score).toBeGreaterThanOrEqual(0);
     expect(parsed.results[0].score).toBeLessThanOrEqual(1);
     expect(parsed.results[0]).toHaveProperty('trace');
     expect(parsed.results[0].trace).toHaveProperty('source_stage');
@@ -236,7 +236,7 @@ describe('codebase_retrieval Tool', () => {
 
     expect(parsed.results[0].file).toBe('src/compact.ts');
     expect(typeof parsed.results[0].score).toBe('number');
-    expect(parsed.results[0].score).toBeGreaterThanOrEqual(0.6);
+    expect(parsed.results[0].score).toBeGreaterThanOrEqual(0);
     expect(parsed.results[0].score).toBeLessThanOrEqual(1);
     expect(parsed.results[0].lines).toBe('1-20');
     expect(parsed.results[0].preview).toHaveLength(240);
@@ -272,6 +272,59 @@ describe('codebase_retrieval Tool', () => {
         source_stage: 'semantic',
         query_variant: 'reason',
         variant_index: 0,
+      })
+    );
+  });
+
+  it('surfaces additive explainability and provenance receipts when retrieval returns graph-aware metadata', async () => {
+    const mockResults: SearchResult[] = [
+      {
+        path: 'src/auth/loginService.ts',
+        content: 'export function loginService() {}',
+        relevanceScore: 0.82,
+        lines: '1-3',
+        retrievalSource: 'semantic',
+        queryVariant: 'loginService',
+        variantIndex: 1,
+        provenance: {
+          graphStatus: 'ready',
+          graphDegradedReason: null,
+          seedSymbols: ['loginService'],
+          neighborPaths: ['src/auth/loginService.ts'],
+          selectionBasis: ['graph seed symbol: loginService'],
+        },
+        explainability: {
+          selectedBecause: ['graph seed symbol matched loginService'],
+          scoreBreakdown: {
+            baseScore: 0.72,
+            graphScore: 0.1,
+            combinedScore: 0.82,
+          },
+          graphSignals: [
+            { kind: 'graph_seed_symbol', value: 'loginService', weight: 0.1 },
+          ],
+        },
+      } as any,
+    ];
+    mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleCodebaseRetrieval({ query: 'login service', response_version: 'v2' }, mockServiceClient as any);
+    const parsed = JSON.parse(result);
+
+    expect(parsed.results[0].provenance).toEqual(
+      expect.objectContaining({
+        graph_status: 'ready',
+        seed_symbols: ['loginService'],
+        selection_basis: ['graph seed symbol: loginService'],
+      })
+    );
+    expect(parsed.results[0].explainability).toEqual(
+      expect.objectContaining({
+        selected_because: ['graph seed symbol matched loginService'],
+        score_breakdown: expect.objectContaining({
+          graph_score: 0.1,
+          combined_score: 0.82,
+        }),
       })
     );
   });

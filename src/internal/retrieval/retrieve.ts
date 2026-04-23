@@ -3,6 +3,11 @@ import { featureEnabled } from '../../config/features.js';
 import { envInt, envMs } from '../../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../../metrics/metrics.js';
 import {
+  runWithObservabilitySpan,
+  setActiveSpanAttributes,
+  withObservabilitySpanContext,
+} from '../../observability/otel.js';
+import {
   evaluateMemoryPressure,
   getRetrievalMemoryGuardrails,
   memoryPressureLevelValue,
@@ -10,6 +15,11 @@ import {
   type RetrievalMemoryGuardrails,
 } from '../../runtime/memoryPressure.js';
 import { expandQuery } from './expandQuery.js';
+import {
+  applyGraphAwareRetrievalSignals,
+  buildRetrievalGraphContext,
+  mergeExpandedQueriesWithGraph,
+} from './graphAware.js';
 import { dedupeResults } from './dedupe.js';
 import { scoreDenseCandidates } from './dense.js';
 import { createWorkspaceDenseRetriever } from './denseIndex.js';
@@ -261,17 +271,38 @@ function recordStageDuration(
   );
 }
 
+function setRetrievalTraceAttributes(attributes: Record<string, unknown>): void {
+  setActiveSpanAttributes(attributes);
+}
+
 function withStageTiming<T>(
   flow: RetrievalFlowContext,
   stage: RetrievalMeasuredStage,
   fn: () => T
 ): T {
   const start = Date.now();
-  try {
-    return fn();
-  } finally {
-    recordStageDuration(flow, stage, Date.now() - start);
-  }
+  return withObservabilitySpanContext(
+    'retrieval.stage',
+    {
+      attributes: {
+        'retrieval.stage': stage,
+        'retrieval.flow_stage_count': flow.stages.length,
+      },
+    },
+    () => {
+      try {
+        return fn();
+      } finally {
+        const durationMs = Date.now() - start;
+        recordStageDuration(flow, stage, durationMs);
+        setRetrievalTraceAttributes({
+          'retrieval.stage.last_name': stage,
+          'retrieval.stage.last_duration_ms': durationMs,
+          'retrieval.flow_stage_count': flow.stages.length,
+        });
+      }
+    }
+  );
 }
 
 async function withAsyncStageTiming<T>(
@@ -280,11 +311,28 @@ async function withAsyncStageTiming<T>(
   fn: () => Promise<T>
 ): Promise<T> {
   const start = Date.now();
-  try {
-    return await fn();
-  } finally {
-    recordStageDuration(flow, stage, Date.now() - start);
-  }
+  return await runWithObservabilitySpan(
+    'retrieval.stage',
+    {
+      attributes: {
+        'retrieval.stage': stage,
+        'retrieval.flow_stage_count': flow.stages.length,
+      },
+    },
+    async () => {
+      try {
+        return await fn();
+      } finally {
+        const durationMs = Date.now() - start;
+        recordStageDuration(flow, stage, durationMs);
+        setRetrievalTraceAttributes({
+          'retrieval.stage.last_name': stage,
+          'retrieval.stage.last_duration_ms': durationMs,
+          'retrieval.flow_stage_count': flow.stages.length,
+        });
+      }
+    }
+  );
 }
 
 function annotateMemoryPressure(
@@ -879,295 +927,400 @@ export async function retrieve(
       rankingMode: settings.rankingMode,
     },
   });
-  flow.metadata.requestedFanoutConcurrency = requestedSettings.fanoutConcurrency;
-  flow.metadata.effectiveFanoutConcurrency = settings.fanoutConcurrency;
-  flow.metadata.requestedMaxVariants = requestedSettings.maxVariants;
-  flow.metadata.effectiveMaxVariants = settings.maxVariants;
-  flow.metadata.requestedRerankEnabled = requestedSettings.enableRerank;
-  flow.metadata.effectiveRerankEnabled = settings.enableRerank;
-  flow.metadata.requestedRerankBudgetMs = requestedSettings.rerankBudgetMs;
-  flow.metadata.effectiveRerankBudgetMs = settings.rerankBudgetMs;
-  flow.metadata.degradationFloor = resolveDegradationFloor(settings);
-  flow.metadata.memoryPressureGuardrails = { ...preflightGuardrails };
-  annotateMemoryPressure(flow, 'preflight', preflightMemoryPressure);
-  noteRetrievalStage(flow, `memory_pressure:preflight:${preflightMemoryPressure.level}`);
-  if (preflightGuardrails.fanoutConcurrencyCap !== undefined) {
-    noteMemoryGuardrail(
-      flow,
-      'preflight',
-      preflightMemoryPressure.level,
-      'fanout_concurrency_cap',
-      preflightGuardrails.fanoutConcurrencyCap
-    );
-  }
-  if (preflightGuardrails.maxVariantsCap !== undefined) {
-    noteMemoryGuardrail(
-      flow,
-      'preflight',
-      preflightMemoryPressure.level,
-      'max_variants_cap',
-      preflightGuardrails.maxVariantsCap
-    );
-  }
-  if (preflightGuardrails.disableRerank) {
-    noteMemoryGuardrail(flow, 'preflight', preflightMemoryPressure.level, 'rerank_disabled');
-  }
-  noteRetrievalStage(flow, 'start');
-  assertRetrievalFlowActive(flow, 'start');
-  const semanticSearchOptions =
-    settings.bypassCache
-    || settings.maxOutputLength !== undefined
-    || settings.includePaths !== undefined
-    || settings.excludePaths !== undefined
-      ? {
-          bypassCache: settings.bypassCache,
-          maxOutputLength: settings.maxOutputLength,
-          includePaths: settings.includePaths,
-          excludePaths: settings.excludePaths,
-        }
-      : undefined;
-  const semanticSearch = (q: string, k: number) =>
-    semanticSearchOptions
-      ? serviceClient.semanticSearch(q, k, semanticSearchOptions)
-      : serviceClient.semanticSearch(q, k);
 
-  if (!isRetrievalPipelineEnabled()) {
-    noteRetrievalStage(flow, 'legacy_semantic_path');
-    noteRetrievalStage(flow, 'complete');
-    return withAsyncStageTiming(
-      flow,
-      'legacy_semantic_path',
-      () => semanticSearch(query, settings.topK)
-    );
-  }
-
-  const expandedQueries = withStageTiming(flow, 'expand_queries', () => buildExpandedQueries(query, settings));
-  noteRetrievalStage(flow, `expanded_queries:${expandedQueries.length}`);
-  assertRetrievalFlowActive(flow, 'expanded_queries');
-  const semanticCandidates: InternalSearchResult[] = [];
-  const lexicalCandidates: InternalSearchResult[] = [];
-  const denseCandidates: InternalSearchResult[] = [];
-  const denseProvider = resolveDenseProvider(settings, serviceClient);
-  const localKeywordSearch = (serviceClient as ContextServiceClient & {
-    localKeywordSearch?: (
-      input: string,
-      topK: number,
-      options?: { includePaths?: string[]; excludePaths?: string[]; bypassCache?: boolean }
-    ) => Promise<SearchResult[]>;
-  }).localKeywordSearch;
-  const enabledBackends: FanoutBackend[] = ['semantic'];
-  if (settings.enableLexical && typeof localKeywordSearch === 'function') {
-    enabledBackends.push('lexical');
-  }
-  if (settings.enableDense && denseProvider) {
-    enabledBackends.push('dense');
-  }
-  const plannedFanoutTasks = expandedQueries.length * enabledBackends.length;
-  const limiter = createLocalSemaphore(settings.fanoutConcurrency);
-  const syncFanoutDiagnostics = () => updateFanoutDiagnostics(flow, {
-    backends: enabledBackends,
-    variantCount: expandedQueries.length,
-    plannedTasks: plannedFanoutTasks,
-    snapshot: limiter.snapshot(),
-  });
-  syncFanoutDiagnostics();
-  noteRetrievalStage(flow, `fanout:cap:${settings.fanoutConcurrency}`);
-  noteRetrievalStage(flow, `fanout:planned:${plannedFanoutTasks}`);
-
-  const runFanoutSearch = <T extends SearchResult[]>(
-    backend: FanoutBackend,
-    variant: ExpandedQuery,
-    operation: () => Promise<T>
-  ): Promise<T> => {
-    const queuedAt = Date.now();
-    const pending = limiter.run(async () => {
-      observeDurationMs(
-        RETRIEVAL_FANOUT_QUEUE_WAIT_METRIC,
-        { backend },
-        Date.now() - queuedAt,
-        { help: 'Retrieval fanout task queue wait time in seconds.' }
-      );
-      assertRetrievalFlowActive(flow, `variant:${variant.index}:${backend}`);
-      syncFanoutDiagnostics();
-      const executionStart = Date.now();
-      try {
-        return await operation();
-      } finally {
-        observeDurationMs(
-          RETRIEVAL_FANOUT_EXECUTION_METRIC,
-          { backend },
-          Date.now() - executionStart,
-          { help: 'Retrieval fanout task execution time in seconds.' }
+  return await runWithObservabilitySpan(
+    'retrieval.pipeline',
+    {
+      attributes: {
+        'retrieval.top_k': settings.topK,
+        'retrieval.per_query_top_k': settings.perQueryTopK,
+        'retrieval.max_variants': settings.maxVariants,
+        'retrieval.fanout_concurrency': settings.fanoutConcurrency,
+        'retrieval.profile': settings.profile,
+        'retrieval.rewrite_mode': settings.rewriteMode,
+        'retrieval.ranking_mode': settings.rankingMode,
+        'retrieval.enable_expansion': settings.enableExpansion,
+        'retrieval.enable_lexical': settings.enableLexical,
+        'retrieval.enable_dense': settings.enableDense,
+        'retrieval.enable_fusion': settings.enableFusion,
+        'retrieval.enable_rerank': settings.enableRerank,
+        'retrieval.bypass_cache': settings.bypassCache,
+        'retrieval.query_length': query.length,
+      },
+    },
+    async () => {
+      flow.metadata.requestedFanoutConcurrency = requestedSettings.fanoutConcurrency;
+      flow.metadata.effectiveFanoutConcurrency = settings.fanoutConcurrency;
+      flow.metadata.requestedMaxVariants = requestedSettings.maxVariants;
+      flow.metadata.effectiveMaxVariants = settings.maxVariants;
+      flow.metadata.requestedRerankEnabled = requestedSettings.enableRerank;
+      flow.metadata.effectiveRerankEnabled = settings.enableRerank;
+      flow.metadata.requestedRerankBudgetMs = requestedSettings.rerankBudgetMs;
+      flow.metadata.effectiveRerankBudgetMs = settings.rerankBudgetMs;
+      flow.metadata.degradationFloor = resolveDegradationFloor(settings);
+      flow.metadata.memoryPressureGuardrails = { ...preflightGuardrails };
+      annotateMemoryPressure(flow, 'preflight', preflightMemoryPressure);
+      setRetrievalTraceAttributes({
+        'retrieval.degradation_floor': flow.metadata.degradationFloor,
+        'retrieval.memory_pressure.preflight_level': preflightMemoryPressure.level,
+      });
+      noteRetrievalStage(flow, `memory_pressure:preflight:${preflightMemoryPressure.level}`);
+      if (preflightGuardrails.fanoutConcurrencyCap !== undefined) {
+        noteMemoryGuardrail(
+          flow,
+          'preflight',
+          preflightMemoryPressure.level,
+          'fanout_concurrency_cap',
+          preflightGuardrails.fanoutConcurrencyCap
         );
-        syncFanoutDiagnostics();
       }
-    });
-    syncFanoutDiagnostics();
-    return pending;
-  };
-
-  const perVariantResults = await withAsyncStageTiming(
-    flow,
-    'fanout',
-    async () => Promise.all(
-      expandedQueries.map(async (variant) => {
-        assertRetrievalFlowActive(flow, `variant:${variant.index}`);
-        const semanticPromise = runFanoutSearch(
-          'semantic',
-          variant,
-          () => withTimeout(
-            semanticSearch(variant.query, settings.perQueryTopK),
-            settings.timeoutMs,
-            []
-          ).catch((error) => {
-            if (settings.log) {
-              console.error(`[retrieve] Failed variant \"${variant.query}\":`, error);
+      if (preflightGuardrails.maxVariantsCap !== undefined) {
+        noteMemoryGuardrail(
+          flow,
+          'preflight',
+          preflightMemoryPressure.level,
+          'max_variants_cap',
+          preflightGuardrails.maxVariantsCap
+        );
+      }
+      if (preflightGuardrails.disableRerank) {
+        noteMemoryGuardrail(flow, 'preflight', preflightMemoryPressure.level, 'rerank_disabled');
+      }
+      noteRetrievalStage(flow, 'start');
+      assertRetrievalFlowActive(flow, 'start');
+      const semanticSearchOptions =
+        settings.bypassCache
+        || settings.maxOutputLength !== undefined
+        || settings.includePaths !== undefined
+        || settings.excludePaths !== undefined
+          ? {
+              bypassCache: settings.bypassCache,
+              maxOutputLength: settings.maxOutputLength,
+              includePaths: settings.includePaths,
+              excludePaths: settings.excludePaths,
             }
-            return [] as SearchResult[];
-          })
+          : undefined;
+      const semanticSearch = (q: string, k: number) =>
+        semanticSearchOptions
+          ? serviceClient.semanticSearch(q, k, semanticSearchOptions)
+          : serviceClient.semanticSearch(q, k);
+
+      if (!isRetrievalPipelineEnabled()) {
+        noteRetrievalStage(flow, 'legacy_semantic_path');
+        noteRetrievalStage(flow, 'complete');
+        const legacyResults = await withAsyncStageTiming(
+          flow,
+          'legacy_semantic_path',
+          () => semanticSearch(query, settings.topK)
         );
-
-        const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
-          ? runFanoutSearch(
-              'lexical',
-              variant,
-              () => withTimeout(
-                localKeywordSearch(variant.query, settings.perQueryTopK, {
-                  includePaths: settings.includePaths,
-                  excludePaths: settings.excludePaths,
-                  bypassCache: settings.bypassCache,
-                }),
-                settings.timeoutMs,
-                []
-              ).catch((error) => {
-                if (settings.log) {
-                  console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
-                }
-                return [] as SearchResult[];
-              })
-            )
-          : Promise.resolve([] as SearchResult[]);
-
-        const densePromise = settings.enableDense && denseProvider
-          ? runFanoutSearch(
-              'dense',
-              variant,
-              () => withTimeout(
-                denseProvider.search(variant.query, settings.perQueryTopK),
-                settings.timeoutMs,
-                []
-              ).catch((error) => {
-                if (settings.log) {
-                  console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
-                }
-                return [] as SearchResult[];
-              })
-            )
-          : Promise.resolve([] as SearchResult[]);
-
-        noteRetrievalStage(flow, `variant:${variant.index}:started`);
-        const [semanticResults, lexicalResults, denseResults] = await Promise.all([
-          semanticPromise,
-          lexicalPromise,
-          densePromise,
-        ]);
-        noteRetrievalStage(flow, `variant:${variant.index}:completed`);
-
-        return { variant, semanticResults, lexicalResults, denseResults };
-      })
-    )
-  );
-  syncFanoutDiagnostics();
-  if (limiter.snapshot().queuedEvents > 0) {
-    noteRetrievalStage(flow, 'fanout:queued');
-  }
-  noteRetrievalStage(flow, `fanout:max_in_flight:${limiter.snapshot().maxActive}`);
-
-  noteRetrievalStage(flow, 'collected_variants');
-  withStageTiming(flow, 'collect_candidates', () => {
-    for (const { variant, semanticResults, lexicalResults, denseResults } of perVariantResults) {
-      for (const result of semanticResults) {
-        const semanticScore = result.relevanceScore ?? result.score ?? 0;
-        semanticCandidates.push({
-          ...result,
-          retrievalSource: 'semantic',
-          semanticScore,
-          combinedScore: semanticScore,
-          queryVariant: variant.query,
-          variantIndex: variant.index,
-          variantWeight: variant.weight,
+        setRetrievalTraceAttributes({
+          'retrieval.result_count': legacyResults.length,
+          'retrieval.flow_stage_count': flow.stages.length,
         });
+        return legacyResults;
       }
 
-      if (lexicalResults.length > 0) {
-        lexicalCandidates.push(...scoreLexicalCandidates(lexicalResults, {
-          query: variant.query,
-          queryVariant: variant.query,
-          variantIndex: variant.index,
-          variantWeight: variant.weight,
+      let graphContext = await buildRetrievalGraphContext(query, serviceClient);
+      flow.metadata.graphStatus = graphContext.graphStatus;
+      flow.metadata.graphDegradedReason = graphContext.graphDegradedReason;
+      flow.metadata.graphSeedSymbols = graphContext.seedSymbols.map((symbol) => symbol.name);
+      flow.metadata.graphNeighborPaths = graphContext.neighborPaths;
+      noteRetrievalStage(flow, `graph:status:${graphContext.graphStatus}`);
+      if (graphContext.seedSymbols.length > 0) {
+        noteRetrievalStage(flow, `graph:seed_symbols:${graphContext.seedSymbols.length}`);
+      }
+      const expandedQueries = withStageTiming(flow, 'expand_queries', () =>
+        mergeExpandedQueriesWithGraph(buildExpandedQueries(query, settings), graphContext)
+      );
+      setRetrievalTraceAttributes({ 'retrieval.expanded_query_count': expandedQueries.length });
+      noteRetrievalStage(flow, `expanded_queries:${expandedQueries.length}`);
+      assertRetrievalFlowActive(flow, 'expanded_queries');
+      const semanticCandidates: InternalSearchResult[] = [];
+      const lexicalCandidates: InternalSearchResult[] = [];
+      const denseCandidates: InternalSearchResult[] = [];
+      const denseProvider = resolveDenseProvider(settings, serviceClient);
+      const localKeywordSearch = (serviceClient as ContextServiceClient & {
+        localKeywordSearch?: (
+          input: string,
+          topK: number,
+          options?: { includePaths?: string[]; excludePaths?: string[]; bypassCache?: boolean }
+        ) => Promise<SearchResult[]>;
+      }).localKeywordSearch;
+      const enabledBackends: FanoutBackend[] = ['semantic'];
+      if (settings.enableLexical && typeof localKeywordSearch === 'function') {
+        enabledBackends.push('lexical');
+      }
+      if (settings.enableDense && denseProvider) {
+        enabledBackends.push('dense');
+      }
+      const plannedFanoutTasks = expandedQueries.length * enabledBackends.length;
+      const limiter = createLocalSemaphore(settings.fanoutConcurrency);
+      const syncFanoutDiagnostics = () => {
+        const snapshot = limiter.snapshot();
+        updateFanoutDiagnostics(flow, {
+          backends: enabledBackends,
+          variantCount: expandedQueries.length,
+          plannedTasks: plannedFanoutTasks,
+          snapshot,
+        });
+        setRetrievalTraceAttributes({
+          'retrieval.fanout.backend_count': enabledBackends.length,
+          'retrieval.fanout.variant_count': expandedQueries.length,
+          'retrieval.fanout.planned_tasks': plannedFanoutTasks,
+          'retrieval.fanout.active': snapshot.active,
+          'retrieval.fanout.max_active': snapshot.maxActive,
+          'retrieval.fanout.queued': snapshot.queued,
+          'retrieval.fanout.max_queued': snapshot.maxQueued,
+        });
+      };
+      syncFanoutDiagnostics();
+      noteRetrievalStage(flow, `fanout:cap:${settings.fanoutConcurrency}`);
+      noteRetrievalStage(flow, `fanout:planned:${plannedFanoutTasks}`);
+
+      const runFanoutSearch = <T extends SearchResult[]>(
+        backend: FanoutBackend,
+        variant: ExpandedQuery,
+        operation: () => Promise<T>
+      ): Promise<T> => {
+        const queuedAt = Date.now();
+        const pending = limiter.run(async () => {
+          const queueWaitMs = Date.now() - queuedAt;
+          observeDurationMs(
+            RETRIEVAL_FANOUT_QUEUE_WAIT_METRIC,
+            { backend },
+            queueWaitMs,
+            { help: 'Retrieval fanout task queue wait time in seconds.' }
+          );
+          assertRetrievalFlowActive(flow, `variant:${variant.index}:${backend}`);
+          syncFanoutDiagnostics();
+          return await runWithObservabilitySpan(
+            'retrieval.fanout_backend',
+            {
+              attributes: {
+                'retrieval.backend': backend,
+                'retrieval.variant_index': variant.index,
+                'retrieval.variant_source': variant.source,
+                'retrieval.variant_weight': variant.weight,
+                'retrieval.queue_wait_ms': queueWaitMs,
+              },
+            },
+            async (span) => {
+              const executionStart = Date.now();
+              try {
+                const results = await operation();
+                span?.setAttribute('retrieval.result_count', results.length);
+                return results;
+              } finally {
+                const executionMs = Date.now() - executionStart;
+                observeDurationMs(
+                  RETRIEVAL_FANOUT_EXECUTION_METRIC,
+                  { backend },
+                  executionMs,
+                  { help: 'Retrieval fanout task execution time in seconds.' }
+                );
+                span?.setAttribute('retrieval.execution_ms', executionMs);
+                syncFanoutDiagnostics();
+              }
+            }
+          );
+        });
+        syncFanoutDiagnostics();
+        return pending;
+      };
+
+      const perVariantResults = await withAsyncStageTiming(
+        flow,
+        'fanout',
+        async () => Promise.all(
+          expandedQueries.map(async (variant) => {
+            assertRetrievalFlowActive(flow, `variant:${variant.index}`);
+            const semanticPromise = runFanoutSearch(
+              'semantic',
+              variant,
+              () => withTimeout(
+                semanticSearch(variant.query, settings.perQueryTopK),
+                settings.timeoutMs,
+                []
+              ).catch((error) => {
+                if (settings.log) {
+                  console.error(`[retrieve] Failed variant \"${variant.query}\":`, error);
+                }
+                return [] as SearchResult[];
+              })
+            );
+
+            const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
+              ? runFanoutSearch(
+                  'lexical',
+                  variant,
+                  () => withTimeout(
+                    localKeywordSearch(variant.query, settings.perQueryTopK, {
+                      includePaths: settings.includePaths,
+                      excludePaths: settings.excludePaths,
+                      bypassCache: settings.bypassCache,
+                    }),
+                    settings.timeoutMs,
+                    []
+                  ).catch((error) => {
+                    if (settings.log) {
+                      console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
+                    }
+                    return [] as SearchResult[];
+                  })
+                )
+              : Promise.resolve([] as SearchResult[]);
+
+            const densePromise = settings.enableDense && denseProvider
+              ? runFanoutSearch(
+                  'dense',
+                  variant,
+                  () => withTimeout(
+                    denseProvider.search(variant.query, settings.perQueryTopK),
+                    settings.timeoutMs,
+                    []
+                  ).catch((error) => {
+                    if (settings.log) {
+                      console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
+                    }
+                    return [] as SearchResult[];
+                  })
+                )
+              : Promise.resolve([] as SearchResult[]);
+
+            noteRetrievalStage(flow, `variant:${variant.index}:started`);
+            const [semanticResults, lexicalResults, denseResults] = await Promise.all([
+              semanticPromise,
+              lexicalPromise,
+              densePromise,
+            ]);
+            noteRetrievalStage(flow, `variant:${variant.index}:completed`);
+
+            return { variant, semanticResults, lexicalResults, denseResults };
+          })
+        )
+      );
+      syncFanoutDiagnostics();
+      if (limiter.snapshot().queuedEvents > 0) {
+        noteRetrievalStage(flow, 'fanout:queued');
+      }
+      noteRetrievalStage(flow, `fanout:max_in_flight:${limiter.snapshot().maxActive}`);
+
+      noteRetrievalStage(flow, 'collected_variants');
+      withStageTiming(flow, 'collect_candidates', () => {
+        for (const { variant, semanticResults, lexicalResults, denseResults } of perVariantResults) {
+          for (const result of semanticResults) {
+            const semanticScore = result.relevanceScore ?? result.score ?? 0;
+            semanticCandidates.push({
+              ...result,
+              retrievalSource: 'semantic',
+              semanticScore,
+              combinedScore: semanticScore,
+              queryVariant: variant.query,
+              variantIndex: variant.index,
+              variantWeight: variant.weight,
+            });
+          }
+
+          if (lexicalResults.length > 0) {
+            lexicalCandidates.push(...scoreLexicalCandidates(lexicalResults, {
+              query: variant.query,
+              queryVariant: variant.query,
+              variantIndex: variant.index,
+              variantWeight: variant.weight,
+            }));
+          }
+
+          if (denseResults.length > 0) {
+            denseCandidates.push(...scoreDenseCandidates(denseResults, {
+              queryVariant: variant.query,
+              variantIndex: variant.index,
+              variantWeight: variant.weight,
+            }));
+          }
+        }
+      });
+      setRetrievalTraceAttributes({
+        'retrieval.semantic_candidate_count': semanticCandidates.length,
+        'retrieval.lexical_candidate_count': lexicalCandidates.length,
+        'retrieval.dense_candidate_count': denseCandidates.length,
+      });
+
+      if (semanticCandidates.length === 0 && lexicalCandidates.length === 0 && denseCandidates.length === 0) {
+        noteRetrievalStage(flow, 'complete');
+        setRetrievalTraceAttributes({
+          'retrieval.result_count': 0,
+          'retrieval.flow_stage_count': flow.stages.length,
+        });
+        return [];
+      }
+
+      let processed: InternalSearchResult[] = applyGraphAwareRetrievalSignals(
+        [...semanticCandidates, ...lexicalCandidates, ...denseCandidates],
+        graphContext
+      );
+      flow.metadata.graphVariantCount = graphContext.graphVariants.length;
+      if (graphContext.graphVariants.length > 0) {
+        flow.metadata.graphExpandedQueries = graphContext.graphVariants.map((variant) => variant.query);
+        noteRetrievalStage(flow, `graph:variants:${graphContext.graphVariants.length}`);
+      }
+
+      if (settings.enableDedupe) {
+        noteRetrievalStage(flow, 'dedupe');
+        processed = withStageTiming(flow, 'dedupe', () => {
+          // Keep cross-source signals for fusion by deduping inside each source first.
+          const dedupedSemantic = dedupeResults(
+            processed.filter((candidate) => candidate.retrievalSource === 'semantic' || candidate.retrievalSource === 'hybrid')
+          );
+          const dedupedLexical = dedupeResults(
+            processed.filter((candidate) => candidate.retrievalSource === 'lexical')
+          );
+          const dedupedDense = dedupeResults(
+            processed.filter((candidate) => candidate.retrievalSource === 'dense')
+          );
+          return [...dedupedSemantic, ...dedupedLexical, ...dedupedDense];
+        });
+        setRetrievalTraceAttributes({ 'retrieval.post_dedupe_count': processed.length });
+      }
+
+      if (settings.enableFusion) {
+        noteRetrievalStage(flow, 'fusion');
+        const fusionWeights = resolveFusionWeights(query, settings);
+        processed = withStageTiming(flow, 'fusion', () => fuseCandidates(processed, {
+          semanticWeight: fusionWeights.semanticWeight,
+          lexicalWeight: fusionWeights.lexicalWeight,
+          denseWeight: fusionWeights.denseWeight,
         }));
+        setRetrievalTraceAttributes({ 'retrieval.post_fusion_count': processed.length });
       }
 
-      if (denseResults.length > 0) {
-        denseCandidates.push(...scoreDenseCandidates(denseResults, {
-          queryVariant: variant.query,
-          variantIndex: variant.index,
-          variantWeight: variant.weight,
-        }));
+      if (settings.enableRerank) {
+        const preRerankMemoryPressure = evaluateMemoryPressure();
+        annotateMemoryPressure(flow, 'pre_rerank', preRerankMemoryPressure);
+        setRetrievalTraceAttributes({
+          'retrieval.memory_pressure.pre_rerank_level': preRerankMemoryPressure.level,
+        });
+        noteRetrievalStage(flow, `memory_pressure:pre_rerank:${preRerankMemoryPressure.level}`);
+        if (getRetrievalMemoryGuardrails(preRerankMemoryPressure).disableRerank) {
+          flow.metadata.preRerankMemoryPressureGuardrails = { disableRerank: true };
+          flow.metadata.effectiveRerankEnabled = false;
+          noteMemoryGuardrail(flow, 'pre_rerank', preRerankMemoryPressure.level, 'rerank_disabled');
+          noteRetrievalStage(flow, 'rerank:skipped:memory_pressure');
+        } else {
+          processed = await withAsyncStageTiming(flow, 'rerank', () => applyRerankStage(query, processed, settings, flow));
+          setRetrievalTraceAttributes({ 'retrieval.post_rerank_count': processed.length });
+        }
+      } else {
+        flow.metadata.effectiveRerankEnabled = false;
       }
+      noteRetrievalStage(flow, 'complete');
+
+      const finalResults = processed.slice(0, settings.topK);
+      setRetrievalTraceAttributes({
+        'retrieval.result_count': finalResults.length,
+        'retrieval.flow_stage_count': flow.stages.length,
+        'retrieval.effective_rerank_enabled': flow.metadata.effectiveRerankEnabled === true,
+      });
+      return finalResults;
     }
-  });
-
-  if (semanticCandidates.length === 0 && lexicalCandidates.length === 0 && denseCandidates.length === 0) {
-    noteRetrievalStage(flow, 'complete');
-    return [];
-  }
-
-  let processed: InternalSearchResult[] = [...semanticCandidates, ...lexicalCandidates, ...denseCandidates];
-
-  if (settings.enableDedupe) {
-    noteRetrievalStage(flow, 'dedupe');
-    processed = withStageTiming(flow, 'dedupe', () => {
-      // Keep cross-source signals for fusion by deduping inside each source first.
-      const dedupedSemantic = dedupeResults(
-        processed.filter((candidate) => candidate.retrievalSource === 'semantic' || candidate.retrievalSource === 'hybrid')
-      );
-      const dedupedLexical = dedupeResults(
-        processed.filter((candidate) => candidate.retrievalSource === 'lexical')
-      );
-      const dedupedDense = dedupeResults(
-        processed.filter((candidate) => candidate.retrievalSource === 'dense')
-      );
-      return [...dedupedSemantic, ...dedupedLexical, ...dedupedDense];
-    });
-  }
-
-  if (settings.enableFusion) {
-    noteRetrievalStage(flow, 'fusion');
-    const fusionWeights = resolveFusionWeights(query, settings);
-    processed = withStageTiming(flow, 'fusion', () => fuseCandidates(processed, {
-      semanticWeight: fusionWeights.semanticWeight,
-      lexicalWeight: fusionWeights.lexicalWeight,
-      denseWeight: fusionWeights.denseWeight,
-    }));
-  }
-
-  if (settings.enableRerank) {
-    const preRerankMemoryPressure = evaluateMemoryPressure();
-    annotateMemoryPressure(flow, 'pre_rerank', preRerankMemoryPressure);
-    noteRetrievalStage(flow, `memory_pressure:pre_rerank:${preRerankMemoryPressure.level}`);
-    if (getRetrievalMemoryGuardrails(preRerankMemoryPressure).disableRerank) {
-      flow.metadata.preRerankMemoryPressureGuardrails = { disableRerank: true };
-      flow.metadata.effectiveRerankEnabled = false;
-      noteMemoryGuardrail(flow, 'pre_rerank', preRerankMemoryPressure.level, 'rerank_disabled');
-      noteRetrievalStage(flow, 'rerank:skipped:memory_pressure');
-    } else {
-      processed = await withAsyncStageTiming(flow, 'rerank', () => applyRerankStage(query, processed, settings, flow));
-    }
-  } else {
-    flow.metadata.effectiveRerankEnabled = false;
-  }
-  noteRetrievalStage(flow, 'complete');
-
-  return processed.slice(0, settings.topK);
+  );
 }

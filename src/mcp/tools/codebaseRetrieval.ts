@@ -42,6 +42,30 @@ export interface CodebaseRetrievalResult {
     query_variant?: string;
     variant_index?: number;
   };
+  provenance?: {
+    graph_status: 'ready' | 'empty' | 'degraded' | 'stale' | 'rebuild_required' | 'unavailable';
+    graph_degraded_reason?: string | null;
+    seed_symbols: string[];
+    neighbor_paths: string[];
+    selection_basis: string[];
+  };
+  explainability?: {
+    selected_because: string[];
+    score_breakdown: {
+      base_score: number;
+      graph_score: number;
+      combined_score: number;
+      semantic_score?: number;
+      lexical_score?: number;
+      dense_score?: number;
+      fused_score?: number;
+    };
+    graph_signals?: Array<{
+      kind: string;
+      value: string;
+      weight: number;
+    }>;
+  };
 }
 
 export interface CodebaseRetrievalOutput {
@@ -114,6 +138,30 @@ type TraceCandidate = {
   retrievalSource?: string;
   queryVariant?: string;
   variantIndex?: number;
+  provenance?: {
+    graphStatus?: string;
+    graphDegradedReason?: string | null;
+    seedSymbols?: string[];
+    neighborPaths?: string[];
+    selectionBasis?: string[];
+  };
+  explainability?: {
+    selectedBecause?: string[];
+    scoreBreakdown?: {
+      baseScore?: number;
+      graphScore?: number;
+      combinedScore?: number;
+      semanticScore?: number;
+      lexicalScore?: number;
+      denseScore?: number;
+      fusedScore?: number;
+    };
+    graphSignals?: Array<{
+      kind?: string;
+      value?: string;
+      weight?: number;
+    }>;
+  };
 };
 
 type TraceStage = 'semantic' | 'keyword' | 'hybrid' | 'lexical' | 'dense';
@@ -238,6 +286,53 @@ function buildTraceEnvelope(traceCandidate: TraceCandidate): TraceEnvelope {
   return trace;
 }
 
+function buildProvenanceEnvelope(traceCandidate: TraceCandidate): CodebaseRetrievalResult['provenance'] | undefined {
+  const provenance = traceCandidate.provenance;
+  if (!provenance) {
+    return undefined;
+  }
+  return {
+    graph_status: (
+      provenance.graphStatus === 'ready'
+      || provenance.graphStatus === 'empty'
+      || provenance.graphStatus === 'degraded'
+      || provenance.graphStatus === 'stale'
+      || provenance.graphStatus === 'rebuild_required'
+      || provenance.graphStatus === 'unavailable'
+    )
+      ? provenance.graphStatus
+      : 'unavailable',
+    graph_degraded_reason: provenance.graphDegradedReason ?? null,
+    seed_symbols: provenance.seedSymbols ?? [],
+    neighbor_paths: provenance.neighborPaths ?? [],
+    selection_basis: provenance.selectionBasis ?? [],
+  };
+}
+
+function buildExplainabilityEnvelope(traceCandidate: TraceCandidate): CodebaseRetrievalResult['explainability'] | undefined {
+  const explainability = traceCandidate.explainability;
+  if (!explainability?.scoreBreakdown) {
+    return undefined;
+  }
+  return {
+    selected_because: explainability.selectedBecause ?? [],
+    score_breakdown: {
+      base_score: explainability.scoreBreakdown.baseScore ?? 0,
+      graph_score: explainability.scoreBreakdown.graphScore ?? 0,
+      combined_score: explainability.scoreBreakdown.combinedScore ?? 0,
+      semantic_score: explainability.scoreBreakdown.semanticScore,
+      lexical_score: explainability.scoreBreakdown.lexicalScore,
+      dense_score: explainability.scoreBreakdown.denseScore,
+      fused_score: explainability.scoreBreakdown.fusedScore,
+    },
+    graph_signals: explainability.graphSignals?.map((signal) => ({
+      kind: signal.kind ?? 'unknown',
+      value: signal.value ?? '',
+      weight: typeof signal.weight === 'number' ? signal.weight : 0,
+    })),
+  };
+}
+
 export async function handleCodebaseRetrieval(
   args: CodebaseRetrievalArgs,
   serviceClient: ContextServiceClient
@@ -317,6 +412,8 @@ export async function handleCodebaseRetrieval(
       lines: r.lines,
       reason: `Semantic match for: "${normalizedQuery}"`,
       trace: buildTraceEnvelope(traceCandidate),
+      provenance: buildProvenanceEnvelope(traceCandidate),
+      explainability: buildExplainabilityEnvelope(traceCandidate),
     };
   });
 

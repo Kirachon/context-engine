@@ -5,6 +5,10 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import { execFileSync } from 'child_process';
 import { ReactiveReviewService } from '../../src/reactive/ReactiveReviewService.js';
 import { ContextServiceClient } from '../../src/mcp/serviceClient.js';
 import { PlanningService } from '../../src/mcp/services/planningService.js';
@@ -46,8 +50,17 @@ describe('ReactiveReviewService', () => {
     // Create minimal mocks - we only need to test cleanup logic
     mockContextClient = {
       getWorkspaceRoot: jest.fn(() => '/test/workspace'),
+      getWorkspacePath: jest.fn(() => '/test/workspace'),
       disableCommitCache: jest.fn(),
       getCacheStats: jest.fn(() => ({ hitRate: 0.5, size: 10, commitKeyed: false, currentCommit: null })),
+      searchAndAsk: jest.fn(async () =>
+        JSON.stringify({
+          findings: [],
+          overall_correctness: 'correct',
+          overall_explanation: 'No issues found.',
+          overall_confidence_score: 0.9,
+        })
+      ),
     } as unknown as jest.Mocked<ContextServiceClient>;
 
     mockPlanningService = {} as unknown as jest.Mocked<PlanningService>;
@@ -363,6 +376,159 @@ describe('ReactiveReviewService', () => {
 
         // Cleanup
         serviceNoPersistence.stopCleanupTimer();
+      });
+    });
+
+    describe('Step diff generation', () => {
+      it('uses a real git diff for review steps instead of placeholder content', async () => {
+        const serviceAny = service as any;
+        const sessionId = 'step-diff-session';
+        const planId = 'plan-step-diff';
+        const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'reactive-review-step-'));
+        const trackedFile = path.join(tempRepo, 'src', 'file1.ts');
+        fs.mkdirSync(path.dirname(trackedFile), { recursive: true });
+
+        execFileSync('git', ['init'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.name', 'Codex Test'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: tempRepo, stdio: 'ignore' });
+
+        fs.writeFileSync(trackedFile, 'export const value = "old";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd: tempRepo, stdio: 'ignore' });
+        const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tempRepo,
+          encoding: 'utf8',
+        }).trim();
+
+        fs.writeFileSync(trackedFile, 'export const value = "new";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'update'], { cwd: tempRepo, stdio: 'ignore' });
+        const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tempRepo,
+          encoding: 'utf8',
+        }).trim();
+
+        mockContextClient.getWorkspacePath.mockReturnValue(tempRepo);
+        const prMetadata: PRMetadata = {
+          ...createMockPRMetadata(headCommit),
+          base_ref: baseCommit,
+          changed_files: ['src/file1.ts'],
+        };
+
+        serviceAny.sessionPlans.set(sessionId, {
+          id: planId,
+          steps: [
+            {
+              step_number: 1,
+              files_to_modify: [{ path: 'src/file1.ts' }],
+            },
+          ],
+        });
+
+        const executor = serviceAny.createDefaultStepExecutor(sessionId, prMetadata);
+        const result = await executor(planId, 1);
+
+        expect(result).toEqual({ success: true, files_modified: ['src/file1.ts'] });
+        expect(mockContextClient.searchAndAsk).toHaveBeenCalled();
+        expect(mockContextClient.searchAndAsk.mock.calls[0]?.[1]).toContain('diff --git a/src/file1.ts b/src/file1.ts');
+        expect(mockContextClient.searchAndAsk.mock.calls[0]?.[1]).toContain('-export const value = "old";');
+        expect(mockContextClient.searchAndAsk.mock.calls[0]?.[1]).toContain('+export const value = "new";');
+        expect(mockContextClient.searchAndAsk.mock.calls[0]?.[1]).not.toContain('Placeholder for actual file content');
+
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+      });
+
+      it('fails closed when step file scope excludes all diff content', async () => {
+        const serviceAny = service as any;
+        const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'reactive-review-step-empty-'));
+        const trackedFile = path.join(tempRepo, 'src', 'file1.ts');
+        fs.mkdirSync(path.dirname(trackedFile), { recursive: true });
+
+        execFileSync('git', ['init'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.name', 'Codex Test'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: tempRepo, stdio: 'ignore' });
+
+        fs.writeFileSync(trackedFile, 'export const value = "old";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd: tempRepo, stdio: 'ignore' });
+        const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tempRepo,
+          encoding: 'utf8',
+        }).trim();
+
+        fs.writeFileSync(trackedFile, 'export const value = "new";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'update'], { cwd: tempRepo, stdio: 'ignore' });
+        const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tempRepo,
+          encoding: 'utf8',
+        }).trim();
+
+        mockContextClient.getWorkspacePath.mockReturnValue(tempRepo);
+        const prMetadata: PRMetadata = {
+          ...createMockPRMetadata(headCommit),
+          base_ref: baseCommit,
+          changed_files: ['src/file1.ts'],
+        };
+
+        const result = await serviceAny.buildStepDiff(['tests/file1.test.ts'], prMetadata);
+
+        expect(result.diff).toBe('');
+        expect(result.changed_files).toEqual([]);
+        expect(result.scope_empty_reason).toBe('path_scope_excluded_all_changes');
+        expect(mockContextClient.searchAndAsk).not.toHaveBeenCalled();
+
+        fs.rmSync(tempRepo, { recursive: true, force: true });
+      });
+
+      it('builds step diffs against the full PR range instead of only the head commit', async () => {
+        const serviceAny = service as any;
+        const tempRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'reactive-review-step-range-'));
+        const fileOne = path.join(tempRepo, 'src', 'file1.ts');
+        const fileTwo = path.join(tempRepo, 'src', 'file2.ts');
+        fs.mkdirSync(path.dirname(fileOne), { recursive: true });
+
+        execFileSync('git', ['init'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.name', 'Codex Test'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['config', 'user.email', 'codex@example.com'], { cwd: tempRepo, stdio: 'ignore' });
+
+        fs.writeFileSync(fileOne, 'export const value1 = "old";\n');
+        fs.writeFileSync(fileTwo, 'export const value2 = "old";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'initial'], { cwd: tempRepo, stdio: 'ignore' });
+        const baseCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tempRepo,
+          encoding: 'utf8',
+        }).trim();
+
+        fs.writeFileSync(fileOne, 'export const value1 = "mid";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'update file1'], { cwd: tempRepo, stdio: 'ignore' });
+
+        fs.writeFileSync(fileTwo, 'export const value2 = "new";\n');
+        execFileSync('git', ['add', '.'], { cwd: tempRepo, stdio: 'ignore' });
+        execFileSync('git', ['commit', '-m', 'update file2'], { cwd: tempRepo, stdio: 'ignore' });
+        const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+          cwd: tempRepo,
+          encoding: 'utf8',
+        }).trim();
+
+        mockContextClient.getWorkspacePath.mockReturnValue(tempRepo);
+        const prMetadata: PRMetadata = {
+          ...createMockPRMetadata(headCommit),
+          base_ref: baseCommit,
+          changed_files: ['src/file1.ts', 'src/file2.ts'],
+        };
+
+        const result = await serviceAny.buildStepDiff(['src/file1.ts'], prMetadata);
+
+        expect(result.changed_files).toEqual(['src/file1.ts']);
+        expect(result.diff).toContain('diff --git a/src/file1.ts b/src/file1.ts');
+        expect(result.diff).toContain('-export const value1 = "old";');
+        expect(result.diff).toContain('+export const value1 = "mid";');
+        expect(result.diff).not.toContain('file2.ts');
+
+        fs.rmSync(tempRepo, { recursive: true, force: true });
       });
     });
   });

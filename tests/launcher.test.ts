@@ -283,7 +283,7 @@ async function startStdioServer(cwd: string): Promise<RunningStdioServer> {
   await waitForServerReady(child, stderrRef, stdoutRef, [
     'Starting MCP server (stdio)...',
     'Transport: stdio',
-    'Available tools (42 total):',
+    'Available tools (',
     'Server ready. Waiting for requests...',
   ]);
 
@@ -567,8 +567,34 @@ describe('repo-aware launcher startup smoke', () => {
 
       expect(runtimeToolNames).toEqual(manifest.tools);
       expect(server.stderr).toContain('Starting MCP server (stdio)...');
-      expect(server.stderr).toContain('Available tools (42 total):');
+      expect(server.stderr).toContain('Available tools (');
       expect(server.stderr).toContain('Server ready. Waiting for requests...');
+    } finally {
+      await server.stop();
+      fs.rmSync(repoRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('exits cleanly when the stdio client disconnects', async () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-launcher-stdio-exit-'));
+    seedRepo(repoRoot);
+
+    const server = await startStdioServer(repoRoot);
+
+    try {
+      server.child.stdin?.end();
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          reject(new Error(`Timed out waiting for stdio shutdown. Captured stderr:\n${server.stderr}`));
+        }, 5000);
+
+        server.child.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+
+      expect(server.child.exitCode).toBe(0);
     } finally {
       await server.stop();
       fs.rmSync(repoRoot, { recursive: true, force: true });

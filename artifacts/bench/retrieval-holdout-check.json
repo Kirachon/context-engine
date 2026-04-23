@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-04-11T13:40:12.029Z",
+  "generated_at": "2026-04-21T05:57:00.710Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "dataset_id": "holdout_v1",
@@ -8,11 +8,11 @@
   },
   "summary": {
     "dataset_id": "holdout_v1",
-    "dataset_hash": "d393e407c4e9304fd3994d8fc1fbfc40b51a5c9c59a3d064b2118ac687acbf39",
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
     "dataset_hash_length": 64,
-    "query_count": 5,
-    "case_count": 5,
-    "judged_path_count": 5,
+    "query_count": 15,
+    "case_count": 15,
+    "judged_path_count": 15,
     "leakage_count": 0,
     "leakage_guard_training_dataset_id": "train_v1",
     "leakage_guard_holdout_dataset_id": "holdout_v1"
@@ -30,7 +30,7 @@
     "matches": []
   },
   "reproducibility_lock": {
-    "fixture_pack_hash": "9417e2253ff0305c7c981cfca90e9d5ec1d59627be40e3f6856009c6e0716701",
+    "fixture_pack_hash": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643",
     "normalization": "trim_lower_whitespace_collapse"
   },
   "gate": {

@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-04-11T13:40:36.812Z",
+  "generated_at": "2026-04-21T05:58:30.442Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
@@ -14,10 +14,10 @@
   },
   "offline_eval": {
     "dataset_id": "holdout_v1",
-    "dataset_hash": "d393e407c4e9304fd3994d8fc1fbfc40b51a5c9c59a3d064b2118ac687acbf39",
-    "query_count": 5,
-    "case_count": 5,
-    "judged_path_count": 5,
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
+    "query_count": 15,
+    "case_count": 15,
+    "judged_path_count": 15,
     "top_k": 10,
     "retrieve_mode": "fast",
     "bypass_cache": false,
@@ -26,17 +26,17 @@
       "refreshed": true,
       "status_before": "idle",
       "file_count_before": 0,
-      "indexed": 622,
+      "indexed": 679,
       "skipped": 0,
       "errors": 0
     },
     "aggregate_metrics": {
-      "mrr_at_10": 0.6066666666666667,
-      "ndcg_at_10": 0.7035565121611999,
+      "mrr_at_10": 0.9333333333333333,
+      "ndcg_at_10": 0.9507906338095277,
       "recall_at_10": 1,
-      "p_at_1": 0.4,
-      "case_count": 5,
-      "judged_path_count": 5
+      "p_at_1": 0.8666666666666667,
+      "case_count": 15,
+      "judged_path_count": 15
     },
     "cases": [
       {
@@ -49,51 +49,44 @@
           }
         ],
         "actual_paths": [
-          "tests/ci/benchSuiteModePolicy.test.ts",
-          "config/ci/retrieval-quality-fixture-pack.json",
-          "artifacts/bench/retrieval-quality-report.json",
+          "src/ci/benchSuiteModePolicy.ts",
           "scripts/ci/run-bench-suite.ts",
-          "src/ci/benchSuiteModePolicy.ts"
+          "docs/BENCHMARKING.md",
+          "docs/archive/retrieval-bottleneck-swarm-refined-plan.md"
         ],
         "hits_at_10": [
           {
             "rank": 1,
-            "path": "tests/ci/benchSuiteModePolicy.test.ts",
-            "grade": 0,
-            "relevant": false
+            "path": "src/ci/benchSuiteModePolicy.ts",
+            "grade": 3,
+            "relevant": true
           },
           {
             "rank": 2,
-            "path": "config/ci/retrieval-quality-fixture-pack.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 3,
-            "path": "artifacts/bench/retrieval-quality-report.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 4,
             "path": "scripts/ci/run-bench-suite.ts",
             "grade": 0,
             "relevant": false
           },
           {
-            "rank": 5,
-            "path": "src/ci/benchSuiteModePolicy.ts",
-            "grade": 3,
-            "relevant": true
+            "rank": 3,
+            "path": "docs/BENCHMARKING.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "docs/archive/retrieval-bottleneck-swarm-refined-plan.md",
+            "grade": 0,
+            "relevant": false
           }
         ],
         "metrics": {
-          "p_at_1": 0,
-          "reciprocal_rank_at_10": 0.2,
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
           "recall_at_10": 1,
-          "ndcg_at_10": 0.38685280723454163,
+          "ndcg_at_10": 1,
           "relevant_hit_count_at_10": 1,
-          "first_relevant_rank": 5
+          "first_relevant_rank": 1
         }
       },
       {
@@ -106,65 +99,65 @@
           }
         ],
         "actual_paths": [
-          "config/ci/retrieval-quality-fixture-pack.json",
-          "artifacts/bench/retrieval-quality-report.json",
           "scripts/ci/bench-provenance.ts",
           "scripts/ci/check-retrieval-bench-gate.ts",
           "scripts/ci/release-bench.ts",
-          "scripts/bench.ts",
-          "scripts/ci/run-bench-suite.ts"
+          "scripts/ci/run-bench-suite.ts",
+          "scripts/ci/generate-retrieval-quality-report.ts",
+          "scripts/ci/bench-compare.ts",
+          "src/ci/slowOpenAiToolHardening.ts"
         ],
         "hits_at_10": [
           {
             "rank": 1,
-            "path": "config/ci/retrieval-quality-fixture-pack.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 2,
-            "path": "artifacts/bench/retrieval-quality-report.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 3,
             "path": "scripts/ci/bench-provenance.ts",
             "grade": 3,
             "relevant": true
           },
           {
-            "rank": 4,
+            "rank": 2,
             "path": "scripts/ci/check-retrieval-bench-gate.ts",
             "grade": 0,
             "relevant": false
           },
           {
-            "rank": 5,
+            "rank": 3,
             "path": "scripts/ci/release-bench.ts",
             "grade": 0,
             "relevant": false
           },
           {
+            "rank": 4,
+            "path": "scripts/ci/run-bench-suite.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "scripts/ci/generate-retrieval-quality-report.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
             "rank": 6,
-            "path": "scripts/bench.ts",
+            "path": "scripts/ci/bench-compare.ts",
             "grade": 0,
             "relevant": false
           },
           {
             "rank": 7,
-            "path": "scripts/ci/run-bench-suite.ts",
+            "path": "src/ci/slowOpenAiToolHardening.ts",
             "grade": 0,
             "relevant": false
           }
         ],
         "metrics": {
-          "p_at_1": 0,
-          "reciprocal_rank_at_10": 0.3333333333333333,
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
           "recall_at_10": 1,
-          "ndcg_at_10": 0.5,
+          "ndcg_at_10": 1,
           "relevant_hit_count_at_10": 1,
-          "first_relevant_rank": 3
+          "first_relevant_rank": 1
         }
       },
       {
@@ -178,11 +171,9 @@
         ],
         "actual_paths": [
           "scripts/ci/check-retrieval-holdout-fixture.ts",
-          "config/ci/retrieval-quality-fixture-pack.json",
           "scripts/ci/generate-retrieval-quality-report.ts",
           "scripts/bench.ts",
-          "tests/ci/checkRetrievalHoldoutFixture.test.ts",
-          "scripts/ci/retrieval-quality-fixture.ts"
+          "context-engine-audit-response-swarm-plan.md"
         ],
         "hits_at_10": [
           {
@@ -193,31 +184,19 @@
           },
           {
             "rank": 2,
-            "path": "config/ci/retrieval-quality-fixture-pack.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 3,
             "path": "scripts/ci/generate-retrieval-quality-report.ts",
             "grade": 0,
             "relevant": false
           },
           {
-            "rank": 4,
+            "rank": 3,
             "path": "scripts/bench.ts",
             "grade": 0,
             "relevant": false
           },
           {
-            "rank": 5,
-            "path": "tests/ci/checkRetrievalHoldoutFixture.test.ts",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 6,
-            "path": "scripts/ci/retrieval-quality-fixture.ts",
+            "rank": 4,
+            "path": "context-engine-audit-response-swarm-plan.md",
             "grade": 0,
             "relevant": false
           }
@@ -242,11 +221,7 @@
         ],
         "actual_paths": [
           "scripts/ci/generate-retrieval-quality-report.ts",
-          "config/ci/retrieval-quality-fixture-pack.json",
-          "artifacts/bench/retrieval-quality-report.json",
-          "tests/ci/generateRetrievalQualityReport.test.ts",
-          "scripts/ci/check-retrieval-quality-gate.ts",
-          "tests/ci/checkRetrievalQualityGate.test.ts"
+          "scripts/ci/check-retrieval-quality-gate.ts"
         ],
         "hits_at_10": [
           {
@@ -257,31 +232,7 @@
           },
           {
             "rank": 2,
-            "path": "config/ci/retrieval-quality-fixture-pack.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 3,
-            "path": "artifacts/bench/retrieval-quality-report.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 4,
-            "path": "tests/ci/generateRetrievalQualityReport.test.ts",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 5,
             "path": "scripts/ci/check-retrieval-quality-gate.ts",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 6,
-            "path": "tests/ci/checkRetrievalQualityGate.test.ts",
             "grade": 0,
             "relevant": false
           }
@@ -305,40 +256,218 @@
           }
         ],
         "actual_paths": [
-          "config/ci/retrieval-quality-fixture-pack.json",
           "scripts/ci/generate-weekly-retrieval-trend-report.ts",
-          "artifacts/bench/retrieval-quality-report.json",
           "docs/R4_WEEKLY_TREND_CONTRACT.md",
-          "tests/ci/checkWeeklyRetrievalTrendReport.test.ts"
+          "scripts/ci/check-weekly-retrieval-trend-report.ts"
         ],
         "hits_at_10": [
           {
             "rank": 1,
-            "path": "config/ci/retrieval-quality-fixture-pack.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 2,
             "path": "scripts/ci/generate-weekly-retrieval-trend-report.ts",
             "grade": 3,
             "relevant": true
           },
           {
-            "rank": 3,
-            "path": "artifacts/bench/retrieval-quality-report.json",
-            "grade": 0,
-            "relevant": false
-          },
-          {
-            "rank": 4,
+            "rank": 2,
             "path": "docs/R4_WEEKLY_TREND_CONTRACT.md",
             "grade": 0,
             "relevant": false
           },
           {
+            "rank": 3,
+            "path": "scripts/ci/check-weekly-retrieval-trend-report.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-python-compute-total",
+        "query": "python compute_total items price qty sum",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "scripts/bench.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
             "rank": 5,
-            "path": "tests/ci/checkWeeklyRetrievalTrendReport.test.ts",
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "scripts/bench.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-python-order-processor",
+        "query": "python OrderProcessor class tax_rate process",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "src/reactive/config.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "src/reactive/config.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-go-compute-total",
+        "query": "go ComputeTotal items price qty aggregate",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "scripts/ci/check-r6-execution-board.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "scripts/ci/check-r6-execution-board.ts",
             "grade": 0,
             "relevant": false
           }
@@ -351,31 +480,528 @@
           "relevant_hit_count_at_10": 1,
           "first_relevant_rank": 2
         }
+      },
+      {
+        "id": "polyglot-go-order-processor",
+        "query": "go OrderProcessor struct TaxRate Process method",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "scripts/ops/check-context-engine-process-health.ps1",
+          "src/reviewer/reviewDiff.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "scripts/ops/check-context-engine-process-health.ps1",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "src/reviewer/reviewDiff.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-rust-compute-total",
+        "query": "rust compute_total items price qty slice",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "src/mcp/tools/reviewAuto.ts",
+          "scripts/ci/check-r6-execution-board.ts",
+          "src/internal/retrieval/fusion.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "src/mcp/tools/reviewAuto.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "scripts/ci/check-r6-execution-board.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "src/internal/retrieval/fusion.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-rust-order-processor",
+        "query": "rust OrderProcessor struct tax_rate impl process",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md",
+          "vscode-extension/src/providers/serverManager.ts",
+          "src/ai/providers/codexSessionProvider.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "docs/CONTEXT_ENGINE_ENHANCEMENT_DECISION_PACKAGE_2026-03-12.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "vscode-extension/src/providers/serverManager.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "src/ai/providers/codexSessionProvider.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-java-compute-total",
+        "query": "java computeTotal static method items price qty",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "src/reviewer/reviewDiff.ts",
+          "src/reviewer/checks/adapters/index.ts",
+          "vscode-extension/src/providers/codeLensProvider.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "src/reviewer/reviewDiff.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "src/reviewer/checks/adapters/index.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "vscode-extension/src/providers/codeLensProvider.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 0,
+          "reciprocal_rank_at_10": 0.5,
+          "recall_at_10": 1,
+          "ndcg_at_10": 0.6309297535714575,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 2
+        }
+      },
+      {
+        "id": "polyglot-java-order-processor",
+        "query": "java OrderProcessor class taxRate process",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "vscode-extension/src/providers/codeLensProvider.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "vscode-extension/src/providers/codeLensProvider.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-csharp-compute-total",
+        "query": "csharp ComputeTotal static method items price qty",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "src/reviewer/checks/adapters/index.ts",
+          "src/reviewer/reviewDiff.ts",
+          "vscode-extension/src/providers/codeLensProvider.ts"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "src/reviewer/checks/adapters/index.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "src/reviewer/reviewDiff.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "vscode-extension/src/providers/codeLensProvider.ts",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
+      },
+      {
+        "id": "polyglot-csharp-order-processor",
+        "query": "csharp OrderProcessor class TaxRate Process",
+        "expected_paths": [
+          {
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 3
+          }
+        ],
+        "actual_paths": [
+          "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+          "tests/fixtures/retrieval/polyglot/java/Sample.java",
+          "tests/fixtures/retrieval/polyglot/go/sample.go",
+          "tests/fixtures/retrieval/polyglot/python/sample.py",
+          "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+          "scripts/ops/check-context-engine-process-health.ps1"
+        ],
+        "hits_at_10": [
+          {
+            "rank": 1,
+            "path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
+            "grade": 3,
+            "relevant": true
+          },
+          {
+            "rank": 2,
+            "path": "tests/fixtures/retrieval/polyglot/java/Sample.java",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "tests/fixtures/retrieval/polyglot/go/sample.go",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "tests/fixtures/retrieval/polyglot/python/sample.py",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "tests/fixtures/retrieval/polyglot/rust/sample.rs",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "scripts/ops/check-context-engine-process-health.ps1",
+            "grade": 0,
+            "relevant": false
+          }
+        ],
+        "metrics": {
+          "p_at_1": 1,
+          "reciprocal_rank_at_10": 1,
+          "recall_at_10": 1,
+          "ndcg_at_10": 1,
+          "relevant_hit_count_at_10": 1,
+          "first_relevant_rank": 1
+        }
       }
     ]
   },
   "metrics": {
-    "quality.mrr_at_10": 0.6066666666666667,
-    "quality.ndcg_at_10": 0.7035565121611999,
+    "quality.mrr_at_10": 0.9333333333333333,
+    "quality.ndcg_at_10": 0.9507906338095277,
     "quality.recall_at_10": 1,
-    "quality.p_at_1": 0.4
+    "quality.p_at_1": 0.8666666666666667
   },
   "evaluations": [
     {
       "id": "quality.ndcg_at_10",
       "status": "pass",
-      "value": 27.919365847490873,
-      "observed_value": 0.7035565121611999,
+      "value": 72.87102432900502,
+      "observed_value": 0.9507906338095277,
       "source_metric": "quality.ndcg_at_10",
-      "message": "PASS quality.ndcg_at_10: observed=0.703557 baseline=0.550000 delta_pct=27.919 min=5"
+      "message": "PASS quality.ndcg_at_10: observed=0.950791 baseline=0.550000 delta_pct=72.871 min=5"
     },
     {
       "id": "quality.mrr_at_10",
       "status": "pass",
-      "value": 10.303030303030297,
-      "observed_value": 0.6066666666666667,
+      "value": 69.69696969696969,
+      "observed_value": 0.9333333333333333,
       "source_metric": "quality.mrr_at_10",
-      "message": "PASS quality.mrr_at_10: observed=0.606667 baseline=0.550000 delta_pct=10.303 min=5"
+      "message": "PASS quality.mrr_at_10: observed=0.933333 baseline=0.550000 delta_pct=69.697 min=5"
     },
     {
       "id": "quality.recall_at_10",
@@ -388,9 +1014,9 @@
     {
       "id": "quality.p_at_1",
       "status": "pass",
-      "value": 0.4,
+      "value": 0.8666666666666667,
       "source_metric": "quality.p_at_1",
-      "message": "PASS quality.p_at_1: value=0.4 min=0.4"
+      "message": "PASS quality.p_at_1: value=0.8666666666666667 min=0.4"
     },
     {
       "id": "latency.fast.p95_ms",
@@ -437,14 +1063,14 @@
     {
       "id": "holdout.query_count_min",
       "status": "pass",
-      "value": 5,
-      "message": "PASS holdout.query_count_min: value=5 min=1"
+      "value": 15,
+      "message": "PASS holdout.query_count_min: value=15 min=1"
     },
     {
       "id": "holdout.case_count_min",
       "status": "pass",
-      "value": 5,
-      "message": "PASS holdout.case_count_min: value=5 min=1"
+      "value": 15,
+      "message": "PASS holdout.case_count_min: value=15 min=1"
     },
     {
       "id": "holdout.leakage_count_max",
@@ -505,12 +1131,12 @@
     "reasons": []
   },
   "reproducibility_lock": {
-    "commit_sha": "31ef6baef6cca4e1a2fc014df461c4b1e4a62d84",
+    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
     "dataset_id": "holdout_v1",
-    "dataset_hash": "d393e407c4e9304fd3994d8fc1fbfc40b51a5c9c59a3d064b2118ac687acbf39",
-    "fixture_pack_hash": "9417e2253ff0305c7c981cfca90e9d5ec1d59627be40e3f6856009c6e0716701",
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
+    "fixture_pack_hash": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643",
     "workspace_fingerprint": "workspace:b936785814af332a5ab279649ef316767dc76996f7735adba5b378fddb2bff51",
-    "feature_flags_snapshot": "{\"context_packs_v2\":true,\"hash_normalize_eol\":true,\"http_metrics\":false,\"index_state_store\":true,\"memory_autosave_v1\":false,\"memory_draft_retrieval_v1\":false,\"memory_suggestions_v1\":false,\"metrics\":false,\"retrieval_artifacts_v2\":false,\"retrieval_chunk_search_v1\":true,\"retrieval_cross_encoder_rerank_v1\":false,\"retrieval_hybrid_v1\":true,\"retrieval_lancedb_v1\":true,\"retrieval_provider_v2\":false,\"retrieval_quality_guard_v1\":true,\"retrieval_ranking_v2\":false,\"retrieval_ranking_v3\":true,\"retrieval_request_memo_v2\":true,\"retrieval_rewrite_v2\":true,\"retrieval_shadow_control_v2\":false,\"retrieval_sqlite_fts5_v1\":true,\"retrieval_transformer_embeddings_v1\":true,\"retrieval_tree_sitter_v1\":false,\"rollout_kill_switch\":false,\"skip_unchanged_indexing\":true}",
+    "feature_flags_snapshot": "{\"context_packs_v2\":true,\"hash_normalize_eol\":true,\"http_metrics\":false,\"index_state_store\":true,\"memory_autosave_v1\":false,\"memory_draft_retrieval_v1\":false,\"memory_suggestions_v1\":false,\"metrics\":false,\"retrieval_artifacts_v2\":false,\"retrieval_chunk_search_v1\":true,\"retrieval_cross_encoder_rerank_v1\":false,\"retrieval_declaration_routing_v1\":false,\"retrieval_hybrid_v1\":true,\"retrieval_lancedb_v1\":true,\"retrieval_provider_v2\":false,\"retrieval_quality_guard_v1\":true,\"retrieval_ranking_v2\":false,\"retrieval_ranking_v3\":true,\"retrieval_request_memo_v2\":true,\"retrieval_rewrite_v2\":true,\"retrieval_shadow_control_v2\":false,\"retrieval_sqlite_fts5_v1\":true,\"retrieval_transformer_embeddings_v1\":true,\"retrieval_tree_sitter_v1\":false,\"rollout_kill_switch\":false,\"skip_unchanged_indexing\":true}",
     "config_snapshot": {
       "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
       "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",

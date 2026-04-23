@@ -225,10 +225,11 @@
       {
         "id": "get_context_for_prompt",
         "title": "Get Context For Prompt",
-        "usage_hint": "Assemble multi-file context and summaries before writing or refining a prompt.",
+        "usage_hint": "Assemble multi-file context and summaries before writing or refining a prompt, with optional active-plan handoff inputs.",
         "examples": [
           "Gather context for the MCP HTTP transport.",
-          "Show files relevant to plan execution."
+          "Show files relevant to plan execution.",
+          "Request context for an active plan handoff with handoff_mode=\"active_plan\" and a plan_id."
         ],
         "safety_hints": [
           "Read-only; may include external grounding only when explicitly requested."

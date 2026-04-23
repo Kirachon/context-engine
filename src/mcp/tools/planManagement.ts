@@ -10,7 +10,13 @@ import { PlanPersistenceService } from '../services/planPersistenceService.js';
 import { ApprovalWorkflowService } from '../services/approvalWorkflowService.js';
 import { ExecutionTrackingService } from '../services/executionTrackingService.js';
 import { PlanHistoryService } from '../services/planHistoryService.js';
-import { EnhancedPlanOutput, PlanStatus } from '../types/planning.js';
+import {
+  CompletePlanState,
+  EnhancedPlanOutput,
+  PlanExecutionState,
+  PlanStatus,
+  StepExecutionState,
+} from '../types/planning.js';
 import {
   parseJsonString,
   validateFiniteNumberInRange,
@@ -62,6 +68,112 @@ function getHistoryService(): PlanHistoryService {
 
 export function getPlanHistoryService(): PlanHistoryService {
   return getHistoryService();
+}
+
+export type PersistedPlanStateReadReason =
+  | 'plan_not_found'
+  | 'plan_unavailable'
+  | 'plan_services_uninitialized';
+
+export type PersistedPlanStateReadResult =
+  | {
+    ok: true;
+    plan_id: string;
+    state: CompletePlanState;
+  }
+  | {
+    ok: false;
+    plan_id: string;
+    reason: PersistedPlanStateReadReason;
+    message: string;
+  };
+
+export interface PersistedPlanStateReadServices {
+  getPersistenceService: () => Pick<PlanPersistenceService, 'getPlanMetadata' | 'loadPlan'>;
+  getApprovalService?: () => Pick<ApprovalWorkflowService, 'getPendingApprovalsForPlan'>;
+  getExecutionService?: () => Pick<ExecutionTrackingService, 'getExecutionState'>;
+  getHistoryService?: () => Pick<PlanHistoryService, 'getHistory'>;
+}
+
+function buildDefaultExecutionState(plan: EnhancedPlanOutput, status: PlanStatus): PlanExecutionState {
+  const steps: StepExecutionState[] = (plan.steps ?? []).map((step) => ({
+    step_number: step.step_number,
+    step_id: step.id,
+    status: 'pending',
+    retry_count: 0,
+  }));
+
+  return {
+    plan_id: plan.id,
+    plan_version: plan.version,
+    status,
+    steps,
+    current_steps: [],
+    ready_steps: [],
+    blocked_steps: [],
+  };
+}
+
+function isPlanServicesUninitializedError(error: unknown): boolean {
+  return error instanceof Error && /services not initialized/i.test(error.message);
+}
+
+export async function readPersistedPlanState(
+  planId: string,
+  services: PersistedPlanStateReadServices = {
+    getPersistenceService,
+    getApprovalService,
+    getExecutionService,
+    getHistoryService,
+  }
+): Promise<PersistedPlanStateReadResult> {
+  try {
+    const persistence = services.getPersistenceService();
+    const metadata = await persistence.getPlanMetadata(planId);
+
+    if (!metadata) {
+      return {
+        ok: false,
+        plan_id: planId,
+        reason: 'plan_not_found',
+        message: `No persisted plan metadata found for ${planId}.`,
+      };
+    }
+
+    const plan = await persistence.loadPlan(planId);
+    if (!plan) {
+      return {
+        ok: false,
+        plan_id: planId,
+        reason: 'plan_unavailable',
+        message: `Persisted plan ${planId} could not be loaded from disk.`,
+      };
+    }
+
+    const execution = services.getExecutionService?.()?.getExecutionState(planId)
+      ?? buildDefaultExecutionState(plan, metadata.status);
+    const pendingApprovals = services.getApprovalService?.()?.getPendingApprovalsForPlan(planId) ?? [];
+    const history = services.getHistoryService?.()?.getHistory(planId, { include_plans: false });
+
+    return {
+      ok: true,
+      plan_id: planId,
+      state: {
+        plan,
+        execution,
+        pending_approvals: pendingApprovals,
+        version_count: history?.versions.length ?? 0,
+        metadata,
+      },
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      plan_id: planId,
+      reason: isPlanServicesUninitializedError(error) ? 'plan_services_uninitialized' : 'plan_unavailable',
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function operationFailureResponse(error: string, retryGuidance: string): string {

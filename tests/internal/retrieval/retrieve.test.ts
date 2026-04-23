@@ -9,6 +9,7 @@ import os from 'os';
 import path from 'path';
 import { createHashEmbeddingRuntime } from '../../../src/internal/retrieval/embeddingRuntime.js';
 import { createWorkspaceLanceDbVectorRetriever } from '../../../src/internal/retrieval/lancedbVectorIndex.js';
+import { createWorkspacePersistentGraphStore } from '../../../src/internal/graph/persistentGraphStore.js';
 
 describe('retrieve internal pipeline', () => {
   const originalEnv = { ...process.env };
@@ -864,5 +865,99 @@ describe('retrieve internal pipeline', () => {
     ).rejects.toThrow(/aborted/i);
 
     expect(serviceClient.semanticSearch).not.toHaveBeenCalled();
+  });
+
+  it('adds graph-aware query variants and provenance receipts when persisted graph artifacts are available', async () => {
+    const workspacePath = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-retrieve-graph-aware-'));
+    const loginPath = path.join(workspacePath, 'src', 'auth', 'loginService.ts');
+    const helperPath = path.join(workspacePath, 'src', 'auth', 'helper.ts');
+    fs.mkdirSync(path.dirname(loginPath), { recursive: true });
+    fs.writeFileSync(
+      loginPath,
+      [
+        'export function loginService() {',
+        '  return helper();',
+        '}',
+      ].join('\n'),
+      'utf8'
+    );
+    fs.writeFileSync(
+      helperPath,
+      [
+        'export function helper() {',
+        '  return true;',
+        '}',
+      ].join('\n'),
+      'utf8'
+    );
+    fs.writeFileSync(
+      path.join(workspacePath, '.context-engine-index-state.json'),
+      JSON.stringify({
+        files: {
+          'src/auth/loginService.ts': { hash: 'h-login', indexed_at: new Date().toISOString() },
+          'src/auth/helper.ts': { hash: 'h-helper', indexed_at: new Date().toISOString() },
+        },
+      }),
+      'utf8'
+    );
+    const graphStore = createWorkspacePersistentGraphStore({ workspacePath });
+    await graphStore.refresh();
+
+    try {
+      const serviceClient = {
+        workspacePath,
+        semanticSearch: jest.fn(async (searchQuery: string) => {
+          if (searchQuery === 'login service') {
+            return [
+              { path: 'src/other.ts', content: 'other result', relevanceScore: 0.88, lines: '1-2' },
+            ];
+          }
+          if (searchQuery === 'loginService') {
+            return [
+              { path: 'src/auth/loginService.ts', content: 'login service body', relevanceScore: 0.71, lines: '1-3' },
+            ];
+          }
+          return [];
+        }),
+        localKeywordSearch: jest.fn(async () => []),
+      } as any;
+
+      const results = await retrieve('login service', serviceClient, {
+        enableExpansion: true,
+        enableLexical: false,
+        enableFusion: false,
+        enableRerank: true,
+        rankingMode: 'v3',
+        rewriteMode: 'v2',
+        topK: 5,
+      });
+
+      expect(serviceClient.semanticSearch.mock.calls.map((call: [string]) => call[0])).toEqual(
+        expect.arrayContaining(['login service', 'loginService'])
+      );
+      expect(results[0]?.path).toBe('src/auth/loginService.ts');
+      expect((results[0] as any).provenance).toEqual(
+        expect.objectContaining({
+          graphStatus: 'ready',
+          seedSymbols: expect.arrayContaining(['loginService']),
+          selectionBasis: expect.arrayContaining([
+            expect.stringContaining('graph seed symbol'),
+          ]),
+        })
+      );
+      expect((results[0] as any).explainability).toEqual(
+        expect.objectContaining({
+          selectedBecause: expect.arrayContaining([
+            expect.stringContaining('graph seed symbol'),
+          ]),
+          scoreBreakdown: expect.objectContaining({
+            graphScore: expect.any(Number),
+            combinedScore: expect.any(Number),
+          }),
+        })
+      );
+    } finally {
+      fs.rmSync(workspacePath, { recursive: true, force: true });
+    }
   });
 });

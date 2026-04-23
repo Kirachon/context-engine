@@ -447,6 +447,20 @@ describe('PlanningService', () => {
       });
     });
 
+    it('retries deep plan generation on retryable upstream failures', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(7, 9200));
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('rate limit'))
+        .mockResolvedValueOnce(createPlanResponse('Retried deep plan'));
+
+      const result = await planningService.generatePlan(
+        'Perform a multi-step architecture migration with rollout and reliability work'
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+    });
+
     it('forwards scoped path filters into planning context retrieval without changing compact/deep heuristics', async () => {
       mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(7, 9200));
       mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Deep scoped plan'));
@@ -679,6 +693,76 @@ describe('PlanningService', () => {
       expect(mockServiceClient.searchAndAsk.mock.calls[1][2]).toEqual(
         expect.objectContaining({ signal: controller.signal, priority: 'background' })
       );
+    });
+
+    it('retries plan refinement on retryable upstream failures', async () => {
+      const currentPlan = {
+        id: 'plan_1',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Refine me',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: [createStep(1, [], [])],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [1] },
+        testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: [],
+      } as any;
+
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('429 retry after 1 s'))
+        .mockResolvedValueOnce(createPlanResponse('Refined after retry'));
+
+      const result = await planningService.refinePlan(
+        currentPlan,
+        { feedback: 'Make it shorter', clarifications: {} }
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+    });
+
+    it('retries step execution on retryable upstream failures', async () => {
+      const currentPlan = {
+        id: 'plan_1',
+        version: 1,
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+        goal: 'Refine me',
+        scope: { included: [], excluded: [], assumptions: [], constraints: [] },
+        mvp_features: [],
+        nice_to_have_features: [],
+        architecture: { notes: '', patterns_used: [], diagrams: [] },
+        risks: [],
+        milestones: [],
+        steps: [createStep(1, [], [])],
+        dependency_graph: { nodes: [], edges: [], critical_path: [], parallel_groups: [], execution_order: [1] },
+        testing_strategy: { unit: 'unit', integration: 'integration', coverage_target: '80%' },
+        acceptance_criteria: [],
+        confidence_score: 0.8,
+        questions_for_clarification: [],
+        context_files: [],
+        codebase_insights: [],
+      } as any;
+
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 1000));
+      mockServiceClient.searchAndAsk
+        .mockRejectedValueOnce(new Error('temporarily unavailable'))
+        .mockResolvedValueOnce(createExecutionResponse());
+
+      const result = await planningService.executeStep(currentPlan, 1);
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
     });
   });
 });

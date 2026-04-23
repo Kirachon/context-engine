@@ -293,13 +293,21 @@ describe('ContextServiceClient', () => {
   });
 
   describe('Retrieval Provider Dispatch', () => {
+    it('should delegate provider callback construction to the retrieval access seam', () => {
+      const localClient = new ContextServiceClient(testWorkspace);
+      const createProviderCallbacksSpy = jest.spyOn((localClient as any).retrievalAccess, 'createProviderCallbacks');
+
+      const callbacks = (localClient as any).createRetrievalProviderCallbacks();
+
+      expect(createProviderCallbacksSpy).toHaveBeenCalledTimes(1);
+      expect(callbacks).toHaveProperty('localNative.search');
+      expect(callbacks).toHaveProperty('localNative.indexWorkspace');
+    });
+
     it('should expose provider-scoped retrieval callbacks without callback-layer branching', async () => {
       const localClient = new ContextServiceClient(testWorkspace);
       const searchWithProviderRuntimeSpy = jest
-        .spyOn(localClient as any, 'searchWithProviderRuntime')
-        .mockResolvedValue([]);
-      const keywordFallbackSpy = jest
-        .spyOn(localClient as any, 'keywordFallbackSearch')
+        .spyOn((localClient as any).retrievalAccess, 'searchWithProviderRuntime')
         .mockResolvedValue([]);
       const indexWorkspaceLocalSpy = jest
         .spyOn(localClient as any, 'indexWorkspaceLocalNativeFallback')
@@ -323,11 +331,27 @@ describe('ContextServiceClient', () => {
       });
 
       expect(searchWithProviderRuntimeSpy).toHaveBeenCalledWith('provider query', 3, { bypassCache: true });
-      expect(keywordFallbackSpy).not.toHaveBeenCalled();
       expect(indexWorkspaceLocalSpy).toHaveBeenCalledTimes(1);
       expect(indexFilesLocalSpy).toHaveBeenCalledWith(['src/file.ts']);
       expect(clearIndexSpy).toHaveBeenCalledWith({ localNative: true });
       expect(health).toEqual({ ok: true, details: 'retrieval_provider=local_native' });
+    });
+
+    it('should delegate provider runtime search through the retrieval access seam', async () => {
+      const localClient = new ContextServiceClient(testWorkspace);
+      const retrievalAccessSpy = jest
+        .spyOn((localClient as any).retrievalAccess, 'searchWithProviderRuntime')
+        .mockResolvedValue([]);
+
+      await (localClient as any).searchWithProviderRuntime('provider query', 3, {
+        bypassCache: true,
+        includePaths: ['src/**'],
+      });
+
+      expect(retrievalAccessSpy).toHaveBeenCalledWith('provider query', 3, {
+        bypassCache: true,
+        includePaths: ['src/**'],
+      });
     });
 
     it('should route semantic search through the active retrieval provider instance', async () => {
@@ -477,7 +501,7 @@ describe('ContextServiceClient', () => {
 
       const localClient = new ContextServiceClient(tempDir);
       configureOpenAISemanticProvider(localClient, 'not-json-provider-response');
-      const searchWithProviderRuntimeSpy = jest.spyOn(localClient as any, 'searchWithProviderRuntime');
+      const searchWithProviderRuntimeSpy = jest.spyOn((localClient as any).retrievalAccess, 'searchWithProviderRuntime');
       const keywordFallbackSpy = jest.spyOn(localClient as any, 'keywordFallbackSearch');
       const searchAndAskSpy = jest.spyOn(localClient as any, 'searchAndAsk');
       const parseFormattedResultsSpy = jest.spyOn(localClient as any, 'parseFormattedResults');
@@ -1153,6 +1177,66 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it('should return graph-backed symbol references after indexing', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-references-graph-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        'export function resolveAIProviderId() { return "openai_session"; }\n',
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'caller.ts'),
+        [
+          'import { resolveAIProviderId } from "./provider";',
+          'export function loadProvider() {',
+          '  return resolveAIProviderId();',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      await fallbackClient.indexWorkspace();
+      const results = await fallbackClient.symbolReferencesSearch('resolveAIProviderId', 5, {
+        bypassCache: true,
+      });
+
+      expect(results.some((result: SearchResult) => result.path.includes('src/caller.ts'))).toBe(true);
+      expect(fallbackClient.getLastSymbolNavigationDiagnostics()).toEqual(expect.objectContaining({
+        tool: 'symbol_references',
+        backend: 'graph',
+      }));
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should surface fallback reasons when graph artifacts are unavailable', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-fallback-reason-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        'export function resolveAIProviderId() { return "openai_session"; }\n',
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const result = await fallbackClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(true);
+      expect(fallbackClient.getLastSymbolNavigationDiagnostics()).toEqual(expect.objectContaining({
+        tool: 'symbol_definition',
+        backend: 'heuristic_fallback',
+        fallback_reason: expect.any(String),
+      }));
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
     it('should not return reference-only files as the definition', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-refonly-'));
       fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
@@ -1227,6 +1311,48 @@ describe('ContextServiceClient', () => {
       expect(barCaller).toBeDefined();
       expect(barCaller?.callerSymbol).toBe('bar');
       expect(barCaller?.snippet).toContain('foo(1, 2)');
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should use graph-backed call edges after indexing and expose graph metadata', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-call-relationships-graph-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'foo.ts'),
+        ['export function foo(a, b) {', '  return a + b;', '}', ''].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'bar.ts'),
+        [
+          'import { foo } from "./foo";',
+          'export function bar() {',
+          '  return foo(1, 2);',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      await fallbackClient.indexWorkspace();
+      const result = await fallbackClient.callRelationships('foo', {
+        direction: 'callers',
+        bypassCache: true,
+      });
+
+      expect(result.callers.some((entry) => entry.file.includes('src/bar.ts'))).toBe(true);
+      expect(result.metadata).toEqual(expect.objectContaining({
+        resolutionBackend: 'graph',
+        graphStatus: 'ready',
+        fallbackReason: null,
+      }));
+      expect(fallbackClient.getLastSymbolNavigationDiagnostics()).toEqual(expect.objectContaining({
+        tool: 'call_relationships',
+        backend: 'graph',
+      }));
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
@@ -1861,6 +1987,26 @@ describe('ContextServiceClient', () => {
   });
 
   describe('searchAndAsk provider behavior', () => {
+    it('should delegate queued runtime execution through the runtime access seam', async () => {
+      const runtimeSpy = jest
+        .spyOn((client as any).runtimeAccess, 'searchAndAsk')
+        .mockResolvedValue('delegated response');
+
+      const result = await client.searchAndAsk('delegated query', 'delegated prompt', {
+        priority: 'background',
+        timeoutMs: 4321,
+      });
+
+      expect(result).toBe('delegated response');
+      expect(runtimeSpy).toHaveBeenCalledWith(expect.objectContaining({
+        searchQuery: 'delegated query',
+        prompt: 'delegated prompt',
+        priority: 'background',
+        timeoutMs: 4321,
+        searchQueues: expect.any(Object),
+      }));
+    });
+
     it('should return provider response text', async () => {
       const providerCall = configureOpenAISemanticProvider(client, 'provider success');
 
@@ -3342,6 +3488,91 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it('should prefer graph-backed definitions after indexing and report graph diagnostics', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-graph-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      await fallbackClient.indexWorkspace();
+      const keywordSpy = jest.spyOn(fallbackClient as any, 'localKeywordSearch');
+      const result = await fallbackClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(true);
+      if (result.found) {
+        expect(result.file).toContain('src/provider.ts');
+        expect(result.metadata).toEqual(expect.objectContaining({
+          backend: 'graph',
+          graph_status: 'ready',
+          fallback_reason: null,
+        }));
+      }
+      expect(keywordSpy).not.toHaveBeenCalled();
+      expect(fallbackClient.getLastSymbolNavigationDiagnostics()).toEqual(expect.objectContaining({
+        tool: 'symbol_definition',
+        backend: 'graph',
+      }));
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('persists graph artifacts during local_native indexing and removes only graph-local artifacts on clear', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-local-native-graph-'));
+      fs.writeFileSync(
+        path.join(tempDir, 'a.ts'),
+        [
+          'export function helper(value: string) {',
+          '  return value.toUpperCase();',
+          '}',
+          'export function run(value: string) {',
+          '  return helper(value);',
+          '}',
+        ].join('\n'),
+        'utf-8'
+      );
+      fs.writeFileSync(path.join(tempDir, 'notes.md'), '# unsupported\n', 'utf-8');
+      fs.mkdirSync(path.join(tempDir, '.context-engine-lancedb'), { recursive: true });
+      fs.writeFileSync(path.join(tempDir, '.context-engine-lancedb', 'keep.txt'), 'vector', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, '.context-engine-lexical-index.sqlite'), 'sqlite', 'utf-8');
+
+      try {
+        const localClient = new ContextServiceClient(tempDir);
+        await localClient.indexWorkspace();
+
+        const graphMetadataPath = path.join(tempDir, '.context-engine-graph-index.json');
+        const graphPayloadPath = path.join(tempDir, '.context-engine-graph', 'graph.json');
+        const parsedGraphMetadata = JSON.parse(fs.readFileSync(graphMetadataPath, 'utf-8'));
+
+        expect(fs.existsSync(graphMetadataPath)).toBe(true);
+        expect(fs.existsSync(graphPayloadPath)).toBe(true);
+        expect(parsedGraphMetadata.graph_status).toBe('ready');
+        expect(parsedGraphMetadata.files_indexed).toBe(1);
+        expect(parsedGraphMetadata.unsupported_files).toBe(1);
+
+        await localClient.clearIndex();
+
+        expect(fs.existsSync(graphMetadataPath)).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, '.context-engine-graph'))).toBe(false);
+        expect(fs.existsSync(path.join(tempDir, '.context-engine-lancedb', 'keep.txt'))).toBe(true);
+        expect(fs.existsSync(path.join(tempDir, '.context-engine-lexical-index.sqlite'))).toBe(true);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
+    });
+
     it('rotates the index fingerprint and clears persisted context bundles when a chunk index is discarded', () => {
       process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-chunk-index-discard-'));
@@ -3769,6 +4000,36 @@ describe('ContextServiceClient', () => {
       expect(localClient.getIndexStatus().fileCount).toBe(1);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should refresh persisted graph metadata after delete pruning via applyWorkspaceChanges', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-workspace-change-graph-prune-'));
+      fs.writeFileSync(path.join(tempDir, 'keep.ts'), 'export const keep = true;\\n', 'utf-8');
+      fs.writeFileSync(path.join(tempDir, 'deleted.ts'), 'export const deleted = true;\\n', 'utf-8');
+
+      try {
+        const localClient = new ContextServiceClient(tempDir);
+        await localClient.indexWorkspace();
+
+        fs.unlinkSync(path.join(tempDir, 'deleted.ts'));
+        await localClient.applyWorkspaceChanges([{ type: 'unlink', path: 'deleted.ts' }]);
+
+        const graphMetadata = JSON.parse(
+          fs.readFileSync(path.join(tempDir, '.context-engine-graph-index.json'), 'utf-8')
+        ) as {
+          graph_status: string;
+          files_indexed: number;
+        };
+
+        expect(graphMetadata.graph_status).toBe('ready');
+        expect(graphMetadata.files_indexed).toBe(1);
+        expect(localClient.getIndexStatus().fileCount).toBe(1);
+      } finally {
+        fs.rmSync(tempDir, { recursive: true, force: true });
+      }
     });
 
     it('should prune deletes and keep incremental indexFiles path for mixed workspace changes', async () => {

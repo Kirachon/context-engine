@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-13T10:30:22.139Z",
+  "generated_at": "2026-04-21T05:58:31.218Z",
   "inputs": {
     "report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-gate.json"
   },
   "summary": {
-    "total": 14,
-    "pass": 14,
+    "total": 16,
+    "pass": 16,
     "fail": 0,
     "skip": 0,
     "pass_rate": 1
@@ -17,10 +17,10 @@
     "reasons": []
   },
   "reproducibility_lock": {
-    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
+    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
     "dataset_id": "holdout_v1",
-    "dataset_hash": "766ae63823a88c1a3edf8dc133599d3b4fe03ada77e8b92bf6540a458e5bc716",
-    "fixture_pack_hash": "198ce10f0a420000c97107ff63337864f3e0a87f46ba056fd208b4921f87127d",
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
+    "fixture_pack_hash": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643",
     "report_path": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json"
   }
 }

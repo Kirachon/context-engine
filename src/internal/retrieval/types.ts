@@ -1,5 +1,6 @@
 import { SearchResult } from '../../mcp/serviceClient.js';
 import type { RetrievalFlowContext } from './flow.js';
+import type { GraphDegradedReason, GraphStatus } from '../graph/persistentGraphStore.js';
 
 export type QuerySource = 'original' | 'expanded';
 export type RetrievalProfile = 'fast' | 'balanced' | 'rich';
@@ -35,6 +36,43 @@ export interface InternalSearchResult extends SearchResult {
   tieBreakPath?: string;
   tieBreakLine?: number;
   combinedScore?: number;
+  graphScore?: number;
+  provenance?: RetrievalSelectionProvenance;
+  explainability?: RetrievalSelectionExplainability;
+}
+
+export interface RetrievalGraphSignal {
+  kind:
+    | 'graph_seed_symbol'
+    | 'graph_definition_path'
+    | 'graph_reference_path'
+    | 'graph_call_edge'
+    | 'graph_import_path'
+    | 'graph_containment_path';
+  value: string;
+  weight: number;
+}
+
+export interface RetrievalSelectionProvenance {
+  graphStatus: GraphStatus | 'unavailable';
+  graphDegradedReason: GraphDegradedReason | 'graph_missing' | 'graph_unavailable' | null;
+  seedSymbols: string[];
+  neighborPaths: string[];
+  selectionBasis: string[];
+}
+
+export interface RetrievalSelectionExplainability {
+  selectedBecause: string[];
+  scoreBreakdown: {
+    baseScore: number;
+    graphScore: number;
+    combinedScore: number;
+    semanticScore?: number;
+    lexicalScore?: number;
+    denseScore?: number;
+    fusedScore?: number;
+  };
+  graphSignals?: RetrievalGraphSignal[];
 }
 
 export interface DenseSearchProvider {

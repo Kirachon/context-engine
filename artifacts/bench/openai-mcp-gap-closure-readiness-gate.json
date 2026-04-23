@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-04-23T14:55:12.763Z",
+  "mode": "dry_run",
+  "inputs": {
+    "contract": "D:\\GitProjects\\context-engine\\config\\ci\\openai-mcp-gap-closure-readiness-contract.json",
+    "plan": "D:\\GitProjects\\context-engine\\openai-mcp-gap-closure-swarm-plan.md",
+    "workspace": "D:\\GitProjects\\context-engine",
+    "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\openai-mcp-gap-closure-readiness-gate.json",
+    "readiness_pack": "D:\\GitProjects\\context-engine\\docs\\plan-execution\\openai-mcp-gap-closure-final-readiness-pack.md",
+    "skip_live_tests": false
+  },
+  "dependencies": {
+    "required_docs": [
+      {
+        "path": "docs/plan-execution/openai-mcp-gap-closure-t0-baseline.md",
+        "exists": true
+      },
+      {
+        "path": "docs/plan-execution/openai-mcp-gap-closure-ownership-gate-pack.md",
+        "exists": true
+      },
+      {
+        "path": "docs/plan-execution/openai-mcp-gap-closure-gap-ledger.md",
+        "exists": true
+      }
+    ],
+    "required_completed_tasks": [
+      {
+        "task_id": "T6",
+        "status": "Completed",
+        "ok": true
+      },
+      {
+        "task_id": "T10a",
+        "status": "Completed",
+        "ok": true
+      },
+      {
+        "task_id": "T10b",
+        "status": "Completed",
+        "ok": true
+      },
+      {
+        "task_id": "T11a",
+        "status": "Completed",
+        "ok": true
+      },
+      {
+        "task_id": "T11b",
+        "status": "Completed",
+        "ok": true
+      },
+      {
+        "task_id": "T12",
+        "status": "Completed",
+        "ok": true
+      }
+    ]
+  },
+  "live_test_groups": {
+    "graph_accuracy": {
+      "label": "graph accuracy fixtures",
+      "tests": [
+        "tests/internal/graph/persistentGraphStore.test.ts",
+        "tests/tools/graphNativeTools.test.ts",
+        "tests/mcp/graphNativeRegistration.test.ts"
+      ],
+      "fixtures": [],
+      "command": [
+        "C:\\nvm4w\\nodejs\\node.exe",
+        "--experimental-vm-modules",
+        "D:\\GitProjects\\context-engine\\node_modules\\jest\\bin\\jest.js",
+        "tests/internal/graph/persistentGraphStore.test.ts",
+        "tests/tools/graphNativeTools.test.ts",
+        "tests/mcp/graphNativeRegistration.test.ts",
+        "--runInBand"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "duration_ms": 4112,
+      "reasons": []
+    },
+    "review_precision_grounding": {
+      "label": "review precision and grounding",
+      "tests": [
+        "tests/tools/reviewDiff.test.ts",
+        "tests/ci/reviewDiffArtifacts.test.ts"
+      ],
+      "fixtures": [
+        "config/ci/review-quality-corpus.json"
+      ],
+      "command": [
+        "C:\\nvm4w\\nodejs\\node.exe",
+        "--experimental-vm-modules",
+        "D:\\GitProjects\\context-engine\\node_modules\\jest\\bin\\jest.js",
+        "tests/tools/reviewDiff.test.ts",
+        "tests/ci/reviewDiffArtifacts.test.ts",
+        "--runInBand"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "duration_ms": 8964,
+      "reasons": []
+    },
+    "tracing_telemetry": {
+      "label": "tracing and telemetry smoke",
+      "tests": [
+        "tests/observability/otel.test.ts",
+        "tests/mcp/serverObservability.test.ts",
+        "tests/internal/retrieval/retrieveObservability.test.ts"
+      ],
+      "fixtures": [],
+      "command": [
+        "C:\\nvm4w\\nodejs\\node.exe",
+        "--experimental-vm-modules",
+        "D:\\GitProjects\\context-engine\\node_modules\\jest\\bin\\jest.js",
+        "tests/observability/otel.test.ts",
+        "tests/mcp/serverObservability.test.ts",
+        "tests/internal/retrieval/retrieveObservability.test.ts",
+        "--runInBand"
+      ],
+      "status": "pass",
+      "exit_code": 0,
+      "duration_ms": 11153,
+      "reasons": []
+    }
+  },
+  "artifact_checks": {
+    "retrieval_provenance": {
+      "label": "retrieval provenance",
+      "status": "pass",
+      "paths": {
+        "quality_report": "artifacts/bench/retrieval-quality-report.json",
+        "quality_gate": "artifacts/bench/retrieval-quality-gate.json",
+        "telemetry": "artifacts/bench/retrieval-quality-telemetry.json",
+        "routing_receipts": "artifacts/bench/retrieval-routing-receipts.json",
+        "shadow_canary_gate": "artifacts/bench/retrieval-shadow-canary-gate.json"
+      },
+      "metrics": {
+        "quality_gate_pass_rate": 1,
+        "routing_receipt_coverage_pct": 100,
+        "shadow_gate_status_pass": true,
+        "quality_report_status_pass": true
+      },
+      "reasons": []
+    },
+    "malformed_output_accounting": {
+      "label": "malformed output accounting",
+      "status": "pass",
+      "paths": {
+        "taxonomy_report": "artifacts/bench/enhancement-error-taxonomy-report.json"
+      },
+      "metrics": {
+        "malformed_event_count": 0,
+        "status_pass": true,
+        "total_events": 0
+      },
+      "reasons": []
+    }
+  },
+  "overall": {
+    "status": "pass",
+    "reasons": []
+  }
+}

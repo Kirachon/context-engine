@@ -467,6 +467,24 @@ index 1234567..abcdefg 100644
     ).rejects.toThrow(/No changes found for review_git_diff target "staged".*review is blocked/i);
   });
 
+  it('blocks when auto-select path scope excludes all matching changes', async () => {
+    const tmp = createRepoWithStagedChange();
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () => '',
+    } as any;
+
+    await expect(
+      handleReviewAuto(
+        {
+          target: 'staged',
+          include_patterns: ['tests/**/*.ts'],
+        },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/scope is empty \(path_scope_excluded_all_changes\)/i);
+  });
+
   it('treats whitespace-only diff as absent and auto-selects review_git_diff', async () => {
     const tmp = createRepoWithStagedChange();
     const mockServiceClient = {

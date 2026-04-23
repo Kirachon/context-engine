@@ -6,35 +6,18 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
+import { createOpenAITaskRuntime, OpenAITaskRuntimeValidationError } from '../openaiTaskRuntime.js';
+import { getOpenAITaskPolicy, resolveOpenAITaskRuntimeOptions } from '../taskPolicyRegistry.js';
 import { reviewDiff, type ReviewDiffInput } from '../../reviewer/reviewDiff.js';
 import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
-import { envMs } from '../../config/env.js';
+import { extractJsonFromResponse } from '../prompts/codeReview.js';
 import {
   createRetrievalFlowContext,
   finalizeRetrievalFlow,
   noteRetrievalStage,
 } from '../../internal/retrieval/flow.js';
 
-const DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS = 60_000;
-const MIN_REVIEW_DIFF_LLM_TIMEOUT_MS = 1_000;
-const MAX_REVIEW_DIFF_LLM_TIMEOUT_MS = 30 * 60 * 1000;
 const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
-
-function resolveReviewTimeoutMs(
-  requestedTimeoutMs: number | undefined,
-  fallbackTimeoutMs: number
-): number {
-  if (requestedTimeoutMs === undefined) {
-    return fallbackTimeoutMs;
-  }
-  if (!Number.isFinite(requestedTimeoutMs)) {
-    return fallbackTimeoutMs;
-  }
-  return Math.max(
-    MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
-    Math.min(MAX_REVIEW_DIFF_LLM_TIMEOUT_MS, Math.floor(requestedTimeoutMs))
-  );
-}
 
 export interface ReviewDiffArgs {
   diff: string;
@@ -99,28 +82,51 @@ export async function handleReviewDiff(
       readFile: (filePath: string) => serviceClient.getFile(filePath),
     };
     if (args.options?.enable_llm) {
-      const reviewDiffLlmTimeoutMs = envMs(
-        'CE_REVIEW_DIFF_LLM_TIMEOUT_MS',
-        envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_REVIEW_DIFF_LLM_TIMEOUT_MS, {
-          min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
-          max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
-        }),
-        {
-          min: MIN_REVIEW_DIFF_LLM_TIMEOUT_MS,
-          max: MAX_REVIEW_DIFF_LLM_TIMEOUT_MS,
-        }
-      );
-      const effectiveReviewTimeoutMs = resolveReviewTimeoutMs(
-        args.options?.llm_timeout_ms,
-        reviewDiffLlmTimeoutMs
-      );
+      const taskRuntime = createOpenAITaskRuntime(serviceClient);
+      const reviewDiffPolicy = getOpenAITaskPolicy('review_diff_llm_synthesis');
+      const runtimeOptions = resolveOpenAITaskRuntimeOptions(reviewDiffPolicy, {
+        requestedTimeoutMs: args.options?.llm_timeout_ms,
+      });
       noteReviewFlowStage(flow, 'llm:enabled');
       runtime.llm = {
         call: async (searchQuery: string, prompt: string) => {
           noteReviewFlowStage(flow, 'llm:request');
           try {
-            const response = await serviceClient.searchAndAsk(searchQuery, prompt, {
-              timeoutMs: effectiveReviewTimeoutMs,
+            const response = await taskRuntime.executeTask<string>({
+              taskName: reviewDiffPolicy.taskName,
+              promptVersion: reviewDiffPolicy.promptVersion,
+              searchQuery,
+              prompt,
+              timeoutMs: runtimeOptions.timeoutMs,
+              responseSchemaVersion: reviewDiffPolicy.responseSchemaVersion,
+              priority: reviewDiffPolicy.priority,
+              retryPolicy: runtimeOptions.retryPolicy,
+              bypassDedupe: runtimeOptions.bypassDedupe,
+              dedupeContext: JSON.stringify({
+                base_sha: args.base_sha ?? null,
+                head_sha: args.head_sha ?? null,
+                changed_files: args.changed_files ?? [],
+                review_options: {
+                  two_pass: args.options?.two_pass ?? true,
+                  risk_threshold: args.options?.risk_threshold ?? 3,
+                },
+              }),
+              validateResponse: (responseText) => {
+                const json = extractJsonFromResponse(responseText);
+                if (!json) {
+                  throw new OpenAITaskRuntimeValidationError(
+                    'LLM response did not contain JSON.',
+                    'json_missing',
+                    responseText
+                  );
+                }
+                return {
+                  parsed: json,
+                  parseStatus: 'json_extracted',
+                };
+              },
+              allowValidationFailureResult: runtimeOptions.allowValidationFailureResult,
+              degradedModeOnValidationFailure: runtimeOptions.degradedModeOnValidationFailure,
             });
             noteReviewFlowStage(flow, 'llm:response');
             return response;

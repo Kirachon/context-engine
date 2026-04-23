@@ -8,19 +8,35 @@
       "detail": "selected_tool=review_git_diff"
     },
     {
-      "id": "observed_timeout_matches_request",
+      "id": "observed_timeout_matches_request_review_git_diff",
       "status": "PASS",
       "detail": "requested=120000 observed=120000"
     },
     {
-      "id": "review_payload_is_present",
+      "id": "review_payload_is_present_review_git_diff",
       "status": "PASS",
       "detail": "Expected review_auto output.review.findings array."
+    },
+    {
+      "id": "selected_review_diff_path",
+      "status": "PASS",
+      "detail": "selected_tool=review_diff"
+    },
+    {
+      "id": "observed_timeout_matches_request_review_diff",
+      "status": "PASS",
+      "detail": "requested=120000 observed=120000"
+    },
+    {
+      "id": "review_payload_is_present_review_diff",
+      "status": "PASS",
+      "detail": "Expected review_auto output.findings array for review_diff route."
     }
   ],
   "metrics": {
-    "duration_ms": 6325,
+    "duration_ms": 867,
     "requested_timeout_ms": 120000,
-    "observed_timeout_ms": 120000
+    "observed_timeout_ms": 120000,
+    "observed_timeout_ms_review_diff": 120000
   }
 }

@@ -1,0 +1,35 @@
+{
+  "generated_at": "2026-04-21T06:00:21.739Z",
+  "routing_diagnostics": {
+    "total_bundle_count": 15,
+    "routing_diagnostics_count": 15,
+    "symbol_route_count": 0,
+    "shadow_compare_receipt_count": 0,
+    "shadow_compare_executed_count": 0,
+    "receipt_coverage_pct": 100
+  },
+  "reproducibility_lock": {
+    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
+    "dataset_id": "holdout_v1",
+    "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
+    "dataset_hash_length": 64,
+    "dataset_source": "fixture",
+    "workspace_fingerprint": "workspace:b936785814af332a5ab279649ef316767dc76996f7735adba5b378fddb2bff51",
+    "feature_flags_snapshot": "{\"context_packs_v2\":true,\"hash_normalize_eol\":true,\"http_metrics\":false,\"index_state_store\":true,\"memory_autosave_v1\":false,\"memory_draft_retrieval_v1\":false,\"memory_suggestions_v1\":false,\"metrics\":false,\"retrieval_artifacts_v2\":false,\"retrieval_chunk_search_v1\":true,\"retrieval_cross_encoder_rerank_v1\":false,\"retrieval_declaration_routing_v1\":true,\"retrieval_hybrid_v1\":true,\"retrieval_lancedb_v1\":true,\"retrieval_provider_v2\":false,\"retrieval_quality_guard_v1\":true,\"retrieval_ranking_v2\":false,\"retrieval_ranking_v3\":true,\"retrieval_request_memo_v2\":true,\"retrieval_rewrite_v2\":true,\"retrieval_shadow_control_v2\":false,\"retrieval_sqlite_fts5_v1\":true,\"retrieval_transformer_embeddings_v1\":true,\"retrieval_tree_sitter_v1\":false,\"rollout_kill_switch\":false,\"skip_unchanged_indexing\":true}",
+    "env_fingerprint": "0d727c661b83ec4b",
+    "config_snapshot_hash": "a64a25b668c4b1b0b0cc06cf1c48a3c2240c086f446bd77a2d76b386f3f361f7",
+    "config_key_count": 10,
+    "config_snapshot": {
+      "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
+      "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
+      "workspace": "D:\\GitProjects\\context-engine",
+      "dataset_id": null,
+      "CE_PERF_PROFILE": "quality",
+      "CE_RETRIEVAL_DECLARATION_ROUTING_V1": "true",
+      "declaration_routing_enabled": "true",
+      "CE_RETRIEVAL_SHADOW_COMPARE_ENABLED": "true",
+      "CE_RETRIEVAL_SHADOW_SAMPLE_RATE": "1",
+      "shadow_compare_enabled": "true"
+    }
+  }
+}

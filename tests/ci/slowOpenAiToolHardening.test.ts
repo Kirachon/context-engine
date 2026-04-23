@@ -249,4 +249,24 @@ describe('slow OpenAI tool hardening gate', () => {
     expect(req.setTimeout).toHaveBeenCalledWith(250);
     expect(res.setTimeout).toHaveBeenCalledWith(250);
   });
+
+  it('restores the previous socket timeout after the tool settles', async () => {
+    const req = new EventEmitter() as Request & {
+      setTimeout: jest.Mock;
+      socket: { timeout: number };
+    };
+    const res = new EventEmitter() as Response & {
+      setTimeout: jest.Mock;
+      socket: { timeout: number };
+    };
+    req.setTimeout = jest.fn();
+    req.socket = { timeout: 30 } as any;
+    res.setTimeout = jest.fn();
+    res.socket = { timeout: 45 } as any;
+
+    await runAbortableTool(req, 250, 'Slow OpenAI tool', async () => 'done', res);
+
+    expect(req.setTimeout.mock.calls).toEqual([[250], [30]]);
+    expect(res.setTimeout.mock.calls).toEqual([[250], [45]]);
+  });
 });

@@ -32,7 +32,8 @@ import {
   validateReviewResult,
 } from '../prompts/codeReview.js';
 import { postProcessReviewFindings } from './codeReviewPost.js';
-import { envMs } from '../../config/env.js';
+import { createOpenAITaskRuntime, OpenAITaskRuntimeValidationError } from '../openaiTaskRuntime.js';
+import { getOpenAITaskPolicy, resolveOpenAITaskRuntimeOptions } from '../taskPolicyRegistry.js';
 
 // ============================================================================
 // Constants
@@ -41,9 +42,6 @@ import { envMs } from '../../config/env.js';
 /** Tool version for metadata */
 const TOOL_VERSION = '1.0.0';
 const FALLBACK_MODEL_USED = 'local-native-context-engine';
-const DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS = 120_000;
-const MIN_CODE_REVIEW_AI_TIMEOUT_MS = 1_000;
-const MAX_CODE_REVIEW_AI_TIMEOUT_MS = 30 * 60 * 1000;
 
 /** Default review options */
 const DEFAULT_OPTIONS: Required<ReviewOptions> = {
@@ -101,11 +99,6 @@ export class CodeReviewService {
   async reviewChanges(input: ReviewChangesInput): Promise<ReviewResult> {
     const startTime = Date.now();
     const opts = this.resolveOptions(input.options);
-    const envReviewTimeoutMs = envMs('CE_REVIEW_AI_TIMEOUT_MS', DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS, {
-      min: MIN_CODE_REVIEW_AI_TIMEOUT_MS,
-      max: MAX_CODE_REVIEW_AI_TIMEOUT_MS,
-    });
-    const reviewTimeoutMs = this.resolveReviewTimeoutMs(input.options?.llm_timeout_ms, envReviewTimeoutMs);
 
     console.error(`[CodeReviewService] Starting code review...`);
 
@@ -128,14 +121,41 @@ export class CodeReviewService {
       const fullPrompt = `${CODE_REVIEW_SYSTEM_PROMPT}\n\n${reviewPrompt}`;
 
       // Step 5: Call AI to perform the review
-      const response = await this.contextClient.searchAndAsk(
-        'Review code changes for issues',
-        fullPrompt,
-        { timeoutMs: reviewTimeoutMs }
-      );
+      const taskRuntime = createOpenAITaskRuntime(this.contextClient);
+      const reviewPolicy = getOpenAITaskPolicy('review_changes_llm_synthesis');
+      const runtimeOptions = resolveOpenAITaskRuntimeOptions(reviewPolicy, {
+        requestedTimeoutMs: input.options?.llm_timeout_ms,
+      });
+      const runtimeResult = await taskRuntime.executeTask<string>({
+        taskName: reviewPolicy.taskName,
+        promptVersion: reviewPolicy.promptVersion,
+        searchQuery: 'Review code changes for issues',
+        prompt: fullPrompt,
+        timeoutMs: runtimeOptions.timeoutMs,
+        responseSchemaVersion: reviewPolicy.responseSchemaVersion,
+        priority: reviewPolicy.priority,
+        retryPolicy: runtimeOptions.retryPolicy,
+        bypassDedupe: runtimeOptions.bypassDedupe,
+        allowValidationFailureResult: runtimeOptions.allowValidationFailureResult,
+        degradedModeOnValidationFailure: runtimeOptions.degradedModeOnValidationFailure,
+        validateResponse: (responseText) => {
+          const json = extractJsonFromResponse(responseText);
+          if (!json) {
+            throw new OpenAITaskRuntimeValidationError(
+              'Failed to extract JSON from LLM response',
+              'json_missing',
+              responseText
+            );
+          }
+          return {
+            parsed: json,
+            parseStatus: 'json_extracted',
+          };
+        },
+      });
 
       // Step 6: Parse and validate the response
-      const jsonStr = extractJsonFromResponse(response);
+      const jsonStr = runtimeResult.parsed;
       if (!jsonStr) {
         throw new Error('Failed to extract JSON from LLM response');
       }
@@ -189,22 +209,6 @@ export class CodeReviewService {
         metadata: this.buildMetadata(startTime, opts, 0),
       };
     }
-  }
-
-  private resolveReviewTimeoutMs(
-    requestedTimeoutMs: number | undefined,
-    fallbackTimeoutMs: number
-  ): number {
-    if (requestedTimeoutMs === undefined) {
-      return fallbackTimeoutMs;
-    }
-    if (!Number.isFinite(requestedTimeoutMs)) {
-      return fallbackTimeoutMs;
-    }
-    return Math.max(
-      MIN_CODE_REVIEW_AI_TIMEOUT_MS,
-      Math.min(MAX_CODE_REVIEW_AI_TIMEOUT_MS, Math.floor(requestedTimeoutMs))
-    );
   }
 
   // ==========================================================================

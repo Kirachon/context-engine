@@ -16,8 +16,12 @@ import { handleReviewGitDiff, type ReviewGitDiffArgs } from './gitReview.js';
 import { handleReviewDiff, type ReviewDiffArgs } from './reviewDiff.js';
 import type { ReviewGitDiffOutput } from './gitReview.js';
 import { normalizeOptionalDiffInput, parseRequiredDiffInput } from '../tooling/diffInput.js';
-import { getCommitDiff, getGitDiff, getGitStatus, type GitDiffResult } from '../utils/gitUtils.js';
 import { envInt } from '../../config/env.js';
+import {
+  buildEmptyReviewDiffScopeError,
+  getReviewDiffSource,
+  type ReviewDiffSource,
+} from '../tooling/reviewDiffSource.js';
 
 export type ReviewAutoSelectedTool = 'review_diff' | 'review_git_diff';
 
@@ -101,10 +105,6 @@ function getReviewAutoChunkMinFiles(): number {
 
 function getReviewAutoParallelWorkers(): number {
   return envInt('CE_REVIEW_AUTO_PARALLEL_WORKERS', 2, { min: 1, max: 4 });
-}
-
-function looksLikeCommitHash(target: string): boolean {
-  return /^[a-f0-9]{7,40}$/i.test(target);
 }
 
 type ReviewPathBucket = 'src' | 'tests' | 'ops' | 'other';
@@ -421,16 +421,12 @@ async function runWithConcurrency<T, R>(
 async function loadGitDiffResult(
   args: ReviewAutoArgs,
   workspacePath: string
-): Promise<GitDiffResult | null> {
-  const target = args.target ?? 'staged';
-  if (looksLikeCommitHash(target)) {
-    return getCommitDiff(workspacePath, target);
-  }
-
-  return getGitDiff(workspacePath, {
-    target,
+) : Promise<ReviewDiffSource> {
+  return getReviewDiffSource({
+    workspacePath,
+    target: args.target,
     base: args.base,
-    pathPatterns: args.include_patterns,
+    include_patterns: args.include_patterns,
   });
 }
 
@@ -487,14 +483,9 @@ async function runChunkedParallelGitReview(
   if (!isChunkedParallelEnabled()) return null;
 
   const workspacePath = serviceClient.getWorkspacePath();
-  const status = await getGitStatus(workspacePath);
-  if (!status.is_git_repo) {
-    throw new Error('Not a git repository. Please run this tool from within a git repository.');
-  }
-
   const diffResult = await loadGitDiffResult(args, workspacePath);
-  if (!diffResult || !diffResult.diff.trim()) {
-    return null;
+  if (!diffResult.diff.trim() || diffResult.changed_files.length === 0) {
+    throw buildEmptyReviewDiffScopeError(diffResult, 'review_git_diff');
   }
 
   const chunks = buildReviewDiffChunks(diffResult.diff);

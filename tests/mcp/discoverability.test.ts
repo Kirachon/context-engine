@@ -5,6 +5,7 @@ import {
   buildResourceList,
   buildToolRegistryEntries,
 } from '../../src/mcp/server.js';
+import { listRestApiToolMappings } from '../../src/mcp/tooling/discoverability.js';
 import { getToolManifest } from '../../src/mcp/tools/manifest.js';
 import { initializePlanManagementServices } from '../../src/mcp/tools/planManagement.js';
 
@@ -51,6 +52,10 @@ describe('MCP discoverability metadata', () => {
     const symbolReferencesMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_references');
     const symbolDefinitionMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'symbol_definition');
     const callRelationshipsMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'call_relationships');
+    const findCallersMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'find_callers');
+    const findCalleesMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'find_callees');
+    const traceSymbolMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'trace_symbol');
+    const impactAnalysisMetadata = manifest.discoverability?.tools?.find((entry) => entry.id === 'impact_analysis');
 
     expect(enhanceMetadata).toEqual(
       expect.objectContaining({
@@ -62,6 +67,19 @@ describe('MCP discoverability metadata', () => {
           prompts: expect.arrayContaining(['enhance-request']),
           tools: expect.arrayContaining(['create_plan']),
         }),
+        shared_contract: expect.objectContaining({
+          latency_class: 'extended',
+          index_requirement: 'recommended',
+          provenance_availability: 'none',
+          transport: expect.objectContaining({
+            stdio_mcp: true,
+            streamable_http_mcp: true,
+            rest_api: expect.objectContaining({
+              method: 'POST',
+              path: '/api/v1/enhance-prompt',
+            }),
+          }),
+        }),
       })
     );
 
@@ -70,9 +88,24 @@ describe('MCP discoverability metadata', () => {
         id: 'symbol_search',
         title: 'Symbol Search',
         usage_hint: expect.stringContaining('identifier'),
-        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for identifier-style code navigation.']),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for identifier-style code navigation with explicit graph fallback receipts.']),
         related_surfaces: expect.objectContaining({
           tools: expect.arrayContaining(['semantic_search', 'get_file']),
+        }),
+        shared_contract: expect.objectContaining({
+          graph_requirement: 'preferred',
+          provenance_availability: 'fallback_receipts',
+          explainability_fields: expect.arrayContaining([
+            'backend',
+            'graph_status',
+            'graph_degraded_reason',
+            'fallback_reason',
+          ]),
+          transport: expect.objectContaining({
+            rest_api: expect.objectContaining({
+              path: '/api/v1/symbol-search',
+            }),
+          }),
         }),
       })
     );
@@ -82,7 +115,7 @@ describe('MCP discoverability metadata', () => {
         id: 'symbol_references',
         title: 'Symbol References',
         usage_hint: expect.stringContaining('usages'),
-        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for non-declaration symbol usages.']),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for non-declaration symbol usages with explicit graph fallback receipts.']),
         related_surfaces: expect.objectContaining({
           tools: expect.arrayContaining(['symbol_search', 'get_file']),
         }),
@@ -94,7 +127,7 @@ describe('MCP discoverability metadata', () => {
         id: 'symbol_definition',
         title: 'Symbol Definition',
         usage_hint: expect.stringContaining('declaration'),
-        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for the single best declaration site.']),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval for the single best declaration site with explicit graph fallback receipts.']),
         related_surfaces: expect.objectContaining({
           tools: expect.arrayContaining(['symbol_search', 'symbol_references', 'get_file']),
         }),
@@ -106,9 +139,63 @@ describe('MCP discoverability metadata', () => {
         id: 'call_relationships',
         title: 'Call Relationships',
         usage_hint: expect.stringContaining('callers'),
-        safety_hints: expect.arrayContaining(['Read-only deterministic local heuristic; brace-language only for callees in v1.']),
+        safety_hints: expect.arrayContaining(['Read-only deterministic local retrieval; graph-backed when available with controlled heuristic fallback.']),
         related_surfaces: expect.objectContaining({
           tools: expect.arrayContaining(['symbol_definition', 'symbol_references', 'symbol_search']),
+        }),
+      })
+    );
+
+    expect(findCallersMetadata).toEqual(
+      expect.objectContaining({
+        id: 'find_callers',
+        title: 'Find Callers',
+        usage_hint: expect.stringContaining('direct callers'),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['call_relationships', 'trace_symbol', 'impact_analysis']),
+        }),
+      })
+    );
+
+    expect(findCalleesMetadata).toEqual(
+      expect.objectContaining({
+        id: 'find_callees',
+        title: 'Find Callees',
+        usage_hint: expect.stringContaining('direct callees'),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['call_relationships', 'trace_symbol', 'impact_analysis']),
+        }),
+      })
+    );
+
+    expect(traceSymbolMetadata).toEqual(
+      expect.objectContaining({
+        id: 'trace_symbol',
+        title: 'Trace Symbol',
+        usage_hint: expect.stringContaining('definition'),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['find_callers', 'find_callees', 'impact_analysis']),
+        }),
+      })
+    );
+
+    expect(impactAnalysisMetadata).toEqual(
+      expect.objectContaining({
+        id: 'impact_analysis',
+        title: 'Impact Analysis',
+        usage_hint: expect.stringContaining('direct change surface'),
+        related_surfaces: expect.objectContaining({
+          tools: expect.arrayContaining(['trace_symbol', 'find_callers', 'find_callees', 'symbol_definition']),
+        }),
+        shared_contract: expect.objectContaining({
+          latency_class: 'extended',
+          graph_requirement: 'preferred',
+          provenance_availability: 'fallback_receipts',
+          transport: expect.objectContaining({
+            rest_api: expect.objectContaining({
+              path: '/api/v1/impact-analysis',
+            }),
+          }),
         }),
       })
     );
@@ -190,5 +277,47 @@ describe('MCP discoverability metadata', () => {
         }),
       ])
     );
+  });
+
+  it('keeps manifest tool ids, runtime registration, and REST parity declarations aligned', () => {
+    const entries = buildToolRegistryEntries({} as any);
+    const runtimeToolNames = entries.map((entry) => entry.tool.name).sort((left, right) => left.localeCompare(right));
+    const manifest = getToolManifest() as {
+      tools: string[];
+      discoverability?: {
+        tools?: Array<{
+          id: string;
+          shared_contract?: {
+            transport?: {
+              rest_api?: {
+                method: 'POST';
+                path: `/api/v1/${string}`;
+              };
+            };
+          };
+        }>;
+      };
+    };
+
+    expect([...manifest.tools].sort((left, right) => left.localeCompare(right))).toEqual(runtimeToolNames);
+    expect(
+      (manifest.discoverability?.tools ?? [])
+        .map((entry) => entry.id)
+        .sort((left, right) => left.localeCompare(right))
+    ).toEqual(runtimeToolNames);
+
+    expect(
+      (manifest.discoverability?.tools ?? [])
+        .flatMap((entry) =>
+          entry.shared_contract?.transport?.rest_api
+            ? [{
+                tool: entry.id,
+                method: entry.shared_contract.transport.rest_api.method,
+                path: entry.shared_contract.transport.rest_api.path,
+              }]
+            : []
+        )
+        .sort((left, right) => left.path.localeCompare(right.path))
+    ).toEqual(listRestApiToolMappings());
   });
 });

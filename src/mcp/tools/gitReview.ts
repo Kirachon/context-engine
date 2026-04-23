@@ -6,9 +6,9 @@
  */
 
 import { ContextServiceClient } from '../serviceClient.js';
-import { getGitDiff, getGitStatus, getCommitDiff, GitDiffOptions } from '../utils/gitUtils.js';
 import { ReviewResult, ReviewOptions } from '../types/codeReview.js';
 import { internalCodeReviewService } from '../../internal/handlers/codeReview.js';
+import { buildEmptyReviewDiffScopeError, getReviewDiffSource } from '../tooling/reviewDiffSource.js';
 
 // ============================================================================
 // Types
@@ -141,48 +141,25 @@ export async function handleReviewGitDiff(
 
   // Get workspace path from service client
   const workspacePath = serviceClient.getWorkspacePath();
-
-  // Check if we're in a git repository
-  const status = await getGitStatus(workspacePath);
-  if (!status.is_git_repo) {
-    throw new Error('Not a git repository. Please run this tool from within a git repository.');
-  }
-
-  // Get the diff based on target type
-  let diffResult;
-  
-  // Check if target looks like a commit hash (7-40 hex chars)
-  const isCommitHash = /^[a-f0-9]{7,40}$/i.test(target);
-  
-  if (isCommitHash) {
-    console.error(`[review_git_diff] Getting diff for commit: ${target}`);
-    diffResult = await getCommitDiff(workspacePath, target);
-  } else {
-    const diffOptions: GitDiffOptions = {
-      target,
-      base,
-      pathPatterns: include_patterns,
-    };
-    console.error(`[review_git_diff] Getting diff with options:`, diffOptions);
-    diffResult = await getGitDiff(workspacePath, diffOptions);
-  }
+  const diffSource = await getReviewDiffSource({
+    workspacePath,
+    target,
+    base,
+    include_patterns,
+  });
 
   // Block no-op scopes so operators do not mistake empty input for a completed review.
-  if (!diffResult.diff.trim()) {
-    throw new Error(
-      `No changes found for review_git_diff target "${target}". ` +
-        'Review scope is empty, so review is blocked. ' +
-        'Stage or modify files, or choose a different target (e.g., unstaged, head, branch, or commit).'
-    );
+  if (!diffSource.diff.trim() || diffSource.changed_files.length === 0) {
+    throw buildEmptyReviewDiffScopeError(diffSource, 'review_git_diff');
   }
 
-  console.error(`[review_git_diff] Found ${diffResult.files_changed.length} files changed`);
-  console.error(`[review_git_diff] Stats: +${diffResult.stats.additions}/-${diffResult.stats.deletions}`);
+  console.error(`[review_git_diff] Found ${diffSource.changed_files.length} files changed`);
+  console.error(`[review_git_diff] Stats: +${diffSource.stats.additions}/-${diffSource.stats.deletions}`);
 
   // Perform the code review using CodeReviewService
   const reviewService = internalCodeReviewService(serviceClient);
   const reviewResult = await reviewService.reviewChanges({
-    diff: diffResult.diff,
+    diff: diffSource.diff,
     options: {
       ...options,
       // Default changed_lines_only to true for git reviews
@@ -195,9 +172,9 @@ export async function handleReviewGitDiff(
     git_info: {
       target,
       base,
-      command: diffResult.command,
-      files_changed: diffResult.files_changed,
-      stats: diffResult.stats,
+      command: diffSource.command,
+      files_changed: diffSource.changed_files,
+      stats: diffSource.stats,
     },
     review: reviewResult,
   };

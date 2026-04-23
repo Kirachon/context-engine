@@ -1,0 +1,61 @@
+{
+  "version": 1,
+  "plan_path": "openai-mcp-gap-closure-swarm-plan.md",
+  "readiness_pack_path": "docs/plan-execution/openai-mcp-gap-closure-final-readiness-pack.md",
+  "gate_artifact_path": "artifacts/bench/openai-mcp-gap-closure-readiness-gate.json",
+  "required_completed_tasks": [
+    "T6",
+    "T10a",
+    "T10b",
+    "T11a",
+    "T11b",
+    "T12"
+  ],
+  "required_docs": [
+    "docs/plan-execution/openai-mcp-gap-closure-t0-baseline.md",
+    "docs/plan-execution/openai-mcp-gap-closure-ownership-gate-pack.md",
+    "docs/plan-execution/openai-mcp-gap-closure-gap-ledger.md"
+  ],
+  "live_test_groups": {
+    "graph_accuracy": {
+      "label": "graph accuracy fixtures",
+      "tests": [
+        "tests/internal/graph/persistentGraphStore.test.ts",
+        "tests/tools/graphNativeTools.test.ts",
+        "tests/mcp/graphNativeRegistration.test.ts"
+      ]
+    },
+    "review_precision_grounding": {
+      "label": "review precision and grounding",
+      "tests": [
+        "tests/tools/reviewDiff.test.ts",
+        "tests/ci/reviewDiffArtifacts.test.ts"
+      ],
+      "fixtures": [
+        "config/ci/review-quality-corpus.json"
+      ]
+    },
+    "tracing_telemetry": {
+      "label": "tracing and telemetry smoke",
+      "tests": [
+        "tests/observability/otel.test.ts",
+        "tests/mcp/serverObservability.test.ts",
+        "tests/internal/retrieval/retrieveObservability.test.ts"
+      ]
+    }
+  },
+  "artifact_checks": {
+    "retrieval_provenance": {
+      "quality_report": "artifacts/bench/retrieval-quality-report.json",
+      "quality_gate": "artifacts/bench/retrieval-quality-gate.json",
+      "telemetry": "artifacts/bench/retrieval-quality-telemetry.json",
+      "routing_receipts": "artifacts/bench/retrieval-routing-receipts.json",
+      "shadow_canary_gate": "artifacts/bench/retrieval-shadow-canary-gate.json",
+      "min_routing_receipt_coverage_pct": 100
+    },
+    "malformed_output_accounting": {
+      "taxonomy_report": "artifacts/bench/enhancement-error-taxonomy-report.json",
+      "max_malformed_event_count": 0
+    }
+  }
+}

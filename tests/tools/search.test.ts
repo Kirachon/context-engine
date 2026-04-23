@@ -490,6 +490,7 @@ describe('symbol_search Tool', () => {
     jest.clearAllMocks();
     mockServiceClient = {
       symbolSearch: jest.fn(),
+      getLastSymbolNavigationDiagnostics: jest.fn(() => null),
       getIndexStatus: jest.fn(() => ({
         workspace: '/tmp/workspace',
         lastIndexed: '2024-01-01T00:00:00.000Z',
@@ -540,6 +541,31 @@ describe('symbol_search Tool', () => {
     await expect(handleSymbolSearch({ symbol: '   ' }, mockServiceClient as any)).rejects.toThrow(/symbol/i);
   });
 
+  it('includes symbol navigation diagnostics when provided', async () => {
+    mockServiceClient.symbolSearch.mockResolvedValue([
+      {
+        path: 'src/auth/provider.ts',
+        content: 'export function resolveAIProviderId() {}',
+        relevanceScore: 0.97,
+        lines: '1-1',
+        matchType: 'keyword',
+        retrievedAt: '2024-01-01T00:00:00.000Z',
+      },
+    ] satisfies SearchResult[]);
+    mockServiceClient.getLastSymbolNavigationDiagnostics.mockReturnValue({
+      backend: 'heuristic_fallback',
+      graph_status: 'unavailable',
+      graph_degraded_reason: 'graph_unavailable',
+      fallback_reason: 'graph_unavailable',
+    });
+
+    const result = await handleSymbolSearch({ symbol: 'resolveAIProviderId' }, mockServiceClient as any);
+
+    expect(result).toContain('Resolution Backend');
+    expect(result).toContain('heuristic_fallback');
+    expect(result).toContain('graph_unavailable');
+  });
+
   it('exposes the symbol_search schema', () => {
     expect(symbolSearchTool.name).toBe('symbol_search');
     expect(symbolSearchTool.inputSchema.required).toContain('symbol');
@@ -556,6 +582,7 @@ describe('symbol_references Tool', () => {
     jest.clearAllMocks();
     mockServiceClient = {
       symbolReferencesSearch: jest.fn(),
+      getLastSymbolNavigationDiagnostics: jest.fn(() => null),
       getIndexStatus: jest.fn(() => ({
         workspace: '/tmp/workspace',
         lastIndexed: '2024-01-01T00:00:00.000Z',
@@ -605,6 +632,30 @@ describe('symbol_references Tool', () => {
     await expect(handleSymbolReferencesSearch({ symbol: '   ' }, mockServiceClient as any)).rejects.toThrow(/symbol/i);
   });
 
+  it('includes symbol navigation diagnostics when references fall back', async () => {
+    mockServiceClient.symbolReferencesSearch.mockResolvedValue([
+      {
+        path: 'src/caller.ts',
+        content: 'return resolveAIProviderId();',
+        relevanceScore: 0.95,
+        lines: '2-2',
+        matchType: 'keyword',
+        retrievedAt: '2024-01-01T00:00:00.000Z',
+      },
+    ] satisfies SearchResult[]);
+    mockServiceClient.getLastSymbolNavigationDiagnostics.mockReturnValue({
+      backend: 'heuristic_fallback',
+      graph_status: 'degraded',
+      graph_degraded_reason: 'graph_partial',
+      fallback_reason: 'graph_reference_not_found',
+    });
+
+    const result = await handleSymbolReferencesSearch({ symbol: 'resolveAIProviderId' }, mockServiceClient as any);
+
+    expect(result).toContain('Resolution Backend');
+    expect(result).toContain('graph_reference_not_found');
+  });
+
   it('exposes the symbol_references schema', () => {
     expect(symbolReferencesTool.name).toBe('symbol_references');
     expect(symbolReferencesTool.inputSchema.required).toContain('symbol');
@@ -621,6 +672,7 @@ describe('symbol_definition Tool', () => {
     jest.clearAllMocks();
     mockServiceClient = {
       symbolDefinition: jest.fn(),
+      getLastSymbolNavigationDiagnostics: jest.fn(() => null),
       getIndexStatus: jest.fn(() => ({
         workspace: '/tmp/workspace',
         lastIndexed: '2024-01-01T00:00:00.000Z',
@@ -642,6 +694,12 @@ describe('symbol_definition Tool', () => {
       kind: 'function',
       snippet: 'export function resolveAIProviderId() {}',
       score: 195,
+      metadata: {
+        backend: 'graph',
+        graph_status: 'ready',
+        graph_degraded_reason: null,
+        fallback_reason: null,
+      },
     });
 
     const result = await handleSymbolDefinition(
@@ -662,6 +720,8 @@ describe('symbol_definition Tool', () => {
     );
     expect(result).toContain('# 📍 Symbol Definition');
     expect(result).toContain('src/providers.ts');
+    expect(result).toContain('Resolution Backend');
+    expect(result).toContain('graph');
   });
 
   it('requires a non-empty symbol', async () => {
@@ -725,6 +785,10 @@ describe('call_relationships Tool', () => {
         totalCallees: 1,
         consideredFiles: 5,
         cacheBypassed: false,
+        resolutionBackend: 'graph',
+        fallbackReason: null,
+        graphStatus: 'ready',
+        graphDegradedReason: null,
       },
     });
 
@@ -751,6 +815,8 @@ describe('call_relationships Tool', () => {
     expect(result).toContain('# 🔁 Call Relationships');
     expect(result).toContain('src/handler.ts');
     expect(result).toContain('lookup');
+    expect(result).toContain('Resolution Backend');
+    expect(result).toContain('graph');
   });
 
   it('requires a non-empty symbol', async () => {

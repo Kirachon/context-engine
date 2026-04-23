@@ -11,13 +11,16 @@ export interface ToolManifestArgs {
   // No arguments
 }
 
-export const MCP_SERVER_VERSION = '1.9.0';
+export const MCP_SERVER_VERSION = '1.10.0';
 
 export const toolManifest = {
   version: MCP_SERVER_VERSION,
   capabilities: [
     'semantic_search',
     'symbol_navigation',
+    'graph_navigation',
+    'impact_analysis',
+    'why_this_context',
     'file_retrieval',
     'context_enhancement',
     'index_status',
@@ -44,6 +47,11 @@ export const toolManifest = {
     'symbol_references',
     'symbol_definition',
     'call_relationships',
+    'find_callers',
+    'find_callees',
+    'trace_symbol',
+    'impact_analysis',
+    'why_this_context',
     'get_file',
     'get_context_for_prompt',
     'enhance_prompt',
@@ -104,16 +112,62 @@ export const toolManifest = {
       tools: ['create_plan', 'refine_plan', 'visualize_plan'],
     },
     symbol_navigation: {
-      description: 'Deterministic local symbol-first navigation for identifier queries',
-      version: '1.9.0',
-      tools: ['symbol_search', 'symbol_references', 'symbol_definition', 'call_relationships'],
+      description: 'Deterministic symbol-first navigation for identifier queries with graph-backed resolution and explicit fallback receipts',
+      version: '1.10.0',
+      tools: [
+        'symbol_search',
+        'symbol_references',
+        'symbol_definition',
+        'call_relationships',
+        'find_callers',
+        'find_callees',
+        'trace_symbol',
+        'impact_analysis',
+      ],
       features: [
-        'Exact and symbol-aware local ranking',
+        'Graph-backed exact and symbol-aware ranking with deterministic heuristic fallback',
         'Reference-only lookup that filters declaration hits',
         'Single-best declaration lookup for canonical jump-to-definition',
-        'Caller and callee enumeration for known function symbols',
+        'Caller and callee enumeration for known function symbols using persisted call edges first',
+        'Direct caller-only and callee-only graph-native tools for narrower navigation',
+        'Combined symbol tracing across definition, references, and direct call edges',
+        'Direct impact estimation with bounded, deterministic risk receipts',
         'Scope filters via include_paths and exclude_paths',
         'Provider-independent navigation path for known identifiers',
+        'Explicit fallback reason reporting when graph artifacts are unavailable or incomplete',
+      ],
+    },
+    context_explainability: {
+      description: 'Deterministic explanation of why context files were selected using shared retrieval provenance and explainability receipts',
+      version: '1.10.0',
+      tools: ['why_this_context'],
+      features: [
+        'Reuses the graph-aware retrieval provenance and explainability vocabulary',
+        'Surfaces explicit degraded-mode receipts when selection evidence is missing or stale',
+        'Explains context bundle selection without changing the underlying retrieval path',
+      ],
+    },
+    transport_parity: {
+      description: 'Shared metadata contract for latency, requirements, provenance, explainability, and transport parity',
+      version: '1.10.0',
+      tools: [
+        'tool_manifest',
+        'codebase_retrieval',
+        'get_context_for_prompt',
+        'why_this_context',
+        'symbol_search',
+        'symbol_references',
+        'symbol_definition',
+        'call_relationships',
+        'find_callers',
+        'find_callees',
+        'trace_symbol',
+        'impact_analysis',
+      ],
+      features: [
+        'Manifest discoverability now includes additive shared_contract metadata for applicable tools',
+        'Transport metadata declares stdio MCP, streamable HTTP MCP, and REST parity where the same surface exists',
+        'Explainability and provenance receipts are described without changing existing MCP tool names',
       ],
     },
     persistence: {

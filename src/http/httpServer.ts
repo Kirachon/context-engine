@@ -43,6 +43,7 @@ import {
     createCorsMiddleware,
     validateAllowedOrigin,
     loggingMiddleware,
+    observabilityMiddleware,
     errorHandler,
     HttpError,
     createApiRateLimitMiddleware,
@@ -184,6 +185,7 @@ export class ContextEngineHttpServer {
         // Middleware
         app.use(createCorsMiddleware());
         app.use(loggingMiddleware);
+        app.use(observabilityMiddleware);
 
         // Health endpoint at root level
         app.use(createHealthRouter(this.version));

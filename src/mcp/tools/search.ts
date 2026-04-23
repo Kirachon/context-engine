@@ -158,6 +158,25 @@ function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDi
   return null;
 }
 
+function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): {
+  backend: string;
+  graph_status: string;
+  graph_degraded_reason: string | null;
+  fallback_reason: string | null;
+} | null {
+  const maybeClient = serviceClient as ContextServiceClient & {
+    getLastSymbolNavigationDiagnostics?: () => {
+      backend: string;
+      graph_status: string;
+      graph_degraded_reason: string | null;
+      fallback_reason: string | null;
+    } | null | undefined;
+  };
+
+  const diagnostics = maybeClient.getLastSymbolNavigationDiagnostics?.();
+  return diagnostics ?? null;
+}
+
 function summarizeRetrievalSignals(
   results: Array<{ matchType?: string; retrievalSource?: string }>,
   _fallbackDiagnostics: FallbackDiagnostics | null,
@@ -603,7 +622,18 @@ export async function handleSymbolSearch(
       'scoping the search with include_paths',
       'checking if the workspace index is fresh',
     ],
-    footer: '_Use `get_file` to inspect a matching file or `semantic_search` when you need broader concept-level exploration._',
+    footer: [
+      ...(getSymbolNavigationDiagnostics(serviceClient)
+        ? [
+            `**Resolution Backend:** ${getSymbolNavigationDiagnostics(serviceClient)!.backend}`,
+            `**Graph Status:** ${getSymbolNavigationDiagnostics(serviceClient)!.graph_status}`,
+            `**Graph Degraded Reason:** ${getSymbolNavigationDiagnostics(serviceClient)!.graph_degraded_reason ?? 'none'}`,
+            `**Fallback Reason:** ${getSymbolNavigationDiagnostics(serviceClient)!.fallback_reason ?? 'none'}`,
+            '',
+          ]
+        : []),
+      '_Use `get_file` to inspect a matching file or `semantic_search` when you need broader concept-level exploration._',
+    ].join('\n'),
   });
 }
 
@@ -639,7 +669,18 @@ export async function handleSymbolReferencesSearch(
       'scoping the search with include_paths to likely consumers',
       'trying symbol_search first to confirm the declaration name',
     ],
-    footer: '_Use `symbol_search` to jump to declarations or `get_file` to inspect a matching usage in full._',
+    footer: [
+      ...(getSymbolNavigationDiagnostics(serviceClient)
+        ? [
+            `**Resolution Backend:** ${getSymbolNavigationDiagnostics(serviceClient)!.backend}`,
+            `**Graph Status:** ${getSymbolNavigationDiagnostics(serviceClient)!.graph_status}`,
+            `**Graph Degraded Reason:** ${getSymbolNavigationDiagnostics(serviceClient)!.graph_degraded_reason ?? 'none'}`,
+            `**Fallback Reason:** ${getSymbolNavigationDiagnostics(serviceClient)!.fallback_reason ?? 'none'}`,
+            '',
+          ]
+        : []),
+      '_Use `symbol_search` to jump to declarations or `get_file` to inspect a matching usage in full._',
+    ].join('\n'),
   });
 }
 
@@ -666,8 +707,15 @@ export async function handleSymbolDefinition(
   });
 
   if (!result.found) {
+    const navigationDiagnostics = getSymbolNavigationDiagnostics(serviceClient);
     let output = '# 📍 Symbol Definition\n\n';
     output += `**Symbol:** "${validSymbol}"\n\n`;
+    if (navigationDiagnostics) {
+      output += `**Resolution Backend:** ${navigationDiagnostics.backend}\n`;
+      output += `**Graph Status:** ${navigationDiagnostics.graph_status}\n`;
+      output += `**Graph Degraded Reason:** ${navigationDiagnostics.graph_degraded_reason ?? 'none'}\n`;
+      output += `**Fallback Reason:** ${navigationDiagnostics.fallback_reason ?? 'none'}\n\n`;
+    }
     output += '_No definition found. Try:\n';
     output += '- using the exact identifier spelling\n';
     output += '- scoping the search with include_paths to likely declaration sites\n';
@@ -677,6 +725,7 @@ export async function handleSymbolDefinition(
   }
 
   let output = '# 📍 Symbol Definition\n\n';
+  const navigationDiagnostics = result.metadata ?? getSymbolNavigationDiagnostics(serviceClient);
   output += `**Symbol:** "${result.symbol}"\n`;
   output += `**File:** \`${result.file}\`\n`;
   output += `**Line:** ${result.line}`;
@@ -685,6 +734,12 @@ export async function handleSymbolDefinition(
   }
   output += `\n**Kind:** ${result.kind}\n`;
   output += `**Score:** ${result.score}\n\n`;
+  if (navigationDiagnostics) {
+    output += `**Resolution Backend:** ${navigationDiagnostics.backend}\n`;
+    output += `**Graph Status:** ${navigationDiagnostics.graph_status}\n`;
+    output += `**Graph Degraded Reason:** ${navigationDiagnostics.graph_degraded_reason ?? 'none'}\n`;
+    output += `**Fallback Reason:** ${navigationDiagnostics.fallback_reason ?? 'none'}\n\n`;
+  }
   output += '```\n';
   output += result.snippet.length > 600 ? `${result.snippet.substring(0, 600)}...` : result.snippet;
   output += '\n```\n\n';
@@ -734,6 +789,12 @@ export async function handleCallRelationships(
   output += `**Symbol:** "${result.symbol}"\n`;
   output += `**Direction:** ${result.metadata.direction}\n`;
   output += `**Callers:** ${result.metadata.totalCallers} | **Callees:** ${result.metadata.totalCallees}\n\n`;
+  if (result.metadata.resolutionBackend) {
+    output += `**Resolution Backend:** ${result.metadata.resolutionBackend}\n`;
+    output += `**Graph Status:** ${result.metadata.graphStatus ?? 'unavailable'}\n`;
+    output += `**Graph Degraded Reason:** ${result.metadata.graphDegradedReason ?? 'none'}\n`;
+    output += `**Fallback Reason:** ${result.metadata.fallbackReason ?? 'none'}\n\n`;
+  }
 
   if (direction === 'callers' || direction === 'both') {
     output += '## Callers\n';
