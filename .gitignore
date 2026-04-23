@@ -25,6 +25,9 @@ build/
 .context-engine-*.json
 .context-engine-*.sqlite
 .context-engine-startup.lock
+.context-engine-graph/
+.claude/
+/latest
 
 # Personal planning notes
 plan/
