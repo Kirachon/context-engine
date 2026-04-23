@@ -136,6 +136,28 @@ describe('Old-client fixture catalog coverage', () => {
     expect(errors).toEqual([]);
   });
 
+  it('keeps get_context_for_prompt handoff inputs additive for old fixtures', () => {
+    const catalog = loadCatalog();
+    const getContextFixture = catalog.families
+      .flatMap((family) => family.fixtures)
+      .find((fixture) => fixture.tool === 'get_context_for_prompt');
+
+    expect(getContextTool.inputSchema?.required).toEqual(['query']);
+    expect(getContextTool.inputSchema?.properties).toEqual(
+      expect.objectContaining({
+        handoff_mode: expect.any(Object),
+        plan_id: expect.any(Object),
+      })
+    );
+    expect(getContextFixture?.args).toEqual(
+      expect.objectContaining({
+        query: 'auth flow',
+      })
+    );
+    expect(getContextFixture?.args).not.toHaveProperty('handoff_mode');
+    expect(getContextFixture?.args).not.toHaveProperty('plan_id');
+  });
+
   it('keeps runtime tool inventory in parity with manifest output and the baseline snapshot', async () => {
     const runtimeTools = getRegisteredTools().map((tool) => tool.name);
     const manifest = JSON.parse(await handleToolManifest({}, {} as never)) as {

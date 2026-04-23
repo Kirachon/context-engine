@@ -1,4 +1,5 @@
 import { extractJsonFromResponse } from '../../mcp/prompts/codeReview.js';
+import type { OpenAITaskResult } from '../../mcp/openaiTaskRuntime.js';
 import type { EnterpriseFinding } from '../types.js';
 import type { EnterpriseLLMClient, LLMCallResult } from './types.js';
 
@@ -63,10 +64,23 @@ function parseFindingsObject(raw: unknown): { findings: EnterpriseFinding[]; war
   return { findings, warnings };
 }
 
+function isTaskRuntimeResult(value: string | OpenAITaskResult<string>): value is OpenAITaskResult<string> {
+  return typeof value === 'object' && value !== null && 'cache_status' in value && 'parse_status' in value;
+}
+
 async function callAndParse(llm: EnterpriseLLMClient, searchQuery: string, prompt: string): Promise<LLMCallResult> {
   const warnings: string[] = [];
   const response = await llm.call(searchQuery, prompt);
-  const jsonStr = extractJsonFromResponse(response);
+  const runtimeResult = isTaskRuntimeResult(response) ? response : undefined;
+  const responseText = runtimeResult?.text ?? (typeof response === 'string' ? response : response.text);
+  const jsonStr = runtimeResult?.parse_status === 'json_extracted'
+    ? runtimeResult.parsed
+    : extractJsonFromResponse(responseText);
+
+  if (runtimeResult?.failure?.category === 'validation') {
+    return { findings: [], warnings: ['Failed to extract JSON from LLM response'] };
+  }
+
   if (!jsonStr) {
     return { findings: [], warnings: ['Failed to extract JSON from LLM response'] };
   }
