@@ -180,13 +180,10 @@ export const RANKING_V3_WEIGHT_SNAPSHOT: RankingCalibrationWeights = {
 // (tracked separately) to avoid regressions in sibling retrieval tests. The
 // quality-guard warnings surfaced via `computeQualityWarnings` are the
 // telemetry hook that will drive the next bump.
-// TODO(p2-calibrate): once the fixture baseline is in place, reduce
-//   `maxTop1Top2Gap` and `maxTopKSpread` conservatively (~-10%) and raise
-//   `minCandidateCount` to tighten rerank acceptance.
 export const RANKING_HARD_QUERY_GATE: RankingGateThresholds = {
-  minCandidateCount: 4,
-  maxTop1Top2Gap: 0.08,
-  maxTopKSpread: 0.22,
+  minCandidateCount: 5,
+  maxTop1Top2Gap: 0.072,
+  maxTopKSpread: 0.198,
   maxDominantSourceShare: 0.7,
   minAmbiguousSignals: 2,
 };

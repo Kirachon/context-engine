@@ -2,17 +2,17 @@
 
 /**
  * Context Engine MCP Server
- * 
+ *
  * A local-first, agent-agnostic MCP server implementation
- * using the legacy retrieval runtime as the core context engine.
- * 
+ * using the local-native retrieval runtime as the core context engine.
+ *
  * Architecture (5 layers):
- * 1. Core Context Engine (legacy retrieval runtime) - indexing, retrieval
+ * 1. Core Context Engine (local-native runtime) - indexing, retrieval
  * 2. Context Service Layer (serviceClient.ts) - orchestration
  * 3. MCP Interface Layer (server.ts, tools/) - protocol adapter
  * 4. Agent Clients (Claude, Cursor, etc.) - consumers
- * 5. Storage Backend (legacy runtime internals) - vectors, metadata
- * 
+ * 5. Local Retrieval Storage - vectors, lexical indexes, metadata
+ *
  * Transport Modes:
  * - stdio (default): Standard MCP protocol for Codex, Claude, etc.
  * - http (--http flag): REST API for VS Code extension and HTTP clients

@@ -1,6 +1,7 @@
-import { describe, expect, it } from '@jest/globals';
+import { afterEach, describe, expect, it, jest } from '@jest/globals';
 import {
   computeQualityWarnings,
+  emitQualityWarnings,
   type QualityWarning,
 } from '../../src/internal/retrieval/rankingCalibration.js';
 import type { EmbeddingRuntimeStatus } from '../../src/internal/retrieval/embeddingRuntime.js';
@@ -27,6 +28,10 @@ function assertShape(warning: QualityWarning): void {
 }
 
 describe('computeQualityWarnings', () => {
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
   it('returns no warnings when runtime is healthy and reranker is enabled', () => {
     const warnings = computeQualityWarnings({
       embeddingRuntimeStatus: makeStatus(),
@@ -112,5 +117,37 @@ describe('computeQualityWarnings', () => {
     expect(first.map((w) => w.code)).toContain('embedding_hash_fallback');
     expect(second.map((w) => w.code)).toContain('embedding_hash_fallback');
     expect(first).toEqual(second);
+  });
+
+  it('emits stable warning logs for every warning entry', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnings = computeQualityWarnings({
+      embeddingRuntimeStatus: undefined,
+      rerankEnabled: false,
+      rerankFallbackReason: 'rerank_error',
+    });
+
+    emitQualityWarnings(warnings);
+
+    expect(warnSpy).toHaveBeenCalledTimes(warnings.length);
+    for (const [index, warning] of warnings.entries()) {
+      expect(warnSpy).toHaveBeenNthCalledWith(
+        index + 1,
+        expect.stringContaining(`[retrieval:quality] ${warning.code} severity=${warning.severity} detail=`)
+      );
+    }
+  });
+
+  it('does not suppress repeated warning emission across calls', () => {
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    const warnings = computeQualityWarnings({
+      embeddingRuntimeStatus: undefined,
+      rerankEnabled: false,
+    });
+
+    emitQualityWarnings(warnings);
+    emitQualityWarnings(warnings);
+
+    expect(warnSpy).toHaveBeenCalledTimes(warnings.length * 2);
   });
 });

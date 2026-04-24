@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "generated_at": "2026-04-21T05:58:30.442Z",
+  "generated_at": "2026-04-24T12:43:41.624Z",
   "inputs": {
     "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json",
     "holdout_artifact": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-holdout-check.json",
@@ -23,11 +23,11 @@
     "bypass_cache": false,
     "workspace_fingerprint": "workspace:b936785814af332a5ab279649ef316767dc76996f7735adba5b378fddb2bff51",
     "indexing": {
-      "refreshed": true,
+      "refreshed": false,
       "status_before": "idle",
-      "file_count_before": 0,
-      "indexed": 679,
-      "skipped": 0,
+      "file_count_before": 723,
+      "indexed": null,
+      "skipped": null,
       "errors": 0
     },
     "aggregate_metrics": {
@@ -104,8 +104,8 @@
           "scripts/ci/release-bench.ts",
           "scripts/ci/run-bench-suite.ts",
           "scripts/ci/generate-retrieval-quality-report.ts",
-          "scripts/ci/bench-compare.ts",
-          "src/ci/slowOpenAiToolHardening.ts"
+          "src/ci/slowOpenAiToolHardening.ts",
+          "scripts/ci/bench-compare.ts"
         ],
         "hits_at_10": [
           {
@@ -140,13 +140,13 @@
           },
           {
             "rank": 6,
-            "path": "scripts/ci/bench-compare.ts",
+            "path": "src/ci/slowOpenAiToolHardening.ts",
             "grade": 0,
             "relevant": false
           },
           {
             "rank": 7,
-            "path": "src/ci/slowOpenAiToolHardening.ts",
+            "path": "scripts/ci/bench-compare.ts",
             "grade": 0,
             "relevant": false
           }
@@ -173,7 +173,9 @@
           "scripts/ci/check-retrieval-holdout-fixture.ts",
           "scripts/ci/generate-retrieval-quality-report.ts",
           "scripts/bench.ts",
-          "context-engine-audit-response-swarm-plan.md"
+          "context-engine-audit-response-swarm-plan.md",
+          "docs/MASTER_PLAN_CHECKLIST.md",
+          "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md"
         ],
         "hits_at_10": [
           {
@@ -199,6 +201,18 @@
             "path": "context-engine-audit-response-swarm-plan.md",
             "grade": 0,
             "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "docs/MASTER_PLAN_CHECKLIST.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+            "grade": 0,
+            "relevant": false
           }
         ],
         "metrics": {
@@ -221,7 +235,11 @@
         ],
         "actual_paths": [
           "scripts/ci/generate-retrieval-quality-report.ts",
-          "scripts/ci/check-retrieval-quality-gate.ts"
+          "scripts/ci/check-retrieval-quality-gate.ts",
+          "docs/MASTER_PLAN_CHECKLIST.md",
+          "scripts/ci/run-migrated-family-matrix.ts",
+          "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -233,6 +251,30 @@
           {
             "rank": 2,
             "path": "scripts/ci/check-retrieval-quality-gate.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 3,
+            "path": "docs/MASTER_PLAN_CHECKLIST.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "scripts/ci/run-migrated-family-matrix.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 6,
+            "path": "scripts/bench.ts",
             "grade": 0,
             "relevant": false
           }
@@ -258,7 +300,9 @@
         "actual_paths": [
           "scripts/ci/generate-weekly-retrieval-trend-report.ts",
           "docs/R4_WEEKLY_TREND_CONTRACT.md",
-          "scripts/ci/check-weekly-retrieval-trend-report.ts"
+          "scripts/ci/check-weekly-retrieval-trend-report.ts",
+          "docs/MASTER_PLAN_CHECKLIST.md",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -276,6 +320,18 @@
           {
             "rank": 3,
             "path": "scripts/ci/check-weekly-retrieval-trend-report.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 4,
+            "path": "docs/MASTER_PLAN_CHECKLIST.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 5,
+            "path": "scripts/bench.ts",
             "grade": 0,
             "relevant": false
           }
@@ -368,7 +424,9 @@
           "tests/fixtures/retrieval/polyglot/csharp/Sample.cs",
           "tests/fixtures/retrieval/polyglot/java/Sample.java",
           "tests/fixtures/retrieval/polyglot/go/sample.go",
-          "src/reactive/config.ts"
+          "src/reactive/config.ts",
+          "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+          "docs/archive/IMPLEMENTATION_STATUS_ASSESSMENT.md"
         ],
         "hits_at_10": [
           {
@@ -406,6 +464,18 @@
             "path": "src/reactive/config.ts",
             "grade": 0,
             "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "docs/archive/IMPLEMENTATION_STATUS_ASSESSMENT.md",
+            "grade": 0,
+            "relevant": false
           }
         ],
         "metrics": {
@@ -432,7 +502,8 @@
           "tests/fixtures/retrieval/polyglot/java/Sample.java",
           "tests/fixtures/retrieval/polyglot/rust/sample.rs",
           "tests/fixtures/retrieval/polyglot/python/sample.py",
-          "scripts/ci/check-r6-execution-board.ts"
+          "scripts/ci/check-r6-execution-board.ts",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -468,6 +539,12 @@
           {
             "rank": 6,
             "path": "scripts/ci/check-r6-execution-board.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "scripts/bench.ts",
             "grade": 0,
             "relevant": false
           }
@@ -569,7 +646,8 @@
           "tests/fixtures/retrieval/polyglot/java/Sample.java",
           "src/mcp/tools/reviewAuto.ts",
           "scripts/ci/check-r6-execution-board.ts",
-          "src/internal/retrieval/fusion.ts"
+          "src/internal/retrieval/fusion.ts",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -617,6 +695,12 @@
           {
             "rank": 8,
             "path": "src/internal/retrieval/fusion.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 9,
+            "path": "scripts/bench.ts",
             "grade": 0,
             "relevant": false
           }
@@ -724,7 +808,8 @@
           "tests/fixtures/retrieval/polyglot/rust/sample.rs",
           "src/reviewer/reviewDiff.ts",
           "src/reviewer/checks/adapters/index.ts",
-          "vscode-extension/src/providers/codeLensProvider.ts"
+          "vscode-extension/src/providers/codeLensProvider.ts",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -768,6 +853,12 @@
             "path": "vscode-extension/src/providers/codeLensProvider.ts",
             "grade": 0,
             "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "scripts/bench.ts",
+            "grade": 0,
+            "relevant": false
           }
         ],
         "metrics": {
@@ -794,7 +885,10 @@
           "tests/fixtures/retrieval/polyglot/go/sample.go",
           "tests/fixtures/retrieval/polyglot/python/sample.py",
           "tests/fixtures/retrieval/polyglot/rust/sample.rs",
-          "vscode-extension/src/providers/codeLensProvider.ts"
+          "vscode-extension/src/providers/codeLensProvider.ts",
+          "docs/MASTER_PLAN_CHECKLIST.md",
+          "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -832,6 +926,24 @@
             "path": "vscode-extension/src/providers/codeLensProvider.ts",
             "grade": 0,
             "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "docs/MASTER_PLAN_CHECKLIST.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 9,
+            "path": "scripts/bench.ts",
+            "grade": 0,
+            "relevant": false
           }
         ],
         "metrics": {
@@ -859,7 +971,8 @@
           "tests/fixtures/retrieval/polyglot/go/sample.go",
           "src/reviewer/checks/adapters/index.ts",
           "src/reviewer/reviewDiff.ts",
-          "vscode-extension/src/providers/codeLensProvider.ts"
+          "vscode-extension/src/providers/codeLensProvider.ts",
+          "scripts/bench.ts"
         ],
         "hits_at_10": [
           {
@@ -903,6 +1016,12 @@
             "path": "vscode-extension/src/providers/codeLensProvider.ts",
             "grade": 0,
             "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "scripts/bench.ts",
+            "grade": 0,
+            "relevant": false
           }
         ],
         "metrics": {
@@ -929,7 +1048,10 @@
           "tests/fixtures/retrieval/polyglot/go/sample.go",
           "tests/fixtures/retrieval/polyglot/python/sample.py",
           "tests/fixtures/retrieval/polyglot/rust/sample.rs",
-          "scripts/ops/check-context-engine-process-health.ps1"
+          "scripts/ops/check-context-engine-process-health.ps1",
+          "scripts/ci/run-migrated-family-matrix.ts",
+          "docs/MASTER_PLAN_CHECKLIST.md",
+          "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md"
         ],
         "hits_at_10": [
           {
@@ -965,6 +1087,24 @@
           {
             "rank": 6,
             "path": "scripts/ops/check-context-engine-process-health.ps1",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 7,
+            "path": "scripts/ci/run-migrated-family-matrix.ts",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 8,
+            "path": "docs/MASTER_PLAN_CHECKLIST.md",
+            "grade": 0,
+            "relevant": false
+          },
+          {
+            "rank": 9,
+            "path": "docs/archive/ARCHITECTURE_ENHANCEMENT_BLUEPRINT.md",
             "grade": 0,
             "relevant": false
           }
@@ -1131,7 +1271,7 @@
     "reasons": []
   },
   "reproducibility_lock": {
-    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
+    "commit_sha": "9aa49ee26b54a7adf97193fd6198c136e95cb349",
     "dataset_id": "holdout_v1",
     "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
     "fixture_pack_hash": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643",

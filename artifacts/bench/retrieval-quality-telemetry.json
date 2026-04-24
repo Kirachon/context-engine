@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-04-21T05:57:01.663Z",
+  "generated_at": "2026-04-24T12:43:10.896Z",
   "dense_refresh": {
     "skipped_docs_rate_pct": 0,
     "embed_batch_p95_ms": 45
@@ -10,7 +10,7 @@
     "symbol_route_misroute_rate_pct": 0
   },
   "reproducibility_lock": {
-    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
+    "commit_sha": "9aa49ee26b54a7adf97193fd6198c136e95cb349",
     "dataset_id": "holdout_v1",
     "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
     "dataset_hash_length": 64,

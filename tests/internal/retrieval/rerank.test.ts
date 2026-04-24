@@ -79,6 +79,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -100,6 +101,7 @@ describe('reranker', () => {
       'src/auth/login.ts',
       'src/shared/alpha.ts',
       'src/shared/beta.ts',
+      'src/shared/gamma.ts',
       'src/database/schema.ts',
     ]);
     expect(ranked[0]?.combinedScore).toBeGreaterThanOrEqual(ranked[1]?.combinedScore ?? -Infinity);
@@ -122,6 +124,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -209,6 +212,68 @@ describe('reranker', () => {
     expect(loadTransformersModule).not.toHaveBeenCalled();
   });
 
+  it('keeps the gate conservative when candidate count falls below the hard-query minimum', () => {
+    const candidates = [
+      createResult('src/a.ts', 'alpha', 0.61, '1-2', 'semantic'),
+      createResult('src/b.ts', 'beta', 0.6, '1-2', 'lexical'),
+      createResult('src/c.ts', 'gamma', 0.59, '1-2', 'dense'),
+      createResult('src/d.ts', 'delta', 0.58, '1-2', 'hybrid'),
+    ];
+
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+
+    expect(gateDecision.shouldUseTransformerRerank).toBe(false);
+    expect(gateDecision.signals.candidateCount).toBe(4);
+    expect(gateDecision.reasons).toEqual(
+      expect.arrayContaining(['candidate_count=4 < 5'])
+    );
+  });
+
+  it('keeps the gate conservative when ambiguity signals do not meet the tightened spread thresholds', () => {
+    const candidates = [
+      createResult('src/a.ts', 'alpha', 0.8, '1-2', 'semantic'),
+      createResult('src/b.ts', 'beta', 0.72, '1-2', 'semantic'),
+      createResult('src/c.ts', 'gamma', 0.59, '1-2', 'semantic'),
+      createResult('src/d.ts', 'delta', 0.58, '1-2', 'semantic'),
+      createResult('src/e.ts', 'epsilon', 0.57, '1-2', 'semantic'),
+    ];
+
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+
+    expect(gateDecision.signals.top1Top2Gap).toBeCloseTo(0.08, 6);
+    expect(gateDecision.signals.topKSpread).toBeCloseTo(0.23, 6);
+    expect(gateDecision.shouldUseTransformerRerank).toBe(false);
+    expect(gateDecision.reasons).toEqual(
+      expect.arrayContaining(['query_is_not_ambiguous_enough_for_transformer_rerank'])
+    );
+  });
+
+  it('uses transformer rerank once the tightened hard-query thresholds are satisfied', () => {
+    const candidates = [
+      createResult('src/a.ts', 'alpha', 0.61, '1-2', 'semantic'),
+      createResult('src/b.ts', 'beta', 0.59, '1-2', 'lexical'),
+      createResult('src/c.ts', 'gamma', 0.57, '1-2', 'dense'),
+      createResult('src/d.ts', 'delta', 0.55, '1-2', 'hybrid'),
+      createResult('src/e.ts', 'epsilon', 0.53, '1-2', 'semantic'),
+    ];
+
+    const gateDecision = evaluateRankingGate(candidates, {
+      rankingMode: 'v3',
+      profile: 'rich',
+    });
+
+    expect(gateDecision.signals.candidateCount).toBe(5);
+    expect(gateDecision.signals.top1Top2Gap).toBeCloseTo(0.02, 6);
+    expect(gateDecision.signals.topKSpread).toBeCloseTo(0.08, 6);
+    expect(gateDecision.shouldUseTransformerRerank).toBe(true);
+  });
+
   it('reuses the lazy transformer runtime for repeated reranks', async () => {
     const extractor = createVectorExtractor();
     const loadTransformersModule = jest.fn(async () => createTransformersModule(extractor));
@@ -217,6 +282,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -253,6 +319,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -277,6 +344,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -306,6 +374,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -323,7 +392,7 @@ describe('reranker', () => {
     });
 
     expect(trace).toHaveBeenCalledWith(expect.objectContaining({
-      candidateCount: 4,
+      candidateCount: 5,
       selectedPath: 'transformer',
       appliedPath: 'heuristic',
       state: 'fail_open',
@@ -394,6 +463,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -419,6 +489,7 @@ describe('reranker', () => {
       expect.any(String),
       expect.any(String),
       expect.any(String),
+      expect.any(String),
     ]);
     expect(extractor.mock.calls[0]?.[1]).toEqual({ pooling: 'mean', normalize: true });
     const batchCallCount = extractor.mock.calls.filter(([firstArg]) => Array.isArray(firstArg)).length;
@@ -440,6 +511,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',
@@ -473,6 +545,7 @@ describe('reranker', () => {
       createResult('src/auth/login.ts', 'login handler', 0.6, '1-2', 'lexical'),
       createResult('src/shared/alpha.ts', 'shared alpha', 0.59, '1-2', 'dense'),
       createResult('src/shared/beta.ts', 'shared beta', 0.58, '1-2', 'hybrid'),
+      createResult('src/shared/gamma.ts', 'shared gamma', 0.57, '1-2', 'semantic'),
     ];
     const gateDecision = evaluateRankingGate(candidates, {
       rankingMode: 'v3',

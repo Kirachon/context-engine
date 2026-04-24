@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-04-21T05:58:31.218Z",
+  "generated_at": "2026-04-24T12:43:42.080Z",
   "inputs": {
     "report": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-report.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-quality-gate.json"
@@ -17,7 +17,7 @@
     "reasons": []
   },
   "reproducibility_lock": {
-    "commit_sha": "aac839eb6fb637666b623170c1afaef18e5218ef",
+    "commit_sha": "9aa49ee26b54a7adf97193fd6198c136e95cb349",
     "dataset_id": "holdout_v1",
     "dataset_hash": "0f90c952c31adba36c82a5b1cbf52fd60dc9f799364a5d02adfec2ac255906cb",
     "fixture_pack_hash": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643",
