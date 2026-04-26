@@ -41,6 +41,7 @@ import { getOpenAITaskPolicy, resolveOpenAITaskRuntimeOptions } from '../taskPol
 
 /** Tool version for metadata */
 const TOOL_VERSION = '1.0.0';
+export const DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS = 120_000;
 const FALLBACK_MODEL_USED = 'local-native-context-engine';
 
 /** Default review options */
@@ -51,7 +52,7 @@ const DEFAULT_OPTIONS: Required<ReviewOptions> = {
   changed_lines_only: true,
   custom_instructions: '',
   exclude_patterns: [],
-  llm_timeout_ms: Number.NaN,
+  llm_timeout_ms: DEFAULT_CODE_REVIEW_AI_TIMEOUT_MS,
 };
 
 // ============================================================================
