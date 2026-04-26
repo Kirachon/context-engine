@@ -1,7 +1,10 @@
 import fs from 'fs';
-import path from 'path';
 import YAML from 'yaml';
 import type { InvariantsConfig, ReviewInvariant } from './types.js';
+import {
+  resolveRealPathInsideWorkspace,
+  resolveWorkspaceRelativePath,
+} from '../../../workspace/pathValidation.js';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -37,14 +40,14 @@ function normalizeInvariant(raw: unknown): ReviewInvariant | null {
 }
 
 export function loadInvariantsConfig(workspacePath: string, invariantsPath: string): InvariantsConfig {
-  const resolved =
-    path.isAbsolute(invariantsPath) ? invariantsPath : path.join(workspacePath, invariantsPath);
+  const resolved = resolveWorkspaceRelativePath(workspacePath, invariantsPath, 'invariants_path');
 
   if (!fs.existsSync(resolved)) {
     throw new Error(`Invariants file not found: ${resolved}`);
   }
 
-  const rawText = fs.readFileSync(resolved, 'utf-8');
+  const safeResolved = resolveRealPathInsideWorkspace(workspacePath, resolved, 'invariants_path');
+  const rawText = fs.readFileSync(safeResolved, 'utf-8');
   const parsed = YAML.parse(rawText) as unknown;
 
   if (!isObject(parsed)) {
@@ -64,4 +67,3 @@ export function loadInvariantsConfig(workspacePath: string, invariantsPath: stri
 
   return config;
 }
-

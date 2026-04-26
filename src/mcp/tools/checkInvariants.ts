@@ -12,6 +12,7 @@ import { runDeterministicPreflight } from '../../reviewer/checks/preflight.js';
 import { loadInvariantsConfig } from '../../reviewer/checks/invariants/load.js';
 import { runInvariants } from '../../reviewer/checks/invariants/runner.js';
 import { assertNonEmptyDiffScope, normalizeRequiredDiffInput } from '../tooling/diffInput.js';
+import { normalizeWorkspaceRelativePaths } from '../../workspace/pathValidation.js';
 
 export interface CheckInvariantsArgs {
   diff: string;
@@ -27,13 +28,16 @@ export async function handleCheckInvariants(
     args.diff,
     'Missing or invalid "diff" argument. Provide a unified diff string.'
   );
-  assertNonEmptyDiffScope(diff, args.changed_files);
+  const changedFiles = args.changed_files
+    ? normalizeWorkspaceRelativePaths(args.changed_files, 'changed_files', { rejectOptionLike: true })
+    : undefined;
+  assertNonEmptyDiffScope(diff, changedFiles);
 
   const workspacePath = serviceClient.getWorkspacePath();
   const invariantsPath = args.invariants_path ?? '.review-invariants.yml';
 
   const parsedDiff: ParsedDiff = parseUnifiedDiff(diff);
-  const preflight = runDeterministicPreflight(parsedDiff, args.changed_files);
+  const preflight = runDeterministicPreflight(parsedDiff, changedFiles);
 
   const warnings: string[] = [];
   try {

@@ -97,6 +97,22 @@ index 1234567..abcdefg 100644
     expect(result.stats.files_changed).toBe(1);
   });
 
+  it('rejects unsafe changed_files before review execution', async () => {
+    await expect(
+      handleReviewDiff(
+        { diff: 'plain text, not a diff', changed_files: ['--config'] },
+        { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+      )
+    ).rejects.toThrow(/option-like paths are not allowed/i);
+
+    await expect(
+      handleReviewDiff(
+        { diff: 'plain text, not a diff', changed_files: ['../secret.ts'] },
+        { getWorkspacePath: () => process.cwd(), getFile: async () => '', searchAndAsk: async () => '' } as any
+      )
+    ).rejects.toThrow(/path traversal is not allowed/i);
+  });
+
   it('accepts partial git-style file sections without hunks', async () => {
     const diff = `diff --git a/src/a.ts b/src/a.ts
 index 1234567..abcdefg 100644
@@ -247,11 +263,34 @@ index 1234567..abcdefg 100644
 `;
 
     const resultStr = await handleReviewDiff(
-      { diff, options: { max_findings: 10, invariants_path: invPath } },
+      { diff, options: { max_findings: 10, invariants_path: '.review-invariants.yml' } },
       { getWorkspacePath: () => tmpDir } as any
     );
     const result = JSON.parse(resultStr);
     expect(result.findings.some((f: any) => f.id === 'SEC999')).toBe(true);
+  });
+
+  it('does not load invariants_path outside the workspace', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-reviewdiff-contained-'));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-reviewdiff-outside-'));
+    const outsidePath = path.join(outsideDir, '.review-invariants.yml');
+    fs.writeFileSync(outsidePath, 'security: []\n', 'utf-8');
+
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const resultStr = await handleReviewDiff(
+      { diff, options: { max_findings: 10, invariants_path: outsidePath } },
+      { getWorkspacePath: () => tmpDir } as any
+    );
+    const result = JSON.parse(resultStr);
+    expect(result.metadata.warnings.join('\n')).toMatch(/absolute or drive-qualified paths are not allowed/i);
   });
 
   it('runs LLM passes when enable_llm is true', async () => {
@@ -430,7 +469,7 @@ index 1234567..abcdefg 100644
 `;
 
     const resultStr = await handleReviewDiff(
-      { diff, options: { invariants_path: invPath } },
+      { diff, options: { invariants_path: '.review-invariants.yml' } },
       { getWorkspacePath: () => tmpDir, getFile: async () => 'x', searchAndAsk: async () => '{}' } as any
     );
     const result = JSON.parse(resultStr);
@@ -468,7 +507,7 @@ index 1234567..abcdefg 100644
     );
 
     const resultStr = await handleReviewDiff(
-      { diff, options: { invariants_path: invPath, include_markdown: true } },
+      { diff, options: { invariants_path: '.review-invariants.yml', include_markdown: true } },
       { getWorkspacePath: () => tmpDir, getFile: async () => 'x', searchAndAsk: async () => '{}' } as any
     );
     const result = JSON.parse(resultStr);

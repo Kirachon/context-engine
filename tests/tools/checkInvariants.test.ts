@@ -56,7 +56,7 @@ index 1234567..abcdefg 100644
 `;
 
     const resultStr = await handleCheckInvariants(
-      { diff, invariants_path: invPath },
+      { diff, invariants_path: '.review-invariants.yml' },
       { getWorkspacePath: () => tmpDir } as any
     );
     const result = JSON.parse(resultStr);
@@ -71,7 +71,7 @@ index 1234567..abcdefg 100644
 
     await expect(
       handleCheckInvariants(
-        { diff: 'plain text, not a diff', invariants_path: invPath },
+        { diff: 'plain text, not a diff', invariants_path: '.review-invariants.yml' },
         { getWorkspacePath: () => tmpDir } as any
       )
     ).rejects.toThrow('No reviewable changes found in diff scope. Provide a unified diff with at least one changed file.');
@@ -83,7 +83,7 @@ index 1234567..abcdefg 100644
     fs.writeFileSync(invPath, 'security: []\n', 'utf-8');
 
     const resultStr = await handleCheckInvariants(
-      { diff: 'plain text, not a diff', changed_files: ['src/a.ts'], invariants_path: invPath },
+      { diff: 'plain text, not a diff', changed_files: ['src/a.ts'], invariants_path: '.review-invariants.yml' },
       { getWorkspacePath: () => tmpDir } as any
     );
     const result = JSON.parse(resultStr);
@@ -102,11 +102,45 @@ index 1234567..abcdefg 100644
 `;
 
     const resultStr = await handleCheckInvariants(
-      { diff, invariants_path: invPath },
+      { diff, invariants_path: '.review-invariants.yml' },
       { getWorkspacePath: () => tmpDir } as any
     );
     const result = JSON.parse(resultStr);
     expect(result.success).toBe(true);
     expect(result.findings).toEqual([]);
+  });
+
+  it('rejects invariants_path outside the workspace', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-inv-outside-'));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-inv-outside-file-'));
+    const outsidePath = path.join(outsideDir, '.review-invariants.yml');
+    fs.writeFileSync(outsidePath, 'security: []\n', 'utf-8');
+
+    const diff = `diff --git a/src/a.ts b/src/a.ts
+index 1234567..abcdefg 100644
+--- a/src/a.ts
++++ b/src/a.ts
+@@ -1 +1 @@
+-export const a = 1;
++export const a = 2;
+`;
+
+    const absoluteResult = JSON.parse(
+      await handleCheckInvariants(
+        { diff, invariants_path: outsidePath },
+        { getWorkspacePath: () => tmpDir } as any
+      )
+    );
+    expect(absoluteResult.success).toBe(false);
+    expect(absoluteResult.error).toMatch(/absolute or drive-qualified paths are not allowed/i);
+
+    const traversalResult = JSON.parse(
+      await handleCheckInvariants(
+        { diff, invariants_path: '../.review-invariants.yml' },
+        { getWorkspacePath: () => tmpDir } as any
+      )
+    );
+    expect(traversalResult.success).toBe(false);
+    expect(traversalResult.error).toMatch(/path traversal is not allowed/i);
   });
 });

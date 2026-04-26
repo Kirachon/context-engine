@@ -11,6 +11,7 @@ import { buildDetailedPrompt, buildStructuralPrompt } from '../prompts/enterpris
 import type { EnterpriseFinding } from '../types.js';
 import { scrubSecrets } from '../../reactive/guardrails/index.js';
 import type { ReviewDiffInput } from '../reviewDiff.js';
+import { normalizeWorkspaceRelativePaths } from '../../workspace/pathValidation.js';
 
 const REVIEW_CONTEXT_LINES = 16;
 
@@ -162,8 +163,11 @@ async function runStaticAnalysisStage(
   }
 
   const startedAt = Date.now();
-  const changedFiles =
+  const rawChangedFiles =
     context.preflight.changed_files.length > 0 ? context.preflight.changed_files : input.changed_files ?? [];
+  const changedFiles = normalizeWorkspaceRelativePaths(rawChangedFiles, 'changed_files', {
+    rejectOptionLike: true,
+  });
 
   const run = await runStaticAnalyzers({
     input: {

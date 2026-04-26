@@ -53,5 +53,23 @@ index 1234567..abcdefg 100644
     expect(result.findings.map(f => f.id).sort()).toEqual(['SEC001', 'SEC002']);
     expect(result.checked_invariants).toBeGreaterThanOrEqual(2);
   });
-});
 
+  it('rejects absolute, traversal, and symlinked invariants paths outside the workspace', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-invariants-contained-'));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-invariants-outside-'));
+    const outsideFile = path.join(outsideDir, '.review-invariants.yml');
+    fs.writeFileSync(outsideFile, 'security: []\n', 'utf-8');
+
+    expect(() => loadInvariantsConfig(tmpDir, outsideFile)).toThrow(/absolute or drive-qualified paths are not allowed/i);
+    expect(() => loadInvariantsConfig(tmpDir, '../.review-invariants.yml')).toThrow(/path traversal is not allowed/i);
+
+    const symlinkPath = path.join(tmpDir, 'linked-invariants.yml');
+    try {
+      fs.symlinkSync(outsideFile, symlinkPath, 'file');
+    } catch {
+      return;
+    }
+
+    expect(() => loadInvariantsConfig(tmpDir, 'linked-invariants.yml')).toThrow(/within workspace/i);
+  });
+});

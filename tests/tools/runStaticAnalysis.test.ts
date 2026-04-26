@@ -137,4 +137,15 @@ describe('run_static_analysis tool', () => {
       'semgrep changed_files contains 5 entries; execution will be chunked into 3 batches (max 2 files each)'
     );
   });
+
+  it('rejects unsafe changed_files before invoking analyzers', async () => {
+    await expect(
+      handleRunStaticAnalysis(
+        { changed_files: ['src/a.ts', '../secret.ts'], options: { analyzers: ['semgrep'] } },
+        { getWorkspacePath: () => process.cwd() } as any
+      )
+    ).rejects.toThrow(/path traversal is not allowed/i);
+
+    expect(runSemgrepAnalyzer).not.toHaveBeenCalled();
+  });
 });

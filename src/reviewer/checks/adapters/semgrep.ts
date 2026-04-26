@@ -3,6 +3,7 @@ import type { EnterpriseFinding, FindingSeverity } from '../../types.js';
 import type { StaticAnalyzerInput, StaticAnalyzerResult } from './types.js';
 import { envInt } from '../../../config/env.js';
 import { runCommand } from './exec.js';
+import { normalizeWorkspaceRelativePaths } from '../../../workspace/pathValidation.js';
 
 const DEFAULT_SEMGREP_MAX_FILES = 100;
 
@@ -23,7 +24,20 @@ export async function runSemgrepAnalyzer(
   const command = process.platform === 'win32' ? 'semgrep.exe' : 'semgrep';
   const baseArgs = ['--json', ...(opts.args ?? ['--config', 'auto']), '--quiet'];
   const maxFiles = envInt('CE_SEMGREP_MAX_FILES', DEFAULT_SEMGREP_MAX_FILES, { min: 0 });
-  const files = input.changed_files ?? [];
+  let files: string[];
+  try {
+    files = normalizeWorkspaceRelativePaths(input.changed_files ?? [], 'changed_files', {
+      rejectOptionLike: true,
+    });
+  } catch (error) {
+    return {
+      analyzer: 'semgrep',
+      duration_ms: Date.now() - startTime,
+      findings: [],
+      warnings: [`Invalid semgrep changed_files: ${String(error)}`],
+      skipped_reason: 'semgrep_invalid_changed_files',
+    };
+  }
   if (files.length === 0) {
     return {
       analyzer: 'semgrep',
@@ -57,7 +71,7 @@ export async function runSemgrepAnalyzer(
   let anyParsed = false;
 
   for (const chunk of chunks) {
-    const commandArgs = [...baseArgs, ...chunk];
+    const commandArgs = [...baseArgs, '--', ...chunk];
     const result = await runCommand({
       command,
       commandArgs,

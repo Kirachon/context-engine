@@ -16,6 +16,7 @@ import {
   finalizeRetrievalFlow,
   noteRetrievalStage,
 } from '../../internal/retrieval/flow.js';
+import { normalizeWorkspaceRelativePaths } from '../../workspace/pathValidation.js';
 
 const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
@@ -75,7 +76,10 @@ export async function handleReviewDiff(
       'Missing or invalid "diff" argument. Provide a unified diff string.'
     );
     noteReviewFlowStage(flow, 'diff_normalized');
-    assertNonEmptyDiffScope(diff, args.changed_files);
+    const changedFiles = args.changed_files
+      ? normalizeWorkspaceRelativePaths(args.changed_files, 'changed_files', { rejectOptionLike: true })
+      : undefined;
+    assertNonEmptyDiffScope(diff, changedFiles);
     noteReviewFlowStage(flow, 'scope_validated');
 
     const runtime: ReviewDiffInput['runtime'] = {
@@ -105,7 +109,7 @@ export async function handleReviewDiff(
               dedupeContext: JSON.stringify({
                 base_sha: args.base_sha ?? null,
                 head_sha: args.head_sha ?? null,
-                changed_files: args.changed_files ?? [],
+                changed_files: changedFiles ?? [],
                 review_options: {
                   two_pass: args.options?.two_pass ?? true,
                   risk_threshold: args.options?.risk_threshold ?? 3,
@@ -142,7 +146,7 @@ export async function handleReviewDiff(
 
     const input: ReviewDiffInput = {
       diff,
-      changed_files: args.changed_files,
+      changed_files: changedFiles,
       workspace_path: serviceClient.getWorkspacePath(),
       options: args.options,
       runtime,

@@ -9,6 +9,7 @@ import { ContextServiceClient } from '../serviceClient.js';
 import { runStaticAnalyzers } from '../../reviewer/checks/adapters/index.js';
 import type { StaticAnalyzerId } from '../../reviewer/checks/adapters/types.js';
 import { envInt } from '../../config/env.js';
+import { normalizeWorkspaceRelativePaths } from '../../workspace/pathValidation.js';
 
 const DEFAULT_SEMGREP_MAX_FILES = 100;
 
@@ -28,7 +29,9 @@ export async function handleRunStaticAnalysis(
 ): Promise<string> {
   const workspacePath = serviceClient.getWorkspacePath();
   const analyzers = (args.options?.analyzers ?? ['tsc']).filter(Boolean) as StaticAnalyzerId[];
-  const changedFiles = args.changed_files ?? [];
+  const changedFiles = normalizeWorkspaceRelativePaths(args.changed_files ?? [], 'changed_files', {
+    rejectOptionLike: true,
+  });
   const analyzerTimeoutInput = args.options?.timeout_ms ?? 60_000;
   const analyzerTimeoutMs = Number.isFinite(analyzerTimeoutInput)
     ? Math.max(1, Math.trunc(analyzerTimeoutInput))

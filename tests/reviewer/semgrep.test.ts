@@ -22,8 +22,8 @@ describe('runSemgrepAnalyzer', () => {
   it('chunks large file lists and merges results', async () => {
     (runCommand as jest.Mock).mockImplementation(async (args: any) => {
       const commandArgs = (args?.commandArgs ?? []) as string[];
-      const quietIndex = commandArgs.indexOf('--quiet');
-      const files = quietIndex === -1 ? [] : commandArgs.slice(quietIndex + 1);
+      const separatorIndex = commandArgs.indexOf('--');
+      const files = separatorIndex === -1 ? [] : commandArgs.slice(separatorIndex + 1);
       return {
         stdout: JSON.stringify({
           results: files.map((file: string) => ({
@@ -51,8 +51,9 @@ describe('runSemgrepAnalyzer', () => {
     const calls = (runCommand as jest.Mock).mock.calls as Array<[any]>;
     const calledFiles = calls.map((call) => {
       const args = (call?.[0]?.commandArgs ?? []) as string[];
-      const quietIndex = args.indexOf('--quiet');
-      return quietIndex === -1 ? [] : args.slice(quietIndex + 1);
+      const separatorIndex = args.indexOf('--');
+      expect(separatorIndex).toBeGreaterThan(args.indexOf('--quiet'));
+      return separatorIndex === -1 ? [] : args.slice(separatorIndex + 1);
     });
     expect(calledFiles).toEqual([['a.ts', 'b.ts'], ['c.ts', 'd.ts'], ['e.ts']]);
     expect(result.findings).toHaveLength(5);
@@ -72,4 +73,37 @@ describe('runSemgrepAnalyzer', () => {
     expect(result.skipped_reason).toBe('semgrep_no_changed_files');
     expect(result.warnings).toContain('semgrep selected with empty changed_files; skipping to avoid scanning the full workspace');
   });
+
+  it('places file paths after -- so they cannot become semgrep options', async () => {
+    (runCommand as jest.Mock).mockImplementation(async () => ({
+      stdout: JSON.stringify({ results: [] }),
+      stderr: '',
+      exitCode: 0,
+      duration_ms: 5,
+    }));
+
+    const result = await runSemgrepAnalyzer(
+      { workspace_path: process.cwd(), changed_files: ['src/a.ts', 'src/b.ts'] },
+      { timeoutMs: 1000, maxFindings: 10, args: ['--config', 'auto'] }
+    );
+
+    expect(result.skipped_reason).toBeUndefined();
+    const calls = (runCommand as jest.Mock).mock.calls as Array<[any]>;
+    const commandArgs = (calls[0]?.[0]?.commandArgs ?? []) as string[];
+    expect(commandArgs).toEqual(['--json', '--config', 'auto', '--quiet', '--', 'src/a.ts', 'src/b.ts']);
+  });
+
+  it.each([[['--config']], [['../secret.ts']], [['/tmp/secret.ts']], [['C:/tmp/secret.ts']], [['C:tmp/secret.ts']], [['src/a\nb.ts']]])(
+    'skips invalid changed_files entry %p without invoking semgrep',
+    async (changedFiles) => {
+      const result = await runSemgrepAnalyzer(
+        { workspace_path: process.cwd(), changed_files: changedFiles },
+        { timeoutMs: 1000, maxFindings: 10 }
+      );
+
+      expect(runCommand).not.toHaveBeenCalled();
+      expect(result.skipped_reason).toBe('semgrep_invalid_changed_files');
+      expect(result.warnings.join('\n')).toMatch(/Invalid semgrep changed_files/);
+    }
+  );
 });

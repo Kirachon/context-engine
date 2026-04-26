@@ -770,6 +770,39 @@ describe('ContextServiceClient', () => {
         expect((error as Error).message).not.toMatch(/path traversal|absolute paths/i);
       }
     });
+
+    it('should reject symlinks that escape the workspace', async () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-getfile-workspace-'));
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-getfile-outside-'));
+      const outsideFile = path.join(outside, 'secret.txt');
+      const linkPath = path.join(workspace, 'secret-link.txt');
+      fs.writeFileSync(outsideFile, 'secret', 'utf-8');
+
+      try {
+        fs.symlinkSync(outsideFile, linkPath, 'file');
+      } catch {
+        return;
+      }
+
+      const isolatedClient = new ContextServiceClient(workspace);
+      await expect(isolatedClient.getFile('secret-link.txt')).rejects.toThrow(/within workspace/i);
+    });
+
+    it('should allow symlinks that stay inside the workspace', async () => {
+      const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-getfile-workspace-safe-'));
+      const targetFile = path.join(workspace, 'safe.txt');
+      const linkPath = path.join(workspace, 'safe-link.txt');
+      fs.writeFileSync(targetFile, 'safe', 'utf-8');
+
+      try {
+        fs.symlinkSync(targetFile, linkPath, 'file');
+      } catch {
+        return;
+      }
+
+      const isolatedClient = new ContextServiceClient(workspace);
+      await expect(isolatedClient.getFile('safe-link.txt')).resolves.toBe('safe');
+    });
   });
 
   describe('File Size Limits', () => {

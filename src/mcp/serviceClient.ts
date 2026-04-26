@@ -26,6 +26,7 @@ import { featureEnabled } from '../config/features.js';
 import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
 import { formatRequestLogPrefix } from '../telemetry/requestContext.js';
+import { assertPathInsideWorkspace, resolveRealPathInsideWorkspace } from '../workspace/pathValidation.js';
 import { evaluateStartupAutoIndex } from './tooling/indexFreshness.js';
 import {
   filterEntriesByPathScope,
@@ -5859,10 +5860,7 @@ export class ContextServiceClient {
     // Build full path safely
     const fullPath = path.resolve(this.workspacePath, normalized);
 
-    // Ensure the resolved path is still within workspace
-    if (!fullPath.startsWith(path.resolve(this.workspacePath))) {
-      throw new Error(`Invalid path: path must be within workspace.`);
-    }
+    assertPathInsideWorkspace(path.resolve(this.workspacePath), fullPath);
 
     return fullPath;
   }
@@ -5877,13 +5875,15 @@ export class ContextServiceClient {
       throw new Error(`File not found: ${filePath}`);
     }
 
+    const safeFullPath = resolveRealPathInsideWorkspace(this.workspacePath, fullPath);
+
     // Check file size
-    const stats = fs.statSync(fullPath);
+    const stats = fs.statSync(safeFullPath);
     if (stats.size > MAX_FILE_SIZE) {
       throw new Error(`File too large: ${filePath} (${(stats.size / 1024 / 1024).toFixed(2)}MB > ${MAX_FILE_SIZE / 1024 / 1024}MB limit)`);
     }
 
-    return fs.readFileSync(fullPath, 'utf-8');
+    return fs.readFileSync(safeFullPath, 'utf-8');
   }
 
   // ==========================================================================
