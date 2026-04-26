@@ -204,7 +204,7 @@ const EXCLUDED_DIRECTORIES = new Set([
 
 function isArtifactLikeFile(relativePath: string): boolean {
   const basename = path.basename(relativePath);
-  return basename.startsWith('.context-engine-') || basename.startsWith('.augment-');
+  return basename.startsWith('.context-engine-');
 }
 
 function normalizePath(relativePath: string): string {

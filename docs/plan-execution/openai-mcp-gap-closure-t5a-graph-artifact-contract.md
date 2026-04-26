@@ -49,7 +49,7 @@ Out of scope for the first rollout:
 - remote graph stores
 - process-external daemons
 - hidden artifacts outside the workspace root
-- reuse of `.augment-*` legacy names for new graph artifacts
+- reuse of legacy branded names for new graph artifacts
 
 ### Naming and compatibility rules
 
