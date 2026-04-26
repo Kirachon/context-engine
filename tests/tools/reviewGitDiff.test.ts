@@ -110,6 +110,64 @@ describe('review_git_diff tool', () => {
     );
   });
 
+  it('rejects injected git targets before review execution', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-git-diff-injection-'));
+    const markerPath = path.join(os.tmpdir(), 'context-engine-git-diff-cmdi-review-poc.txt');
+    fs.rmSync(markerPath, { force: true });
+
+    sh('git', ['init'], tmp);
+    sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+    sh('git', ['config', 'user.name', 'CI'], tmp);
+
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+    sh('git', ['commit', '-m', 'base'], tmp);
+
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () => {
+        throw new Error('review should not run for invalid git target');
+      },
+    } as any;
+
+    await expect(
+      handleReviewGitDiff(
+        { target: `HEAD & echo POC>${markerPath} & rem` },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/Invalid git target/i);
+
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it('rejects unsafe include_patterns before review execution', async () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-git-diff-path-injection-'));
+
+    sh('git', ['init'], tmp);
+    sh('git', ['config', 'user.email', 'ci@example.com'], tmp);
+    sh('git', ['config', 'user.name', 'CI'], tmp);
+
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 1;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+    sh('git', ['commit', '-m', 'base'], tmp);
+    writeFile(path.join(tmp, 'src/a.ts'), ['export const a = 2;', ''].join('\n'));
+    sh('git', ['add', '.'], tmp);
+
+    const mockServiceClient = {
+      getWorkspacePath: () => tmp,
+      searchAndAsk: async () => {
+        throw new Error('review should not run for invalid path pattern');
+      },
+    } as any;
+
+    await expect(
+      handleReviewGitDiff(
+        { target: 'staged', include_patterns: ['../outside.ts'] },
+        mockServiceClient
+      )
+    ).rejects.toThrow(/Invalid git path pattern/i);
+  });
+
   it('blocks review when include_patterns exclude all matching changes', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-review-git-diff-scope-empty-'));
 

@@ -6,6 +6,8 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
+import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import {
   execGitCommand,
@@ -85,6 +87,44 @@ describe('getGitDiff', () => {
     expect(result.command).toContain('HEAD');
     expect(result.files_changed).toBeDefined();
   });
+
+  it('rejects shell metacharacters in target refs without executing injected commands', async () => {
+    const markerPath = path.join(os.tmpdir(), 'context-engine-git-diff-cmdi-poc.txt');
+    fs.rmSync(markerPath, { force: true });
+
+    await expect(
+      getGitDiff(workspacePath, {
+        target: `HEAD & echo POC>${markerPath} & rem`,
+      })
+    ).rejects.toThrow(/Invalid git target/i);
+
+    expect(fs.existsSync(markerPath)).toBe(false);
+  });
+
+  it('rejects shell metacharacters in base refs', async () => {
+    await expect(
+      getGitDiff(workspacePath, {
+        target: 'HEAD',
+        base: 'main; echo POC',
+      })
+    ).rejects.toThrow(/Invalid git base/i);
+  });
+
+  it('rejects option-like and traversal path patterns before invoking git', async () => {
+    await expect(
+      getGitDiff(workspacePath, {
+        target: 'staged',
+        pathPatterns: ['--output=/tmp/poc'],
+      })
+    ).rejects.toThrow(/Invalid git path pattern/i);
+
+    await expect(
+      getGitDiff(workspacePath, {
+        target: 'staged',
+        pathPatterns: ['../outside.ts'],
+      })
+    ).rejects.toThrow(/Invalid git path pattern/i);
+  });
 });
 
 // ============================================================================
@@ -116,6 +156,12 @@ describe('Convenience Functions', () => {
       expect(true).toBe(true);
     }
   });
+
+  it('getCommitDiff rejects unsafe commit-ish values', async () => {
+    await expect(getCommitDiff(workspacePath, 'HEAD & echo POC')).rejects.toThrow(
+      /Invalid git commit/i
+    );
+  });
 });
 
 // ============================================================================
@@ -146,4 +192,3 @@ describe('Diff Parsing Logic', () => {
     }
   });
 });
-

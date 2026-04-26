@@ -50,6 +50,73 @@ export interface GitStatusResult {
   has_staged: boolean;
 }
 
+const GIT_REF_MAX_LENGTH = 1024;
+const GIT_PATH_PATTERN_MAX_LENGTH = 4096;
+const SAFE_GIT_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._/@-]*$/;
+
+function validateSafeGitRef(value: unknown, fieldName: string): string {
+  if (typeof value !== 'string') {
+    throw new Error(`Invalid git ${fieldName}: must be a safe branch name or commit hash`);
+  }
+
+  const trimmed = value.trim();
+  if (
+    trimmed.length === 0 ||
+    trimmed.length > GIT_REF_MAX_LENGTH ||
+    trimmed !== value ||
+    !SAFE_GIT_REF_PATTERN.test(trimmed) ||
+    trimmed.startsWith('-') ||
+    trimmed.endsWith('.') ||
+    trimmed.endsWith('/') ||
+    trimmed.includes('..') ||
+    trimmed.includes('@{') ||
+    trimmed.includes('//') ||
+    trimmed.split('/').some((segment) => segment.length === 0 || segment.endsWith('.lock'))
+  ) {
+    throw new Error(`Invalid git ${fieldName}: must be a safe branch name or commit hash`);
+  }
+
+  return trimmed;
+}
+
+function validateContextLines(value: number): number {
+  if (!Number.isInteger(value) || value < 0 || value > 1000) {
+    throw new Error('Invalid git contextLines: must be an integer between 0 and 1000');
+  }
+  return value;
+}
+
+function validateGitPathPatterns(patterns: unknown): string[] {
+  if (!Array.isArray(patterns)) {
+    throw new Error('Invalid git path pattern: must be a safe workspace-relative path or glob');
+  }
+
+  return patterns.map((pattern) => {
+    if (typeof pattern !== 'string') {
+      throw new Error('Invalid git path pattern: must be a string');
+    }
+
+    let normalized = pattern.trim().replace(/\\/g, '/');
+    while (normalized.startsWith('./')) {
+      normalized = normalized.slice(2);
+    }
+    normalized = normalized.replace(/\/{2,}/g, '/');
+
+    if (
+      normalized.length === 0 ||
+      normalized.length > GIT_PATH_PATTERN_MAX_LENGTH ||
+      normalized.startsWith('-') ||
+      /^(?:\/|[A-Za-z]:\/|\/\/)/.test(normalized) ||
+      /[\0\r\n]/.test(normalized) ||
+      normalized.split('/').some((segment) => segment === '..')
+    ) {
+      throw new Error('Invalid git path pattern: must be a safe workspace-relative path or glob');
+    }
+
+    return normalized;
+  });
+}
+
 // ============================================================================
 // Git Command Execution
 // ============================================================================
@@ -65,6 +132,7 @@ export function execGitCommand(
     const proc = spawn('git', args, {
       cwd: workspacePath,
       stdio: ['ignore', 'pipe', 'pipe'],
+      shell: false,
     });
 
     let stdout = '';
@@ -137,9 +205,11 @@ export async function getGitDiff(
   options: GitDiffOptions = {}
 ): Promise<GitDiffResult> {
   const { target = 'staged', base, pathPatterns = [], contextLines = 3 } = options;
+  const safeContextLines = validateContextLines(contextLines);
+  const safePathPatterns = validateGitPathPatterns(pathPatterns);
 
   // Build the git diff command
-  const args: string[] = ['diff', `--unified=${contextLines}`];
+  const args: string[] = ['diff', `--unified=${safeContextLines}`];
 
   // Handle different target types
   if (target === 'staged') {
@@ -149,17 +219,20 @@ export async function getGitDiff(
   } else if (target === 'head') {
     args.push('HEAD');
   } else if (base) {
+    const safeBase = validateSafeGitRef(base, 'base');
+    const safeTarget = validateSafeGitRef(target, 'target');
     // Compare base...target
-    args.push(`${base}...${target}`);
+    args.push(`${safeBase}...${safeTarget}`);
   } else {
+    const safeTarget = validateSafeGitRef(target, 'target');
     // Compare against target directly (e.g., branch name or commit)
-    args.push(target);
+    args.push(safeTarget);
   }
 
   // Add path patterns if specified
-  if (pathPatterns.length > 0) {
+  if (safePathPatterns.length > 0) {
     args.push('--');
-    args.push(...pathPatterns);
+    args.push(...safePathPatterns);
   }
 
   const command = `git ${args.join(' ')}`;
@@ -258,10 +331,13 @@ export async function getCommitDiff(
   options: Pick<GitDiffOptions, 'pathPatterns' | 'contextLines'> = {}
 ): Promise<GitDiffResult> {
   const { pathPatterns = [], contextLines = 3 } = options;
-  const args = ['show', commitHash, '--format=', `--unified=${contextLines}`];
-  if (pathPatterns.length > 0) {
+  const safeCommitHash = validateSafeGitRef(commitHash, 'commit');
+  const safeContextLines = validateContextLines(contextLines);
+  const safePathPatterns = validateGitPathPatterns(pathPatterns);
+  const args = ['show', safeCommitHash, '--format=', `--unified=${safeContextLines}`];
+  if (safePathPatterns.length > 0) {
     args.push('--');
-    args.push(...pathPatterns);
+    args.push(...safePathPatterns);
   }
   const command = `git ${args.join(' ')}`;
   const result = await execGitCommand(args, workspacePath);
