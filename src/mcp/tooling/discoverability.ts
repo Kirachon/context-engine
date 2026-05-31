@@ -1,4 +1,6 @@
 import type { Prompt, Resource, ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
+import { applyOutputSchema } from '../utils/outputSchemaContract.js';
+import { buildSelectionProfile, type ToolSelectionProfile } from './selectionProfile.js';
 
 type RelatedSurfaceMetadata = {
   tools?: string[];
@@ -51,6 +53,7 @@ export type ManifestDiscoverabilityEntry = {
   safety_hints?: string[];
   related_surfaces?: RelatedSurfaceMetadata;
   shared_contract?: ToolSharedContractMetadata;
+  selection_profile?: ToolSelectionProfile;
 };
 
 export type ManifestResourceDiscoverabilityEntry = ManifestDiscoverabilityEntry & {
@@ -1123,18 +1126,20 @@ export function applyToolDiscoverability<T extends { name: string; title?: strin
 ): T {
   const metadata = getToolDiscoverabilityMetadata(tool.name);
   if (!metadata) {
-    return tool;
+    return applyOutputSchema(tool);
   }
 
-  return {
+  return applyOutputSchema({
     ...tool,
     title: metadata.title,
     annotations: {
       ...(tool.annotations ?? {}),
       ...(metadata.annotations ?? {}),
     },
-  };
+  });
 }
+
+export { applyOutputSchema } from '../utils/outputSchemaContract.js';
 
 export function applyPromptDiscoverability<T extends Prompt>(prompt: T): T {
   const metadata = getPromptDiscoverabilityMetadata(prompt.name);
@@ -1162,7 +1167,10 @@ export function applyResourceDiscoverability<T extends Resource>(resource: T): T
 
 export function buildManifestDiscoverability() {
   return {
-    tools: Object.entries(TOOL_DISCOVERABILITY).map(([name, metadata]) => toManifestEntry(name, metadata)),
+    tools: Object.entries(TOOL_DISCOVERABILITY).map(([name, metadata]) => ({
+      ...toManifestEntry(name, metadata),
+      selection_profile: buildSelectionProfile(name, metadata),
+    })),
     prompts: Object.entries(PROMPT_DISCOVERABILITY).map(([name, metadata]) => toManifestEntry(name, metadata)),
     resources: RESOURCE_DISCOVERABILITY.map((metadata) => ({
       ...toManifestEntry(metadata.uriPattern, metadata),

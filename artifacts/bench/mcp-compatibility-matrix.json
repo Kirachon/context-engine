@@ -1,0 +1,121 @@
+{
+  "status": "PASS",
+  "version": 1,
+  "generated_at": "2026-05-31T09:42:05.586Z",
+  "repo_root": "D:\\GitProjects\\context-engine",
+  "summary": {
+    "surfaces_total": 7,
+    "surfaces_passed": 7,
+    "surfaces_failed": 0,
+    "checks_total": 8,
+    "checks_passed": 8,
+    "checks_failed": 0
+  },
+  "surfaces": [
+    {
+      "id": "structured-outputs",
+      "label": "Structured outputs, old-client text, and transport parity",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/mcp/outputSchemaContract.test.ts, tests/integration/client-compat.test.ts, tests/integration/mcpTransportParity.test.ts, tests/integration/mcpErrorParity.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/mcp/outputSchemaContract.test.ts tests/integration/client-compat.test.ts tests/integration/mcpTransportParity.test.ts tests/integration/mcpErrorParity.test.ts",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "resources",
+      "label": "Resources list/read, URI safety, MIME, and error parity",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/mcp/resourceRouter.test.ts, tests/mcp/resourceTemplates.test.ts, tests/mcp/resourcePolicyReads.test.ts, tests/mcp/resourceSafety.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/mcp/resourceRouter.test.ts tests/mcp/resourceTemplates.test.ts tests/mcp/resourcePolicyReads.test.ts tests/mcp/resourceSafety.test.ts",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "policy",
+      "label": "Discoverability, capabilities, and client-aware policy",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/mcp/discoverability.test.ts, tests/mcp/serverCapabilities.test.ts, tests/mcp/clientCapabilities.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/mcp/discoverability.test.ts tests/mcp/serverCapabilities.test.ts tests/mcp/clientCapabilities.test.ts",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "tasks",
+      "label": "Task lifecycle, cancellation, and review integration",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/mcp/taskManager.test.ts, tests/mcp/reviewTaskIntegration.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/mcp/taskManager.test.ts tests/mcp/reviewTaskIntegration.test.ts",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "auth",
+      "label": "HTTP auth scopes and default local compatibility",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/integration/httpAuthScopes.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/integration/httpAuthScopes.test.ts",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "roots",
+      "label": "MCP roots negotiation and single-workspace compatibility",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/mcp/rootsManager.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/mcp/rootsManager.test.ts",
+          "exit_code": 0
+        }
+      ]
+    },
+    {
+      "id": "evals",
+      "label": "MCP eval smoke harness and informational baseline gate",
+      "status": "pass",
+      "checks": [
+        {
+          "name": "tests/evals/mcpEvalSmoke.test.ts",
+          "kind": "jest",
+          "status": "pass",
+          "detail": "jest tests/evals/mcpEvalSmoke.test.ts",
+          "exit_code": 0
+        },
+        {
+          "name": "scripts/ci/run-mcp-eval-smoke.ts",
+          "kind": "script",
+          "status": "pass",
+          "detail": "scripts/ci/run-mcp-eval-smoke.ts",
+          "exit_code": 0
+        }
+      ]
+    }
+  ]
+}

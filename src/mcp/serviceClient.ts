@@ -27,6 +27,8 @@ import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
 import { formatRequestLogPrefix } from '../telemetry/requestContext.js';
 import { assertPathInsideWorkspace, resolveRealPathInsideWorkspace } from '../workspace/pathValidation.js';
+import type { RootsManager } from './roots/rootsManager.js';
+import type { ClientCapabilitiesManager } from './capabilities/clientCapabilities.js';
 import { evaluateStartupAutoIndex } from './tooling/indexFreshness.js';
 import {
   filterEntriesByPathScope,
@@ -1557,6 +1559,8 @@ interface SemanticSearchInFlightRequest {
 
 export class ContextServiceClient {
   private workspacePath: string;
+  private rootsManager: RootsManager | null = null;
+  private clientCapabilitiesManager: ClientCapabilitiesManager | null = null;
   private indexChain: Promise<void> = Promise.resolve();
   private indexStateStore: JsonIndexStateStore | null = null;
   private indexStateProviderMismatchWarned = false;
@@ -1789,7 +1793,12 @@ export class ContextServiceClient {
   }
 
   private getFallbackDiscoverFilesCacheKey(): string {
-    return this.workspacePath;
+    if (!this.rootsManager?.isEnforcementActive()) {
+      return this.workspacePath;
+    }
+
+    const allowedRoots = this.rootsManager.getAllowedRoots().join('|');
+    return `${this.workspacePath}::roots::${allowedRoots}`;
   }
 
   private async getCachedFallbackFiles(options?: { bypassCache?: boolean }): Promise<string[]> {
@@ -1812,7 +1821,7 @@ export class ContextServiceClient {
       return cached.files;
     }
 
-    const fetchFiles = this.discoverFiles(this.workspacePath);
+    const fetchFiles = this.discoverWorkspaceFiles();
     if (!bypassCache) {
       this.fallbackDiscoverFilesInFlight = fetchFiles;
     }
@@ -1925,6 +1934,23 @@ export class ContextServiceClient {
    */
   getWorkspacePath(): string {
     return this.workspacePath;
+  }
+
+  setRootsManager(rootsManager: RootsManager | null): void {
+    this.rootsManager = rootsManager;
+    this.fallbackDiscoverFilesCache = null;
+  }
+
+  getRootsManager(): RootsManager | null {
+    return this.rootsManager;
+  }
+
+  setClientCapabilitiesManager(manager: ClientCapabilitiesManager | null): void {
+    this.clientCapabilitiesManager = manager;
+  }
+
+  getClientCapabilitiesManager(): ClientCapabilitiesManager | null {
+    return this.clientCapabilitiesManager;
   }
 
   /**
@@ -2427,6 +2453,24 @@ export class ContextServiceClient {
     }
 
     return files;
+  }
+
+  private filterPathsByClientRoots(paths: string[]): string[] {
+    return this.rootsManager?.filterAllowedRelativePaths(paths) ?? paths;
+  }
+
+  private async discoverWorkspaceFiles(): Promise<string[]> {
+    const indexingRoots = this.rootsManager?.getIndexingRoots() ?? [this.workspacePath];
+    const discovered = new Set<string>();
+
+    for (const indexingRoot of indexingRoots) {
+      const files = await this.discoverFiles(indexingRoot, this.workspacePath);
+      for (const filePath of files) {
+        discovered.add(filePath);
+      }
+    }
+
+    return this.filterPathsByClientRoots([...discovered]);
   }
 
   /**
@@ -3441,7 +3485,7 @@ export class ContextServiceClient {
   private async indexWorkspaceLocalNativeFallback(): Promise<IndexResult> {
     const startTime = Date.now();
     this.loadIgnorePatterns();
-    const filePaths = await this.discoverFiles(this.workspacePath);
+    const filePaths = await this.discoverWorkspaceFiles();
     const indexedAtIso = new Date().toISOString();
     if (filePaths.length === 0) {
       this.updateIndexStatus({
@@ -3833,7 +3877,7 @@ export class ContextServiceClient {
    * Incrementally index a list of file paths (relative to workspace)
    */
   async indexFiles(filePaths: string[]): Promise<IndexResult> {
-    return this.retrievalProvider.indexFiles(filePaths);
+    return this.retrievalProvider.indexFiles(this.filterPathsByClientRoots(filePaths));
   }
 
   /**
@@ -5861,6 +5905,10 @@ export class ContextServiceClient {
     const fullPath = path.resolve(this.workspacePath, normalized);
 
     assertPathInsideWorkspace(path.resolve(this.workspacePath), fullPath);
+
+    if (this.rootsManager?.isEnforcementActive() && !this.rootsManager.isAbsolutePathAllowed(fullPath)) {
+      throw new Error(`Invalid path: path is outside client-provided roots.`);
+    }
 
     return fullPath;
   }

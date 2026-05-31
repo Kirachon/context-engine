@@ -1,10 +1,14 @@
 import { beforeEach, describe, expect, it, jest } from '@jest/globals';
 
 import {
+  buildWhyThisContextStructuredContent,
+  formatWhyThisContextText,
   handleWhyThisContext,
+  whyThisContextOutputSchema,
   whyThisContextTool,
 } from '../../src/mcp/tools/whyThisContext.js';
 import type { ContextBundle } from '../../src/mcp/serviceClient.js';
+import { validateStructuredContent } from '../../src/mcp/utils/outputSchemaContract.js';
 
 function createContextBundle(): ContextBundle {
   return {
@@ -108,7 +112,8 @@ describe('why_this_context tool', () => {
   });
 
   it('explains selected context files using the shared provenance and explainability contract', async () => {
-    const parsed = JSON.parse(await handleWhyThisContext({ query: ' login flow ' }, mockServiceClient as any));
+    const result = await handleWhyThisContext({ query: ' login flow ' }, mockServiceClient as any);
+    const parsed = JSON.parse(result.content[0].text);
 
     expect(parsed).toEqual({
       query: 'login flow',
@@ -153,6 +158,9 @@ describe('why_this_context tool', () => {
       }),
     });
 
+    expect(result.structuredContent).toEqual(parsed);
+    expect(validateStructuredContent('why_this_context', result.structuredContent).valid).toBe(true);
+
     expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith('login flow', expect.objectContaining({
       maxFiles: 5,
       tokenBudget: 8000,
@@ -187,7 +195,8 @@ describe('why_this_context tool', () => {
       return bundle;
     });
 
-    const parsed = JSON.parse(await handleWhyThisContext({ query: 'login flow', max_files: 1 }, mockServiceClient as any));
+    const result = await handleWhyThisContext({ query: 'login flow', max_files: 1 }, mockServiceClient as any);
+    const parsed = JSON.parse(result.content[0].text);
 
     expect(parsed.files[0]).toEqual(expect.objectContaining({
       degraded: true,
@@ -201,6 +210,7 @@ describe('why_this_context tool', () => {
       degraded: true,
       degraded_reasons: expect.arrayContaining(['graph_stale']),
     }));
+    expect(result.structuredContent).toEqual(parsed);
   });
 
   it('validates required input and supports scoped retrieval knobs', async () => {
@@ -228,8 +238,21 @@ describe('why_this_context tool', () => {
     }));
   });
 
+  it('formats backward-compatible JSON text from structured content', async () => {
+    const bundle = createContextBundle();
+    const structuredContent = buildWhyThisContextStructuredContent('login flow', bundle, {
+      tokenBudget: 8000,
+      includeRelated: true,
+    });
+
+    expect(formatWhyThisContextText(structuredContent)).toBe(JSON.stringify(structuredContent, null, 2));
+  });
+
   it('exports a stable additive schema', () => {
-    expect(whyThisContextTool).toMatchInlineSnapshot(`
+    expect(whyThisContextTool.outputSchema).toEqual(whyThisContextOutputSchema);
+
+    const { outputSchema: _outputSchema, ...toolWithoutOutputSchema } = whyThisContextTool;
+    expect(toolWithoutOutputSchema).toMatchInlineSnapshot(`
 {
   "description": "Explain why files were selected into a context bundle using the shared retrieval provenance and explainability contract.
 

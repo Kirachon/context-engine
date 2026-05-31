@@ -1,0 +1,37 @@
+MCP compatibility release gate (S9B)
+config=D:\GitProjects\context-engine\config\ci\mcp-compatibility-matrix.json
+generated_at=2026-05-31T09:42:05.586Z
+status=PASS
+surfaces=7/7
+checks=8/8
+
+[surface] structured-outputs: Structured outputs, old-client text, and transport parity
+PASS jest:tests/mcp/outputSchemaContract.test.ts, tests/integration/client-compat.test.ts, tests/integration/mcpTransportParity.test.ts, tests/integration/mcpErrorParity.test.ts: jest tests/mcp/outputSchemaContract.test.ts tests/integration/client-compat.test.ts tests/integration/mcpTransportParity.test.ts tests/integration/mcpErrorParity.test.ts
+surface_status=PASS
+
+[surface] resources: Resources list/read, URI safety, MIME, and error parity
+PASS jest:tests/mcp/resourceRouter.test.ts, tests/mcp/resourceTemplates.test.ts, tests/mcp/resourcePolicyReads.test.ts, tests/mcp/resourceSafety.test.ts: jest tests/mcp/resourceRouter.test.ts tests/mcp/resourceTemplates.test.ts tests/mcp/resourcePolicyReads.test.ts tests/mcp/resourceSafety.test.ts
+surface_status=PASS
+
+[surface] policy: Discoverability, capabilities, and client-aware policy
+PASS jest:tests/mcp/discoverability.test.ts, tests/mcp/serverCapabilities.test.ts, tests/mcp/clientCapabilities.test.ts: jest tests/mcp/discoverability.test.ts tests/mcp/serverCapabilities.test.ts tests/mcp/clientCapabilities.test.ts
+surface_status=PASS
+
+[surface] tasks: Task lifecycle, cancellation, and review integration
+PASS jest:tests/mcp/taskManager.test.ts, tests/mcp/reviewTaskIntegration.test.ts: jest tests/mcp/taskManager.test.ts tests/mcp/reviewTaskIntegration.test.ts
+surface_status=PASS
+
+[surface] auth: HTTP auth scopes and default local compatibility
+PASS jest:tests/integration/httpAuthScopes.test.ts: jest tests/integration/httpAuthScopes.test.ts
+surface_status=PASS
+
+[surface] roots: MCP roots negotiation and single-workspace compatibility
+PASS jest:tests/mcp/rootsManager.test.ts: jest tests/mcp/rootsManager.test.ts
+surface_status=PASS
+
+[surface] evals: MCP eval smoke harness and informational baseline gate
+PASS jest:tests/evals/mcpEvalSmoke.test.ts: jest tests/evals/mcpEvalSmoke.test.ts
+PASS script:scripts/ci/run-mcp-eval-smoke.ts: scripts/ci/run-mcp-eval-smoke.ts
+surface_status=PASS
+
+MCP compatibility matrix passed.

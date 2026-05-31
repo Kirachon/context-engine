@@ -3,11 +3,20 @@
 **Query:** "database schema"
 **Found:** 2 matching snippets
 
+**Query Mode:** semantic
+**Hybrid Components:** semantic
+**Quality Guard:** disabled
+**Fallback State:** inactive
+
+**Ranking Diagnostics:** ranking_mode=v1; score_spread=0.160; source_consensus=1; fallback_reason=none; rerank_gate_state=disabled
+
 ## Results by File
 
 ### 1. `src/db/connection.ts` 🔥
 
 **Lines 1-3** (88% match)
+
+Trace: source_stage=semantic; match_type=semantic
 
 ```
 export function connect() {
@@ -19,6 +28,8 @@ export function connect() {
 ### 2. `src/db/schema.ts` ✅
 
 **Lines 1-3** (72% match)
+
+Trace: source_stage=semantic; match_type=semantic
 
 ```
 export const schema = {

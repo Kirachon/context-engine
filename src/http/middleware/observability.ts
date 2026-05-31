@@ -28,7 +28,7 @@ export function observabilityMiddleware(
     return;
   }
 
-  const spanName = requestContext.transport === 'mcp' ? 'mcp.http.request' : 'http.request';
+  const spanName = requestContext.transport === 'mcp' ? 'mcp.http.inbound' : 'http.inbound';
   const routeId = resolveRouteId(req);
 
   withObservabilitySpanContext(
@@ -40,7 +40,7 @@ export function observabilityMiddleware(
         'context_engine.transport': requestContext.transport,
         'context_engine.route': routeId,
         'context_engine.operation': requestContext.transport === 'mcp' ? 'mcp_http_request' : 'http_request',
-        'http.request.method': req.method,
+        'http.method': req.method,
       },
     },
     (span) => {

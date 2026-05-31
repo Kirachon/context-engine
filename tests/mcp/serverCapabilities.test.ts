@@ -11,7 +11,11 @@ describe('MCP server capability parity', () => {
       },
       resources: {
         capability: { subscribe: false, listChanged: true },
-        runtimeReceipts: ['ListResourcesRequestSchema', 'ReadResourceRequestSchema'],
+        runtimeReceipts: [
+          'ListResourcesRequestSchema',
+          'ListResourceTemplatesRequestSchema',
+          'ReadResourceRequestSchema',
+        ],
       },
       prompts: {
         capability: { listChanged: true },
@@ -20,6 +24,10 @@ describe('MCP server capability parity', () => {
       logging: {
         capability: undefined,
         runtimeReceipts: [],
+      },
+      roots: {
+        capability: undefined,
+        runtimeReceipts: ['RootsListChangedNotificationSchema', 'roots/list'],
       },
     });
   });

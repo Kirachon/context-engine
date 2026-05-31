@@ -4,6 +4,7 @@ import { DEFAULT_NEGOTIATED_PROTOCOL_VERSION } from '@modelcontextprotocol/sdk/t
 
 import { ContextEngineHttpServer, type HttpServerOptions } from '../../src/http/httpServer.js';
 import { REQUEST_ID_HEADER } from '../../src/http/middleware/logging.js';
+import { getToolManifest } from '../../src/mcp/tools/manifest.js';
 
 type MockServiceClient = {
   getIndexStatus: ReturnType<typeof jest.fn>;
@@ -19,6 +20,7 @@ function createMockServiceClient(): MockServiceClient {
   return {
     getIndexStatus: jest.fn(() => ({
       workspace: '/tmp/workspace',
+      status: 'idle',
       lastIndexed: '2026-04-10T00:00:00.000Z',
       fileCount: 12,
       isStale: false,
@@ -68,7 +70,147 @@ function parseSseJsonPayload(text: string): Record<string, unknown> {
   return JSON.parse(dataLine.slice('data: '.length)) as Record<string, unknown>;
 }
 
+async function initializeMcpSession(app: ReturnType<typeof createApp>['app']): Promise<string> {
+  const initializeResponse = await request(app)
+    .post('/mcp')
+    .set('accept', 'application/json, text/event-stream')
+    .send({
+      jsonrpc: '2.0',
+      id: 900,
+      method: 'initialize',
+      params: {
+        protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+        capabilities: {},
+        clientInfo: {
+          name: 'http-test-client',
+          version: '1.0.0',
+        },
+      },
+    });
+
+  expect(initializeResponse.status).toBe(200);
+  const sessionId = initializeResponse.headers['mcp-session-id'];
+  expect(typeof sessionId).toBe('string');
+
+  const initializedResponse = await request(app)
+    .post('/mcp')
+    .set('accept', 'application/json, text/event-stream')
+    .set('mcp-session-id', sessionId as string)
+    .send({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+    });
+
+  expect([200, 202, 204]).toContain(initializedResponse.status);
+  return sessionId as string;
+}
+
 describe('MCP HTTP transport', () => {
+  it('preserves text and structuredContent for structured tool results', async () => {
+    const { app } = createApp();
+    const sessionId = await initializeMcpSession(app);
+
+    const manifestResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', sessionId)
+      .send({
+        jsonrpc: '2.0',
+        id: 901,
+        method: 'tools/call',
+        params: {
+          name: 'tool_manifest',
+          arguments: {},
+        },
+      });
+
+    expect(manifestResponse.status).toBe(200);
+    const manifestPayload = parseSseJsonPayload(manifestResponse.text);
+    const manifestResult = manifestPayload.result as {
+      content?: Array<{ text?: string }>;
+      structuredContent?: unknown;
+    };
+    expect(JSON.parse(manifestResult.content?.[0]?.text ?? '{}')).toEqual(getToolManifest());
+    expect(manifestResult.structuredContent).toEqual(getToolManifest());
+
+    const statusResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', sessionId)
+      .send({
+        jsonrpc: '2.0',
+        id: 902,
+        method: 'tools/call',
+        params: {
+          name: 'index_status',
+          arguments: {},
+        },
+      });
+
+    expect(statusResponse.status).toBe(200);
+    const statusPayload = parseSseJsonPayload(statusResponse.text);
+    const statusResult = statusPayload.result as {
+      content?: Array<{ text?: string }>;
+      structuredContent?: unknown;
+    };
+    expect(statusResult.content?.[0]?.text).toContain('# 🩺 Index Status');
+    expect(statusResult.content?.[0]?.text).toContain('**Workspace**');
+    expect(statusResult.structuredContent).toEqual(
+      expect.objectContaining({
+        schema_version: 1,
+        status: expect.objectContaining({
+          workspace: '/tmp/workspace',
+          state: 'idle',
+          fileCount: 12,
+        }),
+        freshness: expect.objectContaining({
+          code: 'healthy',
+          severity: 'ok',
+        }),
+        guidance: [],
+      })
+    );
+
+    const whyThisContextResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', sessionId)
+      .send({
+        jsonrpc: '2.0',
+        id: 903,
+        method: 'tools/call',
+        params: {
+          name: 'why_this_context',
+          arguments: {
+            query: 'auth flow',
+            max_files: 2,
+            token_budget: 1200,
+          },
+        },
+      });
+
+    expect(whyThisContextResponse.status).toBe(200);
+    const whyThisContextPayload = parseSseJsonPayload(whyThisContextResponse.text);
+    const whyThisContextResult = whyThisContextPayload.result as {
+      content?: Array<{ text?: string }>;
+      structuredContent?: unknown;
+    };
+    const whyThisContextParsed = JSON.parse(whyThisContextResult.content?.[0]?.text ?? '{}');
+    expect(whyThisContextParsed).toEqual(
+      expect.objectContaining({
+        query: 'auth flow',
+        files: [],
+        metadata: expect.objectContaining({
+          total_files: 0,
+          analysis_scope: 'context_selection_receipts_only',
+          deterministic: true,
+          token_budget: 1200,
+        }),
+      })
+    );
+    expect(whyThisContextResult.structuredContent).toEqual(whyThisContextParsed);
+  });
+
   it('supports initialize and tools/list over POST /mcp with session reuse', async () => {
     const { app } = createApp();
 

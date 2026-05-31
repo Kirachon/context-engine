@@ -27,12 +27,24 @@ import { handleEnhancePrompt } from '../../src/mcp/tools/enhance.js';
 import { handleGetFile } from '../../src/mcp/tools/file.js';
 import { handleIndexStatus } from '../../src/mcp/tools/status.js';
 import { handleToolManifest } from '../../src/mcp/tools/manifest.js';
+import { normalizeToolResult } from '../../src/mcp/utils/resultBuilder.js';
 import { handleVisualizePlan } from '../../src/mcp/tools/plan.js';
 import { handleListMemories } from '../../src/mcp/tools/memory.js';
 import { reviewMemorySuggestionsTool } from '../../src/mcp/tools/memoryReview.js';
 import { indexWorkspaceTool } from '../../src/mcp/tools/index.js';
 import { codebaseRetrievalTool } from '../../src/mcp/tools/codebaseRetrieval.js';
-import { semanticSearchTool } from '../../src/mcp/tools/search.js';
+import {
+  semanticSearchTool,
+  symbolSearchTool,
+  symbolReferencesTool,
+  symbolDefinitionTool,
+  callRelationshipsTool,
+} from '../../src/mcp/tools/search.js';
+import { findCallersTool } from '../../src/mcp/tools/findCallers.js';
+import { findCalleesTool } from '../../src/mcp/tools/findCallees.js';
+import { traceSymbolTool } from '../../src/mcp/tools/traceSymbol.js';
+import { impactAnalysisTool } from '../../src/mcp/tools/impactAnalysis.js';
+import { whyThisContextTool } from '../../src/mcp/tools/whyThisContext.js';
 import { getFileTool } from '../../src/mcp/tools/file.js';
 import { getContextTool } from '../../src/mcp/tools/context.js';
 import { enhancePromptTool } from '../../src/mcp/tools/enhance.js';
@@ -218,6 +230,15 @@ function getRegisteredTools(): ToolDefinition[] {
     indexWorkspaceTool,
     codebaseRetrievalTool,
     semanticSearchTool,
+    symbolSearchTool,
+    symbolReferencesTool,
+    symbolDefinitionTool,
+    callRelationshipsTool,
+    findCallersTool,
+    findCalleesTool,
+    traceSymbolTool,
+    impactAnalysisTool,
+    whyThisContextTool,
     getFileTool,
     getContextTool,
     enhancePromptTool,
@@ -287,13 +308,13 @@ async function runCase(caseDef: (typeof SNAPSHOT_CASES)[number], serviceClient: 
   try {
     switch (caseDef.tool) {
       case 'codebase_retrieval':
-        output = await handleCodebaseRetrieval(caseDef.args as any, serviceClient as any);
+        output = normalizeToolResult(await handleCodebaseRetrieval(caseDef.args as any, serviceClient as any)).content[0].text;
         break;
       case 'semantic_search':
-        output = await handleSemanticSearch(caseDef.args as any, serviceClient as any);
+        output = normalizeToolResult(await handleSemanticSearch(caseDef.args as any, serviceClient as any)).content[0].text;
         break;
       case 'get_context_for_prompt':
-        output = await handleGetContext(caseDef.args as any, serviceClient as any);
+        output = normalizeToolResult(await handleGetContext(caseDef.args as any, serviceClient as any)).content[0].text;
         break;
       case 'enhance_prompt':
         output = await handleEnhancePrompt(caseDef.args as any, serviceClient as any);
@@ -302,10 +323,10 @@ async function runCase(caseDef: (typeof SNAPSHOT_CASES)[number], serviceClient: 
         output = await handleGetFile(caseDef.args as any, serviceClient as any);
         break;
       case 'index_status':
-        output = await handleIndexStatus(caseDef.args as any, serviceClient as any);
+        output = normalizeToolResult(await handleIndexStatus(caseDef.args as any, serviceClient as any)).content[0].text;
         break;
       case 'tool_manifest':
-        output = await handleToolManifest(caseDef.args as any, serviceClient as any);
+        output = normalizeToolResult(await handleToolManifest(caseDef.args as any, serviceClient as any)).content[0].text;
         break;
       case 'visualize_plan':
         output = await handleVisualizePlan(caseDef.args as any, serviceClient as any);

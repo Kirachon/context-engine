@@ -1,0 +1,82 @@
+[
+  {
+    "intent": "find code by concept before opening files",
+    "expected_tools": ["codebase_retrieval", "semantic_search"]
+  },
+  {
+    "intent": "search for retry logic snippets",
+    "expected_tools": ["semantic_search"]
+  },
+  {
+    "intent": "gather broad context for a prompt",
+    "expected_tools": ["get_context_for_prompt"]
+  },
+  {
+    "intent": "open a known file path",
+    "expected_tools": ["get_file"]
+  },
+  {
+    "intent": "find a symbol declaration",
+    "expected_tools": ["symbol_definition", "symbol_search"]
+  },
+  {
+    "intent": "find callers and callees of a function",
+    "expected_tools": ["call_relationships", "find_callers", "find_callees"]
+  },
+  {
+    "intent": "estimate change impact for a symbol",
+    "expected_tools": ["impact_analysis"]
+  },
+  {
+    "intent": "explain why context files were selected",
+    "expected_tools": ["why_this_context"]
+  },
+  {
+    "intent": "check whether the index is stale",
+    "expected_tools": ["index_status"]
+  },
+  {
+    "intent": "refresh semantic index",
+    "expected_tools": ["index_workspace"]
+  },
+  {
+    "intent": "clear corrupted local index cache",
+    "expected_tools": ["clear_index"]
+  },
+  {
+    "intent": "show available MCP tools and capabilities",
+    "expected_tools": ["tool_manifest"]
+  },
+  {
+    "intent": "save a durable memory",
+    "expected_tools": ["add_memory"]
+  },
+  {
+    "intent": "create an implementation plan",
+    "expected_tools": ["create_plan"]
+  },
+  {
+    "intent": "execute the next plan step",
+    "expected_tools": ["execute_plan", "start_step"]
+  },
+  {
+    "intent": "delete an obsolete saved plan",
+    "expected_tools": ["delete_plan"]
+  },
+  {
+    "intent": "review staged git changes",
+    "expected_tools": ["review_git_diff", "review_auto"]
+  },
+  {
+    "intent": "run deterministic review invariants",
+    "expected_tools": ["check_invariants", "review_diff"]
+  },
+  {
+    "intent": "run TypeScript static analysis",
+    "expected_tools": ["run_static_analysis"]
+  },
+  {
+    "intent": "mask secrets before sending content to a model",
+    "expected_tools": ["scrub_secrets"]
+  }
+]

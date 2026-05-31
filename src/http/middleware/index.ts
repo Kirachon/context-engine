@@ -10,3 +10,4 @@ export { observabilityMiddleware } from './observability.js';
 export { errorHandler, HttpError, badRequest, notFound, internalError } from './errorHandler.js';
 export { createApiRateLimitMiddleware, createMcpConnectionRateLimitMiddleware } from './rateLimit.js';
 export { createRequestTimeoutMiddleware } from './requestTimeout.js';
+export { createHttpAuthMiddleware } from './httpAuth.js';

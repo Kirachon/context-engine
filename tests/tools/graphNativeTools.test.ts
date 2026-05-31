@@ -16,6 +16,12 @@ import {
   impactAnalysisTool,
   handleImpactAnalysis,
 } from '../../src/mcp/tools/impactAnalysis.js';
+import { normalizeToolResult } from '../../src/mcp/utils/resultBuilder.js';
+
+function parseJsonHandlerResult(result: unknown): Record<string, unknown> {
+  const normalized = normalizeToolResult(result as never);
+  return JSON.parse(normalized.content[0].text) as Record<string, unknown>;
+}
 
 describe('graph-native MCP tools', () => {
   let mockServiceClient: {
@@ -175,7 +181,7 @@ describe('graph-native MCP tools', () => {
   });
 
   it('returns direct callers with explicit graph receipts', async () => {
-    const parsed = JSON.parse(await handleFindCallers({ symbol: ' targetSymbol ' }, mockServiceClient as any));
+    const parsed = parseJsonHandlerResult(await handleFindCallers({ symbol: ' targetSymbol ' }, mockServiceClient as any));
 
     expect(parsed).toEqual({
       symbol: 'targetSymbol',
@@ -198,7 +204,7 @@ describe('graph-native MCP tools', () => {
   });
 
   it('returns explicit degraded receipts for direct callees fallback mode', async () => {
-    const parsed = JSON.parse(await handleFindCallees({ symbol: 'targetSymbol', top_k: 5 }, mockServiceClient as any));
+    const parsed = parseJsonHandlerResult(await handleFindCallees({ symbol: 'targetSymbol', top_k: 5 }, mockServiceClient as any));
 
     expect(parsed).toEqual({
       symbol: 'targetSymbol',
@@ -218,7 +224,7 @@ describe('graph-native MCP tools', () => {
   });
 
   it('traces a symbol across definition, references, callers, and callees', async () => {
-    const parsed = JSON.parse(await handleTraceSymbol({ symbol: 'targetSymbol', top_k: 7 }, mockServiceClient as any));
+    const parsed = parseJsonHandlerResult(await handleTraceSymbol({ symbol: 'targetSymbol', top_k: 7 }, mockServiceClient as any));
 
     expect(parsed.trace_summary).toEqual({
       definition_found: true,
@@ -236,7 +242,7 @@ describe('graph-native MCP tools', () => {
   });
 
   it('computes a bounded direct impact summary with deterministic risk receipts', async () => {
-    const parsed = JSON.parse(await handleImpactAnalysis({ symbol: 'targetSymbol' }, mockServiceClient as any));
+    const parsed = parseJsonHandlerResult(await handleImpactAnalysis({ symbol: 'targetSymbol' }, mockServiceClient as any));
 
     expect(parsed.impact_summary).toEqual(expect.objectContaining({
       direct_reference_count: 2,
@@ -245,6 +251,30 @@ describe('graph-native MCP tools', () => {
       impacted_file_count: 4,
       risk_level: 'low',
     }));
+    expect(parsed.test_candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          path: 'tests/target.test.ts',
+          strategy: 'symbol_reference',
+          confidence: 'high',
+        }),
+      ])
+    );
+    expect(parsed.runtime_impact).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ path: 'src/target.ts', role: 'definition' }),
+        expect.objectContaining({ path: 'src/caller.ts' }),
+        expect.objectContaining({ path: 'src/callee.ts', role: 'callee' }),
+      ])
+    );
+    expect(parsed.recommended_validation).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          kind: 'test_command',
+          command: 'npm test -- --runInBand tests/target.test.ts',
+        }),
+      ])
+    );
     expect(parsed.metadata).toEqual(expect.objectContaining({
       transitive: false,
       deterministic: true,
@@ -260,11 +290,16 @@ describe('graph-native MCP tools', () => {
   });
 
   it('exports stable additive tool schemas', () => {
+    const { outputSchema: _findCallersOutputSchema, ...findCallersSchema } = findCallersTool;
+    const { outputSchema: _findCalleesOutputSchema, ...findCalleesSchema } = findCalleesTool;
+    const { outputSchema: _traceSymbolOutputSchema, ...traceSymbolSchema } = traceSymbolTool;
+    const { outputSchema: _impactAnalysisOutputSchema, ...impactAnalysisSchema } = impactAnalysisTool;
+
     expect([
-      findCallersTool,
-      findCalleesTool,
-      traceSymbolTool,
-      impactAnalysisTool,
+      findCallersSchema,
+      findCalleesSchema,
+      traceSymbolSchema,
+      impactAnalysisSchema,
     ]).toMatchInlineSnapshot(`
 [
   {

@@ -5,11 +5,56 @@
  */
 
 import { ContextServiceClient, IndexStatus } from '../serviceClient.js';
+import { indexStatusOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import { evaluateIndexFreshness } from './index.js';
+
+export { indexStatusOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 
 export interface IndexStatusArgs {
   // No arguments required for now
 }
+
+export type IndexStatusStructuredContent = {
+  schema_version: 1;
+  status: {
+    workspace: string;
+    state: IndexStatus['status'];
+    lastIndexed: string | null;
+    fileCount: number;
+    isStale: boolean;
+    lastError: string | null;
+  };
+  freshness: {
+    code: string;
+    severity: string;
+    summary: string;
+  };
+  guidance: string[];
+  embeddingRuntime: null | {
+    state: string;
+    configured: {
+      id: string;
+      modelId: string;
+      vectorDimension: number;
+    } | null;
+    active: {
+      id: string;
+      modelId: string;
+      vectorDimension: number;
+    } | null;
+    fallback: {
+      id: string;
+      modelId: string;
+      vectorDimension: number;
+    } | null;
+    lastFailure: string | null;
+    nextRetryAt: string | null;
+    loadFailures: number | null;
+    hashFallbackActive: boolean | null;
+  };
+};
 
 function formatTableCell(value: string | undefined): string {
   return (value ?? 'None')
@@ -17,7 +62,56 @@ function formatTableCell(value: string | undefined): string {
     .replace(/\|/g, '\\|');
 }
 
-function formatStatus(status: IndexStatus): string {
+function normalizeEmbeddingRuntime(status: IndexStatus): IndexStatusStructuredContent['embeddingRuntime'] {
+  const runtime = status.embeddingRuntime;
+  if (!runtime || runtime.state === 'uninitialized') {
+    return null;
+  }
+
+  const normalizeRuntime = (value: typeof runtime.active | undefined) =>
+    value
+      ? {
+          id: value.id,
+          modelId: value.modelId,
+          vectorDimension: value.vectorDimension,
+        }
+      : null;
+
+  return {
+    state: runtime.state,
+    configured: normalizeRuntime(runtime.configured),
+    active: normalizeRuntime(runtime.active),
+    fallback: normalizeRuntime(runtime.fallback),
+    lastFailure: runtime.lastFailure ?? null,
+    nextRetryAt: runtime.nextRetryAt ?? null,
+    loadFailures: runtime.loadFailures ?? null,
+    hashFallbackActive: runtime.hashFallbackActive ?? null,
+  };
+}
+
+export function buildIndexStatusStructuredContent(status: IndexStatus): IndexStatusStructuredContent {
+  const freshness = evaluateIndexFreshness(status);
+  return {
+    schema_version: 1,
+    status: {
+      workspace: status.workspace,
+      state: status.status,
+      lastIndexed: status.lastIndexed ?? null,
+      fileCount: status.fileCount,
+      isStale: status.isStale,
+      lastError: status.lastError ?? null,
+    },
+    freshness: {
+      code: freshness.code,
+      severity: freshness.severity,
+      summary: freshness.summary,
+    },
+    guidance: freshness.guidance,
+    embeddingRuntime: normalizeEmbeddingRuntime(status),
+  };
+}
+
+export function formatIndexStatusText(status: IndexStatus): string {
   const freshness = evaluateIndexFreshness(status);
   const statusEmoji =
     status.status === 'indexing'
@@ -68,9 +162,9 @@ function formatStatus(status: IndexStatus): string {
 export async function handleIndexStatus(
   _args: IndexStatusArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<ContextEngineToolResult<IndexStatusStructuredContent>> {
   const status = serviceClient.getIndexStatus();
-  return formatStatus(status);
+  return okResult(formatIndexStatusText(status), buildIndexStatusStructuredContent(status));
 }
 
 export const indexStatusTool = {
@@ -81,4 +175,5 @@ export const indexStatusTool = {
     properties: {},
     required: [],
   },
+  outputSchema: indexStatusOutputSchema,
 };

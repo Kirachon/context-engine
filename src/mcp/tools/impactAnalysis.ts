@@ -1,4 +1,14 @@
+import {
+  buildImpactAnalysisEnrichment,
+  type ImpactRisk,
+  type RecommendedValidation,
+  type RuntimeImpactEntry,
+  type TestCandidate,
+} from '../../analysis/testDiscovery.js';
+import { impactAnalysisOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 import { ContextServiceClient } from '../serviceClient.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import {
   validateBoolean,
   validateFiniteNumberInRange,
@@ -41,6 +51,45 @@ type SymbolDefinitionResult =
 type CallRelationshipsResult = {
   callers: Array<{ file: string; line: number; snippet: string; score: number; callerSymbol?: string }>;
   callees: Array<{ file: string; line: number; snippet: string; score: number; calleeSymbol: string }>;
+};
+
+export type ImpactAnalysisStructuredContent = {
+  symbol: string;
+  definition: SymbolDefinitionResult;
+  impact_summary: {
+    direct_reference_count: number;
+    direct_caller_count: number;
+    direct_callee_count: number;
+    impacted_file_count: number;
+    impacted_files: string[];
+    risk_level: 'low' | 'medium' | 'high';
+    risk_score: number;
+    risk_reasons: string[];
+  };
+  impact_surface: {
+    references: SearchResult[];
+    callers: CallRelationshipsResult['callers'];
+    callees: CallRelationshipsResult['callees'];
+  };
+  test_candidates: TestCandidate[];
+  runtime_impact: RuntimeImpactEntry[];
+  risks: ImpactRisk[];
+  recommended_validation: RecommendedValidation[];
+  metadata: Record<string, unknown> & {
+    requested_top_k: number;
+    graph_backed_operations: number;
+    heuristic_operations: number;
+    degraded: boolean;
+    degraded_reasons: string[];
+    diagnostics: {
+      symbol_definition: SymbolNavigationDiagnostics | null;
+      symbol_references: SymbolNavigationDiagnostics | null;
+      call_relationships: SymbolNavigationDiagnostics | null;
+    };
+    analysis_scope: 'direct_definition_references_and_call_edges_only';
+    transitive: false;
+    deterministic: true;
+  };
 };
 
 function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): SymbolNavigationDiagnostics | null {
@@ -135,10 +184,94 @@ function classifyImpactRisk(params: {
   return { level: 'low', reasons, score };
 }
 
+export function buildImpactAnalysisStructuredContent(params: {
+  symbol: string;
+  topK: number;
+  definition: SymbolDefinitionResult;
+  references: SearchResult[];
+  relationships: CallRelationshipsResult;
+  definitionDiagnostics: SymbolNavigationDiagnostics | null;
+  referenceDiagnostics: SymbolNavigationDiagnostics | null;
+  relationshipDiagnostics: SymbolNavigationDiagnostics | null;
+}): ImpactAnalysisStructuredContent {
+  const impactedFiles = buildImpactFiles(
+    params.definition,
+    params.references,
+    params.relationships.callers,
+    params.relationships.callees
+  );
+  const risk = classifyImpactRisk({
+    definitionFound: params.definition.found,
+    referenceCount: params.references.length,
+    callerCount: params.relationships.callers.length,
+    calleeCount: params.relationships.callees.length,
+    impactedFileCount: impactedFiles.length,
+  });
+  const degraded = buildDegradedSummary([
+    params.definitionDiagnostics,
+    params.referenceDiagnostics,
+    params.relationshipDiagnostics,
+  ]);
+  const enrichment = buildImpactAnalysisEnrichment({
+    symbol: params.symbol,
+    definition: params.definition,
+    references: params.references,
+    callers: params.relationships.callers,
+    callees: params.relationships.callees,
+    riskLevel: risk.level,
+    riskReasons: risk.reasons,
+    degraded: degraded.degraded,
+    degradedReasons: degraded.degraded_reasons,
+  });
+
+  return {
+    symbol: params.symbol,
+    definition: params.definition,
+    impact_summary: {
+      direct_reference_count: params.references.length,
+      direct_caller_count: params.relationships.callers.length,
+      direct_callee_count: params.relationships.callees.length,
+      impacted_file_count: impactedFiles.length,
+      impacted_files: impactedFiles,
+      risk_level: risk.level,
+      risk_score: risk.score,
+      risk_reasons: risk.reasons,
+    },
+    impact_surface: {
+      references: params.references,
+      callers: params.relationships.callers,
+      callees: params.relationships.callees,
+    },
+    test_candidates: enrichment.test_candidates,
+    runtime_impact: enrichment.runtime_impact,
+    risks: enrichment.risks,
+    recommended_validation: enrichment.recommended_validation,
+    metadata: {
+      requested_top_k: params.topK,
+      graph_backed_operations: degraded.graph_backed_operations,
+      heuristic_operations: degraded.heuristic_operations,
+      degraded: degraded.degraded,
+      degraded_reasons: degraded.degraded_reasons,
+      diagnostics: {
+        symbol_definition: params.definitionDiagnostics,
+        symbol_references: params.referenceDiagnostics,
+        call_relationships: params.relationshipDiagnostics,
+      },
+      analysis_scope: 'direct_definition_references_and_call_edges_only',
+      transitive: false,
+      deterministic: true,
+    },
+  };
+}
+
+export function formatImpactAnalysisText(content: ImpactAnalysisStructuredContent): string {
+  return JSON.stringify(content, null, 2);
+}
+
 export async function handleImpactAnalysis(
   args: ImpactAnalysisArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<ContextEngineToolResult<ImpactAnalysisStructuredContent>> {
   const symbol = validateTrimmedNonEmptyString(args.symbol, 'symbol');
   validateFiniteNumberInRange(args.top_k, 1, 100, 'invalid top_k');
   validateBoolean(args.bypass_cache, 'invalid bypass_cache');
@@ -172,59 +305,18 @@ export async function handleImpactAnalysis(
   }) as CallRelationshipsResult;
   const relationshipDiagnostics = getSymbolNavigationDiagnostics(serviceClient);
 
-  const impactedFiles = buildImpactFiles(
+  const structured = buildImpactAnalysisStructuredContent({
+    symbol,
+    topK,
     definition,
     references,
-    relationships.callers,
-    relationships.callees
-  );
-  const risk = classifyImpactRisk({
-    definitionFound: definition.found,
-    referenceCount: references.length,
-    callerCount: relationships.callers.length,
-    calleeCount: relationships.callees.length,
-    impactedFileCount: impactedFiles.length,
-  });
-  const degraded = buildDegradedSummary([
+    relationships,
     definitionDiagnostics,
     referenceDiagnostics,
     relationshipDiagnostics,
-  ]);
+  });
 
-  return JSON.stringify({
-    symbol,
-    definition,
-    impact_summary: {
-      direct_reference_count: references.length,
-      direct_caller_count: relationships.callers.length,
-      direct_callee_count: relationships.callees.length,
-      impacted_file_count: impactedFiles.length,
-      impacted_files: impactedFiles,
-      risk_level: risk.level,
-      risk_score: risk.score,
-      risk_reasons: risk.reasons,
-    },
-    impact_surface: {
-      references,
-      callers: relationships.callers,
-      callees: relationships.callees,
-    },
-    metadata: {
-      requested_top_k: topK,
-      graph_backed_operations: degraded.graph_backed_operations,
-      heuristic_operations: degraded.heuristic_operations,
-      degraded: degraded.degraded,
-      degraded_reasons: degraded.degraded_reasons,
-      diagnostics: {
-        symbol_definition: definitionDiagnostics,
-        symbol_references: referenceDiagnostics,
-        call_relationships: relationshipDiagnostics,
-      },
-      analysis_scope: 'direct_definition_references_and_call_edges_only',
-      transitive: false,
-      deterministic: true,
-    },
-  }, null, 2);
+  return okResult(formatImpactAnalysisText(structured), structured);
 }
 
 export const impactAnalysisTool = {
@@ -272,4 +364,5 @@ degraded-mode behavior stays explicit and deterministic.`,
     },
     required: ['symbol'],
   },
+  outputSchema: impactAnalysisOutputSchema,
 };

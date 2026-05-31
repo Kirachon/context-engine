@@ -33,20 +33,20 @@ describe('graph-native tool registration metadata', () => {
   });
 
   it('registers the new handlers in buildToolRegistryEntries', () => {
-    const serverSource = fs.readFileSync(
-      path.join(process.cwd(), 'src/mcp/server.ts'),
+    const registrySource = fs.readFileSync(
+      path.join(process.cwd(), 'src/mcp/toolRegistry.ts'),
       'utf8'
     );
 
-    expect(serverSource).toContain('findCallersTool');
-    expect(serverSource).toContain('findCalleesTool');
-    expect(serverSource).toContain('traceSymbolTool');
-    expect(serverSource).toContain('impactAnalysisTool');
-    expect(serverSource).toContain('whyThisContextTool');
-    expect(serverSource).toContain("handler: (args) => handleFindCallers(args as any, serviceClient)");
-    expect(serverSource).toContain("handler: (args) => handleFindCallees(args as any, serviceClient)");
-    expect(serverSource).toContain("handler: (args) => handleTraceSymbol(args as any, serviceClient)");
-    expect(serverSource).toContain("handler: (args) => handleImpactAnalysis(args as any, serviceClient)");
-    expect(serverSource).toContain("handler: (args) => handleWhyThisContext(args as any, serviceClient)");
+    expect(registrySource).toContain('findCallersTool');
+    expect(registrySource).toContain('findCalleesTool');
+    expect(registrySource).toContain('traceSymbolTool');
+    expect(registrySource).toContain('impactAnalysisTool');
+    expect(registrySource).toContain('whyThisContextTool');
+    expect(registrySource).toContain("handler: (args) => handleFindCallers(args as any, serviceClient)");
+    expect(registrySource).toContain("handler: (args) => handleFindCallees(args as any, serviceClient)");
+    expect(registrySource).toContain("handler: (args) => handleTraceSymbol(args as any, serviceClient)");
+    expect(registrySource).toContain("handler: (args) => handleImpactAnalysis(args as any, serviceClient)");
+    expect(registrySource).toContain("handler: (args) => handleWhyThisContext(args as any, serviceClient)");
   });
 });

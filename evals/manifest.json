@@ -1,0 +1,25 @@
+{
+  "schema_version": 2,
+  "name": "mcp-eval-smoke",
+  "description": "Shadow eval harness for retrieval, context-pack assembly, safety, usefulness, and performance checks.",
+  "gate_mode": "informational",
+  "gate_tiers": {
+    "informational": "Default CI behavior: emit artifacts and warnings without failing the job.",
+    "strict": "Opt-in via --strict: fail when normalized output diverges from baseline."
+  },
+  "sections": ["retrieval", "context_packs", "safety", "usefulness", "performance"],
+  "fixtures": {
+    "context_pack": "evals/fixtures/context-pack-fixtures.json",
+    "retrieval": "evals/fixtures/retrieval-fixtures.json",
+    "safety": "evals/fixtures/safety-fixtures.json",
+    "usefulness": "tests/fixtures/tool-selection-intents.json",
+    "performance": "evals/fixtures/performance-budgets.json"
+  },
+  "artifacts": {
+    "raw": "artifacts/evals/mcp-eval-smoke.json",
+    "normalized": "artifacts/evals/mcp-eval-smoke.normalized.json",
+    "baseline": "evals/baseline/mcp-eval-smoke.normalized.json"
+  },
+  "runner": "scripts/ci/run-mcp-eval-smoke.ts",
+  "npm_script": "ci:check:mcp-eval-smoke"
+}

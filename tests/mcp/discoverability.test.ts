@@ -1,13 +1,113 @@
 import { describe, expect, it } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   PROMPT_DEFINITIONS,
-  buildResourceList,
   buildToolRegistryEntries,
 } from '../../src/mcp/server.js';
+import {
+  TOOL_MANIFEST_RESOURCE_URI,
+  buildResourceList,
+} from '../../src/mcp/resources/resourceRouter.js';
 import { listRestApiToolMappings } from '../../src/mcp/tooling/discoverability.js';
 import { getToolManifest } from '../../src/mcp/tools/manifest.js';
 import { initializePlanManagementServices } from '../../src/mcp/tools/planManagement.js';
+
+type SelectionProfile = {
+  schema_version: 1;
+  intent_tags: string[];
+  preferred_when: string[];
+  avoid_when: string[];
+  selection_signals: string[];
+  operation_risk: string[];
+};
+
+const ALLOWED_INTENT_TAGS = new Set([
+  'index',
+  'search',
+  'context',
+  'symbol',
+  'file',
+  'enhancement',
+  'manifest',
+  'memory',
+  'planning',
+  'approval',
+  'execution_tracking',
+  'review',
+  'static_analysis',
+  'security',
+  'resource',
+  'diagnostics',
+]);
+
+const ALLOWED_OPERATION_RISKS = new Set([
+  'read_only',
+  'writes_workspace_state',
+  'destructive',
+  'runs_local_process',
+  'uses_git_state',
+  'uses_external_sources',
+  'may_send_to_llm',
+  'secret_exposure_risk',
+]);
+
+const POISONING_PATTERNS = [
+  /ignore\s+(all\s+)?previous\s+instructions/iu,
+  /exfiltrat/iu,
+  /leak\s+(the\s+)?secret/iu,
+  /run\s+.+command/iu,
+  /delete\s+.+files?/iu,
+];
+
+function metadataText(entry: {
+  title?: string;
+  usage_hint?: string;
+  examples?: string[];
+  safety_hints?: string[];
+  selection_profile?: SelectionProfile;
+}): string {
+  return [
+    entry.title,
+    entry.usage_hint,
+    ...(entry.examples ?? []),
+    ...(entry.safety_hints ?? []),
+    ...(entry.selection_profile?.preferred_when ?? []),
+    ...(entry.selection_profile?.avoid_when ?? []),
+    ...(entry.selection_profile?.selection_signals ?? []),
+    ...(entry.selection_profile?.intent_tags ?? []),
+  ]
+    .filter((value): value is string => Boolean(value))
+    .join(' ');
+}
+
+function selectToolsForIntent(intent: string, tools: Array<{
+  id: string;
+  title?: string;
+  usage_hint?: string;
+  examples?: string[];
+  selection_profile?: SelectionProfile;
+}>): string[] {
+  const tokens = intent
+    .toLowerCase()
+    .split(/[^a-z0-9_]+/u)
+    .filter((token) => token.length > 2);
+
+  return tools
+    .map((tool) => {
+      const haystack = metadataText(tool).toLowerCase();
+      const tokenScore = tokens.reduce((score, token) => score + (haystack.includes(token) ? 1 : 0), 0);
+      const tagScore = (tool.selection_profile?.intent_tags ?? []).reduce(
+        (score, tag) => score + (tokens.some((token) => tag.includes(token) || token.includes(tag)) ? 3 : 0),
+        0
+      );
+      return { id: tool.id, score: tokenScore + tagScore };
+    })
+    .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id))
+    .slice(0, 3)
+    .map((tool) => tool.id);
+}
 
 describe('MCP discoverability metadata', () => {
   it('applies canonical tool metadata to runtime tool registration and tool_manifest', () => {
@@ -253,7 +353,7 @@ describe('MCP discoverability metadata', () => {
   it('applies canonical resource titles to runtime resources and tool_manifest', async () => {
     initializePlanManagementServices(process.cwd());
     const resources = await buildResourceList();
-    const manifestResource = resources.find((resource) => resource.uri === 'context-engine://tool-manifest');
+    const manifestResource = resources.find((resource) => resource.uri === TOOL_MANIFEST_RESOURCE_URI);
 
     expect(manifestResource).toEqual(
       expect.objectContaining({
@@ -319,5 +419,137 @@ describe('MCP discoverability metadata', () => {
         )
         .sort((left, right) => left.path.localeCompare(right.path))
     ).toEqual(listRestApiToolMappings());
+  });
+
+  it('adds additive selection profiles for every runtime tool without changing tool registration', () => {
+    const entries = buildToolRegistryEntries({} as any);
+    const manifest = getToolManifest() as {
+      discoverability?: {
+        tools?: Array<{
+          id: string;
+          safety_hints?: string[];
+          annotations?: unknown;
+          selection_profile?: SelectionProfile;
+        }>;
+      };
+    };
+
+    const manifestTools = manifest.discoverability?.tools ?? [];
+    const runtimeToolNames = new Set(entries.map((entry) => entry.tool.name));
+
+    expect(manifestTools).toHaveLength(runtimeToolNames.size);
+    for (const entry of manifestTools) {
+      expect(runtimeToolNames.has(entry.id)).toBe(true);
+      expect(entry.selection_profile).toEqual(
+        expect.objectContaining({
+          schema_version: 1,
+          intent_tags: expect.any(Array),
+          preferred_when: expect.any(Array),
+          avoid_when: expect.any(Array),
+          selection_signals: expect.any(Array),
+          operation_risk: expect.any(Array),
+        })
+      );
+      expect(entry.selection_profile?.intent_tags.length).toBeGreaterThan(0);
+      expect(entry.selection_profile?.preferred_when.length).toBeGreaterThan(0);
+      expect(entry.selection_profile?.selection_signals.length).toBeGreaterThan(0);
+      for (const tag of entry.selection_profile?.intent_tags ?? []) {
+        expect(ALLOWED_INTENT_TAGS.has(tag)).toBe(true);
+      }
+      for (const risk of entry.selection_profile?.operation_risk ?? []) {
+        expect(ALLOWED_OPERATION_RISKS.has(risk)).toBe(true);
+      }
+    }
+  });
+
+  it('keeps selection metadata declarative and flags risky tools with safety hints', () => {
+    const manifest = getToolManifest() as {
+      discoverability?: {
+        tools?: Array<{
+          id: string;
+          title?: string;
+          usage_hint?: string;
+          examples?: string[];
+          safety_hints?: string[];
+          selection_profile?: SelectionProfile;
+        }>;
+      };
+    };
+
+    for (const entry of manifest.discoverability?.tools ?? []) {
+      const text = metadataText(entry);
+      expect(text).not.toMatch(/[\0\r]/u);
+      for (const pattern of POISONING_PATTERNS) {
+        expect(text).not.toMatch(pattern);
+      }
+
+      const risks = new Set(entry.selection_profile?.operation_risk ?? []);
+      const requiresSafetyHint = [...risks].some((risk) => risk !== 'read_only');
+      if (requiresSafetyHint) {
+        expect(entry.safety_hints?.length ?? 0).toBeGreaterThan(0);
+      }
+      if (risks.has('destructive')) {
+        expect(entry.safety_hints?.join(' ')).toMatch(/destructive|remove|rollback/i);
+      }
+    }
+  });
+
+  it('pins risk labels for representative sensitive tools', () => {
+    const manifest = getToolManifest() as {
+      discoverability?: {
+        tools?: Array<{
+          id: string;
+          selection_profile?: SelectionProfile;
+        }>;
+      };
+    };
+    const byId = new Map((manifest.discoverability?.tools ?? []).map((tool) => [tool.id, tool]));
+    const expectedRisks: Record<string, string[]> = {
+      index_workspace: ['writes_workspace_state'],
+      clear_index: ['destructive'],
+      delete_plan: ['destructive'],
+      review_auto: ['uses_git_state', 'may_send_to_llm'],
+      run_static_analysis: ['runs_local_process'],
+      scrub_secrets: ['secret_exposure_risk'],
+      reactive_review_pr: ['writes_workspace_state', 'may_send_to_llm'],
+      pause_review: ['writes_workspace_state'],
+      resume_review: ['writes_workspace_state'],
+    };
+
+    for (const [toolId, risks] of Object.entries(expectedRisks)) {
+      expect(byId.has(toolId)).toBe(true);
+      expect(byId.get(toolId)?.selection_profile?.operation_risk).toEqual(expect.arrayContaining(risks));
+    }
+  });
+
+  it('maps representative user intents to the expected tools using selection metadata', () => {
+    const fixturePath = path.join(process.cwd(), 'tests', 'fixtures', 'tool-selection-intents.json');
+    const fixtures = JSON.parse(fs.readFileSync(fixturePath, 'utf8')) as Array<{
+      intent: string;
+      expected_tools: string[];
+    }>;
+    const manifest = getToolManifest() as {
+      discoverability?: {
+        tools?: Array<{
+          id: string;
+          title?: string;
+          usage_hint?: string;
+          examples?: string[];
+          selection_profile?: SelectionProfile;
+        }>;
+      };
+    };
+    const tools = manifest.discoverability?.tools ?? [];
+
+    let topOneMatches = 0;
+    for (const fixture of fixtures) {
+      const selectedTools = selectToolsForIntent(fixture.intent, tools);
+      if (fixture.expected_tools.includes(selectedTools[0] ?? '')) {
+        topOneMatches += 1;
+      }
+      expect(selectedTools).toEqual(expect.arrayContaining([expect.stringMatching(new RegExp(`^(${fixture.expected_tools.join('|')})$`))]));
+    }
+
+    expect(topOneMatches / fixtures.length).toBeGreaterThanOrEqual(0.85);
   });
 });

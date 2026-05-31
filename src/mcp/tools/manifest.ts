@@ -6,6 +6,11 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import { buildManifestDiscoverability } from '../tooling/discoverability.js';
+import { toolManifestOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
+
+export { toolManifestOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 
 export interface ToolManifestArgs {
   // No arguments
@@ -268,8 +273,8 @@ export function getToolManifest(): typeof toolManifest {
 export async function handleToolManifest(
   _args: ToolManifestArgs,
   _serviceClient: ContextServiceClient
-): Promise<string> {
-  return JSON.stringify(toolManifest, null, 2);
+): Promise<ContextEngineToolResult<typeof toolManifest>> {
+  return okResult(JSON.stringify(toolManifest, null, 2), toolManifest);
 }
 
 export const toolManifestTool = {
@@ -280,4 +285,5 @@ export const toolManifestTool = {
     properties: {},
     required: [],
   },
+  outputSchema: toolManifestOutputSchema,
 };

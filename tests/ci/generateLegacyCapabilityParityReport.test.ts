@@ -46,7 +46,51 @@ function runChecker(args: string[], cwd: string): { status: number; stdout: stri
   };
 }
 
+function collectFixtureFilePaths(fixture: Record<string, unknown>): string[] {
+  const out = new Set<string>();
+  const defaults = fixture.defaults;
+  if (defaults && typeof defaults === 'object' && !Array.isArray(defaults)) {
+    const retrievalParityPath = (defaults as Record<string, unknown>).retrieval_parity_path;
+    if (typeof retrievalParityPath === 'string') {
+      out.add(retrievalParityPath);
+    }
+  }
+
+  const checks = fixture.checks;
+  if (Array.isArray(checks)) {
+    for (const check of checks) {
+      if (!check || typeof check !== 'object' || Array.isArray(check)) {
+        continue;
+      }
+      const filePath = (check as Record<string, unknown>).path;
+      if (typeof filePath === 'string' && filePath !== '@retrieval_parity') {
+        out.add(filePath);
+      }
+    }
+  }
+
+  return [...out].sort();
+}
+
 describe('scripts/ci/generate-legacy-capability-parity-report.ts', () => {
+  it('keeps default fixture evidence paths present and eligible for CI checkout', () => {
+    const fixturePath = path.join(process.cwd(), 'config', 'ci', 'legacy-capability-parity-fixture-pack.json');
+    const fixture = JSON.parse(fs.readFileSync(fixturePath, 'utf8')) as Record<string, unknown>;
+    const fixtureFilePaths = collectFixtureFilePaths(fixture);
+
+    expect(fixtureFilePaths.length).toBeGreaterThan(0);
+    for (const relativePath of fixtureFilePaths) {
+      expect(fs.existsSync(path.join(process.cwd(), relativePath))).toBe(true);
+
+      const ignored = spawnSync('git', ['check-ignore', '--quiet', relativePath], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      expect(ignored.status).not.toBe(0);
+    }
+  });
+
   it('generates a full report from fixture-pack evidence and passes the checker', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-legacy-capability-parity-generator-pass-'));
     const matrixPath = path.join(tmp, 'matrix.json');

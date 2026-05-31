@@ -2,5 +2,9 @@
   "diagram_type": "dependencies",
   "mermaid": "graph TD\n    step_1[\"1. Setup\"]\n\n    classDef critical fill:#ff6b6b,stroke:#c0392b\n",
   "plan_id": "plan_test",
-  "plan_version": 1
+  "plan_version": 1,
+  "_meta": {
+    "tool": "visualize_plan",
+    "duration_ms": 0
+  }
 }

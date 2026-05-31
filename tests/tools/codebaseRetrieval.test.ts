@@ -8,6 +8,16 @@ import {
   codebaseRetrievalTool,
 } from '../../src/mcp/tools/codebaseRetrieval.js';
 import { SearchResult } from '../../src/mcp/serviceClient.js';
+import { normalizeToolResult } from '../../src/mcp/utils/resultBuilder.js';
+
+function toolText(result: unknown): string {
+  return normalizeToolResult(result as never).content[0].text;
+}
+
+function toolStructured<T>(result: unknown): T {
+  const normalized = normalizeToolResult(result as never);
+  return normalized.structuredContent as T;
+}
 
 describe('codebase_retrieval Tool', () => {
   let mockServiceClient: any;
@@ -59,7 +69,7 @@ describe('codebase_retrieval Tool', () => {
     mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
     const result = await handleCodebaseRetrieval({ query: 'test' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed).toHaveProperty('results');
     expect(Array.isArray(parsed.results)).toBe(true);
@@ -177,7 +187,7 @@ describe('codebase_retrieval Tool', () => {
       { query: 'v1 compact ignored', compact: true, response_version: 'v1' },
       mockServiceClient as any
     );
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.results[0].content).toBe('full snippet');
     expect(parsed.results[0]).not.toHaveProperty('preview');
@@ -195,7 +205,7 @@ describe('codebase_retrieval Tool', () => {
       { query: 'v2 metadata', response_version: 'v2' },
       mockServiceClient as any
     );
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata.responseVersion).toBe('v2');
     expect(parsed.metadata.providerResolution).toBe('hybrid');
@@ -213,7 +223,7 @@ describe('codebase_retrieval Tool', () => {
       { query: 'legacy version', response_version: 'v3' as any, compact: true, legacy_field: 'ignored' } as any,
       mockServiceClient as any
     );
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata).not.toHaveProperty('responseVersion');
     expect(parsed.metadata).not.toHaveProperty('providerResolution');
@@ -232,7 +242,7 @@ describe('codebase_retrieval Tool', () => {
       { query: 'compact', response_version: 'v2', compact: true },
       mockServiceClient as any
     );
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.results[0].file).toBe('src/compact.ts');
     expect(typeof parsed.results[0].score).toBe('number');
@@ -263,7 +273,7 @@ describe('codebase_retrieval Tool', () => {
     mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
     const result = await handleCodebaseRetrieval({ query: 'reason' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.results[0].reason).toMatch(/Semantic match/);
     expect(parsed.results[0].trace).toEqual(
@@ -309,7 +319,7 @@ describe('codebase_retrieval Tool', () => {
     mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
     const result = await handleCodebaseRetrieval({ query: 'login service', response_version: 'v2' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.results[0].provenance).toEqual(
       expect.objectContaining({
@@ -338,7 +348,7 @@ describe('codebase_retrieval Tool', () => {
     });
 
     const result = await handleCodebaseRetrieval({ query: 'diagnostics' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata.filtersApplied).toEqual(['exclude:artifacts', 'exclude:docs']);
     expect(parsed.metadata.filteredPathsCount).toBe(9);
@@ -357,7 +367,7 @@ describe('codebase_retrieval Tool', () => {
     }));
 
     const result = await handleCodebaseRetrieval({ query: 'legacy diagnostics' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata.filtersApplied).toEqual(['exclude:legacy']);
     expect(parsed.metadata.filteredPathsCount).toBe(3);
@@ -378,7 +388,7 @@ describe('codebase_retrieval Tool', () => {
     });
 
     const result = await handleCodebaseRetrieval({ query: 'strict offline' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.results).toEqual([]);
     expect(parsed.metadata.totalResults).toBe(0);
@@ -397,7 +407,7 @@ describe('codebase_retrieval Tool', () => {
     });
 
     const result = await handleCodebaseRetrieval({ query: 'stale' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata.freshnessWarning).toMatch(/index is stale/i);
     expect(parsed.metadata.indexStatus.isStale).toBe(true);
@@ -414,7 +424,7 @@ describe('codebase_retrieval Tool', () => {
     });
 
     const result = await handleCodebaseRetrieval({ query: 'restored-empty-index' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata.indexStatus.fileCount).toBe(0);
     expect(parsed.metadata.indexStatus.isStale).toBe(false);
@@ -433,7 +443,7 @@ describe('codebase_retrieval Tool', () => {
     });
 
     const result = await handleCodebaseRetrieval({ query: 'unhealthy' }, mockServiceClient as any);
-    const parsed = JSON.parse(result);
+    const parsed = JSON.parse(toolText(result));
 
     expect(parsed.metadata.freshnessWarning).toMatch(/index status is error/i);
     expect(parsed.metadata.freshnessWarning).toMatch(/reindexing succeeds/i);
@@ -444,5 +454,19 @@ describe('codebase_retrieval Tool', () => {
     expect(codebaseRetrievalTool.name).toBe('codebase_retrieval');
     expect(codebaseRetrievalTool.inputSchema.required).toContain('query');
     expect(Object.keys(codebaseRetrievalTool.inputSchema.properties)).toContain('profile');
+    expect(codebaseRetrievalTool.outputSchema).toBeDefined();
+  });
+
+  it('returns structuredContent that mirrors JSON text payload', async () => {
+    const mockResults: SearchResult[] = [
+      { path: 'src/a.ts', content: 'code a', lines: '1-5', relevanceScore: 0.9 },
+    ];
+    mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
+
+    const result = await handleCodebaseRetrieval({ query: 'test' }, mockServiceClient as any);
+    const structured = toolStructured<{ results: Array<{ file: string }> }>(result);
+
+    expect(structured.results[0]?.file).toBe('src/a.ts');
+    expect(JSON.parse(toolText(result))).toEqual(structured);
   });
 });

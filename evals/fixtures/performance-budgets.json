@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "description": "Deterministic structural performance budgets for MCP eval smoke.",
+  "budgets": {
+    "usefulness_top1_min": 0.85,
+    "context_pack_max_items": 100,
+    "safety_min_cases": 4,
+    "retrieval_min_cases": 3
+  }
+}

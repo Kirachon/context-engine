@@ -3,7 +3,11 @@
  */
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
-import { handleIndexStatus, indexStatusTool } from '../../src/mcp/tools/status.js';
+import {
+  buildIndexStatusStructuredContent,
+  handleIndexStatus,
+  indexStatusTool,
+} from '../../src/mcp/tools/status.js';
 import { IndexStatus } from '../../src/mcp/serviceClient.js';
 
 describe('index_status Tool', () => {
@@ -27,11 +31,41 @@ describe('index_status Tool', () => {
   it('should render status markdown', async () => {
     const result = await handleIndexStatus({}, mockServiceClient as any);
 
-    expect(result).toContain('# 🩺 Index Status');
-    expect(result).toContain('**Workspace**');
-    expect(result).toContain('**Status**');
-    expect(result).toContain('42');
-    expect(result).toContain('**Freshness**');
+    expect(result.content[0].text).toContain('# 🩺 Index Status');
+    expect(result.content[0].text).toContain('**Workspace**');
+    expect(result.content[0].text).toContain('**Status**');
+    expect(result.content[0].text).toContain('42');
+    expect(result.content[0].text).toContain('**Freshness**');
+    expect(result.structuredContent).toEqual(buildIndexStatusStructuredContent(mockServiceClient.getIndexStatus()));
+  });
+
+  it('should build structured content for healthy status', () => {
+    const status: IndexStatus = {
+      workspace: '/tmp/workspace',
+      status: 'idle',
+      lastIndexed: '2025-01-11T00:00:00.000Z',
+      fileCount: 42,
+      isStale: false,
+    };
+
+    expect(buildIndexStatusStructuredContent(status)).toEqual({
+      schema_version: 1,
+      status: {
+        workspace: '/tmp/workspace',
+        state: 'idle',
+        lastIndexed: '2025-01-11T00:00:00.000Z',
+        fileCount: 42,
+        isStale: false,
+        lastError: null,
+      },
+      freshness: {
+        code: 'healthy',
+        severity: 'ok',
+        summary: 'Index is healthy and up to date.',
+      },
+      guidance: [],
+      embeddingRuntime: null,
+    });
   });
 
   it('should surface stale index guidance', async () => {
@@ -46,9 +80,13 @@ describe('index_status Tool', () => {
 
     const result = await handleIndexStatus({}, mockServiceClient as any);
 
-    expect(result).toContain('stale');
-    expect(result).toContain('## Freshness Guidance');
-    expect(result).toContain('index_workspace');
+    expect(result.content[0].text).toContain('stale');
+    expect(result.content[0].text).toContain('## Freshness Guidance');
+    expect(result.content[0].text).toContain('index_workspace');
+
+    const structured = buildIndexStatusStructuredContent(staleStatus);
+    expect(structured.freshness.code).toBe('stale');
+    expect(structured.guidance).toEqual(expect.arrayContaining([expect.stringContaining('index_workspace')]));
   });
 
   it('should surface unindexed guidance when never indexed', async () => {
@@ -63,9 +101,14 @@ describe('index_status Tool', () => {
 
     const result = await handleIndexStatus({}, mockServiceClient as any);
 
-    expect(result).toContain('unindexed');
-    expect(result).toContain('Index has not been built yet');
-    expect(result).toContain('index_workspace');
+    expect(result.content[0].text).toContain('unindexed');
+    expect(result.content[0].text).toContain('Index has not been built yet');
+    expect(result.content[0].text).toContain('index_workspace');
+
+    const structured = buildIndexStatusStructuredContent(unindexedStatus);
+    expect(structured.status.lastIndexed).toBeNull();
+    expect(structured.freshness.code).toBe('unindexed');
+    expect(structured.guidance).toEqual(expect.arrayContaining([expect.stringContaining('index_workspace')]));
   });
 
   it('should surface error guidance for unhealthy index status', async () => {
@@ -81,10 +124,15 @@ describe('index_status Tool', () => {
 
     const result = await handleIndexStatus({}, mockServiceClient as any);
 
-    expect(result).toContain('⚠️ error');
-    expect(result).toContain('Index is unhealthy due to an indexing error.');
-    expect(result).toContain('reindex_workspace');
-    expect(result).toContain('Index worker exited with code 1');
+    expect(result.content[0].text).toContain('⚠️ error');
+    expect(result.content[0].text).toContain('Index is unhealthy due to an indexing error.');
+    expect(result.content[0].text).toContain('reindex_workspace');
+    expect(result.content[0].text).toContain('Index worker exited with code 1');
+
+    const structured = buildIndexStatusStructuredContent(errorStatus);
+    expect(structured.status.lastError).toBe('Index worker exited with code 1');
+    expect(structured.freshness.code).toBe('error');
+    expect(structured.guidance).toEqual(expect.arrayContaining([expect.stringContaining('reindex_workspace')]));
   });
 
   it('should surface degraded embedding runtime details', async () => {
@@ -125,12 +173,51 @@ describe('index_status Tool', () => {
 
     const result = await handleIndexStatus({}, mockServiceClient as any);
 
-    expect(result).toContain('**Embedding Runtime**');
-    expect(result).toContain('degraded');
-    expect(result).toContain('hash-32');
-    expect(result).toContain('model unavailable');
-    expect(result).toContain('2025-01-11T00:01:00.000Z');
-    expect(result).toContain('Embedding Load Failures');
+    expect(result.content[0].text).toContain('**Embedding Runtime**');
+    expect(result.content[0].text).toContain('degraded');
+    expect(result.content[0].text).toContain('hash-32');
+    expect(result.content[0].text).toContain('model unavailable');
+    expect(result.content[0].text).toContain('2025-01-11T00:01:00.000Z');
+    expect(result.content[0].text).toContain('Embedding Load Failures');
+
+    const structured = buildIndexStatusStructuredContent(degradedStatus);
+    expect(structured.embeddingRuntime).toEqual(
+      expect.objectContaining({
+        state: 'degraded',
+        active: expect.objectContaining({ id: 'hash-32' }),
+        configured: expect.objectContaining({ id: 'transformers:Xenova/all-MiniLM-L6-v2' }),
+        fallback: expect.objectContaining({ id: 'hash-32' }),
+        lastFailure: 'model unavailable',
+        nextRetryAt: '2025-01-11T00:01:00.000Z',
+        loadFailures: 2,
+        hashFallbackActive: true,
+      })
+    );
+  });
+
+  it('should omit uninitialized embedding runtime from structured content', () => {
+    const status: IndexStatus = {
+      workspace: '/tmp/workspace',
+      status: 'idle',
+      lastIndexed: '2025-01-11T00:00:00.000Z',
+      fileCount: 42,
+      isStale: false,
+      embeddingRuntime: {
+        state: 'uninitialized',
+        configured: {
+          id: 'transformers:Xenova/all-MiniLM-L6-v2',
+          modelId: 'Xenova/all-MiniLM-L6-v2',
+          vectorDimension: 384,
+        },
+        active: {
+          id: 'transformers:Xenova/all-MiniLM-L6-v2',
+          modelId: 'Xenova/all-MiniLM-L6-v2',
+          vectorDimension: 384,
+        },
+      } as IndexStatus['embeddingRuntime'],
+    };
+
+    expect(buildIndexStatusStructuredContent(status).embeddingRuntime).toBeNull();
   });
 
   it('should not classify status as unindexed when lastIndexed exists but fileCount is 0', async () => {
@@ -145,9 +232,9 @@ describe('index_status Tool', () => {
 
     const result = await handleIndexStatus({}, mockServiceClient as any);
 
-    expect(result).toContain('| **Freshness** | ✅ healthy |');
-    expect(result).not.toContain('unindexed');
-    expect(result).not.toContain('Index has not been built yet');
+    expect(result.content[0].text).toContain('| **Freshness** | ✅ healthy |');
+    expect(result.content[0].text).not.toContain('unindexed');
+    expect(result.content[0].text).not.toContain('Index has not been built yet');
   });
 
   it('should expose tool schema', () => {

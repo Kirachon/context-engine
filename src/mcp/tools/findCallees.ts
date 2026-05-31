@@ -1,4 +1,7 @@
+import { findCalleesOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 import { ContextServiceClient } from '../serviceClient.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import {
   validateBoolean,
   validateFiniteNumberInRange,
@@ -21,6 +24,27 @@ type SymbolNavigationDiagnostics = {
   graph_status: string;
   graph_degraded_reason: string | null;
   fallback_reason: string | null;
+};
+
+export type FindCalleesStructuredContent = {
+  symbol: string;
+  callees: Array<{
+    file: string;
+    line: number;
+    snippet: string;
+    score: number;
+    calleeSymbol: string;
+    column?: number;
+  }>;
+  metadata: Record<string, unknown> & {
+    requested_top_k: number;
+    graph_backed: boolean;
+    degraded: boolean;
+    degraded_reasons: string[];
+    diagnostics: SymbolNavigationDiagnostics | null;
+    analysis_scope: 'direct_callees_only';
+    deterministic: true;
+  };
 };
 
 function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): SymbolNavigationDiagnostics | null {
@@ -49,10 +73,39 @@ function buildDegradedSummary(diagnostics: SymbolNavigationDiagnostics | null): 
   };
 }
 
+export function buildFindCalleesStructuredContent(params: {
+  symbol: string;
+  topK: number;
+  callees: FindCalleesStructuredContent['callees'];
+  resultMetadata: Record<string, unknown>;
+  diagnostics: SymbolNavigationDiagnostics | null;
+}): FindCalleesStructuredContent {
+  const degraded = buildDegradedSummary(params.diagnostics);
+
+  return {
+    symbol: params.symbol,
+    callees: params.callees,
+    metadata: {
+      ...params.resultMetadata,
+      requested_top_k: params.topK,
+      graph_backed: params.diagnostics?.backend === 'graph',
+      degraded: degraded.degraded,
+      degraded_reasons: degraded.degraded_reasons,
+      diagnostics: params.diagnostics,
+      analysis_scope: 'direct_callees_only',
+      deterministic: true,
+    },
+  };
+}
+
+export function formatFindCalleesText(content: FindCalleesStructuredContent): string {
+  return JSON.stringify(content, null, 2);
+}
+
 export async function handleFindCallees(
   args: FindCalleesArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<ContextEngineToolResult<FindCalleesStructuredContent>> {
   const symbol = validateTrimmedNonEmptyString(args.symbol, 'symbol');
   validateFiniteNumberInRange(args.top_k, 1, 100, 'invalid top_k');
   validateBoolean(args.bypass_cache, 'invalid bypass_cache');
@@ -70,22 +123,15 @@ export async function handleFindCallees(
     languageHint: args.language_hint,
   });
   const diagnostics = getSymbolNavigationDiagnostics(serviceClient);
-  const degraded = buildDegradedSummary(diagnostics);
-
-  return JSON.stringify({
+  const structured = buildFindCalleesStructuredContent({
     symbol,
+    topK,
     callees: result.callees,
-    metadata: {
-      ...result.metadata,
-      requested_top_k: topK,
-      graph_backed: diagnostics?.backend === 'graph',
-      degraded: degraded.degraded,
-      degraded_reasons: degraded.degraded_reasons,
-      diagnostics,
-      analysis_scope: 'direct_callees_only',
-      deterministic: true,
-    },
-  }, null, 2);
+    resultMetadata: result.metadata,
+    diagnostics,
+  });
+
+  return okResult(formatFindCalleesText(structured), structured);
 }
 
 export const findCalleesTool = {
@@ -132,4 +178,5 @@ receipts when it had to fall back to heuristic extraction.`,
     },
     required: ['symbol'],
   },
+  outputSchema: findCalleesOutputSchema,
 };

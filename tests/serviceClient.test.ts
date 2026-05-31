@@ -1001,7 +1001,7 @@ describe('ContextServiceClient', () => {
         bypassCache: false,
       });
       const rootDiscoveryCalls = discoverFilesSpy.mock.calls.filter(
-        ([dirPath, relativeTo]) => dirPath === tempDir && relativeTo === undefined
+        ([dirPath, relativeTo]) => dirPath === tempDir && relativeTo === tempDir
       );
 
       expect(rootDiscoveryCalls).toHaveLength(1);
@@ -1032,7 +1032,7 @@ describe('ContextServiceClient', () => {
         bypassCache: true,
       });
       const rootDiscoveryCalls = discoverFilesSpy.mock.calls.filter(
-        ([dirPath, relativeTo]) => dirPath === tempDir && relativeTo === undefined
+        ([dirPath, relativeTo]) => dirPath === tempDir && relativeTo === tempDir
       );
 
       expect(rootDiscoveryCalls).toHaveLength(2);

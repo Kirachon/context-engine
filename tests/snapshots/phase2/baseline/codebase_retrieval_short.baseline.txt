@@ -5,7 +5,11 @@
       "content": "export function login(user) {\n  return user;\n}\n",
       "score": 0.92,
       "lines": "1-3",
-      "reason": "Semantic match for: \"login\""
+      "reason": "Semantic match for: \"login\"",
+      "trace": {
+        "source_stage": "semantic",
+        "match_type": "semantic"
+      }
     }
   ],
   "metadata": {
@@ -17,6 +21,23 @@
       "status": "idle",
       "fileCount": 42,
       "isStale": false
+    },
+    "filtersApplied": [],
+    "filteredPathsCount": 0,
+    "secondPassUsed": false,
+    "query_mode": "semantic",
+    "hybrid_components": [
+      "semantic"
+    ],
+    "quality_guard_state": "disabled",
+    "fallback_state": "inactive",
+    "ranking_diagnostics": {
+      "rankingMode": "v1",
+      "scoreSpread": 0.92,
+      "sourceConsensus": 1,
+      "fallbackState": "inactive",
+      "fallbackReason": "none",
+      "rerankGateState": "disabled"
     }
   }
 }

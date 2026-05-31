@@ -5,6 +5,7 @@ import os from 'os';
 import path from 'path';
 import { spawn, spawnSync } from 'child_process';
 import { handleToolManifest } from '../src/mcp/tools/manifest.js';
+import { normalizeToolResult } from '../src/mcp/utils/resultBuilder.js';
 
 const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const entrypoint = path.join(process.cwd(), 'src', 'index.ts');
@@ -563,7 +564,8 @@ describe('repo-aware launcher startup smoke', () => {
       const runtimeToolNames = (
         (listToolsResponse.result as { tools?: Array<{ name: string }> })?.tools ?? []
       ).map((tool) => tool.name);
-      const manifest = JSON.parse(await handleToolManifest({}, {} as never)) as { tools: string[] };
+      const manifestResult = normalizeToolResult(await handleToolManifest({}, {} as never));
+      const manifest = JSON.parse(manifestResult.content[0].text) as { tools: string[] };
 
       expect(runtimeToolNames).toEqual(manifest.tools);
       expect(server.stderr).toContain('Starting MCP server (stdio)...');

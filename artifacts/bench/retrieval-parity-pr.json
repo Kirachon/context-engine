@@ -1,9 +1,9 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-03-11T15:10:23.456Z",
+  "generated_at": "2026-05-31T07:37:28.534Z",
   "inputs": {
-    "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-parity-fixture-pack.json",
-    "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\auggie-capability-matrix.json",
+    "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\legacy-capability-parity-fixture-pack.json",
+    "matrix": "D:\\GitProjects\\context-engine\\config\\ci\\legacy-capability-matrix.json",
     "retrieval_parity": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\retrieval-parity-report.json",
     "out": "D:\\GitProjects\\context-engine\\artifacts\\bench\\retrieval-parity-pr.json"
   },
@@ -105,18 +105,18 @@
     },
     {
       "id": "parity.performance.query_latency_p95",
-      "status": "pass",
-      "message": "PASS parity.performance.query_latency_p95: value=82.86180000000002 lte 100"
+      "status": "fail",
+      "message": "FAIL parity.performance.query_latency_p95: value=223.6456 lte 100"
     },
     {
       "id": "parity.performance.throughput_qps",
-      "status": "pass",
-      "message": "PASS parity.performance.throughput_qps: value=5905.582733767872 gte 4000"
+      "status": "fail",
+      "message": "FAIL parity.performance.throughput_qps: value=2454.7766645084903 gte 4000"
     },
     {
       "id": "parity.performance.cpu_memory_budget",
-      "status": "pass",
-      "message": "PASS parity.performance.cpu_memory_budget: value=83.85537935005902 gte 50"
+      "status": "fail",
+      "message": "FAIL parity.performance.cpu_memory_budget: value=27.74229843066563 gte 50"
     },
     {
       "id": "parity.ops.shadow_receipt_present",
@@ -205,15 +205,15 @@
       "note": "D:\\GitProjects\\context-engine\\docs\\rollout-evidence\\2026-03-04\\ws20-stage3-gate-output.log"
     },
     "parity.performance.query_latency_p95": {
-      "value": 82.86180000000002,
+      "value": 223.6456,
       "note": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json#payload.timing.p95_ms"
     },
     "parity.performance.throughput_qps": {
-      "value": 5905.582733767872,
+      "value": 2454.7766645084903,
       "note": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json#payload.files_per_sec"
     },
     "parity.performance.cpu_memory_budget": {
-      "value": 83.85537935005902,
+      "value": 27.74229843066563,
       "note": "D:\\GitProjects\\context-engine\\artifacts\\bench\\pr-candidate.json#payload.mb_per_sec"
     },
     "parity.ops.shadow_receipt_present": {
@@ -350,20 +350,20 @@
     {
       "id": "parity.performance.query_latency_p95",
       "kind": "json_path_compare",
-      "status": "pass",
-      "message": "PASS parity.performance.query_latency_p95: value=82.86180000000002 lte 100"
+      "status": "fail",
+      "message": "FAIL parity.performance.query_latency_p95: value=223.6456 lte 100"
     },
     {
       "id": "parity.performance.throughput_qps",
       "kind": "json_path_compare",
-      "status": "pass",
-      "message": "PASS parity.performance.throughput_qps: value=5905.582733767872 gte 4000"
+      "status": "fail",
+      "message": "FAIL parity.performance.throughput_qps: value=2454.7766645084903 gte 4000"
     },
     {
       "id": "parity.performance.cpu_memory_budget",
       "kind": "json_path_compare",
-      "status": "pass",
-      "message": "PASS parity.performance.cpu_memory_budget: value=83.85537935005902 gte 50"
+      "status": "fail",
+      "message": "FAIL parity.performance.cpu_memory_budget: value=27.74229843066563 gte 50"
     },
     {
       "id": "parity.ops.shadow_receipt_present",
@@ -397,6 +397,6 @@
     }
   ],
   "gate": {
-    "status": "pass"
+    "status": "fail"
   }
 }

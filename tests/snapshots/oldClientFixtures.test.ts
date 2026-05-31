@@ -8,6 +8,11 @@ import { getFileTool } from '../../src/mcp/tools/file.js';
 import { getContextTool } from '../../src/mcp/tools/context.js';
 import { enhancePromptTool } from '../../src/mcp/tools/enhance.js';
 import { indexStatusTool } from '../../src/mcp/tools/status.js';
+import { findCallersTool } from '../../src/mcp/tools/findCallers.js';
+import { findCalleesTool } from '../../src/mcp/tools/findCallees.js';
+import { traceSymbolTool } from '../../src/mcp/tools/traceSymbol.js';
+import { impactAnalysisTool } from '../../src/mcp/tools/impactAnalysis.js';
+import { whyThisContextTool } from '../../src/mcp/tools/whyThisContext.js';
 import { reindexWorkspaceTool, clearIndexTool } from '../../src/mcp/tools/lifecycle.js';
 import { toolManifestTool } from '../../src/mcp/tools/manifest.js';
 import { addMemoryTool, listMemoriesTool } from '../../src/mcp/tools/memory.js';
@@ -22,6 +27,7 @@ import { checkInvariantsTool } from '../../src/mcp/tools/checkInvariants.js';
 import { runStaticAnalysisTool } from '../../src/mcp/tools/staticAnalysis.js';
 import { reactiveReviewTools } from '../../src/mcp/tools/reactiveReview.js';
 import { handleToolManifest } from '../../src/mcp/tools/manifest.js';
+import { normalizeToolResult } from '../../src/mcp/utils/resultBuilder.js';
 
 type ToolDefinition = {
   name: string;
@@ -71,6 +77,11 @@ function getRegisteredTools(): ToolDefinition[] {
     symbolReferencesTool,
     symbolDefinitionTool,
     callRelationshipsTool,
+    findCallersTool,
+    findCalleesTool,
+    traceSymbolTool,
+    impactAnalysisTool,
+    whyThisContextTool,
     getFileTool,
     getContextTool,
     enhancePromptTool,
@@ -160,7 +171,8 @@ describe('Old-client fixture catalog coverage', () => {
 
   it('keeps runtime tool inventory in parity with manifest output and the baseline snapshot', async () => {
     const runtimeTools = getRegisteredTools().map((tool) => tool.name);
-    const manifest = JSON.parse(await handleToolManifest({}, {} as never)) as {
+    const manifestResult = normalizeToolResult(await handleToolManifest({}, {} as never));
+    const manifest = JSON.parse(manifestResult.content[0].text) as {
       version: string;
       tools: string[];
     };

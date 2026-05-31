@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "name": "mcp-compatibility",
+  "description": "Aggregated MCP compatibility gate combining eval smoke sections and manifest parity.",
+  "gate_mode": "informational",
+  "gate_tiers": {
+    "informational": "Default CI behavior: emit artifacts and warnings without failing the job.",
+    "strict": "Opt-in via --strict: fail when normalized output diverges from baseline or sections fail."
+  },
+  "sections": ["eval_smoke", "tool_manifest_parity"],
+  "artifacts": {
+    "raw": "artifacts/evals/mcp-compatibility.json",
+    "normalized": "artifacts/evals/mcp-compatibility.normalized.json",
+    "baseline": "evals/baseline/mcp-compatibility.normalized.json",
+    "smoke_raw": "artifacts/evals/mcp-eval-smoke.json",
+    "smoke_normalized": "artifacts/evals/mcp-eval-smoke.normalized.json"
+  },
+  "runner": "scripts/ci/run-mcp-compatibility.ts",
+  "npm_script": "ci:check:mcp-compatibility"
+}

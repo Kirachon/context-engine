@@ -20,6 +20,7 @@ import {
     CallToolRequestSchema,
     GetPromptRequestSchema,
     ListPromptsRequestSchema,
+    ListResourceTemplatesRequestSchema,
     ListResourcesRequestSchema,
     ListToolsRequestSchema,
     ReadResourceRequestSchema,
@@ -32,13 +33,32 @@ import { MCP_SERVER_VERSION } from '../mcp/tools/manifest.js';
 import {
     PROMPT_DEFINITIONS,
     buildPromptByName,
-    buildResourceList,
     buildToolRegistryEntries,
     createServerCapabilities,
-    readResourceByUri,
+    type ToolRegistryEntry,
 } from '../mcp/server.js';
+import {
+    buildResourceList,
+    readResourceByUri,
+} from '../mcp/resources/resourceRouter.js';
+import { buildResourceTemplateList } from '../mcp/resources/resourceTemplates.js';
+import type { ContextSafetyMode } from '../security/contextPolicy.js';
+import { executeToolCall, type SignalAwareToolHandler } from '../mcp/executeTool.js';
+import { buildToolInputSchemaMap } from '../mcp/utils/validateToolInput.js';
+import {
+    ClientCapabilitiesManager,
+    attachClientCapabilitiesHandlers,
+    runWithClientCapabilitiesManager,
+} from '../mcp/capabilities/clientCapabilities.js';
 import { initializePlanManagementServices } from '../mcp/tools/planManagement.js';
+import { initializeContextPackStore } from '../context/contextPackStore.js';
 import { renderPrometheusMetrics } from '../metrics/metrics.js';
+import {
+    createHttpAuthHook,
+    isHttpAuthEnabled,
+    parseHttpAuthTokenRegistry,
+    type HttpAuthHook,
+} from './authScopes.js';
 import {
     createCorsMiddleware,
     validateAllowedOrigin,
@@ -49,6 +69,7 @@ import {
     createApiRateLimitMiddleware,
     createMcpConnectionRateLimitMiddleware,
     createRequestTimeoutMiddleware,
+    createHttpAuthMiddleware,
 } from './middleware/index.js';
 import { updateRequestContext } from '../telemetry/requestContext.js';
 import {
@@ -57,19 +78,17 @@ import {
     createToolsRouter,
 } from './routes/index.js';
 
-type SignalAwareToolHandler = (args: unknown, signal?: AbortSignal) => Promise<string>;
-type HttpAuthDecision = {
-    authorized: boolean;
-    statusCode?: number;
-    message?: string;
-};
-type HttpAuthHook = (req: express.Request) => HttpAuthDecision | Promise<HttpAuthDecision>;
-
 type McpHttpSession = {
     server: McpServer;
     transport: StreamableHTTPServerTransport;
+    clientCapabilitiesManager: ClientCapabilitiesManager;
     closed: boolean;
     closeServerPromise?: Promise<void>;
+};
+
+type HttpMcpServerBundle = {
+    server: McpServer;
+    clientCapabilitiesManager: ClientCapabilitiesManager;
 };
 
 const DEFAULT_HTTP_BIND_HOST = '127.0.0.1';
@@ -82,7 +101,15 @@ const API_REQUEST_TIMEOUT_MS = 30_000;
 const SERVER_KEEP_ALIVE_TIMEOUT_MS = 65_000;
 const SERVER_HEADERS_TIMEOUT_MS = 70_000;
 
-function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
+function createHttpMcpServer(
+    serviceClient: ContextServiceClient,
+    toolRegistryEntries?: ToolRegistryEntry[],
+    options?: {
+        workspacePath?: string;
+        contextSafetyMode?: ContextSafetyMode;
+    }
+): HttpMcpServerBundle {
+    const clientCapabilitiesManager = new ClientCapabilitiesManager();
     const server = new McpServer(
         {
             name: 'context-engine',
@@ -93,18 +120,26 @@ function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
         }
     );
 
-    const toolRegistryEntries = buildToolRegistryEntries(serviceClient);
-    const tools = toolRegistryEntries.map((entry) => entry.tool);
+    const entries = toolRegistryEntries ?? buildToolRegistryEntries(serviceClient);
+    const tools = entries.map((entry) => entry.tool);
     const toolHandlers = new Map<string, SignalAwareToolHandler>(
-        toolRegistryEntries.map((entry) => [entry.tool.name, entry.handler])
+        entries.map((entry) => [entry.tool.name, entry.handler])
     );
+    const toolInputSchemas = buildToolInputSchemaMap(entries);
 
     server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
     server.setRequestHandler(ListResourcesRequestSchema, async () => ({
         resources: await buildResourceList(),
     }));
+    server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
+        resourceTemplates: buildResourceTemplateList(),
+    }));
     server.setRequestHandler(ReadResourceRequestSchema, async (request) =>
-        readResourceByUri(request.params.uri)
+        readResourceByUri(request.params.uri, {
+            workspaceRoot: options?.workspacePath ?? serviceClient.getWorkspacePath(),
+            serviceClient,
+            mode: options?.contextSafetyMode,
+        })
     );
     server.setRequestHandler(ListPromptsRequestSchema, async () => ({
         prompts: PROMPT_DEFINITIONS,
@@ -112,26 +147,24 @@ function createHttpMcpServer(serviceClient: ContextServiceClient): McpServer {
     server.setRequestHandler(GetPromptRequestSchema, async (request) =>
         buildPromptByName(request.params.name, request.params.arguments ?? {})
     );
+    attachClientCapabilitiesHandlers(server, clientCapabilitiesManager);
     server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
         const { name, arguments: args } = request.params;
-        const handler = toolHandlers.get(name);
-
-        if (!handler) {
-            throw new Error(`Unknown tool: ${name}`);
-        }
-
-        const result = await handler(args, extra.signal);
-        return {
-            content: [
-                {
-                    type: 'text',
-                    text: result,
-                },
-            ],
-        };
+        return await runWithClientCapabilitiesManager(clientCapabilitiesManager, async () => {
+            const execution = await executeToolCall({
+                name,
+                args,
+                toolHandlers,
+                toolInputSchemas,
+                signal: extra.signal,
+                useObservability: true,
+                recordMetrics: true,
+            });
+            return execution.response;
+        });
     });
 
-    return server;
+    return { server, clientCapabilitiesManager };
 }
 
 export interface HttpServerOptions {
@@ -143,6 +176,10 @@ export interface HttpServerOptions {
     version?: string;
     /** Optional auth hook for HTTP MCP routes. Disabled by default. */
     authHook?: HttpAuthHook;
+    /** Optional tool registry override (primarily for integration tests). */
+    toolRegistryEntries?: ToolRegistryEntry[];
+    /** Optional context safety mode for policy-enforced resource reads. */
+    contextSafetyMode?: ContextSafetyMode;
 }
 
 /**
@@ -158,6 +195,8 @@ export class ContextEngineHttpServer {
     private readonly bindHost: string;
     private readonly version: string;
     private readonly authHook?: HttpAuthHook;
+    private readonly toolRegistryEntries?: ToolRegistryEntry[];
+    private readonly contextSafetyMode?: ContextSafetyMode;
     private readonly mcpSessions = new Map<string, McpHttpSession>();
 
     constructor(
@@ -169,10 +208,13 @@ export class ContextEngineHttpServer {
                 ? (serviceClient as { getWorkspacePath: () => string }).getWorkspacePath()
                 : process.cwd();
         initializePlanManagementServices(workspacePath);
+        initializeContextPackStore(workspacePath);
         this.port = options.port ?? 3333;
         this.bindHost = options.bindHost ?? envString('CE_HTTP_HOST', DEFAULT_HTTP_BIND_HOST) ?? DEFAULT_HTTP_BIND_HOST;
         this.version = options.version ?? '1.0.0';
-        this.authHook = options.authHook;
+        this.authHook = options.authHook ?? this.resolveDefaultAuthHook();
+        this.toolRegistryEntries = options.toolRegistryEntries;
+        this.contextSafetyMode = options.contextSafetyMode;
         this.app = this.createApp();
     }
 
@@ -206,6 +248,7 @@ export class ContextEngineHttpServer {
         // API routes under /api/v1
         app.use('/api/v1', createRequestTimeoutMiddleware(API_REQUEST_TIMEOUT_MS));
         app.use('/api/v1', createApiRateLimitMiddleware());
+        app.use('/api/v1', createHttpAuthMiddleware());
         app.use('/api/v1', express.json({ limit: API_JSON_LIMIT }));
         app.use('/api/v1', helmet());
         app.use('/api/v1', createStatusRouter(this.serviceClient));
@@ -411,8 +454,11 @@ export class ContextEngineHttpServer {
                 });
             },
         });
-        const server = createHttpMcpServer(this.serviceClient);
-        session = { server, transport, closed: false };
+        const { server, clientCapabilitiesManager } = createHttpMcpServer(this.serviceClient, this.toolRegistryEntries, {
+            workspacePath: this.serviceClient.getWorkspacePath(),
+            contextSafetyMode: this.contextSafetyMode,
+        });
+        session = { server, transport, clientCapabilitiesManager, closed: false };
 
         transport.onclose = () => {
             const activeSessionId = transport.sessionId;
@@ -492,6 +538,15 @@ export class ContextEngineHttpServer {
         }
 
         res.status(204).end();
+    }
+
+    private resolveDefaultAuthHook(): HttpAuthHook | undefined {
+        if (!isHttpAuthEnabled()) {
+            return undefined;
+        }
+
+        const registry = parseHttpAuthTokenRegistry();
+        return createHttpAuthHook(registry);
     }
 
     private async enforceMcpTransportPolicy(req: express.Request): Promise<void> {

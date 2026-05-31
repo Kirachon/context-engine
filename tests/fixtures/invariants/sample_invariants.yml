@@ -1,0 +1,49 @@
+# Sample Invariants Configuration
+# Used for testing the invariants system
+
+security:
+  - id: SEC001
+    rule: "Any endpoint handler must call requireAuth() before accessing req.user"
+    paths: ["src/api/**", "src/routes/**"]
+    severity: CRITICAL
+    confidence: 0.95
+    
+  - id: SEC002
+    rule: "No raw SQL string concatenation with user input"
+    paths: ["src/db/**", "src/models/**"]
+    severity: CRITICAL
+    confidence: 0.9
+
+reliability:
+  - id: REL001
+    rule: "All caught errors must be logged with context"
+    paths: ["src/**"]
+    severity: HIGH
+    confidence: 0.85
+    
+  - id: REL002
+    rule: "Async functions must have try-catch or .catch()"
+    paths: ["src/**"]
+    severity: MEDIUM
+    confidence: 0.8
+
+architecture:
+  - id: ARC001
+    rule: "Controllers cannot import DB layer directly"
+    paths: ["src/controllers/**"]
+    severity: MEDIUM
+    confidence: 0.9
+    
+  - id: ARC002
+    rule: "Services must not import from controllers"
+    paths: ["src/services/**"]
+    severity: MEDIUM
+    confidence: 0.95
+
+testing:
+  - id: TST001
+    rule: "Public functions must have corresponding test files"
+    paths: ["src/**"]
+    severity: LOW
+    confidence: 0.7
+

@@ -3,6 +3,9 @@
   "capabilities": [
     "semantic_search",
     "symbol_navigation",
+    "graph_navigation",
+    "impact_analysis",
+    "why_this_context",
     "file_retrieval",
     "context_enhancement",
     "index_status",
@@ -28,6 +31,11 @@
     "symbol_references",
     "symbol_definition",
     "call_relationships",
+    "find_callers",
+    "find_callees",
+    "trace_symbol",
+    "impact_analysis",
+    "why_this_context",
     "get_file",
     "get_context_for_prompt",
     "enhance_prompt",
@@ -89,6 +97,44 @@
           "resources": [
             "context-engine://tool-manifest"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "background",
+          "index_requirement": "none",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "none",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/index"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "index"
+          ],
+          "preferred_when": [
+            "Build or refresh the semantic search index for the current workspace.",
+            "Index the current workspace before running retrieval tools."
+          ],
+          "avoid_when": [
+            "Writes local index state and cache artifacts under the workspace."
+          ],
+          "selection_signals": [
+            "git:none",
+            "graph:none",
+            "index:none",
+            "latency:background",
+            "provenance:none"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -110,6 +156,53 @@
           "prompts": [
             "enhance-request"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "selection_receipts",
+          "explainability_fields": [
+            "trace",
+            "provenance",
+            "explainability"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/codebase-retrieval"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "search"
+          ],
+          "preferred_when": [
+            "Use when you need semantic codebase discovery before opening files or editing.",
+            "Where is authentication handled?",
+            "What files shape the planning flow?"
+          ],
+          "avoid_when": [
+            "Read-only retrieval over the indexed workspace."
+          ],
+          "selection_signals": [
+            "explainability:explainability",
+            "explainability:provenance",
+            "explainability:trace",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:selection_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
@@ -128,54 +221,194 @@
             "codebase_retrieval",
             "get_file"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "none",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/search"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "search"
+          ],
+          "preferred_when": [
+            "Search by intent or concept when you know what you need but not the exact symbol name.",
+            "Find retry logic for HTTP calls.",
+            "Show ranking heuristics for retrieval."
+          ],
+          "avoid_when": [
+            "Read-only retrieval over indexed code chunks."
+          ],
+          "selection_signals": [
+            "git:none",
+            "graph:none",
+            "index:required",
+            "latency:interactive",
+            "provenance:none"
+          ],
+          "operation_risk": [
+            "read_only",
+            "secret_exposure_risk"
+          ]
         }
       },
       {
         "id": "symbol_search",
         "title": "Symbol Search",
-        "usage_hint": "Search by identifier when you know the exact or near-exact symbol name.",
+        "usage_hint": "Search by identifier when you know the exact or near-exact symbol name; prefers graph-backed symbol records and falls back deterministically when graph data is unavailable.",
         "examples": [
           "Find resolveAIProviderId.",
           "Locate ContextServiceClientStrongTokenProof."
         ],
         "safety_hints": [
-          "Read-only deterministic local retrieval for identifier-style code navigation."
+          "Read-only deterministic local retrieval for identifier-style code navigation with explicit graph fallback receipts."
         ],
         "related_surfaces": {
           "tools": [
             "semantic_search",
             "get_file"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "backend",
+            "graph_status",
+            "graph_degraded_reason",
+            "fallback_reason"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/symbol-search"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "search",
+            "symbol"
+          ],
+          "preferred_when": [
+            "Search by identifier when you know the exact or near-exact symbol name; prefers graph-backed symbol records and falls back deterministically when graph data is unavailable.",
+            "Find resolveAIProviderId.",
+            "Locate ContextServiceClientStrongTokenProof."
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval for identifier-style code navigation with explicit graph fallback receipts."
+          ],
+          "selection_signals": [
+            "explainability:backend",
+            "explainability:fallback_reason",
+            "explainability:graph_degraded_reason",
+            "explainability:graph_status",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only",
+            "secret_exposure_risk"
+          ]
         }
       },
       {
         "id": "symbol_references",
         "title": "Symbol References",
-        "usage_hint": "Find non-declaration usages when you already know the identifier name.",
+        "usage_hint": "Find non-declaration usages when you already know the identifier name; uses graph references first and reports when it had to fall back.",
         "examples": [
           "Show usages of resolveAIProviderId.",
           "Find where activeProvider is referenced."
         ],
         "safety_hints": [
-          "Read-only deterministic local retrieval for non-declaration symbol usages."
+          "Read-only deterministic local retrieval for non-declaration symbol usages with explicit graph fallback receipts."
         ],
         "related_surfaces": {
           "tools": [
             "symbol_search",
             "get_file"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "backend",
+            "graph_status",
+            "graph_degraded_reason",
+            "fallback_reason"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/symbol-references"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "symbol"
+          ],
+          "preferred_when": [
+            "Find non-declaration usages when you already know the identifier name; uses graph references first and reports when it had to fall back.",
+            "Show usages of resolveAIProviderId.",
+            "Find where activeProvider is referenced."
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval for non-declaration symbol usages with explicit graph fallback receipts."
+          ],
+          "selection_signals": [
+            "explainability:backend",
+            "explainability:fallback_reason",
+            "explainability:graph_degraded_reason",
+            "explainability:graph_status",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       },
       {
         "id": "symbol_definition",
         "title": "Symbol Definition",
-        "usage_hint": "Jump to the canonical declaration site of a known identifier.",
+        "usage_hint": "Jump to the canonical declaration site of a known identifier; graph definitions are preferred and fallback reasons are surfaced when needed.",
         "examples": [
           "Where is resolveAIProviderId defined?",
           "Find the declaration of ContextServiceClient."
         ],
         "safety_hints": [
-          "Read-only deterministic local retrieval for the single best declaration site."
+          "Read-only deterministic local retrieval for the single best declaration site with explicit graph fallback receipts."
         ],
         "related_surfaces": {
           "tools": [
@@ -183,24 +416,461 @@
             "symbol_references",
             "get_file"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "metadata.backend",
+            "metadata.graph_status",
+            "metadata.graph_degraded_reason",
+            "metadata.fallback_reason"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/symbol-definition"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "symbol"
+          ],
+          "preferred_when": [
+            "Jump to the canonical declaration site of a known identifier; graph definitions are preferred and fallback reasons are surfaced when needed.",
+            "Where is resolveAIProviderId defined?",
+            "Find the declaration of ContextServiceClient."
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval for the single best declaration site with explicit graph fallback receipts."
+          ],
+          "selection_signals": [
+            "explainability:metadata.backend",
+            "explainability:metadata.fallback_reason",
+            "explainability:metadata.graph_degraded_reason",
+            "explainability:metadata.graph_status",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
         "id": "call_relationships",
         "title": "Call Relationships",
-        "usage_hint": "List callers and/or callees of a known function or method symbol.",
+        "usage_hint": "List callers and/or callees of a known function or method symbol using graph edges first with explicit fallback reasons when graph coverage is incomplete.",
         "examples": [
           "Who calls resolveAIProviderId?",
           "What does handleSemanticSearch invoke?"
         ],
         "safety_hints": [
-          "Read-only deterministic local heuristic; brace-language only for callees in v1."
+          "Read-only deterministic local retrieval; graph-backed when available with controlled heuristic fallback."
         ],
         "related_surfaces": {
           "tools": [
             "symbol_definition",
             "symbol_references",
             "symbol_search"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "metadata.resolutionBackend",
+            "metadata.graphStatus",
+            "metadata.graphDegradedReason",
+            "metadata.fallbackReason"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/call-relationships"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "symbol"
+          ],
+          "preferred_when": [
+            "List callers and/or callees of a known function or method symbol using graph edges first with explicit fallback reasons when graph coverage is incomplete.",
+            "Who calls resolveAIProviderId?",
+            "What does handleSemanticSearch invoke?"
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval; graph-backed when available with controlled heuristic fallback."
+          ],
+          "selection_signals": [
+            "explainability:metadata.fallbackReason",
+            "explainability:metadata.graphDegradedReason",
+            "explainability:metadata.graphStatus",
+            "explainability:metadata.resolutionBackend",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
+        }
+      },
+      {
+        "id": "find_callers",
+        "title": "Find Callers",
+        "usage_hint": "Return only direct callers for a known function or method symbol; uses persisted graph call edges first and surfaces degraded-mode receipts explicitly.",
+        "examples": [
+          "Find callers of resolveAIProviderId.",
+          "Show who invokes handleReviewDiff."
+        ],
+        "safety_hints": [
+          "Read-only deterministic local retrieval for direct caller navigation with explicit graph fallback receipts."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "call_relationships",
+            "trace_symbol",
+            "impact_analysis"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "metadata.graph_backed",
+            "metadata.degraded",
+            "metadata.degraded_reasons",
+            "metadata.diagnostics"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/find-callers"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "symbol"
+          ],
+          "preferred_when": [
+            "Return only direct callers for a known function or method symbol; uses persisted graph call edges first and surfaces degraded-mode receipts explicitly.",
+            "Find callers of resolveAIProviderId.",
+            "Show who invokes handleReviewDiff."
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval for direct caller navigation with explicit graph fallback receipts."
+          ],
+          "selection_signals": [
+            "explainability:metadata.degraded",
+            "explainability:metadata.degraded_reasons",
+            "explainability:metadata.diagnostics",
+            "explainability:metadata.graph_backed",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
+        }
+      },
+      {
+        "id": "find_callees",
+        "title": "Find Callees",
+        "usage_hint": "Return only direct callees for a known function or method symbol; prefers persisted graph call edges and reports when it had to fall back.",
+        "examples": [
+          "Find callees of handleSemanticSearch.",
+          "Show what reviewDiff invokes."
+        ],
+        "safety_hints": [
+          "Read-only deterministic local retrieval for direct callee navigation with explicit graph fallback receipts."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "call_relationships",
+            "trace_symbol",
+            "impact_analysis"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "metadata.graph_backed",
+            "metadata.degraded",
+            "metadata.degraded_reasons",
+            "metadata.diagnostics"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/find-callees"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "symbol"
+          ],
+          "preferred_when": [
+            "Return only direct callees for a known function or method symbol; prefers persisted graph call edges and reports when it had to fall back.",
+            "Find callees of handleSemanticSearch.",
+            "Show what reviewDiff invokes."
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval for direct callee navigation with explicit graph fallback receipts."
+          ],
+          "selection_signals": [
+            "explainability:metadata.degraded",
+            "explainability:metadata.degraded_reasons",
+            "explainability:metadata.diagnostics",
+            "explainability:metadata.graph_backed",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:interactive",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
+        }
+      },
+      {
+        "id": "trace_symbol",
+        "title": "Trace Symbol",
+        "usage_hint": "Assemble the direct definition, references, callers, and callees for one symbol in a single deterministic graph-aware response.",
+        "examples": [
+          "Trace resolveAIProviderId.",
+          "Trace ContextEngineMCPServer."
+        ],
+        "safety_hints": [
+          "Read-only deterministic local retrieval composed from graph-backed navigation surfaces with explicit stage diagnostics."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "symbol_definition",
+            "symbol_references",
+            "find_callers",
+            "find_callees",
+            "impact_analysis"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "trace_summary",
+            "metadata.graph_backed_operations",
+            "metadata.degraded",
+            "metadata.diagnostics"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/trace-symbol"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "symbol"
+          ],
+          "preferred_when": [
+            "Assemble the direct definition, references, callers, and callees for one symbol in a single deterministic graph-aware response.",
+            "Trace resolveAIProviderId.",
+            "Trace ContextEngineMCPServer."
+          ],
+          "avoid_when": [
+            "Read-only deterministic local retrieval composed from graph-backed navigation surfaces with explicit stage diagnostics."
+          ],
+          "selection_signals": [
+            "explainability:metadata.degraded",
+            "explainability:metadata.diagnostics",
+            "explainability:metadata.graph_backed_operations",
+            "explainability:trace_summary",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:extended",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
+        }
+      },
+      {
+        "id": "impact_analysis",
+        "title": "Impact Analysis",
+        "usage_hint": "Estimate the direct change surface for one symbol using graph-backed definition, reference, and call-edge data.",
+        "examples": [
+          "Estimate the impact of changing resolveAIProviderId.",
+          "What is the direct blast radius of handleReviewDiff?"
+        ],
+        "safety_hints": [
+          "Read-only deterministic local analysis bounded to direct references and call edges; degraded mode is reported explicitly."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "trace_symbol",
+            "find_callers",
+            "find_callees",
+            "symbol_definition"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "fallback_receipts",
+          "explainability_fields": [
+            "impact_summary",
+            "metadata.degraded",
+            "metadata.diagnostics"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/impact-analysis"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "diagnostics"
+          ],
+          "preferred_when": [
+            "Estimate the direct change surface for one symbol using graph-backed definition, reference, and call-edge data.",
+            "Estimate the impact of changing resolveAIProviderId.",
+            "What is the direct blast radius of handleReviewDiff?"
+          ],
+          "avoid_when": [
+            "Read-only deterministic local analysis bounded to direct references and call edges; degraded mode is reported explicitly."
+          ],
+          "selection_signals": [
+            "explainability:impact_summary",
+            "explainability:metadata.degraded",
+            "explainability:metadata.diagnostics",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:extended",
+            "provenance:fallback_receipts"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
+        }
+      },
+      {
+        "id": "why_this_context",
+        "title": "Why This Context",
+        "usage_hint": "Explain why files were selected into a context bundle using the same retrieval provenance and explainability receipts exposed by graph-aware retrieval.",
+        "examples": [
+          "Why was this login flow context selected?",
+          "Explain the files chosen for this planning query."
+        ],
+        "safety_hints": [
+          "Read-only deterministic explanation of existing context-selection receipts; degraded mode is surfaced explicitly when receipts are missing or stale."
+        ],
+        "related_surfaces": {
+          "tools": [
+            "get_context_for_prompt",
+            "codebase_retrieval"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "selection_receipts",
+          "explainability_fields": [
+            "files[].explainability",
+            "files[].provenance",
+            "metadata.degraded_reasons"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/why-this-context"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "context"
+          ],
+          "preferred_when": [
+            "Explain why files were selected into a context bundle using the same retrieval provenance and explainability receipts exposed by graph-aware retrieval.",
+            "Why was this login flow context selected?",
+            "Explain the files chosen for this planning query."
+          ],
+          "avoid_when": [
+            "Read-only deterministic explanation of existing context-selection receipts; degraded mode is surfaced explicitly when receipts are missing or stale."
+          ],
+          "selection_signals": [
+            "explainability:files[].explainability",
+            "explainability:files[].provenance",
+            "explainability:metadata.degraded_reasons",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:extended",
+            "provenance:selection_receipts"
+          ],
+          "operation_risk": [
+            "read_only",
+            "secret_exposure_risk"
           ]
         }
       },
@@ -219,6 +889,46 @@
           "tools": [
             "codebase_retrieval",
             "semantic_search"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "none",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "none",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/file"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "file"
+          ],
+          "preferred_when": [
+            "Read the full contents of a known file or a targeted line range.",
+            "Open src/mcp/server.ts.",
+            "Read package.json to confirm scripts."
+          ],
+          "avoid_when": [
+            "Read-only file access within the workspace."
+          ],
+          "selection_signals": [
+            "git:none",
+            "graph:none",
+            "index:none",
+            "latency:interactive",
+            "provenance:none"
+          ],
+          "operation_risk": [
+            "read_only",
+            "secret_exposure_risk"
           ]
         }
       },
@@ -242,6 +952,55 @@
           "prompts": [
             "enhance-request"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "required",
+          "graph_requirement": "preferred",
+          "git_requirement": "none",
+          "provenance_availability": "selection_receipts",
+          "explainability_fields": [
+            "files[].selectionExplainability",
+            "files[].selectionProvenance",
+            "handoff"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/context"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "context"
+          ],
+          "preferred_when": [
+            "Assemble multi-file context and summaries before writing or refining a prompt, with optional active-plan handoff inputs.",
+            "Gather context for the MCP HTTP transport.",
+            "Show files relevant to plan execution."
+          ],
+          "avoid_when": [
+            "Read-only; may include external grounding only when explicitly requested."
+          ],
+          "selection_signals": [
+            "explainability:files[].selectionExplainability",
+            "explainability:files[].selectionProvenance",
+            "explainability:handoff",
+            "git:none",
+            "graph:preferred",
+            "index:required",
+            "latency:extended",
+            "provenance:selection_receipts"
+          ],
+          "operation_risk": [
+            "read_only",
+            "secret_exposure_risk",
+            "uses_external_sources"
+          ]
         }
       },
       {
@@ -263,6 +1022,47 @@
           "prompts": [
             "enhance-request"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "recommended",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "none",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/enhance-prompt"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "enhancement"
+          ],
+          "preferred_when": [
+            "Turn a vague request into an actionable repo-grounded prompt with optional scope control.",
+            "Enhance a request to improve login UX.",
+            "Sharpen a refactor request with external docs."
+          ],
+          "avoid_when": [
+            "Read-only; enhancement may use external references only when provided explicitly."
+          ],
+          "selection_signals": [
+            "git:none",
+            "graph:none",
+            "index:recommended",
+            "latency:extended",
+            "provenance:none"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only",
+            "uses_external_sources"
+          ]
         }
       },
       {
@@ -280,6 +1080,26 @@
             "index_workspace",
             "reindex_workspace",
             "clear_index"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "diagnostics",
+            "index"
+          ],
+          "preferred_when": [
+            "Check whether the semantic index is healthy or stale before running retrieval.",
+            "Inspect index health before a large search."
+          ],
+          "avoid_when": [
+            "Read-only status check."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       },
@@ -299,6 +1119,25 @@
             "index_status",
             "clear_index"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "index"
+          ],
+          "preferred_when": [
+            "Force a full rebuild of the semantic index when incremental indexing is not enough.",
+            "Rebuild the entire index after structural codebase changes."
+          ],
+          "avoid_when": [
+            "Writes local index state and may take longer than incremental indexing."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -316,6 +1155,25 @@
             "index_status",
             "reindex_workspace"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "index"
+          ],
+          "preferred_when": [
+            "Remove current index state so the next indexing pass starts fresh.",
+            "Clear corrupted index state before reindexing."
+          ],
+          "avoid_when": [
+            "Destructive to local index/cache state; does not touch source files."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "destructive"
+          ]
         }
       },
       {
@@ -331,6 +1189,52 @@
         "related_surfaces": {
           "resources": [
             "context-engine://tool-manifest"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "interactive",
+          "index_requirement": "none",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "none",
+          "explainability_fields": [
+            "discoverability",
+            "features",
+            "capabilities"
+          ],
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/tool-manifest"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "manifest"
+          ],
+          "preferred_when": [
+            "Inspect the server capability inventory and discoverability metadata.",
+            "List tools, prompts, resources, and feature groups exposed by the server."
+          ],
+          "avoid_when": [
+            "Read-only manifest inspection."
+          ],
+          "selection_signals": [
+            "explainability:capabilities",
+            "explainability:discoverability",
+            "explainability:features",
+            "git:none",
+            "graph:none",
+            "index:none",
+            "latency:interactive",
+            "provenance:none"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       },
@@ -348,6 +1252,26 @@
           "tools": [
             "list_memories"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "memory"
+          ],
+          "preferred_when": [
+            "Persist a durable project fact, preference, or decision for future sessions.",
+            "Store a project convention about naming or architecture."
+          ],
+          "avoid_when": [
+            "Writes a memory entry to workspace-managed storage."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "secret_exposure_risk",
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -363,6 +1287,25 @@
         "related_surfaces": {
           "tools": [
             "add_memory"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "memory"
+          ],
+          "preferred_when": [
+            "Review saved facts, decisions, and preferences already captured for the project.",
+            "Show saved project decisions before proposing a refactor."
+          ],
+          "avoid_when": [
+            "Read-only memory inspection."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       },
@@ -383,6 +1326,29 @@
             "add_memory",
             "list_memories",
             "get_context_for_prompt"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "memory",
+            "review"
+          ],
+          "preferred_when": [
+            "Review isolated draft memory suggestions in small batches and promote approved entries through the durable memory path.",
+            "List draft batches for the current session.",
+            "Approve a small batch of high-confidence memory suggestions."
+          ],
+          "avoid_when": [
+            "Writes draft review state and may persist approved memories through the existing add_memory pathway.",
+            "Feature-flagged; enable CE_MEMORY_SUGGESTIONS_V1 before using in production workflows."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "secret_exposure_risk"
           ]
         }
       },
@@ -409,6 +1375,45 @@
           "resources": [
             "context-engine://plans/{planId}"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "recommended",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "none",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/plan"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Generate a scoped implementation plan with context gathering and validation guidance.",
+            "Plan an auth refactor.",
+            "Plan a safe MCP transport upgrade."
+          ],
+          "avoid_when": [
+            "May persist a saved plan when auto-save is enabled."
+          ],
+          "selection_signals": [
+            "git:none",
+            "graph:none",
+            "index:recommended",
+            "latency:extended",
+            "provenance:none"
+          ],
+          "operation_risk": [
+            "may_send_to_llm"
+          ]
         }
       },
       {
@@ -433,6 +1438,25 @@
             "context-engine://plans/{planId}",
             "context-engine://plan-history/{planId}"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Adjust an existing plan using review feedback or clarification answers.",
+            "Refine a plan after architecture feedback."
+          ],
+          "avoid_when": [
+            "May update plan artifacts when paired with persistence tools."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm"
+          ]
         }
       },
       {
@@ -449,6 +1473,25 @@
           "tools": [
             "create_plan",
             "refine_plan"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Render a saved or in-memory plan into diagrams for faster review.",
+            "Show plan dependencies as a Mermaid graph."
+          ],
+          "avoid_when": [
+            "Read-only transformation of plan data."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       },
@@ -468,6 +1511,27 @@
             "create_plan",
             "save_plan",
             "view_progress"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Generate or apply implementation work from a saved plan or JSON plan definition.",
+            "Execute the next ready plan step.",
+            "Preview full-plan changes without applying them."
+          ],
+          "avoid_when": [
+            "Can write code changes when apply_changes is enabled."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "writes_workspace_state"
           ]
         }
       },
@@ -491,6 +1555,25 @@
             "context-engine://plans/{planId}",
             "context-engine://plan-history/{planId}"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Persist a plan artifact for later execution, review, or versioning.",
+            "Save a reviewed plan with a stable name and tags."
+          ],
+          "avoid_when": [
+            "Writes plan storage and may overwrite when explicitly requested."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -512,6 +1595,25 @@
           "resources": [
             "context-engine://plans/{planId}"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Fetch a persisted plan by ID or name before refinement or execution.",
+            "Load a saved rollout plan to continue execution."
+          ],
+          "avoid_when": [
+            "Read-only plan retrieval."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
@@ -532,6 +1634,25 @@
           "resources": [
             "context-engine://plans/{planId}"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Inspect persisted plans before loading, executing, or cleaning them up.",
+            "List active plans tagged for the current release."
+          ],
+          "avoid_when": [
+            "Read-only plan inventory access."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
@@ -548,6 +1669,25 @@
           "tools": [
             "list_plans",
             "save_plan"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Remove an obsolete saved plan from persistence.",
+            "Delete a superseded draft plan."
+          ],
+          "avoid_when": [
+            "Destructive to persisted plan data."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "destructive"
           ]
         }
       },
@@ -566,6 +1706,26 @@
             "respond_approval",
             "view_progress"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "approval",
+            "planning"
+          ],
+          "preferred_when": [
+            "Open an approval gate for a plan or specific plan steps.",
+            "Request approval before executing a risky migration step."
+          ],
+          "avoid_when": [
+            "Writes approval workflow state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -581,6 +1741,26 @@
         "related_surfaces": {
           "tools": [
             "request_approval"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "approval",
+            "planning"
+          ],
+          "preferred_when": [
+            "Approve, reject, or request modifications for a pending plan approval.",
+            "Approve the next deployment step."
+          ],
+          "avoid_when": [
+            "Writes approval workflow state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
           ]
         }
       },
@@ -600,6 +1780,25 @@
             "fail_step",
             "view_progress"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "execution_tracking"
+          ],
+          "preferred_when": [
+            "Mark a plan step as in progress before execution begins.",
+            "Start the dependency update step."
+          ],
+          "avoid_when": [
+            "Writes execution tracking state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -616,6 +1815,25 @@
           "tools": [
             "start_step",
             "view_progress"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "execution_tracking"
+          ],
+          "preferred_when": [
+            "Record a step as finished with notes and modified files.",
+            "Complete the schema migration step after validation."
+          ],
+          "avoid_when": [
+            "Writes execution tracking state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
           ]
         }
       },
@@ -634,6 +1852,25 @@
             "start_step",
             "view_progress"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "execution_tracking"
+          ],
+          "preferred_when": [
+            "Record a step failure and decide whether to retry or skip dependents.",
+            "Fail a step after a blocked deployment dependency."
+          ],
+          "avoid_when": [
+            "Writes execution tracking state and may alter plan execution flow."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -651,6 +1888,25 @@
             "start_step",
             "complete_step",
             "fail_step"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "execution_tracking"
+          ],
+          "preferred_when": [
+            "Check how far a saved plan has progressed before continuing execution.",
+            "Inspect plan completion after a worker run."
+          ],
+          "avoid_when": [
+            "Read-only progress inspection."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       },
@@ -672,6 +1928,25 @@
           "resources": [
             "context-engine://plan-history/{planId}"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "execution_tracking"
+          ],
+          "preferred_when": [
+            "Inspect plan version history before rollback or review.",
+            "Show plan history after multiple refinement rounds."
+          ],
+          "avoid_when": [
+            "Read-only version history access."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
@@ -689,6 +1964,26 @@
             "view_history",
             "rollback_plan"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "diagnostics",
+            "planning"
+          ],
+          "preferred_when": [
+            "Diff two versions of the same saved plan.",
+            "Compare version 3 and 4 after a refinement round."
+          ],
+          "avoid_when": [
+            "Read-only version comparison."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
@@ -705,6 +2000,25 @@
           "tools": [
             "view_history",
             "compare_plan_versions"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "planning"
+          ],
+          "preferred_when": [
+            "Restore a saved plan to a previous version when a later revision is no longer trusted.",
+            "Rollback to the last approved plan version."
+          ],
+          "avoid_when": [
+            "Destructive to current persisted plan state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "destructive"
           ]
         }
       },
@@ -727,6 +2041,45 @@
           "prompts": [
             "review-diff"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "none",
+          "graph_requirement": "none",
+          "git_requirement": "none",
+          "provenance_availability": "review_receipts",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/review-changes"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Review a provided diff with structured findings and confidence scores.",
+            "Review a patch for correctness and maintainability."
+          ],
+          "avoid_when": [
+            "Read-only analysis of supplied diff content."
+          ],
+          "selection_signals": [
+            "git:none",
+            "graph:none",
+            "index:none",
+            "latency:extended",
+            "provenance:review_receipts"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only"
+          ]
         }
       },
       {
@@ -743,6 +2096,46 @@
           "tools": [
             "review_changes",
             "review_auto"
+          ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "none",
+          "graph_requirement": "none",
+          "git_requirement": "required",
+          "provenance_availability": "review_receipts",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/review-git-diff"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Review git changes directly from the current workspace state.",
+            "Review staged changes before commit."
+          ],
+          "avoid_when": [
+            "Read-only review; inspects local git state."
+          ],
+          "selection_signals": [
+            "git:required",
+            "graph:none",
+            "index:none",
+            "latency:extended",
+            "provenance:review_receipts"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only",
+            "uses_git_state"
           ]
         }
       },
@@ -766,6 +2159,26 @@
           "prompts": [
             "review-diff"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Run the deterministic diff-first review pipeline for CI-style review output.",
+            "Review a PR diff with enterprise preflight checks."
+          ],
+          "avoid_when": [
+            "Read-only diff analysis; optional local analyzers may run."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only"
+          ]
         }
       },
       {
@@ -784,6 +2197,46 @@
             "review_git_diff",
             "review_diff"
           ]
+        },
+        "shared_contract": {
+          "latency_class": "extended",
+          "index_requirement": "none",
+          "graph_requirement": "none",
+          "git_requirement": "optional",
+          "provenance_availability": "review_receipts",
+          "transport": {
+            "stdio_mcp": true,
+            "streamable_http_mcp": true,
+            "rest_api": {
+              "method": "POST",
+              "path": "/api/v1/review-auto"
+            }
+          }
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Auto-select the best review mode based on a diff payload or current git state.",
+            "Review the current staged diff without choosing a review path manually."
+          ],
+          "avoid_when": [
+            "Read-only review orchestration."
+          ],
+          "selection_signals": [
+            "git:optional",
+            "graph:none",
+            "index:none",
+            "latency:extended",
+            "provenance:review_receipts"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only",
+            "uses_git_state"
+          ]
         }
       },
       {
@@ -801,6 +2254,25 @@
             "review_diff",
             "run_static_analysis"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "static_analysis"
+          ],
+          "preferred_when": [
+            "Run deterministic invariant rules against a diff for CI gating.",
+            "Check local invariants before opening a PR."
+          ],
+          "avoid_when": [
+            "Read-only deterministic analysis."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
+          ]
         }
       },
       {
@@ -817,6 +2289,26 @@
           "tools": [
             "review_diff",
             "check_invariants"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "static_analysis"
+          ],
+          "preferred_when": [
+            "Execute local analyzers like TypeScript or Semgrep and return structured findings.",
+            "Run type-checking on the files changed in a PR."
+          ],
+          "avoid_when": [
+            "Read-only code analysis; may be slower depending on analyzers."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only",
+            "runs_local_process"
           ]
         }
       },
@@ -837,6 +2329,26 @@
             "resume_review",
             "get_review_telemetry"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Start a session-based pull request review with pause/resume and telemetry.",
+            "Launch a review session for a large PR."
+          ],
+          "avoid_when": [
+            "Creates review session state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -855,6 +2367,27 @@
             "pause_review",
             "resume_review"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "diagnostics",
+            "review"
+          ],
+          "preferred_when": [
+            "Check progress for an active reactive review session.",
+            "See how many review steps have completed."
+          ],
+          "avoid_when": [
+            "Read-only session status access."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only"
+          ]
         }
       },
       {
@@ -871,6 +2404,26 @@
           "tools": [
             "reactive_review_pr",
             "resume_review"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Pause an active reactive review session without discarding progress.",
+            "Pause a review to free worker capacity."
+          ],
+          "avoid_when": [
+            "Writes session state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "writes_workspace_state"
           ]
         }
       },
@@ -889,6 +2442,26 @@
             "reactive_review_pr",
             "pause_review"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "review"
+          ],
+          "preferred_when": [
+            "Resume a paused reactive review session from its last checkpoint.",
+            "Resume a paused review after resolving an external blocker."
+          ],
+          "avoid_when": [
+            "Writes session state."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "writes_workspace_state"
+          ]
         }
       },
       {
@@ -906,6 +2479,27 @@
             "reactive_review_pr",
             "get_review_status"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "diagnostics",
+            "review"
+          ],
+          "preferred_when": [
+            "Inspect timing, cache, and token telemetry for a reactive review session.",
+            "Check review cache hit rate after a long session."
+          ],
+          "avoid_when": [
+            "Read-only telemetry inspection."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "may_send_to_llm",
+            "read_only"
+          ]
         }
       },
       {
@@ -922,6 +2516,26 @@
           "tools": [
             "validate_content"
           ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "security"
+          ],
+          "preferred_when": [
+            "Mask secrets before logs or snippets are reused in prompts or saved artifacts.",
+            "Scrub a config snippet before sending it to a model."
+          ],
+          "avoid_when": [
+            "Read-only transformation of provided content."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only",
+            "secret_exposure_risk"
+          ]
         }
       },
       {
@@ -937,6 +2551,25 @@
         "related_surfaces": {
           "tools": [
             "scrub_secrets"
+          ]
+        },
+        "selection_profile": {
+          "schema_version": 1,
+          "intent_tags": [
+            "security"
+          ],
+          "preferred_when": [
+            "Run deterministic validation checks for code or structured content before submission.",
+            "Validate generated YAML before saving it."
+          ],
+          "avoid_when": [
+            "Read-only validation of supplied content."
+          ],
+          "selection_signals": [
+            "metadata:title_usage_examples"
+          ],
+          "operation_risk": [
+            "read_only"
           ]
         }
       }
@@ -1096,21 +2729,64 @@
       ]
     },
     "symbol_navigation": {
-      "description": "Deterministic local symbol-first navigation for identifier queries",
-      "version": "1.9.0",
+      "description": "Deterministic symbol-first navigation for identifier queries with graph-backed resolution and explicit fallback receipts",
+      "version": "1.10.0",
       "tools": [
         "symbol_search",
         "symbol_references",
         "symbol_definition",
-        "call_relationships"
+        "call_relationships",
+        "find_callers",
+        "find_callees",
+        "trace_symbol",
+        "impact_analysis"
       ],
       "features": [
-        "Exact and symbol-aware local ranking",
+        "Graph-backed exact and symbol-aware ranking with deterministic heuristic fallback",
         "Reference-only lookup that filters declaration hits",
         "Single-best declaration lookup for canonical jump-to-definition",
-        "Caller and callee enumeration for known function symbols",
+        "Caller and callee enumeration for known function symbols using persisted call edges first",
+        "Direct caller-only and callee-only graph-native tools for narrower navigation",
+        "Combined symbol tracing across definition, references, and direct call edges",
+        "Direct impact estimation with bounded, deterministic risk receipts",
         "Scope filters via include_paths and exclude_paths",
-        "Provider-independent navigation path for known identifiers"
+        "Provider-independent navigation path for known identifiers",
+        "Explicit fallback reason reporting when graph artifacts are unavailable or incomplete"
+      ]
+    },
+    "context_explainability": {
+      "description": "Deterministic explanation of why context files were selected using shared retrieval provenance and explainability receipts",
+      "version": "1.10.0",
+      "tools": [
+        "why_this_context"
+      ],
+      "features": [
+        "Reuses the graph-aware retrieval provenance and explainability vocabulary",
+        "Surfaces explicit degraded-mode receipts when selection evidence is missing or stale",
+        "Explains context bundle selection without changing the underlying retrieval path"
+      ]
+    },
+    "transport_parity": {
+      "description": "Shared metadata contract for latency, requirements, provenance, explainability, and transport parity",
+      "version": "1.10.0",
+      "tools": [
+        "tool_manifest",
+        "codebase_retrieval",
+        "get_context_for_prompt",
+        "why_this_context",
+        "symbol_search",
+        "symbol_references",
+        "symbol_definition",
+        "call_relationships",
+        "find_callers",
+        "find_callees",
+        "trace_symbol",
+        "impact_analysis"
+      ],
+      "features": [
+        "Manifest discoverability now includes additive shared_contract metadata for applicable tools",
+        "Transport metadata declares stdio MCP, streamable HTTP MCP, and REST parity where the same surface exists",
+        "Explainability and provenance receipts are described without changing existing MCP tool names"
       ]
     },
     "persistence": {

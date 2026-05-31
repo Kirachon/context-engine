@@ -7,6 +7,11 @@
 
 import { ContextServiceClient } from '../serviceClient.js';
 import {
+  getDefaultTaskManager,
+  shouldUseIndexingTaskMode,
+  startIndexingTask,
+} from '../tasks/taskManager.js';
+import {
   evaluateIndexFreshness,
   type IndexFreshnessInfo,
 } from '../tooling/indexFreshness.js';
@@ -16,6 +21,8 @@ export interface IndexWorkspaceArgs {
   force?: boolean;
   /** Run indexing in background worker (default: false) */
   background?: boolean;
+  /** Return a task ID and track indexing progress without blocking (default: false) */
+  task?: boolean;
 }
 
 export { evaluateIndexFreshness };
@@ -28,7 +35,7 @@ export async function handleIndexWorkspace(
   args: IndexWorkspaceArgs,
   serviceClient: ContextServiceClient
 ): Promise<string> {
-  const { force = false, background = false } = args;
+  const { force = false, background = false, task = false } = args;
   
   const startTime = Date.now();
   
@@ -46,20 +53,25 @@ export async function handleIndexWorkspace(
       }, null, 2);
     }
 
-    if (force) {
-      console.error('[index_workspace] Force enabled: clearing existing index state first...');
-      await serviceClient.clearIndex();
-    }
-
-    if (background) {
-      // Fire and forget background worker
-      serviceClient.indexWorkspaceInBackground().catch((error) => {
-        console.error('[index_workspace] Background indexing failed:', error);
-      });
+    if (shouldUseIndexingTaskMode({ background, task })) {
+      const taskRecord = startIndexingTask(
+        serviceClient,
+        { force },
+        getDefaultTaskManager()
+      );
       return JSON.stringify({
         success: true,
         message: 'Background indexing started',
+        task_id: taskRecord.id,
+        task_status: taskRecord.status,
+        task_kind: taskRecord.kind,
+        progress: taskRecord.progress,
       }, null, 2);
+    }
+
+    if (force) {
+      console.error('[index_workspace] Force enabled: clearing existing index state first...');
+      await serviceClient.clearIndex();
     }
 
     const result = await serviceClient.indexWorkspace();
@@ -138,6 +150,11 @@ and will be automatically restored on future server starts.`,
       background: {
         type: 'boolean',
         description: 'Run indexing in a background worker thread (non-blocking)',
+        default: false,
+      },
+      task: {
+        type: 'boolean',
+        description: 'Return a task ID and track indexing progress without blocking the tool call',
         default: false,
       },
     },

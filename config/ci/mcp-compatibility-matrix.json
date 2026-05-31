@@ -1,0 +1,68 @@
+{
+  "version": 1,
+  "default_log_path": "docs/rollout-evidence/2026-05-31/mcp-compatibility-matrix.log",
+  "default_json_path": "artifacts/bench/mcp-compatibility-matrix.json",
+  "surfaces": [
+    {
+      "id": "structured-outputs",
+      "label": "Structured outputs, old-client text, and transport parity",
+      "tests": [
+        "tests/mcp/outputSchemaContract.test.ts",
+        "tests/integration/client-compat.test.ts",
+        "tests/integration/mcpTransportParity.test.ts",
+        "tests/integration/mcpErrorParity.test.ts"
+      ]
+    },
+    {
+      "id": "resources",
+      "label": "Resources list/read, URI safety, MIME, and error parity",
+      "tests": [
+        "tests/mcp/resourceRouter.test.ts",
+        "tests/mcp/resourceTemplates.test.ts",
+        "tests/mcp/resourcePolicyReads.test.ts",
+        "tests/mcp/resourceSafety.test.ts"
+      ]
+    },
+    {
+      "id": "policy",
+      "label": "Discoverability, capabilities, and client-aware policy",
+      "tests": [
+        "tests/mcp/discoverability.test.ts",
+        "tests/mcp/serverCapabilities.test.ts",
+        "tests/mcp/clientCapabilities.test.ts"
+      ]
+    },
+    {
+      "id": "tasks",
+      "label": "Task lifecycle, cancellation, and review integration",
+      "tests": [
+        "tests/mcp/taskManager.test.ts",
+        "tests/mcp/reviewTaskIntegration.test.ts"
+      ]
+    },
+    {
+      "id": "auth",
+      "label": "HTTP auth scopes and default local compatibility",
+      "tests": [
+        "tests/integration/httpAuthScopes.test.ts"
+      ]
+    },
+    {
+      "id": "roots",
+      "label": "MCP roots negotiation and single-workspace compatibility",
+      "tests": [
+        "tests/mcp/rootsManager.test.ts"
+      ]
+    },
+    {
+      "id": "evals",
+      "label": "MCP eval smoke harness and informational baseline gate",
+      "tests": [
+        "tests/evals/mcpEvalSmoke.test.ts"
+      ],
+      "scripts": [
+        "scripts/ci/run-mcp-eval-smoke.ts"
+      ]
+    }
+  ]
+}

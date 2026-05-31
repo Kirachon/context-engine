@@ -34,33 +34,48 @@ describe('mcp tooling runtime wrapper', () => {
     expect(log.mock.calls[1][0]).toContain('Tool demo_tool completed in 35ms');
   });
 
-  it('returns error envelope for unknown tools', async () => {
-    const now: () => number = jest.fn<() => number>().mockReturnValueOnce(10).mockReturnValueOnce(22);
+  it('passes structured tool results through unchanged', async () => {
+    const now: () => number = jest.fn<() => number>().mockReturnValueOnce(100).mockReturnValueOnce(101);
     const log = jest.fn();
+    const structured = {
+      content: [{ type: 'text' as const, text: 'ok' }],
+      structuredContent: { answer: 42 },
+      _meta: { requestId: 'req_1' },
+    };
+    const toolHandlers = new Map([
+      ['structured_tool', async () => structured],
+    ]);
 
     const result = await executeToolCall({
-      name: 'missing_tool',
+      name: 'structured_tool',
       args: {},
-      toolHandlers: new Map(),
+      toolHandlers,
       now,
       log,
     });
 
     expect(result).toEqual({
-      response: {
-        content: [
-          {
-            type: 'text',
-            text: 'Error: Unknown tool: missing_tool',
-          },
-        ],
-        isError: true,
-      },
-      result: 'error',
-      elapsedMs: 12,
+      response: structured,
+      result: 'success',
+      elapsedMs: 1,
     });
-    expect(log).toHaveBeenCalledTimes(2);
-    expect(log.mock.calls[1][0]).toContain('Tool missing_tool failed after 12ms: Unknown tool: missing_tool');
+  });
+
+  it('throws JSON-RPC invalid-params error for unknown tools', async () => {
+    const now: () => number = jest.fn<() => number>().mockReturnValueOnce(10).mockReturnValueOnce(22);
+    const log = jest.fn();
+
+    await expect(
+      executeToolCall({
+        name: 'missing_tool',
+        args: {},
+        toolHandlers: new Map(),
+        now,
+        log,
+      })
+    ).rejects.toThrow(/Unknown tool: missing_tool/);
+    expect(log).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls[0][0]).toContain('Tool: missing_tool');
   });
 
   it('returns error envelope when tool handler throws', async () => {

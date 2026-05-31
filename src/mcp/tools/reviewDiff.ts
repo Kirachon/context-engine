@@ -17,6 +17,13 @@ import {
   noteRetrievalStage,
 } from '../../internal/retrieval/flow.js';
 import { normalizeWorkspaceRelativePaths } from '../../workspace/pathValidation.js';
+import {
+  buildTaskStartResponse,
+  getDefaultTaskManager,
+  shouldUseTaskMode,
+  startReviewDiffTask,
+} from '../tasks/taskManager.js';
+import type { EnterpriseReviewResult } from '../../reviewer/types.js';
 
 const FLOW_DEBUG_ENV = 'CE_FLOW_DEBUG';
 
@@ -25,6 +32,10 @@ export interface ReviewDiffArgs {
   changed_files?: string[];
   base_sha?: string;
   head_sha?: string;
+  /** Run review without blocking the tool call (default: false) */
+  background?: boolean;
+  /** Return a task ID and track review progress without blocking (default: false) */
+  task?: boolean;
   options?: {
     confidence_threshold?: number;
     max_findings?: number;
@@ -55,10 +66,10 @@ function noteReviewFlowStage(flow: ReturnType<typeof createRetrievalFlowContext>
   noteRetrievalStage(flow, `review:${stage}`);
 }
 
-export async function handleReviewDiff(
+export async function performReviewDiff(
   args: ReviewDiffArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<EnterpriseReviewResult> {
   const flow = createRetrievalFlowContext('review_diff', {
     metadata: {
       tool: 'review_diff',
@@ -157,7 +168,7 @@ export async function handleReviewDiff(
     noteReviewFlowStage(flow, 'review:complete');
     noteReviewFlowStage(flow, 'complete:success');
     completedSuccessfully = true;
-    return JSON.stringify(result, null, 2);
+    return result;
   } catch (error) {
     noteReviewFlowStage(flow, 'complete:error');
     throw error;
@@ -173,6 +184,39 @@ export async function handleReviewDiff(
   }
 }
 
+export async function handleReviewDiff(
+  args: ReviewDiffArgs,
+  serviceClient: ContextServiceClient
+): Promise<string> {
+  if (shouldUseTaskMode({ background: args.background, task: args.task })) {
+    const diff = normalizeRequiredDiffInput(
+      args.diff,
+      'Missing or invalid "diff" argument. Provide a unified diff string.'
+    );
+    const changedFiles = args.changed_files
+      ? normalizeWorkspaceRelativePaths(args.changed_files, 'changed_files', { rejectOptionLike: true })
+      : undefined;
+    assertNonEmptyDiffScope(diff, changedFiles);
+
+    const taskRecord = startReviewDiffTask(
+      async (updateProgress) => {
+        updateProgress({ message: 'Running diff review preflight' });
+        return performReviewDiff(args, serviceClient);
+      },
+      getDefaultTaskManager()
+    );
+
+    return JSON.stringify(
+      buildTaskStartResponse('Background diff review started', taskRecord),
+      null,
+      2
+    );
+  }
+
+  const result = await performReviewDiff(args, serviceClient);
+  return JSON.stringify(result, null, 2);
+}
+
 export const reviewDiffTool = {
   name: 'review_diff',
   description: 'Enterprise-grade diff-first review with deterministic preflight and structured JSON output.',
@@ -183,6 +227,16 @@ export const reviewDiffTool = {
       changed_files: { type: 'array', items: { type: 'string' }, description: 'Optional list of changed file paths' },
       base_sha: { type: 'string', description: 'Optional base commit SHA' },
       head_sha: { type: 'string', description: 'Optional head commit SHA' },
+      background: {
+        type: 'boolean',
+        description: 'Run review without blocking the tool call (default: false)',
+        default: false,
+      },
+      task: {
+        type: 'boolean',
+        description: 'Return a task ID and track review progress without blocking (default: false)',
+        default: false,
+      },
       options: {
         type: 'object',
         properties: {

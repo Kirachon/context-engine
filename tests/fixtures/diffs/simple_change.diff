@@ -1,0 +1,22 @@
+diff --git a/src/utils/helper.ts b/src/utils/helper.ts
+index abc1234..def5678 100644
+--- a/src/utils/helper.ts
++++ b/src/utils/helper.ts
+@@ -1,10 +1,12 @@
+ /**
+  * Helper utilities
+  */
+ 
+-export function formatDate(date: Date): string {
+-  return date.toISOString();
++export function formatDate(date: Date, locale?: string): string {
++  if (locale) {
++    return date.toLocaleDateString(locale);
++  }
++  return date.toISOString();
+ }
+ 
+ export function capitalize(str: string): string {
+   return str.charAt(0).toUpperCase() + str.slice(1);
+ }
+

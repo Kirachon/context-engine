@@ -42,6 +42,15 @@ import {
   ExecutionProgress,
   GeneratedCodeChange,
 } from '../types/planning.js';
+import {
+  appendClarificationSection,
+  buildDefaultPlanningClarificationQuestions,
+  isAmbiguousPlanningTask,
+  mergeClarificationAnswersIntoText,
+  resolveAmbiguityViaElicitation,
+  resolveClientCapabilitiesManager,
+  type ElicitationResolution,
+} from '../capabilities/clientCapabilities.js';
 
 const planningServiceFactory = createClientBoundFactory(
   (serviceClient: ContextServiceClient) => new PlanningService(serviceClient)
@@ -63,6 +72,64 @@ function buildToolMeta(tool: string, duration_ms: number, status?: string): Tool
     duration_ms,
     ...(status ? { status } : {}),
   };
+}
+
+async function maybeResolvePlanningAmbiguity(
+  serviceClient: ContextServiceClient,
+  subject: string,
+  questions?: string[]
+): Promise<{ subject: string; resolution?: ElicitationResolution }> {
+  const hasPlanQuestions = Boolean(questions && questions.length > 0);
+  if (!hasPlanQuestions && !isAmbiguousPlanningTask(subject)) {
+    return { subject };
+  }
+
+  const clarificationQuestions = hasPlanQuestions
+    ? questions!
+    : buildDefaultPlanningClarificationQuestions(subject);
+
+  const manager = resolveClientCapabilitiesManager(serviceClient);
+  const resolution = await resolveAmbiguityViaElicitation(manager, {
+    taskType: 'planning',
+    subject,
+    questions: clarificationQuestions,
+  });
+
+  if (resolution.mode === 'elicited') {
+    return {
+      subject: mergeClarificationAnswersIntoText(subject, resolution.answers),
+      resolution,
+    };
+  }
+
+  return { subject, resolution };
+}
+
+async function appendPlanningClarificationIfNeeded(
+  output: string,
+  serviceClient: ContextServiceClient,
+  result: PlanResult,
+  initialResolution?: ElicitationResolution
+): Promise<string> {
+  if (initialResolution) {
+    return appendClarificationSection(output, initialResolution);
+  }
+
+  const planQuestions = result.plan?.questions_for_clarification ?? [];
+  if (result.status !== 'needs_clarification' || planQuestions.length === 0) {
+    return output;
+  }
+
+  const followUp = await maybeResolvePlanningAmbiguity(
+    serviceClient,
+    result.plan?.goal ?? 'plan refinement',
+    planQuestions
+  );
+  if (!followUp.resolution) {
+    return output;
+  }
+
+  return appendClarificationSection(output, followUp.resolution);
 }
 
 // ============================================================================
@@ -166,6 +233,9 @@ export async function handleCreatePlan(
   const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
   const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
 
+  const ambiguity = await maybeResolvePlanningAmbiguity(serviceClient, validatedTask);
+  const planningTask = ambiguity.subject;
+
   const planningService = getPlanningService(serviceClient);
 
   const options: PlanGenerationOptions = {
@@ -178,9 +248,9 @@ export async function handleCreatePlan(
     exclude_paths: normalizedExcludePaths,
   };
 
-  console.error(`[create_plan] Generating plan for: "${validatedTask.substring(0, 100)}..."`);
+  console.error(`[create_plan] Generating plan for: "${planningTask.substring(0, 100)}..."`);
 
-  const result = await planningService.generatePlan(validatedTask, options, signal);
+  const result = await planningService.generatePlan(planningTask, options, signal);
 
   if (!result.success) {
     throw new Error(`Failed to generate plan: ${result.error}`);
@@ -198,7 +268,12 @@ export async function handleCreatePlan(
           ...result,
           _meta: buildToolMeta('create_plan', Date.now() - startTime, result.status),
         };
-        return formatPlanResult(resultWithMeta, persistence);
+        return appendPlanningClarificationIfNeeded(
+          formatPlanResult(resultWithMeta, persistence),
+          serviceClient,
+          result,
+          ambiguity.resolution
+        );
       }
       const { PlanPersistenceService } = await import('../services/planPersistenceService.js');
       const service = new PlanPersistenceService(workspacePath);
@@ -226,7 +301,12 @@ export async function handleCreatePlan(
     ...result,
     _meta: buildToolMeta('create_plan', Date.now() - startTime, result.status),
   };
-  return formatPlanResult(resultWithMeta, persistence);
+  return appendPlanningClarificationIfNeeded(
+    formatPlanResult(resultWithMeta, persistence),
+    serviceClient,
+    result,
+    ambiguity.resolution
+  );
 }
 
 /**
@@ -254,6 +334,22 @@ export async function handleRefinePlan(
     );
   }
 
+  let clarificationResolution: ElicitationResolution | undefined;
+  const pendingQuestions = plan.questions_for_clarification ?? [];
+  if (!parsedClarifications && pendingQuestions.length > 0) {
+    const ambiguity = await maybeResolvePlanningAmbiguity(
+      serviceClient,
+      plan.goal ?? 'plan refinement',
+      pendingQuestions
+    );
+    clarificationResolution = ambiguity.resolution;
+    if (ambiguity.resolution?.mode === 'elicited') {
+      parsedClarifications = Object.fromEntries(
+        Object.entries(ambiguity.resolution.answers).map(([key, value]) => [key, String(value)])
+      );
+    }
+  }
+
   const planningService = getPlanningService(serviceClient);
 
   const options: PlanRefinementOptions = {
@@ -274,7 +370,12 @@ export async function handleRefinePlan(
     ...result,
     _meta: buildToolMeta('refine_plan', Date.now() - startTime, result.status),
   };
-  return formatPlanResult(resultWithMeta);
+  return appendPlanningClarificationIfNeeded(
+    formatPlanResult(resultWithMeta),
+    serviceClient,
+    result,
+    clarificationResolution
+  );
 }
 
 /**

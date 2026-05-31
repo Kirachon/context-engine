@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "assembled_at": "2026-05-31T00:00:00.000Z",
+  "cases": [
+    {
+      "id": "auth-flow-default",
+      "bundle": {
+        "summary": "Authentication and session handling context.",
+        "query": "user authentication login flow",
+        "files": [
+          {
+            "path": "src/auth/login.ts",
+            "extension": ".ts",
+            "summary": "Login handler and JWT validation.",
+            "relevance": 0.92,
+            "tokenCount": 120,
+            "selectionRationale": "Contains login handler",
+            "snippets": [
+              {
+                "text": "export async function login(email: string, password: string) {\n  return validateCredentials(email, password);\n}",
+                "lines": "10-14",
+                "relevance": 0.95,
+                "tokenCount": 40,
+                "codeType": "function"
+              }
+            ]
+          }
+        ],
+        "hints": ["Focus on JWT validation edge cases."],
+        "memories": [
+          {
+            "category": "decisions",
+            "content": "Use JWT for authentication because of stateless scaling.",
+            "relevanceScore": 0.8,
+            "title": "Auth strategy",
+            "source": ".memories/decisions/auth.md"
+          }
+        ],
+        "metadata": {
+          "totalFiles": 1,
+          "totalSnippets": 1,
+          "totalTokens": 120,
+          "tokenBudget": 8000,
+          "truncated": false,
+          "searchTimeMs": 42
+        }
+      }
+    }
+  ]
+}

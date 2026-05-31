@@ -10,6 +10,9 @@ import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
 import { featureEnabled } from '../../config/features.js';
 import type { RankingDiagnostics } from '../../internal/handlers/types.js';
+import { codebaseRetrievalOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
   validateFiniteNumberInRange,
@@ -18,6 +21,8 @@ import {
   validatePathScopeGlobs,
   validateTrimmedNonEmptyString,
 } from '../tooling/validation.js';
+
+export { codebaseRetrievalOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 
 export interface CodebaseRetrievalArgs {
   query: string;
@@ -94,6 +99,8 @@ export interface CodebaseRetrievalOutput {
     ranking_diagnostics?: RankingDiagnostics;
   };
 }
+
+export type CodebaseRetrievalStructuredContent = CodebaseRetrievalOutput & Record<string, unknown>;
 
 type FallbackDiagnostics = {
   filtersApplied?: string[];
@@ -320,23 +327,122 @@ function buildExplainabilityEnvelope(traceCandidate: TraceCandidate): CodebaseRe
       base_score: explainability.scoreBreakdown.baseScore ?? 0,
       graph_score: explainability.scoreBreakdown.graphScore ?? 0,
       combined_score: explainability.scoreBreakdown.combinedScore ?? 0,
-      semantic_score: explainability.scoreBreakdown.semanticScore,
-      lexical_score: explainability.scoreBreakdown.lexicalScore,
-      dense_score: explainability.scoreBreakdown.denseScore,
-      fused_score: explainability.scoreBreakdown.fusedScore,
+      ...(explainability.scoreBreakdown.semanticScore !== undefined
+        ? { semantic_score: explainability.scoreBreakdown.semanticScore }
+        : {}),
+      ...(explainability.scoreBreakdown.lexicalScore !== undefined
+        ? { lexical_score: explainability.scoreBreakdown.lexicalScore }
+        : {}),
+      ...(explainability.scoreBreakdown.denseScore !== undefined
+        ? { dense_score: explainability.scoreBreakdown.denseScore }
+        : {}),
+      ...(explainability.scoreBreakdown.fusedScore !== undefined
+        ? { fused_score: explainability.scoreBreakdown.fusedScore }
+        : {}),
     },
-    graph_signals: explainability.graphSignals?.map((signal) => ({
-      kind: signal.kind ?? 'unknown',
-      value: signal.value ?? '',
-      weight: typeof signal.weight === 'number' ? signal.weight : 0,
-    })),
+    ...(explainability.graphSignals?.length
+      ? {
+          graph_signals: explainability.graphSignals.map((signal) => ({
+            kind: signal.kind ?? 'unknown',
+            value: signal.value ?? '',
+            weight: typeof signal.weight === 'number' ? signal.weight : 0,
+          })),
+        }
+      : {}),
   };
+}
+
+export function buildCodebaseRetrievalStructuredContent(params: {
+  normalizedQuery: string;
+  searchResults: Array<{
+    path: string;
+    content: string;
+    lines?: string;
+    relevanceScore?: number;
+    matchType?: string;
+    retrievalSource?: string;
+    queryVariant?: string;
+    variantIndex?: number;
+    provenance?: TraceCandidate['provenance'];
+    explainability?: TraceCandidate['explainability'];
+  }>;
+  useV2: boolean;
+  useCompactPreview: boolean;
+  queryTimeMs: number;
+  fallbackDiagnostics: FallbackDiagnostics | null;
+  signalSummary: RetrievalSignalSummary;
+  status: ReturnType<typeof internalIndexStatus>;
+  freshnessWarning: string | null;
+  rankingDiagnostics?: RankingDiagnostics;
+  providerResolution?: string;
+}): CodebaseRetrievalStructuredContent {
+  const {
+    normalizedQuery,
+    searchResults,
+    useV2,
+    useCompactPreview,
+    queryTimeMs,
+    fallbackDiagnostics,
+    signalSummary,
+    status,
+    freshnessWarning,
+    rankingDiagnostics,
+    providerResolution,
+  } = params;
+
+  const results: CodebaseRetrievalResult[] = searchResults.map((r) => {
+    const traceCandidate = r as unknown as TraceCandidate;
+    const snippet = useCompactPreview
+      ? { preview: r.content.slice(0, 240) }
+      : { content: r.content };
+    return {
+      file: r.path,
+      ...snippet,
+      score: r.relevanceScore || 0,
+      lines: r.lines,
+      reason: `Semantic match for: "${normalizedQuery}"`,
+      trace: buildTraceEnvelope(traceCandidate),
+      provenance: buildProvenanceEnvelope(traceCandidate),
+      explainability: buildExplainabilityEnvelope(traceCandidate),
+    };
+  });
+
+  return {
+    results,
+    metadata: {
+      workspace: status.workspace,
+      lastIndexed: status.lastIndexed,
+      queryTimeMs,
+      totalResults: results.length,
+      indexStatus: {
+        status: status.status,
+        fileCount: status.fileCount,
+        isStale: status.isStale,
+        lastError: status.lastError,
+      },
+      freshnessWarning: freshnessWarning ?? undefined,
+      filtersApplied: fallbackDiagnostics?.filtersApplied ?? [],
+      filteredPathsCount: fallbackDiagnostics?.filteredPathsCount ?? 0,
+      secondPassUsed: fallbackDiagnostics?.secondPassUsed ?? false,
+      ...(useV2 ? { responseVersion: 'v2' as const } : {}),
+      ...(providerResolution ? { providerResolution } : {}),
+      query_mode: signalSummary.queryMode,
+      hybrid_components: signalSummary.hybridComponents,
+      quality_guard_state: signalSummary.qualityGuardState,
+      fallback_state: signalSummary.fallbackState,
+      ranking_diagnostics: rankingDiagnostics,
+    },
+  };
+}
+
+export function formatCodebaseRetrievalText(structuredContent: CodebaseRetrievalStructuredContent): string {
+  return JSON.stringify(structuredContent, null, 2);
 }
 
 export async function handleCodebaseRetrieval(
   args: CodebaseRetrievalArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<ContextEngineToolResult<CodebaseRetrievalStructuredContent>> {
   const startTime = Date.now();
   const {
     query,
@@ -400,23 +506,6 @@ export async function handleCodebaseRetrieval(
   const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status);
 
-  const results: CodebaseRetrievalResult[] = searchResults.map((r) => {
-    const traceCandidate = r as unknown as TraceCandidate;
-    const snippet = useCompactPreview
-      ? { preview: r.content.slice(0, 240) }
-      : { content: r.content };
-    return {
-      file: r.path,
-      ...snippet,
-      score: r.relevanceScore || 0,
-      lines: r.lines,
-      reason: `Semantic match for: "${normalizedQuery}"`,
-      trace: buildTraceEnvelope(traceCandidate),
-      provenance: buildProvenanceEnvelope(traceCandidate),
-      explainability: buildExplainabilityEnvelope(traceCandidate),
-    };
-  });
-
   const maybeClient = serviceClient as unknown as {
     getActiveRetrievalProviderId?: () => unknown;
   };
@@ -432,36 +521,23 @@ export async function handleCodebaseRetrieval(
         })()
       : undefined;
 
-  const output: CodebaseRetrievalOutput = {
-    results,
-    metadata: {
-      workspace: status.workspace,
-      lastIndexed: status.lastIndexed,
-      queryTimeMs: Date.now() - startTime,
-      totalResults: results.length,
-      indexStatus: {
-        status: status.status,
-        fileCount: status.fileCount,
-        isStale: status.isStale,
-        lastError: status.lastError,
-      },
-      freshnessWarning: freshnessWarning ?? undefined,
-      filtersApplied: fallbackDiagnostics?.filtersApplied ?? [],
-      filteredPathsCount: fallbackDiagnostics?.filteredPathsCount ?? 0,
-      secondPassUsed: fallbackDiagnostics?.secondPassUsed ?? false,
-      responseVersion: useV2 ? 'v2' : undefined,
-      providerResolution,
-      query_mode: signalSummary.queryMode,
-      hybrid_components: signalSummary.hybridComponents,
-      quality_guard_state: signalSummary.qualityGuardState,
-      fallback_state: signalSummary.fallbackState,
-      ranking_diagnostics: retrieval.rankingDiagnostics
-        ? (retrieval.rankingDiagnostics as RankingDiagnostics)
-        : undefined,
-    },
-  };
+  const structuredContent = buildCodebaseRetrievalStructuredContent({
+    normalizedQuery,
+    searchResults,
+    useV2,
+    useCompactPreview,
+    queryTimeMs: Date.now() - startTime,
+    fallbackDiagnostics,
+    signalSummary,
+    status,
+    freshnessWarning,
+    rankingDiagnostics: retrieval.rankingDiagnostics
+      ? (retrieval.rankingDiagnostics as RankingDiagnostics)
+      : undefined,
+    providerResolution,
+  });
 
-  return JSON.stringify(output, null, 2);
+  return okResult(formatCodebaseRetrievalText(structuredContent), structuredContent);
 }
 
 export const codebaseRetrievalTool = {
@@ -551,4 +627,5 @@ Before editing a file, ALWAYS first call the codebase-retrieval MCP tool, asking
     },
     required: ['query'],
   },
+  outputSchema: codebaseRetrievalOutputSchema,
 };

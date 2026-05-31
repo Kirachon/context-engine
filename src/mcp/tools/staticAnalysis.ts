@@ -10,11 +10,21 @@ import { runStaticAnalyzers } from '../../reviewer/checks/adapters/index.js';
 import type { StaticAnalyzerId } from '../../reviewer/checks/adapters/types.js';
 import { envInt } from '../../config/env.js';
 import { normalizeWorkspaceRelativePaths } from '../../workspace/pathValidation.js';
+import {
+  buildTaskStartResponse,
+  getDefaultTaskManager,
+  shouldUseTaskMode,
+  startStaticAnalysisTask,
+} from '../tasks/taskManager.js';
 
 const DEFAULT_SEMGREP_MAX_FILES = 100;
 
 export interface RunStaticAnalysisArgs {
   changed_files?: string[];
+  /** Run static analysis without blocking the tool call (default: false) */
+  background?: boolean;
+  /** Return a task ID and track analysis progress without blocking (default: false) */
+  task?: boolean;
   options?: {
     analyzers?: StaticAnalyzerId[];
     timeout_ms?: number;
@@ -23,10 +33,10 @@ export interface RunStaticAnalysisArgs {
   };
 }
 
-export async function handleRunStaticAnalysis(
+export async function performRunStaticAnalysis(
   args: RunStaticAnalysisArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<Record<string, unknown>> {
   const workspacePath = serviceClient.getWorkspacePath();
   const analyzers = (args.options?.analyzers ?? ['tsc']).filter(Boolean) as StaticAnalyzerId[];
   const changedFiles = normalizeWorkspaceRelativePaths(args.changed_files ?? [], 'changed_files', {
@@ -58,17 +68,37 @@ export async function handleRunStaticAnalysis(
     semgrepArgs: args.options?.semgrep_args,
   });
 
-  return JSON.stringify(
-    {
-      success: true,
-      analyzers,
-      warnings: [...warnings, ...run.warnings],
-      results: run.results,
-      findings: run.findings,
-    },
-    null,
-    2
-  );
+  return {
+    success: true,
+    analyzers,
+    warnings: [...warnings, ...run.warnings],
+    results: run.results,
+    findings: run.findings,
+  };
+}
+
+export async function handleRunStaticAnalysis(
+  args: RunStaticAnalysisArgs,
+  serviceClient: ContextServiceClient
+): Promise<string> {
+  if (shouldUseTaskMode({ background: args.background, task: args.task })) {
+    const taskRecord = startStaticAnalysisTask(
+      async (updateProgress) => {
+        updateProgress({ message: 'Running static analyzers' });
+        return performRunStaticAnalysis(args, serviceClient);
+      },
+      getDefaultTaskManager()
+    );
+
+    return JSON.stringify(
+      buildTaskStartResponse('Background static analysis started', taskRecord),
+      null,
+      2
+    );
+  }
+
+  const result = await performRunStaticAnalysis(args, serviceClient);
+  return JSON.stringify(result, null, 2);
 }
 
 export const runStaticAnalysisTool = {
@@ -78,6 +108,16 @@ export const runStaticAnalysisTool = {
     type: 'object',
     properties: {
       changed_files: { type: 'array', items: { type: 'string' }, description: 'Optional list of file paths to analyze' },
+      background: {
+        type: 'boolean',
+        description: 'Run static analysis without blocking the tool call (default: false)',
+        default: false,
+      },
+      task: {
+        type: 'boolean',
+        description: 'Return a task ID and track analysis progress without blocking (default: false)',
+        default: false,
+      },
       options: {
         type: 'object',
         properties: {

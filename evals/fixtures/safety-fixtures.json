@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "description": "Deterministic safety eval cases for secret scrubbing guardrails.",
+  "cases": [
+    {
+      "id": "aws-access-key",
+      "content": "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE",
+      "expect_secrets": true,
+      "expect_types": ["aws_key"]
+    },
+    {
+      "id": "openai-api-key",
+      "content": "const apiKey = \"sk-proj-abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghij\";",
+      "expect_secrets": true,
+      "expect_types": ["openai_key"]
+    },
+    {
+      "id": "github-token",
+      "content": "GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+      "expect_secrets": true,
+      "expect_types": ["github_token"]
+    },
+    {
+      "id": "clean-content",
+      "content": "const message = \"Hello, World!\";",
+      "expect_secrets": false,
+      "expect_types": []
+    }
+  ]
+}

@@ -12,6 +12,12 @@ import { handleGetContext, GetContextArgs, getContextTool } from '../../src/mcp/
 import { ContextServiceClient, ContextBundle, FileContext } from '../../src/mcp/serviceClient.js';
 import { FEATURE_FLAGS } from '../../src/config/features.js';
 import { getPlanPersistenceService, initializePlanManagementServices } from '../../src/mcp/tools/planManagement.js';
+import { normalizeToolResult } from '../../src/mcp/utils/resultBuilder.js';
+import { validateStructuredContent } from '../../src/mcp/utils/outputSchemaContract.js';
+
+function toolText(result: unknown): string {
+  return normalizeToolResult(result as never).content[0].text;
+}
 
 describe('get_context_for_prompt Tool', () => {
   let mockServiceClient: any;
@@ -149,7 +155,7 @@ describe('get_context_for_prompt Tool', () => {
       const mockBundle: ContextBundle = createMockContextBundle();
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: '   test query   ' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: '   test query   ' }, mockServiceClient as any));
       expect(result).toContain('**Query:** "test query"');
     });
 
@@ -181,7 +187,7 @@ describe('get_context_for_prompt Tool', () => {
       const mockBundle = createMockContextBundle();
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('# 📚 Codebase Context');
       expect(result).toContain('**Query:**');
@@ -198,7 +204,7 @@ describe('get_context_for_prompt Tool', () => {
         isStale: true,
       });
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('Index freshness warning');
       expect(result).toContain('index is stale');
@@ -216,7 +222,7 @@ describe('get_context_for_prompt Tool', () => {
         lastError: 'index unavailable',
       });
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('index status is error');
       expect(result).toContain('reindexing succeeds');
@@ -226,7 +232,7 @@ describe('get_context_for_prompt Tool', () => {
       const mockBundle = createMockContextBundle();
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('## 📁 Files Overview');
       expect(result).toContain('| # | File | Relevance | Summary |');
@@ -237,7 +243,7 @@ describe('get_context_for_prompt Tool', () => {
       mockBundle.hints = ['Test hint 1', 'Test hint 2'];
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('## 💡 Key Insights');
       expect(result).toContain('Test hint 1');
@@ -247,7 +253,7 @@ describe('get_context_for_prompt Tool', () => {
       const mockBundle = createMockContextBundle();
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('```typescript');
       expect(result).toContain('```');
@@ -270,7 +276,7 @@ describe('get_context_for_prompt Tool', () => {
       mockBundle.metadata.externalWarnings = [];
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('## 🌐 External References');
       expect(result).toContain('not part of the indexed local codebase');
@@ -285,13 +291,13 @@ describe('get_context_for_prompt Tool', () => {
       mockServiceClient.getWorkspacePath.mockReturnValue(tempDir);
 
       try {
-        const result = await handleGetContext({
+        const result = toolText(await handleGetContext({
           query: 'test',
           handoff_mode: 'active_plan',
           plan_id: 'plan-123',
           include_draft_memories: true,
           draft_session_id: 'session-1',
-        }, mockServiceClient as any);
+        }, mockServiceClient as any));
 
         expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
           'test',
@@ -317,11 +323,11 @@ describe('get_context_for_prompt Tool', () => {
       mockServiceClient.getWorkspacePath.mockReturnValue(tempDir);
 
       try {
-        const result = await handleGetContext({
+        const result = toolText(await handleGetContext({
           query: 'test',
           handoff_mode: 'active_plan',
           plan_id: 'plan-missing',
-        }, mockServiceClient as any);
+        }, mockServiceClient as any));
 
         expect(result).toContain('## 🔁 Active Handoff');
         expect(result).toContain('plan_not_found');
@@ -339,18 +345,18 @@ describe('get_context_for_prompt Tool', () => {
 
       try {
         mockServiceClient.getWorkspacePath.mockReturnValue(firstWorkspace);
-        const first = await handleGetContext({
+        const first = toolText(await handleGetContext({
           query: 'cache handoff proof',
           handoff_mode: 'active_plan',
           plan_id: 'plan-cache-a',
-        }, mockServiceClient as any);
+        }, mockServiceClient as any));
 
         mockServiceClient.getWorkspacePath.mockReturnValue(secondWorkspace);
-        const second = await handleGetContext({
+        const second = toolText(await handleGetContext({
           query: 'cache handoff proof',
           handoff_mode: 'active_plan',
           plan_id: 'plan-cache-b',
-        }, mockServiceClient as any);
+        }, mockServiceClient as any));
 
         expect(first).toContain('`plan-cache-a`');
         expect(second).toContain('`plan-cache-b`');
@@ -382,7 +388,7 @@ describe('get_context_for_prompt Tool', () => {
       };
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'sort by relevance' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'sort by relevance' }, mockServiceClient as any));
 
       expect(result.indexOf('| 1 | `src/high.ts` |')).toBeLessThan(result.indexOf('| 2 | `src/mid.ts` |'));
       expect(result.indexOf('### 1. `src/high.ts`')).toBeLessThan(result.indexOf('### 2. `src/mid.ts`'));
@@ -399,7 +405,7 @@ describe('get_context_for_prompt Tool', () => {
       };
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('## ✅ Why These Files');
       expect(result).toContain('## 🧭 Dependency Map');
@@ -423,7 +429,7 @@ describe('get_context_for_prompt Tool', () => {
       };
       mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
 
-      const result = await handleGetContext({ query: 'login service' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'login service' }, mockServiceClient as any));
 
       expect(result).toContain('Selection Signals');
       expect(result).toContain('graph seed symbol matched loginService');
@@ -448,7 +454,7 @@ describe('get_context_for_prompt Tool', () => {
       };
       mockServiceClient.getContextForPrompt.mockResolvedValue(emptyBundle);
 
-      const result = await handleGetContext({ query: 'nonexistent' }, mockServiceClient as any);
+      const result = toolText(await handleGetContext({ query: 'nonexistent' }, mockServiceClient as any));
 
       expect(result).toContain('No relevant code found');
     });
@@ -488,6 +494,111 @@ describe('get_context_for_prompt Tool', () => {
           type: 'string',
         })
       );
+    });
+
+    it('should expose outputSchema on tool definition', () => {
+      expect(getContextTool.outputSchema).toBeDefined();
+    });
+
+    it('returns structuredContent validated against output schema', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+
+      expect(validateStructuredContent('get_context_for_prompt', result.structuredContent).valid).toBe(true);
+      expect(toolText(result)).toContain('# 📚 Codebase Context');
+    });
+
+    it('should expose include_context_pack in input schema with default false', () => {
+      expect(getContextTool.inputSchema.properties.include_context_pack).toEqual(
+        expect.objectContaining({
+          type: 'boolean',
+          default: false,
+        })
+      );
+    });
+  });
+
+  describe('Context Pack Return Path', () => {
+    it('omits context_pack from structuredContent when include_context_pack is false', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext({ query: 'test' }, mockServiceClient as any);
+
+      expect(result.structuredContent).not.toHaveProperty('context_pack');
+      expect(validateStructuredContent('get_context_for_prompt', result.structuredContent).valid).toBe(true);
+    });
+
+    it('keeps legacy text output unchanged when include_context_pack is false', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const implicitDefault = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
+      const explicitFalse = toolText(
+        await handleGetContext({ query: 'test', include_context_pack: false }, mockServiceClient as any)
+      );
+
+      expect(explicitFalse).toBe(implicitDefault);
+    });
+
+    it('includes deterministic context_pack when include_context_pack is true', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const first = await handleGetContext(
+        { query: 'test', include_context_pack: true, token_budget: 8000 },
+        mockServiceClient as any
+      );
+      const second = await handleGetContext(
+        { query: 'test', include_context_pack: true, token_budget: 8000 },
+        mockServiceClient as any
+      );
+
+      expect(first.structuredContent).toBeDefined();
+      expect(second.structuredContent).toBeDefined();
+      const firstPack = first.structuredContent!.context_pack;
+      const secondPack = second.structuredContent!.context_pack;
+
+      expect(firstPack).toBeDefined();
+      expect(firstPack!.id).toMatch(/^ctxp_[a-f0-9]{16}$/);
+      expect(firstPack!.id).toBe(secondPack!.id);
+      expect(firstPack!.schema_version).toBe('3.0');
+      expect(validateStructuredContent('get_context_for_prompt', first.structuredContent).valid).toBe(true);
+    });
+
+    it('keeps context_pack token usage within the requested budget', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const result = await handleGetContext(
+        { query: 'test', include_context_pack: true, token_budget: 8000 },
+        mockServiceClient as any
+      );
+
+      expect(result.structuredContent).toBeDefined();
+      const pack = result.structuredContent!.context_pack!;
+      expect(pack.token_budget.requested).toBe(8000);
+      expect(pack.token_budget.used).toBeLessThanOrEqual(8000);
+    });
+
+    it('does not change legacy text output when include_context_pack is true', async () => {
+      const mockBundle = createMockContextBundle();
+      mockServiceClient.getContextForPrompt.mockResolvedValue(mockBundle);
+
+      const withoutPack = toolText(await handleGetContext({ query: 'test' }, mockServiceClient as any));
+      const withPack = toolText(
+        await handleGetContext({ query: 'test', include_context_pack: true }, mockServiceClient as any)
+      );
+
+      expect(withPack).toBe(withoutPack);
+    });
+
+    it('rejects non-boolean include_context_pack', async () => {
+      await expect(
+        handleGetContext({ query: 'test', include_context_pack: 'yes' as any }, mockServiceClient as any)
+      ).rejects.toThrow(/invalid include_context_pack/i);
     });
   });
 });

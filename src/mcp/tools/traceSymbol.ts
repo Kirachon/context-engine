@@ -1,4 +1,7 @@
+import { traceSymbolOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 import { ContextServiceClient } from '../serviceClient.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import {
   validateBoolean,
   validateFiniteNumberInRange,
@@ -49,6 +52,35 @@ type SymbolDefinitionResult =
 type CallRelationshipsResult = {
   callers: Array<{ file: string; line: number; snippet: string; score: number; callerSymbol?: string }>;
   callees: Array<{ file: string; line: number; snippet: string; score: number; calleeSymbol: string }>;
+};
+
+export type TraceSymbolStructuredContent = {
+  symbol: string;
+  definition: SymbolDefinitionResult;
+  references: SearchResult[];
+  callers: CallRelationshipsResult['callers'];
+  callees: CallRelationshipsResult['callees'];
+  trace_summary: {
+    definition_found: boolean;
+    reference_count: number;
+    caller_count: number;
+    callee_count: number;
+    touched_files: string[];
+  };
+  metadata: Record<string, unknown> & {
+    requested_top_k: number;
+    graph_backed_operations: number;
+    heuristic_operations: number;
+    degraded: boolean;
+    degraded_reasons: string[];
+    diagnostics: {
+      symbol_definition: SymbolNavigationDiagnostics | null;
+      symbol_references: SymbolNavigationDiagnostics | null;
+      call_relationships: SymbolNavigationDiagnostics | null;
+    };
+    analysis_scope: 'direct_definition_references_and_call_edges_only';
+    deterministic: true;
+  };
 };
 
 function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): SymbolNavigationDiagnostics | null {
@@ -106,10 +138,66 @@ function buildTouchedFiles(
   return [...files].sort((left, right) => left.localeCompare(right));
 }
 
+export function buildTraceSymbolStructuredContent(params: {
+  symbol: string;
+  topK: number;
+  definition: SymbolDefinitionResult;
+  references: SearchResult[];
+  relationships: CallRelationshipsResult;
+  definitionDiagnostics: SymbolNavigationDiagnostics | null;
+  referenceDiagnostics: SymbolNavigationDiagnostics | null;
+  relationshipDiagnostics: SymbolNavigationDiagnostics | null;
+}): TraceSymbolStructuredContent {
+  const degraded = buildDegradedSummary([
+    params.definitionDiagnostics,
+    params.referenceDiagnostics,
+    params.relationshipDiagnostics,
+  ]);
+  const touchedFiles = buildTouchedFiles(
+    params.definition,
+    params.references,
+    params.relationships.callers,
+    params.relationships.callees
+  );
+
+  return {
+    symbol: params.symbol,
+    definition: params.definition,
+    references: params.references,
+    callers: params.relationships.callers,
+    callees: params.relationships.callees,
+    trace_summary: {
+      definition_found: params.definition.found,
+      reference_count: params.references.length,
+      caller_count: params.relationships.callers.length,
+      callee_count: params.relationships.callees.length,
+      touched_files: touchedFiles,
+    },
+    metadata: {
+      requested_top_k: params.topK,
+      graph_backed_operations: degraded.graph_backed_operations,
+      heuristic_operations: degraded.heuristic_operations,
+      degraded: degraded.degraded,
+      degraded_reasons: degraded.degraded_reasons,
+      diagnostics: {
+        symbol_definition: params.definitionDiagnostics,
+        symbol_references: params.referenceDiagnostics,
+        call_relationships: params.relationshipDiagnostics,
+      },
+      analysis_scope: 'direct_definition_references_and_call_edges_only',
+      deterministic: true,
+    },
+  };
+}
+
+export function formatTraceSymbolText(content: TraceSymbolStructuredContent): string {
+  return JSON.stringify(content, null, 2);
+}
+
 export async function handleTraceSymbol(
   args: TraceSymbolArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<ContextEngineToolResult<TraceSymbolStructuredContent>> {
   const symbol = validateTrimmedNonEmptyString(args.symbol, 'symbol');
   validateFiniteNumberInRange(args.top_k, 1, 100, 'invalid top_k');
   validateBoolean(args.bypass_cache, 'invalid bypass_cache');
@@ -143,46 +231,18 @@ export async function handleTraceSymbol(
   }) as CallRelationshipsResult;
   const relationshipDiagnostics = getSymbolNavigationDiagnostics(serviceClient);
 
-  const degraded = buildDegradedSummary([
+  const structured = buildTraceSymbolStructuredContent({
+    symbol,
+    topK,
+    definition,
+    references,
+    relationships,
     definitionDiagnostics,
     referenceDiagnostics,
     relationshipDiagnostics,
-  ]);
-  const touchedFiles = buildTouchedFiles(
-    definition,
-    references,
-    relationships.callers,
-    relationships.callees
-  );
+  });
 
-  return JSON.stringify({
-    symbol,
-    definition,
-    references,
-    callers: relationships.callers,
-    callees: relationships.callees,
-    trace_summary: {
-      definition_found: definition.found,
-      reference_count: references.length,
-      caller_count: relationships.callers.length,
-      callee_count: relationships.callees.length,
-      touched_files: touchedFiles,
-    },
-    metadata: {
-      requested_top_k: topK,
-      graph_backed_operations: degraded.graph_backed_operations,
-      heuristic_operations: degraded.heuristic_operations,
-      degraded: degraded.degraded,
-      degraded_reasons: degraded.degraded_reasons,
-      diagnostics: {
-        symbol_definition: definitionDiagnostics,
-        symbol_references: referenceDiagnostics,
-        call_relationships: relationshipDiagnostics,
-      },
-      analysis_scope: 'direct_definition_references_and_call_edges_only',
-      deterministic: true,
-    },
-  }, null, 2);
+  return okResult(formatTraceSymbolText(structured), structured);
 }
 
 export const traceSymbolTool = {
@@ -230,4 +290,5 @@ deterministic response and makes degraded-mode behavior explicit per stage.`,
     },
     required: ['symbol'],
   },
+  outputSchema: traceSymbolOutputSchema,
 };

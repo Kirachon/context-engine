@@ -3,11 +3,20 @@
 **Query:** "login"
 **Found:** 1 matching snippets
 
+**Query Mode:** semantic
+**Hybrid Components:** semantic
+**Quality Guard:** disabled
+**Fallback State:** inactive
+
+**Ranking Diagnostics:** ranking_mode=v1; score_spread=0.920; source_consensus=1; fallback_reason=none; rerank_gate_state=disabled
+
 ## Results by File
 
 ### 1. `src/auth/login.ts` 🔥
 
 **Lines 1-3** (92% match)
+
+Trace: source_stage=semantic; match_type=semantic
 
 ```
 export function login(user) {

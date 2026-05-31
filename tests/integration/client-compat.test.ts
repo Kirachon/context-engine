@@ -77,6 +77,7 @@ function createMockServiceClient(): MockServiceClient {
   return {
     getIndexStatus: jest.fn(() => ({
       workspace: '/tmp/workspace',
+      status: 'idle',
       lastIndexed: '2026-04-10T00:00:00.000Z',
       fileCount: 12,
       isStale: false,
@@ -251,6 +252,69 @@ describe('MCP Client Compatibility', () => {
         resources: { subscribe: false, listChanged: true },
         prompts: { listChanged: true },
       });
+    });
+
+    test('structured tool results remain text-compatible over MCP HTTP', async () => {
+      const { app } = createApp();
+      const sessionId = await initializeMcpSession(app, 'compat-test-client');
+
+      const manifestResponse = await request(app)
+        .post('/mcp')
+        .set('accept', 'application/json, text/event-stream')
+        .set('mcp-session-id', sessionId)
+        .send({
+          jsonrpc: '2.0',
+          id: 10,
+          method: 'tools/call',
+          params: {
+            name: 'tool_manifest',
+            arguments: {},
+          },
+        });
+
+      expect(manifestResponse.status).toBe(200);
+      const manifestPayload = parseSseJsonPayload(manifestResponse.text);
+      const manifestResult = manifestPayload.result as {
+        content?: Array<{ text?: string }>;
+        structuredContent?: unknown;
+      };
+      expect(JSON.parse(manifestResult.content?.[0]?.text ?? '{}')).toEqual(getToolManifest());
+      expect(manifestResult.structuredContent).toEqual(getToolManifest());
+
+      const statusResponse = await request(app)
+        .post('/mcp')
+        .set('accept', 'application/json, text/event-stream')
+        .set('mcp-session-id', sessionId)
+        .send({
+          jsonrpc: '2.0',
+          id: 12,
+          method: 'tools/call',
+          params: {
+            name: 'index_status',
+            arguments: {},
+          },
+        });
+
+      expect(statusResponse.status).toBe(200);
+      const statusPayload = parseSseJsonPayload(statusResponse.text);
+      const statusResult = statusPayload.result as {
+        content?: Array<{ text?: string }>;
+        structuredContent?: {
+          schema_version?: number;
+          status?: { state?: string; workspace?: string };
+        };
+      };
+      expect(statusResult.content?.[0]?.text).toContain('# 🩺 Index Status');
+      expect(statusResult.content?.[0]?.text).toContain('**Workspace**');
+      expect(statusResult.structuredContent).toEqual(
+        expect.objectContaining({
+          schema_version: 1,
+          status: expect.objectContaining({
+            state: 'idle',
+            workspace: '/tmp/workspace',
+          }),
+        })
+      );
     });
 
     test('should return proper error format for invalid calls', async () => {

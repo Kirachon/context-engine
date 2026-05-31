@@ -3,10 +3,13 @@
   "compilerOptions": {
     "module": "ES2022",
     "target": "ES2022",
-    "moduleResolution": "node"
+    "moduleResolution": "node",
+    "rootDir": ".",
+    "noEmit": true
   },
   "include": [
     "src/**/*",
-    "tests/**/*"
+    "tests/**/*",
+    "evals/**/*"
   ]
 }

@@ -9,19 +9,21 @@ import type { Router, Request, Response, NextFunction } from 'express';
 import { Router as createRouter } from 'express';
 import type { ContextServiceClient, ContextOptions } from '../../mcp/serviceClient.js';
 import { buildActivePlanHandoff } from '../../mcp/handoff/activePlan.js';
-import { handleCreatePlan, type CreatePlanArgs } from '../../mcp/tools/plan.js';
-import { handleEnhancePrompt } from '../../mcp/tools/enhance.js';
-import { handleCodebaseRetrieval, type CodebaseRetrievalArgs } from '../../mcp/tools/codebaseRetrieval.js';
-import { handleFindCallers, type FindCallersArgs } from '../../mcp/tools/findCallers.js';
-import { handleFindCallees, type FindCalleesArgs } from '../../mcp/tools/findCallees.js';
-import { handleTraceSymbol, type TraceSymbolArgs } from '../../mcp/tools/traceSymbol.js';
-import { handleImpactAnalysis, type ImpactAnalysisArgs } from '../../mcp/tools/impactAnalysis.js';
-import { handleWhyThisContext, type WhyThisContextArgs } from '../../mcp/tools/whyThisContext.js';
-import { handleReviewChanges, type ReviewChangesArgs } from '../../mcp/tools/codeReview.js';
-import { handleReviewGitDiff, type ReviewGitDiffArgs } from '../../mcp/tools/gitReview.js';
-import { handleReviewAuto, type ReviewAutoArgs } from '../../mcp/tools/reviewAuto.js';
+import { type CreatePlanArgs } from '../../mcp/tools/plan.js';
+import { type CodebaseRetrievalArgs } from '../../mcp/tools/codebaseRetrieval.js';
+import { type FindCallersArgs } from '../../mcp/tools/findCallers.js';
+import { type FindCalleesArgs } from '../../mcp/tools/findCallees.js';
+import { type TraceSymbolArgs } from '../../mcp/tools/traceSymbol.js';
+import { type ImpactAnalysisArgs } from '../../mcp/tools/impactAnalysis.js';
+import { type WhyThisContextArgs } from '../../mcp/tools/whyThisContext.js';
+import { type ReviewChangesArgs } from '../../mcp/tools/codeReview.js';
+import { type ReviewGitDiffArgs } from '../../mcp/tools/gitReview.js';
+import { type ReviewAutoArgs } from '../../mcp/tools/reviewAuto.js';
 import { getToolManifest } from '../../mcp/tools/manifest.js';
 import type { CodebaseRetrievalOutput } from '../../mcp/tools/codebaseRetrieval.js';
+import type { ContextEngineToolHandlerResult, ContextEngineToolResult } from '../../mcp/types/toolResult.js';
+import { normalizeToolResult } from '../../mcp/utils/resultBuilder.js';
+import { executeHttpRegisteredTool } from '../httpToolExecutor.js';
 import { badRequest, HttpError } from '../middleware/errorHandler.js';
 import { envMs } from '../../config/env.js';
 import { validateExternalSources, validatePathScopeGlobs } from '../../mcp/tooling/validation.js';
@@ -68,13 +70,50 @@ function parseContextPlanIdOrBadRequest(value: unknown): string | undefined {
     return value.trim();
 }
 
-function parseJsonToolResult<T>(payload: string, operation: string): T {
+function parseJsonToolResult<T>(payload: ContextEngineToolHandlerResult, operation: string): T {
+    const normalized = normalizeToolResult(payload);
+    const text = normalized.content[0]?.text;
+    if (typeof text !== 'string' || !text.trim()) {
+        throw new HttpError(500, `${operation} returned empty tool output`);
+    }
+
     try {
-        return JSON.parse(payload) as T;
+        return JSON.parse(text) as T;
     } catch (error) {
         const reason = error instanceof Error ? error.message : 'unknown parse error';
         throw new HttpError(500, `${operation} returned non-JSON output: ${reason}`);
     }
+}
+
+async function runRegisteredTool(
+    serviceClient: ContextServiceClient,
+    toolName: string,
+    args: unknown,
+    signal?: AbortSignal
+): Promise<ContextEngineToolResult> {
+    const result = await executeHttpRegisteredTool(serviceClient, toolName, args, signal);
+    if (result.isError) {
+        throw new HttpError(500, result.content[0]?.text ?? `Tool ${toolName} failed`);
+    }
+    return result;
+}
+
+function structuredPayloadFromToolResult(
+    result: ContextEngineToolResult,
+    operation: string
+): Record<string, unknown> {
+    if (result.structuredContent) {
+        return result.structuredContent as Record<string, unknown>;
+    }
+    return parseJsonToolResult<Record<string, unknown>>(result, operation);
+}
+
+function textPayloadFromToolResult(result: ContextEngineToolResult, operation: string): string {
+    const text = result.content[0]?.text;
+    if (typeof text !== 'string' || !text.trim()) {
+        throw new HttpError(500, `${operation} returned empty tool output`);
+    }
+    return text;
 }
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
@@ -401,16 +440,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            res.json(
-                parseJsonToolResult<Record<string, unknown>>(
-                    await withTimeout(
-                        handleFindCallers(args, serviceClient),
-                        DEFAULT_TOOL_TIMEOUT_MS,
-                        'Find callers'
-                    ),
-                    'Find callers'
-                )
+            const toolResult = await withTimeout(
+                runRegisteredTool(serviceClient, 'find_callers', args),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Find callers'
             );
+
+            res.json(structuredPayloadFromToolResult(toolResult, 'Find callers'));
         })
     );
 
@@ -428,16 +464,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            res.json(
-                parseJsonToolResult<Record<string, unknown>>(
-                    await withTimeout(
-                        handleFindCallees(args, serviceClient),
-                        DEFAULT_TOOL_TIMEOUT_MS,
-                        'Find callees'
-                    ),
-                    'Find callees'
-                )
+            const toolResult = await withTimeout(
+                runRegisteredTool(serviceClient, 'find_callees', args),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Find callees'
             );
+
+            res.json(structuredPayloadFromToolResult(toolResult, 'Find callees'));
         })
     );
 
@@ -547,16 +580,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            res.json(
-                parseJsonToolResult<Record<string, unknown>>(
-                    await withTimeout(
-                        handleTraceSymbol(args, serviceClient),
-                        DEFAULT_TOOL_TIMEOUT_MS,
-                        'Trace symbol'
-                    ),
-                    'Trace symbol'
-                )
+            const toolResult = await withTimeout(
+                runRegisteredTool(serviceClient, 'trace_symbol', args),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Trace symbol'
             );
+
+            res.json(structuredPayloadFromToolResult(toolResult, 'Trace symbol'));
         })
     );
 
@@ -574,16 +604,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            res.json(
-                parseJsonToolResult<Record<string, unknown>>(
-                    await withTimeout(
-                        handleImpactAnalysis(args, serviceClient),
-                        DEFAULT_TOOL_TIMEOUT_MS,
-                        'Impact analysis'
-                    ),
-                    'Impact analysis'
-                )
+            const toolResult = await withTimeout(
+                runRegisteredTool(serviceClient, 'impact_analysis', args),
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Impact analysis'
             );
+
+            res.json(structuredPayloadFromToolResult(toolResult, 'Impact analysis'));
         })
     );
 
@@ -604,7 +631,7 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
 
             const toolResult = parseJsonToolResult<CodebaseRetrievalOutput>(
                 await withTimeout(
-                    handleCodebaseRetrieval(args, serviceClient),
+                    runRegisteredTool(serviceClient, 'codebase_retrieval', args),
                     DEFAULT_TOOL_TIMEOUT_MS,
                     'Codebase retrieval'
                 ),
@@ -644,14 +671,19 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 req,
                 AI_TOOL_TIMEOUT_MS,
                 'Prompt enhancement',
-                (signal) => handleEnhancePrompt(
-                    {
-                        prompt,
-                        external_sources: parseExternalSourcesOrBadRequest(external_sources),
-                    },
-                    serviceClient,
-                    signal
-                ),
+                async (signal) =>
+                    textPayloadFromToolResult(
+                        await runRegisteredTool(
+                            serviceClient,
+                            'enhance_prompt',
+                            {
+                                prompt,
+                                external_sources: parseExternalSourcesOrBadRequest(external_sources),
+                            },
+                            signal
+                        ),
+                        'Prompt enhancement'
+                    ),
                 res
             );
 
@@ -680,11 +712,11 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 req,
                 PLAN_TOOL_TIMEOUT_MS,
                 'Plan generation',
-                (signal) => (handleCreatePlan as unknown as (
-                    args: CreatePlanArgs,
-                    serviceClient: ContextServiceClient,
-                    signal?: AbortSignal
-                ) => Promise<string>)(args, serviceClient, signal),
+                async (signal) =>
+                    textPayloadFromToolResult(
+                        await runRegisteredTool(serviceClient, 'create_plan', args, signal),
+                        'Plan generation'
+                    ),
                 res
             );
 
@@ -772,16 +804,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('query is required and must be a string');
             }
 
-            res.json(
-                parseJsonToolResult<Record<string, unknown>>(
-                    await withTimeout(
-                        handleWhyThisContext(args, serviceClient),
-                        CONTEXT_TIMEOUT_MS,
-                        'Why this context'
-                    ),
-                    'Why this context'
-                )
+            const toolResult = await withTimeout(
+                runRegisteredTool(serviceClient, 'why_this_context', args),
+                CONTEXT_TIMEOUT_MS,
+                'Why this context'
             );
+
+            res.json(structuredPayloadFromToolResult(toolResult, 'Why this context'));
         })
     );
 
@@ -840,15 +869,15 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 req,
                 AI_TOOL_TIMEOUT_MS,
                 'Code review',
-                (signal) =>
-                    (handleReviewChanges as unknown as (
-                        args: ReviewChangesArgs,
-                        serviceClient: ContextServiceClient,
-                        signal?: AbortSignal
-                    ) => Promise<string>)(
-                        { diff, file_contexts, options } as ReviewChangesArgs,
-                        serviceClient,
-                        signal
+                async (signal) =>
+                    textPayloadFromToolResult(
+                        await runRegisteredTool(
+                            serviceClient,
+                            'review_changes',
+                            { diff, file_contexts, options } as ReviewChangesArgs,
+                            signal
+                        ),
+                        'Code review'
                     ),
                 res
             );
@@ -871,15 +900,15 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 req,
                 AI_TOOL_TIMEOUT_MS,
                 'Git code review',
-                (signal) =>
-                    (handleReviewGitDiff as unknown as (
-                        args: ReviewGitDiffArgs,
-                        serviceClient: ContextServiceClient,
-                        signal?: AbortSignal
-                    ) => Promise<string>)(
-                        { target, base, include_patterns, options } as ReviewGitDiffArgs,
-                        serviceClient,
-                        signal
+                async (signal) =>
+                    textPayloadFromToolResult(
+                        await runRegisteredTool(
+                            serviceClient,
+                            'review_git_diff',
+                            { target, base, include_patterns, options } as ReviewGitDiffArgs,
+                            signal
+                        ),
+                        'Git code review'
                     ),
                 res
             );
@@ -902,12 +931,11 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 req,
                 AI_TOOL_TIMEOUT_MS,
                 'Auto code review',
-                (signal) =>
-                    (handleReviewAuto as unknown as (
-                        args: ReviewAutoArgs,
-                        serviceClient: ContextServiceClient,
-                        signal?: AbortSignal
-                    ) => Promise<string>)(args, serviceClient, signal),
+                async (signal) =>
+                    textPayloadFromToolResult(
+                        await runRegisteredTool(serviceClient, 'review_auto', args, signal),
+                        'Auto code review'
+                    ),
                 res
             );
             const result = JSON.parse(resultJson);

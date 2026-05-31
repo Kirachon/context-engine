@@ -22,6 +22,12 @@ import {
   getReviewDiffSource,
   type ReviewDiffSource,
 } from '../tooling/reviewDiffSource.js';
+import {
+  buildTaskStartResponse,
+  getDefaultTaskManager,
+  shouldUseTaskMode,
+  startReviewAutoTask,
+} from '../tasks/taskManager.js';
 
 export type ReviewAutoSelectedTool = 'review_diff' | 'review_git_diff';
 
@@ -62,6 +68,12 @@ export interface ReviewAutoArgs {
    * Response shape version. Default: v1.
    */
   response_version?: 'v1' | 'v2';
+
+  /** Run review without blocking the tool call (default: false) */
+  background?: boolean;
+
+  /** Return a task ID and track review progress without blocking (default: false) */
+  task?: boolean;
 }
 
 interface ReviewAutoSkippedStep {
@@ -587,7 +599,10 @@ function buildV2SkipMetadata(
   };
 }
 
-export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: ContextServiceClient): Promise<string> {
+export async function performReviewAuto(
+  args: ReviewAutoArgs,
+  serviceClient: ContextServiceClient
+): Promise<ReviewAutoResult> {
   const requireExplicitScope = process.env.CE_REVIEW_AUTO_REQUIRE_EXPLICIT_SCOPE === 'true';
   if (requireExplicitScope && !normalizeOptionalDiffInput(args.diff) && !args.target) {
     throw new Error(
@@ -648,7 +663,7 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
       result.skipped_steps = v2Metadata.skipped_steps;
       result.requested_by = v2Metadata.requested_by;
     }
-    return JSON.stringify(result, null, 2);
+    return result;
   }
 
   if (normalizedDiff) {
@@ -695,6 +710,27 @@ export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: Cont
     result.skipped_steps = v2Metadata.skipped_steps;
     result.requested_by = v2Metadata.requested_by;
   }
+  return result;
+}
+
+export async function handleReviewAuto(args: ReviewAutoArgs, serviceClient: ContextServiceClient): Promise<string> {
+  if (shouldUseTaskMode({ background: args.background, task: args.task })) {
+    const taskRecord = startReviewAutoTask(
+      async (updateProgress) => {
+        updateProgress({ message: 'Running review_auto' });
+        return performReviewAuto(args, serviceClient);
+      },
+      getDefaultTaskManager()
+    );
+
+    return JSON.stringify(
+      buildTaskStartResponse('Background review started', taskRecord),
+      null,
+      2
+    );
+  }
+
+  const result = await performReviewAuto(args, serviceClient);
   return JSON.stringify(result, null, 2);
 }
 
@@ -723,6 +759,16 @@ export const reviewAutoTool = {
         enum: ['v1', 'v2'],
         description: 'Response shape version. Default is v1.',
         default: 'v1',
+      },
+      background: {
+        type: 'boolean',
+        description: 'Run review without blocking the tool call (default: false)',
+        default: false,
+      },
+      task: {
+        type: 'boolean',
+        description: 'Return a task ID and track review progress without blocking (default: false)',
+        default: false,
       },
     },
     required: [],

@@ -1,4 +1,7 @@
+import { findCallersOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 import { ContextServiceClient } from '../serviceClient.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import {
   validateBoolean,
   validateFiniteNumberInRange,
@@ -21,6 +24,27 @@ type SymbolNavigationDiagnostics = {
   graph_status: string;
   graph_degraded_reason: string | null;
   fallback_reason: string | null;
+};
+
+export type FindCallersStructuredContent = {
+  symbol: string;
+  callers: Array<{
+    file: string;
+    line: number;
+    snippet: string;
+    score: number;
+    callerSymbol?: string;
+    column?: number;
+  }>;
+  metadata: Record<string, unknown> & {
+    requested_top_k: number;
+    graph_backed: boolean;
+    degraded: boolean;
+    degraded_reasons: string[];
+    diagnostics: SymbolNavigationDiagnostics | null;
+    analysis_scope: 'direct_callers_only';
+    deterministic: true;
+  };
 };
 
 function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): SymbolNavigationDiagnostics | null {
@@ -49,10 +73,39 @@ function buildDegradedSummary(diagnostics: SymbolNavigationDiagnostics | null): 
   };
 }
 
+export function buildFindCallersStructuredContent(params: {
+  symbol: string;
+  topK: number;
+  callers: FindCallersStructuredContent['callers'];
+  resultMetadata: Record<string, unknown>;
+  diagnostics: SymbolNavigationDiagnostics | null;
+}): FindCallersStructuredContent {
+  const degraded = buildDegradedSummary(params.diagnostics);
+
+  return {
+    symbol: params.symbol,
+    callers: params.callers,
+    metadata: {
+      ...params.resultMetadata,
+      requested_top_k: params.topK,
+      graph_backed: params.diagnostics?.backend === 'graph',
+      degraded: degraded.degraded,
+      degraded_reasons: degraded.degraded_reasons,
+      diagnostics: params.diagnostics,
+      analysis_scope: 'direct_callers_only',
+      deterministic: true,
+    },
+  };
+}
+
+export function formatFindCallersText(content: FindCallersStructuredContent): string {
+  return JSON.stringify(content, null, 2);
+}
+
 export async function handleFindCallers(
   args: FindCallersArgs,
   serviceClient: ContextServiceClient
-): Promise<string> {
+): Promise<ContextEngineToolResult<FindCallersStructuredContent>> {
   const symbol = validateTrimmedNonEmptyString(args.symbol, 'symbol');
   validateFiniteNumberInRange(args.top_k, 1, 100, 'invalid top_k');
   validateBoolean(args.bypass_cache, 'invalid bypass_cache');
@@ -70,22 +123,15 @@ export async function handleFindCallers(
     languageHint: args.language_hint,
   });
   const diagnostics = getSymbolNavigationDiagnostics(serviceClient);
-  const degraded = buildDegradedSummary(diagnostics);
-
-  return JSON.stringify({
+  const structured = buildFindCallersStructuredContent({
     symbol,
+    topK,
     callers: result.callers,
-    metadata: {
-      ...result.metadata,
-      requested_top_k: topK,
-      graph_backed: diagnostics?.backend === 'graph',
-      degraded: degraded.degraded,
-      degraded_reasons: degraded.degraded_reasons,
-      diagnostics,
-      analysis_scope: 'direct_callers_only',
-      deterministic: true,
-    },
-  }, null, 2);
+    resultMetadata: result.metadata,
+    diagnostics,
+  });
+
+  return okResult(formatFindCallersText(structured), structured);
 }
 
 export const findCallersTool = {
@@ -135,4 +181,5 @@ of call_relationships.`,
     },
     required: ['symbol'],
   },
+  outputSchema: findCallersOutputSchema,
 };

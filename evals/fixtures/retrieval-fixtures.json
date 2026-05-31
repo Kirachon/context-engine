@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "description": "Smoke retrieval eval cases referencing the shared CI fixture pack.",
+  "source_fixture_pack": "config/ci/retrieval-quality-fixture-pack.json",
+  "dataset_id": "holdout_v1",
+  "case_ids": [
+    "bench-suite-mode-policy",
+    "holdout-validator",
+    "quality-report"
+  ]
+}

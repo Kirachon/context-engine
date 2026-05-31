@@ -1,10 +1,15 @@
 import { ContextOptions, ContextServiceClient } from '../serviceClient.js';
+import { whyThisContextOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
+import type { ContextEngineToolResult } from '../types/toolResult.js';
+import { okResult } from '../utils/resultBuilder.js';
 import {
   validateBoolean,
   validateFiniteNumberInRange,
   validatePathScopeGlobs,
   validateTrimmedNonEmptyString,
 } from '../tooling/validation.js';
+
+export { whyThisContextOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
 
 export interface WhyThisContextArgs {
   query: string;
@@ -46,6 +51,56 @@ type ExplainableFileContext = {
     seedSymbols?: string[];
     neighborPaths?: string[];
     selectionBasis?: string[];
+  };
+};
+
+export type WhyThisContextStructuredContent = {
+  query: string;
+  summary?: string;
+  files: Array<{
+    path: string;
+    summary: string;
+    relevance: number;
+    snippet_count: number;
+    related_files?: string[];
+    explainability: {
+      selected_because: string[];
+      score_breakdown: {
+        base_score: number;
+        graph_score: number;
+        combined_score: number;
+        semantic_score?: number;
+        lexical_score?: number;
+        dense_score?: number;
+        fused_score?: number;
+      };
+      graph_signals?: Array<{
+        kind: string;
+        value: string;
+        weight: number;
+      }>;
+    } | null;
+    provenance: {
+      graph_status: string;
+      graph_degraded_reason: string | null;
+      seed_symbols: string[];
+      neighbor_paths: string[];
+      selection_basis: string[];
+    } | null;
+    degraded: boolean;
+    degraded_reasons: string[];
+  }>;
+  metadata: {
+    total_files: number;
+    explainable_file_count: number;
+    graph_statuses: string[];
+    degraded: boolean;
+    degraded_reasons: string[];
+    analysis_scope: string;
+    deterministic: boolean;
+    query_time_ms?: number;
+    token_budget?: number;
+    include_related?: boolean;
   };
 };
 
@@ -123,30 +178,11 @@ function buildProvenance(file: ExplainableFileContext) {
   };
 }
 
-export async function handleWhyThisContext(
-  args: WhyThisContextArgs,
-  serviceClient: ContextServiceClient
-): Promise<string> {
-  const query = validateTrimmedNonEmptyString(args.query, 'query');
-  validateFiniteNumberInRange(args.max_files, 1, 20, 'invalid max_files');
-  validateFiniteNumberInRange(args.token_budget, 500, 100000, 'invalid token_budget');
-  validateBoolean(args.include_related, 'invalid include_related');
-  validateFiniteNumberInRange(args.min_relevance, 0, 1, 'invalid min_relevance');
-  validateBoolean(args.bypass_cache, 'invalid bypass_cache');
-
-  const options: ContextOptions = {
-    maxFiles: args.max_files ?? 5,
-    tokenBudget: args.token_budget ?? 8000,
-    includeRelated: args.include_related ?? true,
-    minRelevance: args.min_relevance ?? 0.3,
-    includeSummaries: true,
-    includeMemories: true,
-    bypassCache: args.bypass_cache ?? false,
-    includePaths: args.include_paths ? validatePathScopeGlobs(args.include_paths, 'include_paths') : undefined,
-    excludePaths: args.exclude_paths ? validatePathScopeGlobs(args.exclude_paths, 'exclude_paths') : undefined,
-  };
-
-  const bundle = await serviceClient.getContextForPrompt(query, options);
+export function buildWhyThisContextStructuredContent(
+  query: string,
+  bundle: Awaited<ReturnType<ContextServiceClient['getContextForPrompt']>>,
+  options: Pick<ContextOptions, 'tokenBudget' | 'includeRelated'>
+): WhyThisContextStructuredContent {
   const files = (bundle.files as ExplainableFileContext[]).map((file) => {
     const degradedReasons = buildFileDegradedReasons(file);
 
@@ -172,27 +208,56 @@ export async function handleWhyThisContext(
       .filter((value): value is string => typeof value === 'string' && value.length > 0)
   )].sort((left, right) => left.localeCompare(right));
 
-  return JSON.stringify(
-    {
-      query,
-      summary: bundle.summary,
-      files,
-      metadata: {
-        total_files: bundle.files.length,
-        explainable_file_count: files.filter((file) => file.explainability !== null || file.provenance !== null).length,
-        graph_statuses: graphStatuses,
-        degraded: overallDegradedReasons.length > 0,
-        degraded_reasons: overallDegradedReasons,
-        analysis_scope: 'context_selection_receipts_only',
-        deterministic: true,
-        query_time_ms: bundle.metadata.searchTimeMs,
-        token_budget: options.tokenBudget,
-        include_related: options.includeRelated,
-      },
+  return {
+    query,
+    ...(bundle.summary !== undefined ? { summary: bundle.summary } : {}),
+    files,
+    metadata: {
+      total_files: bundle.files.length,
+      explainable_file_count: files.filter((file) => file.explainability !== null || file.provenance !== null).length,
+      graph_statuses: graphStatuses,
+      degraded: overallDegradedReasons.length > 0,
+      degraded_reasons: overallDegradedReasons,
+      analysis_scope: 'context_selection_receipts_only',
+      deterministic: true,
+      query_time_ms: bundle.metadata.searchTimeMs,
+      token_budget: options.tokenBudget,
+      include_related: options.includeRelated,
     },
-    null,
-    2
-  );
+  };
+}
+
+export function formatWhyThisContextText(structuredContent: WhyThisContextStructuredContent): string {
+  return JSON.stringify(structuredContent, null, 2);
+}
+
+export async function handleWhyThisContext(
+  args: WhyThisContextArgs,
+  serviceClient: ContextServiceClient
+): Promise<ContextEngineToolResult<WhyThisContextStructuredContent>> {
+  const query = validateTrimmedNonEmptyString(args.query, 'query');
+  validateFiniteNumberInRange(args.max_files, 1, 20, 'invalid max_files');
+  validateFiniteNumberInRange(args.token_budget, 500, 100000, 'invalid token_budget');
+  validateBoolean(args.include_related, 'invalid include_related');
+  validateFiniteNumberInRange(args.min_relevance, 0, 1, 'invalid min_relevance');
+  validateBoolean(args.bypass_cache, 'invalid bypass_cache');
+
+  const options: ContextOptions = {
+    maxFiles: args.max_files ?? 5,
+    tokenBudget: args.token_budget ?? 8000,
+    includeRelated: args.include_related ?? true,
+    minRelevance: args.min_relevance ?? 0.3,
+    includeSummaries: true,
+    includeMemories: true,
+    bypassCache: args.bypass_cache ?? false,
+    includePaths: args.include_paths ? validatePathScopeGlobs(args.include_paths, 'include_paths') : undefined,
+    excludePaths: args.exclude_paths ? validatePathScopeGlobs(args.exclude_paths, 'exclude_paths') : undefined,
+  };
+
+  const bundle = await serviceClient.getContextForPrompt(query, options);
+  const structuredContent = buildWhyThisContextStructuredContent(query, bundle, options);
+
+  return okResult(formatWhyThisContextText(structuredContent), structuredContent);
 }
 
 export const whyThisContextTool = {
@@ -246,4 +311,5 @@ This tool reuses the same selection vocabulary exposed by graph-aware retrieval 
     },
     required: ['query'],
   },
+  outputSchema: whyThisContextOutputSchema,
 };

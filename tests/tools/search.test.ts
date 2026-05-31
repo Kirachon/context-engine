@@ -23,6 +23,11 @@ import {
   callRelationshipsTool,
 } from '../../src/mcp/tools/search.js';
 import { ContextServiceClient, SearchResult } from '../../src/mcp/serviceClient.js';
+import { normalizeToolResult } from '../../src/mcp/utils/resultBuilder.js';
+
+function toolText(result: unknown): string {
+  return normalizeToolResult(result as never).content[0].text;
+}
 
 describe('semantic_search Tool', () => {
   let mockServiceClient: any;
@@ -253,7 +258,7 @@ describe('semantic_search Tool', () => {
     it('ignores unknown legacy fields without changing the semantic search contract', async () => {
       mockServiceClient.semanticSearch.mockResolvedValue([]);
 
-      const result = await handleSemanticSearch(
+      const result = toolText(await handleSemanticSearch(
         {
           query: '  compat  ',
           top_k: 7,
@@ -261,7 +266,7 @@ describe('semantic_search Tool', () => {
           future_flag: true,
         } as any,
         mockServiceClient as any
-      );
+      ));
 
       expect(mockServiceClient.semanticSearch).toHaveBeenCalledTimes(1);
       expect(mockServiceClient.semanticSearch).toHaveBeenCalledWith(
@@ -285,7 +290,7 @@ describe('semantic_search Tool', () => {
     it('should show empty state message when no results', async () => {
       mockServiceClient.semanticSearch.mockResolvedValue([]);
 
-      const result = await handleSemanticSearch({ query: 'nonexistent' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'nonexistent' }, mockServiceClient as any));
 
       expect(result).toContain('No results found');
       expect(result).toContain('# 🔍 Search Results');
@@ -302,7 +307,7 @@ describe('semantic_search Tool', () => {
       }));
       mockServiceClient.semanticSearch.mockResolvedValue([]);
 
-      const result = await handleSemanticSearch({ query: 'nonexistent' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'nonexistent' }, mockServiceClient as any));
 
       expect(result).toContain('No results found');
       expect(result).toContain('Index freshness warning');
@@ -318,7 +323,7 @@ describe('semantic_search Tool', () => {
         isStale: true,
       });
 
-      const result = await handleSemanticSearch({ query: 'stale' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'stale' }, mockServiceClient as any));
 
       expect(result).toContain('Index freshness warning');
       expect(result).toContain('index is stale');
@@ -335,7 +340,7 @@ describe('semantic_search Tool', () => {
         lastError: 'failed to load index',
       });
 
-      const result = await handleSemanticSearch({ query: 'unhealthy' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'unhealthy' }, mockServiceClient as any));
 
       expect(result).toContain('index status is error');
       expect(result).toContain('reindexing succeeds');
@@ -347,7 +352,7 @@ describe('semantic_search Tool', () => {
       ];
       mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('# 🔍 Search Results');
       expect(result).toContain('**Found:**');
@@ -366,7 +371,7 @@ describe('semantic_search Tool', () => {
       ];
       mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'test' }, mockServiceClient as any));
 
       // Should have grouped file headings
       expect(result).toContain('`src/a.ts`');
@@ -379,7 +384,7 @@ describe('semantic_search Tool', () => {
       ];
       mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch({ query: 'test' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('```');
       expect(result).toContain('function test()');
@@ -402,7 +407,7 @@ describe('semantic_search Tool', () => {
       ];
       mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
-    const result = await handleSemanticSearch({ query: 'test' }, mockServiceClient as any);
+    const result = toolText(await handleSemanticSearch({ query: 'test' }, mockServiceClient as any));
 
       expect(result).toContain('Trace: source_stage=semantic; match_type=semantic');
       expect(result).toContain('query_variant="test"');
@@ -416,7 +421,7 @@ describe('semantic_search Tool', () => {
       ];
       mockServiceClient.semanticSearch.mockResolvedValue(mockResults);
 
-      const result = await handleSemanticSearch({ query: 'audit' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'audit' }, mockServiceClient as any));
 
       expect(result).toContain('Retrieval Audit');
       expect(result).toContain('src/a.ts');
@@ -434,7 +439,7 @@ describe('semantic_search Tool', () => {
         second_pass_used: true,
       });
 
-      const result = await handleSemanticSearch({ query: 'audit' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'audit' }, mockServiceClient as any));
 
       expect(result).toContain('Fallback Diagnostics');
       expect(result).toContain('filters_applied=exclude:artifacts');
@@ -456,7 +461,7 @@ describe('semantic_search Tool', () => {
         secondPassUsed: false,
       }));
 
-      const result = await handleSemanticSearch({ query: 'legacy-audit' }, mockServiceClient as any);
+      const result = toolText(await handleSemanticSearch({ query: 'legacy-audit' }, mockServiceClient as any));
 
       expect(result).toContain('Fallback Diagnostics');
       expect(result).toContain('filters_applied=exclude:legacy');
@@ -479,6 +484,19 @@ describe('semantic_search Tool', () => {
       expect(props).toContain('query');
       expect(props).toContain('top_k');
       expect(props).toContain('profile');
+      expect(semanticSearchTool.outputSchema).toBeDefined();
+    });
+
+    it('returns structuredContent validated against output schema', async () => {
+      mockServiceClient.semanticSearch.mockResolvedValue([
+        { path: 'src/test.ts', content: 'test content', lines: '1-5', relevanceScore: 0.9 },
+      ]);
+
+      const result = await handleSemanticSearch({ query: 'test' }, mockServiceClient as any);
+      const { validateStructuredContent } = await import('../../src/mcp/utils/outputSchemaContract.js');
+
+      expect(validateStructuredContent('semantic_search', result.structuredContent).valid).toBe(true);
+      expect(toolText(result)).toContain('# 🔍 Search Results');
     });
   });
 });
@@ -514,7 +532,7 @@ describe('symbol_search Tool', () => {
       },
     ] satisfies SearchResult[]);
 
-    const result = await handleSymbolSearch(
+    const result = toolText(await handleSymbolSearch(
       {
         symbol: '  resolveAIProviderId  ',
         top_k: 5,
@@ -522,7 +540,7 @@ describe('symbol_search Tool', () => {
         exclude_paths: ['src/legacy/**'],
       } satisfies SymbolSearchArgs,
       mockServiceClient as any
-    );
+    ));
 
     expect(mockServiceClient.symbolSearch).toHaveBeenCalledWith(
       'resolveAIProviderId',
@@ -559,7 +577,7 @@ describe('symbol_search Tool', () => {
       fallback_reason: 'graph_unavailable',
     });
 
-    const result = await handleSymbolSearch({ symbol: 'resolveAIProviderId' }, mockServiceClient as any);
+    const result = toolText(await handleSymbolSearch({ symbol: 'resolveAIProviderId' }, mockServiceClient as any));
 
     expect(result).toContain('Resolution Backend');
     expect(result).toContain('heuristic_fallback');
@@ -606,7 +624,7 @@ describe('symbol_references Tool', () => {
       },
     ] satisfies SearchResult[]);
 
-    const result = await handleSymbolReferencesSearch(
+    const result = toolText(await handleSymbolReferencesSearch(
       {
         symbol: '  resolveAIProviderId  ',
         top_k: 5,
@@ -614,7 +632,7 @@ describe('symbol_references Tool', () => {
         exclude_paths: ['src/legacy/**'],
       } satisfies SymbolReferencesArgs,
       mockServiceClient as any
-    );
+    ));
 
     expect(mockServiceClient.symbolReferencesSearch).toHaveBeenCalledWith(
       'resolveAIProviderId',
@@ -650,7 +668,7 @@ describe('symbol_references Tool', () => {
       fallback_reason: 'graph_reference_not_found',
     });
 
-    const result = await handleSymbolReferencesSearch({ symbol: 'resolveAIProviderId' }, mockServiceClient as any);
+    const result = toolText(await handleSymbolReferencesSearch({ symbol: 'resolveAIProviderId' }, mockServiceClient as any));
 
     expect(result).toContain('Resolution Backend');
     expect(result).toContain('graph_reference_not_found');
@@ -702,14 +720,14 @@ describe('symbol_definition Tool', () => {
       },
     });
 
-    const result = await handleSymbolDefinition(
+    const result = toolText(await handleSymbolDefinition(
       {
         symbol: '  resolveAIProviderId  ',
         include_paths: ['./src/'],
         exclude_paths: ['src/legacy/**'],
       } satisfies SymbolDefinitionArgs,
       mockServiceClient as any
-    );
+    ));
 
     expect(mockServiceClient.symbolDefinition).toHaveBeenCalledWith(
       'resolveAIProviderId',
@@ -792,7 +810,7 @@ describe('call_relationships Tool', () => {
       },
     });
 
-    const result = await handleCallRelationships(
+    const result = toolText(await handleCallRelationships(
       {
         symbol: '  resolveAIProviderId  ',
         direction: 'both',
@@ -801,7 +819,7 @@ describe('call_relationships Tool', () => {
         exclude_paths: ['src/legacy/**'],
       } satisfies CallRelationshipsArgs,
       mockServiceClient as any
-    );
+    ));
 
     expect(mockServiceClient.callRelationships).toHaveBeenCalledWith(
       'resolveAIProviderId',
