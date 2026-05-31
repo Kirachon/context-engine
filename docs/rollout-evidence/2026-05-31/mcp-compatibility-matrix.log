@@ -1,6 +1,6 @@
 MCP compatibility release gate (S9B)
 config=D:\GitProjects\context-engine\config\ci\mcp-compatibility-matrix.json
-generated_at=2026-05-31T09:42:05.586Z
+generated_at=2026-05-31T12:53:24.356Z
 status=PASS
 surfaces=7/7
 checks=8/8

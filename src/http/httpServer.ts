@@ -17,41 +17,26 @@ import { Server as McpServer } from '@modelcontextprotocol/sdk/server/index.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import helmet from 'helmet';
 import {
-    CallToolRequestSchema,
-    GetPromptRequestSchema,
-    ListPromptsRequestSchema,
-    ListResourceTemplatesRequestSchema,
-    ListResourcesRequestSchema,
-    ListToolsRequestSchema,
-    ReadResourceRequestSchema,
     isInitializeRequest,
 } from '@modelcontextprotocol/sdk/types.js';
 import { envString } from '../config/env.js';
 import { featureEnabled } from '../config/features.js';
+import {
+    attachMcpHandlersWithClientCapabilities,
+} from '../mcp/attachMcpHandlers.js';
 import type { ContextServiceClient } from '../mcp/serviceClient.js';
 import { MCP_SERVER_VERSION } from '../mcp/tools/manifest.js';
 import {
-    PROMPT_DEFINITIONS,
-    buildPromptByName,
-    buildToolRegistryEntries,
     createServerCapabilities,
     type ToolRegistryEntry,
 } from '../mcp/server.js';
-import {
-    buildResourceList,
-    readResourceByUri,
-} from '../mcp/resources/resourceRouter.js';
-import { buildResourceTemplateList } from '../mcp/resources/resourceTemplates.js';
+import { initializePlanManagementServices } from '../mcp/tools/planManagement.js';
+import { initializeContextPackStore } from '../context/contextPackStore.js';
 import type { ContextSafetyMode } from '../security/contextPolicy.js';
-import { executeToolCall, type SignalAwareToolHandler } from '../mcp/executeTool.js';
-import { buildToolInputSchemaMap } from '../mcp/utils/validateToolInput.js';
 import {
     ClientCapabilitiesManager,
     attachClientCapabilitiesHandlers,
-    runWithClientCapabilitiesManager,
 } from '../mcp/capabilities/clientCapabilities.js';
-import { initializePlanManagementServices } from '../mcp/tools/planManagement.js';
-import { initializeContextPackStore } from '../context/contextPackStore.js';
 import { renderPrometheusMetrics } from '../metrics/metrics.js';
 import {
     createHttpAuthHook,
@@ -120,48 +105,14 @@ function createHttpMcpServer(
         }
     );
 
-    const entries = toolRegistryEntries ?? buildToolRegistryEntries(serviceClient);
-    const tools = entries.map((entry) => entry.tool);
-    const toolHandlers = new Map<string, SignalAwareToolHandler>(
-        entries.map((entry) => [entry.tool.name, entry.handler])
-    );
-    const toolInputSchemas = buildToolInputSchemaMap(entries);
-
-    server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools }));
-    server.setRequestHandler(ListResourcesRequestSchema, async () => ({
-        resources: await buildResourceList(),
-    }));
-    server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => ({
-        resourceTemplates: buildResourceTemplateList(),
-    }));
-    server.setRequestHandler(ReadResourceRequestSchema, async (request) =>
-        readResourceByUri(request.params.uri, {
+    attachClientCapabilitiesHandlers(server, clientCapabilitiesManager);
+    attachMcpHandlersWithClientCapabilities(server, serviceClient, clientCapabilitiesManager, {
+        toolRegistryEntries: toolRegistryEntries ?? undefined,
+        readResource: {
             workspaceRoot: options?.workspacePath ?? serviceClient.getWorkspacePath(),
             serviceClient,
             mode: options?.contextSafetyMode,
-        })
-    );
-    server.setRequestHandler(ListPromptsRequestSchema, async () => ({
-        prompts: PROMPT_DEFINITIONS,
-    }));
-    server.setRequestHandler(GetPromptRequestSchema, async (request) =>
-        buildPromptByName(request.params.name, request.params.arguments ?? {})
-    );
-    attachClientCapabilitiesHandlers(server, clientCapabilitiesManager);
-    server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
-        const { name, arguments: args } = request.params;
-        return await runWithClientCapabilitiesManager(clientCapabilitiesManager, async () => {
-            const execution = await executeToolCall({
-                name,
-                args,
-                toolHandlers,
-                toolInputSchemas,
-                signal: extra.signal,
-                useObservability: true,
-                recordMetrics: true,
-            });
-            return execution.response;
-        });
+        },
     });
 
     return { server, clientCapabilitiesManager };

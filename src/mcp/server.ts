@@ -17,30 +17,16 @@
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import {
-  CallToolRequestSchema,
-  GetPromptRequestSchema,
-  ListPromptsRequestSchema,
-  ListResourceTemplatesRequestSchema,
-  ListResourcesRequestSchema,
-  ListToolsRequestSchema,
-  ReadResourceRequestSchema,
-} from '@modelcontextprotocol/sdk/types.js';
 import { normalizeIgnoredPatterns } from '../watcher/ignoreRules.js';
 
 import { initializeContextPackStore } from '../context/contextPackStore.js';
-import { setActiveSpanAttributes } from '../observability/otel.js';
 import { FileWatcher } from '../watcher/index.js';
 import {
   ClientCapabilitiesManager,
   attachClientCapabilitiesHandlers,
 } from './capabilities/clientCapabilities.js';
-import { executeToolCall, type ToolHandler } from './executeTool.js';
-import { buildToolInputSchemaMap } from './utils/validateToolInput.js';
-import { buildPromptByName, PROMPT_DEFINITIONS } from './prompts/promptRegistry.js';
+import { attachMcpHandlers } from './attachMcpHandlers.js';
 import { RootsManager, attachRootsHandlers } from './roots/rootsManager.js';
-import { buildResourceList, readResourceByUri } from './resources/resourceRouter.js';
-import { buildResourceTemplateList } from './resources/resourceTemplates.js';
 import { ContextServiceClient } from './serviceClient.js';
 import { createServerCapabilities } from './serverCapabilities.js';
 import { runWithStdioRequestContext } from './stdioRequestContext.js';
@@ -148,69 +134,16 @@ export class ContextEngineMCPServer {
   }
 
   private setupHandlers(): void {
-    const toolRegistryEntries = buildToolRegistryEntries(this.serviceClient);
-
-    const tools = toolRegistryEntries.map((entry) => entry.tool);
-    const toolHandlers = new Map<string, ToolHandler>(
-      toolRegistryEntries.map((entry) => [entry.tool.name, entry.handler])
-    );
-    const toolInputSchemas = buildToolInputSchemaMap(toolRegistryEntries);
-    this.runtimeToolCount = tools.length;
-
-    // List available tools
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => await runWithStdioRequestContext('tools/list', async () => ({
-      tools,
-    })));
-
-    this.server.setRequestHandler(ListResourcesRequestSchema, async () => await runWithStdioRequestContext('resources/list', async () => ({
-      resources: await buildResourceList(),
-    })));
-
-    this.server.setRequestHandler(ListResourceTemplatesRequestSchema, async () => await runWithStdioRequestContext('resources/templates/list', async () => ({
-      resourceTemplates: buildResourceTemplateList(),
-    })));
-
-    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => await runWithStdioRequestContext('resources/read', async () => {
-      setActiveSpanAttributes({
-        'context_engine.operation': 'resources/read',
-      });
-      return await readResourceByUri(request.params.uri, {
+    const attached = attachMcpHandlers(this.server, this.serviceClient, {
+      wrapOperation: (operation, fn) => runWithStdioRequestContext(operation, fn),
+      wrapToolCall: (fn) => runWithStdioRequestContext('tools/call', fn),
+      readResource: {
         workspaceRoot: this.workspacePath,
         serviceClient: this.serviceClient,
         allowedRoots: this.rootsManager.getAllowedRootsForPolicy(),
-      });
-    }));
-
-    this.server.setRequestHandler(ListPromptsRequestSchema, async () => await runWithStdioRequestContext('prompts/list', async () => ({
-      prompts: PROMPT_DEFINITIONS,
-    })));
-
-    this.server.setRequestHandler(GetPromptRequestSchema, async (request) => await runWithStdioRequestContext('prompts/get', async () => {
-      setActiveSpanAttributes({
-        'context_engine.operation': 'prompts/get',
-      });
-      return buildPromptByName(request.params.name, request.params.arguments ?? {});
-    }));
-
-    // Handle tool calls
-    this.server.setRequestHandler(CallToolRequestSchema, async (request, extra) => await runWithStdioRequestContext('tools/call', async () => {
-      const { name, arguments: args } = request.params;
-      setActiveSpanAttributes({
-        'context_engine.tool': name,
-        'context_engine.operation': 'tools/call',
-      });
-      const execution = await executeToolCall({
-        name,
-        args,
-        toolHandlers,
-        toolInputSchemas,
-        signal: extra.signal,
-        useObservability: true,
-        recordMetrics: true,
-      });
-
-      return execution.response;
-    }));
+      },
+    });
+    this.runtimeToolCount = attached.toolCount;
   }
 
   async run(): Promise<void> {

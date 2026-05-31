@@ -16,4 +16,16 @@ describe('stdio request context', () => {
     expect(result.prefix).toMatch(/^\[request:[^\]]+\]$/);
     expect(result.prefix).not.toBe('[request:unknown]');
   });
+
+  it('tools/call wiring preserves correlated stdio request context', async () => {
+    const wrapToolCall = (fn: () => Promise<unknown>) => runWithStdioRequestContext('tools/call', fn);
+    const result = (await wrapToolCall(async () => ({
+      context: getRequestContext(),
+      prefix: formatRequestLogPrefix(),
+    }))) as { context: ReturnType<typeof getRequestContext>; prefix: string };
+
+    expect(result.context?.transport).toBe('stdio');
+    expect(result.context?.method).toBe('tools/call');
+    expect(result.prefix).not.toBe('[request:unknown]');
+  });
 });

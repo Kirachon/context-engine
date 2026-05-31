@@ -3,6 +3,11 @@ import { ContextServiceClient } from '../serviceClient.js';
 import type { ContextEngineToolResult } from '../types/toolResult.js';
 import { okResult } from '../utils/resultBuilder.js';
 import {
+  buildMultiSymbolDegradedSummary,
+  getSymbolNavigationDiagnostics,
+  type SymbolNavigationDiagnostics,
+} from '../tooling/symbolNavigationDiagnostics.js';
+import {
   validateBoolean,
   validateFiniteNumberInRange,
   validatePathScopeGlobs,
@@ -18,13 +23,6 @@ export interface TraceSymbolArgs {
   workspacePath?: string;
   language_hint?: string;
 }
-
-type SymbolNavigationDiagnostics = {
-  backend: string;
-  graph_status: string;
-  graph_degraded_reason: string | null;
-  fallback_reason: string | null;
-};
 
 type SearchResult = {
   path: string;
@@ -83,39 +81,6 @@ export type TraceSymbolStructuredContent = {
   };
 };
 
-function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): SymbolNavigationDiagnostics | null {
-  const maybeClient = serviceClient as ContextServiceClient & {
-    getLastSymbolNavigationDiagnostics?: () => SymbolNavigationDiagnostics | null | undefined;
-  };
-
-  return maybeClient.getLastSymbolNavigationDiagnostics?.() ?? null;
-}
-
-function buildDegradedSummary(diagnostics: Array<SymbolNavigationDiagnostics | null>): {
-  degraded: boolean;
-  degraded_reasons: string[];
-  graph_backed_operations: number;
-  heuristic_operations: number;
-} {
-  const flattened = diagnostics.filter((entry): entry is SymbolNavigationDiagnostics => entry != null);
-  const degradedReasons = flattened.flatMap((entry) => [
-    entry.fallback_reason,
-    entry.graph_degraded_reason,
-  ]).filter((value): value is string => typeof value === 'string' && value.length > 0);
-  const graphBackedOperations = flattened.filter((entry) => entry.backend === 'graph').length;
-  const heuristicOperations = flattened.length - graphBackedOperations;
-
-  return {
-    degraded:
-      heuristicOperations > 0
-      || degradedReasons.length > 0
-      || flattened.some((entry) => entry.graph_status !== 'ready'),
-    degraded_reasons: [...new Set(degradedReasons)],
-    graph_backed_operations: graphBackedOperations,
-    heuristic_operations: heuristicOperations,
-  };
-}
-
 function buildTouchedFiles(
   definition: SymbolDefinitionResult,
   references: SearchResult[],
@@ -148,7 +113,7 @@ export function buildTraceSymbolStructuredContent(params: {
   referenceDiagnostics: SymbolNavigationDiagnostics | null;
   relationshipDiagnostics: SymbolNavigationDiagnostics | null;
 }): TraceSymbolStructuredContent {
-  const degraded = buildDegradedSummary([
+  const degraded = buildMultiSymbolDegradedSummary([
     params.definitionDiagnostics,
     params.referenceDiagnostics,
     params.relationshipDiagnostics,

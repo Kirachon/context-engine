@@ -3,6 +3,11 @@ import { ContextServiceClient } from '../serviceClient.js';
 import type { ContextEngineToolResult } from '../types/toolResult.js';
 import { okResult } from '../utils/resultBuilder.js';
 import {
+  buildSingleSymbolDegradedSummary,
+  getSymbolNavigationDiagnostics,
+  type SymbolNavigationDiagnostics,
+} from '../tooling/symbolNavigationDiagnostics.js';
+import {
   validateBoolean,
   validateFiniteNumberInRange,
   validatePathScopeGlobs,
@@ -18,13 +23,6 @@ export interface FindCalleesArgs {
   workspacePath?: string;
   language_hint?: string;
 }
-
-type SymbolNavigationDiagnostics = {
-  backend: string;
-  graph_status: string;
-  graph_degraded_reason: string | null;
-  fallback_reason: string | null;
-};
 
 export type FindCalleesStructuredContent = {
   symbol: string;
@@ -47,32 +45,6 @@ export type FindCalleesStructuredContent = {
   };
 };
 
-function getSymbolNavigationDiagnostics(serviceClient: ContextServiceClient): SymbolNavigationDiagnostics | null {
-  const maybeClient = serviceClient as ContextServiceClient & {
-    getLastSymbolNavigationDiagnostics?: () => SymbolNavigationDiagnostics | null | undefined;
-  };
-
-  return maybeClient.getLastSymbolNavigationDiagnostics?.() ?? null;
-}
-
-function buildDegradedSummary(diagnostics: SymbolNavigationDiagnostics | null): {
-  degraded: boolean;
-  degraded_reasons: string[];
-} {
-  const degradedReasons = [
-    diagnostics?.fallback_reason ?? null,
-    diagnostics?.graph_degraded_reason ?? null,
-  ].filter((value): value is string => typeof value === 'string' && value.length > 0);
-
-  return {
-    degraded:
-      (diagnostics?.backend ?? 'heuristic_fallback') !== 'graph'
-      || degradedReasons.length > 0
-      || (diagnostics?.graph_status != null && diagnostics.graph_status !== 'ready'),
-    degraded_reasons: [...new Set(degradedReasons)],
-  };
-}
-
 export function buildFindCalleesStructuredContent(params: {
   symbol: string;
   topK: number;
@@ -80,7 +52,7 @@ export function buildFindCalleesStructuredContent(params: {
   resultMetadata: Record<string, unknown>;
   diagnostics: SymbolNavigationDiagnostics | null;
 }): FindCalleesStructuredContent {
-  const degraded = buildDegradedSummary(params.diagnostics);
+  const degraded = buildSingleSymbolDegradedSummary(params.diagnostics);
 
   return {
     symbol: params.symbol,
