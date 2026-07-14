@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-seeded-failure-v1",
+  "intended_lane": "seeded_failure",
+  "description": "Frozen canary failure corpus for the required-lane catch-rate evaluator (Appendix E.6/E.8). Each case is pre-labeled with the outcome an approved evaluator must produce, so the catch-rate metric can be computed instead of printed. Q3a pins the corpus and labels only; the evaluator itself is implemented in Q3b.",
+  "cases": [
+    {
+      "id": "seed-fail-provider-timeout",
+      "query": "provider request exceeds timeout budget without cancellation",
+      "language": "typescript",
+      "labels": ["regression-seed"],
+      "intended_lane": "seeded_failure",
+      "expected_outcome": "should_catch",
+      "failure_category": "cancellation-regression"
+    },
+    {
+      "id": "seed-fail-cache-key-collision",
+      "query": "semantic cache key omits maxOutputLength causing collision",
+      "language": "typescript",
+      "labels": ["regression-seed"],
+      "intended_lane": "seeded_failure",
+      "expected_outcome": "should_catch",
+      "failure_category": "cache-identity-regression"
+    },
+    {
+      "id": "seed-fail-graph-broad-scan",
+      "query": "graph hydration falls back to recursive workspace scan on missing manifest",
+      "language": "typescript",
+      "labels": ["regression-seed"],
+      "intended_lane": "seeded_failure",
+      "expected_outcome": "should_catch",
+      "failure_category": "graph-scope-regression"
+    },
+    {
+      "id": "seed-pass-symbol-definition-lookup",
+      "query": "symbol_definition returns canonical declaration site for a known function",
+      "language": "typescript",
+      "labels": ["control-pass"],
+      "intended_lane": "seeded_failure",
+      "expected_outcome": "should_pass",
+      "failure_category": "none"
+    },
+    {
+      "id": "seed-pass-holdout-leakage-guard",
+      "query": "holdout leakage guard rejects training/holdout query overlap",
+      "language": "typescript",
+      "labels": ["control-pass"],
+      "intended_lane": "seeded_failure",
+      "expected_outcome": "should_pass",
+      "failure_category": "none"
+    },
+    {
+      "id": "seed-pass-git-status-totals",
+      "query": "git status totals remain independent of display truncation",
+      "language": "typescript",
+      "labels": ["control-pass"],
+      "intended_lane": "seeded_failure",
+      "expected_outcome": "should_pass",
+      "failure_category": "none"
+    }
+  ]
+}

@@ -13,6 +13,7 @@ import {
   type ChunkRecord,
 } from './chunking.js';
 import { createTreeSitterChunkParser } from './treeSitterChunkParser.js';
+import { filterIndexStateFilesToCanonicalManifest } from './discoveryAdapter.js';
 import {
   buildIdentifierPathSignals,
   computeExactMatchBoost,
@@ -680,7 +681,13 @@ export function createWorkspaceChunkSearchIndex(
   }
 
   const refresh = async (): Promise<ChunkSearchRefreshStats> => {
-    const indexState = readIndexState(indexStatePath);
+    const rawIndexState = readIndexState(indexStatePath);
+    // R3b2: never chunk-index a path outside the canonical R3a discovery
+    // manifest, even if a stale/independently-computed index-state file
+    // claims it. See discoveryAdapter.ts for the rollback lever.
+    const indexState: IndexStateFile = {
+      files: await filterIndexStateFilesToCanonicalManifest(workspacePath, rawIndexState.files),
+    };
     const existingIndex = currentIndex;
     const nextDocs: Record<string, ChunkIndexDocument> = {};
     const reusedPaths = new Set<string>();

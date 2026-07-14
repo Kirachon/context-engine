@@ -1,15 +1,24 @@
 import { createHash } from 'crypto';
-import { execGitCommand, getGitStatus } from '../../mcp/utils/gitUtils.js';
+import { execGitCommand, getGitStatus, parseGitPorcelainStatus } from '../../mcp/utils/gitUtils.js';
 import type { ConnectorSignal, ContextConnector } from './types.js';
 
-function parseChangedFiles(statusOutput: string): string[] {
-  return statusOutput
-    .split('\n')
-    .map((line) => line.trimEnd())
-    .filter(Boolean)
-    .map((line) => line.length >= 3 ? line.slice(3).trim() : '')
-    .filter(Boolean)
-    .slice(0, 5);
+/** Maximum number of file names rendered in the human-readable summary/details. */
+const MAX_DISPLAYED_CHANGED_FILES = 5;
+
+interface ChangedFilesSummary {
+  /** Exact total changed-file count; never reduced by display truncation. */
+  total: number;
+  /** Truncated list of file paths for human-readable display only. */
+  displayed: string[];
+}
+
+function summarizeChangedFiles(statusOutput: string): ChangedFilesSummary {
+  const entries = parseGitPorcelainStatus(statusOutput);
+  const paths = entries.map((entry) => entry.path);
+  return {
+    total: paths.length,
+    displayed: paths.slice(0, MAX_DISPLAYED_CHANGED_FILES),
+  };
 }
 
 function buildFingerprint(branch: string, statusOutput: string): string {
@@ -30,12 +39,19 @@ export function createGitMetadataConnector(): ContextConnector {
       }
 
       const statusResult = await execGitCommand(['status', '--porcelain'], workspacePath);
-      const changedFiles = parseChangedFiles(statusResult.stdout);
+      const { total: totalChangedFiles, displayed: displayedChangedFiles } = summarizeChangedFiles(
+        statusResult.stdout
+      );
       const branch = status.current_branch?.trim() || 'detached';
       const fingerprint = `git:${branch}:${buildFingerprint(branch, statusResult.stdout)}`;
       const summary = status.has_changes
-        ? `branch=${branch}; ${changedFiles.length} changed file(s); ${status.has_staged ? 'staged changes present' : 'no staged changes'}`
+        ? `branch=${branch}; ${totalChangedFiles} changed file(s); ${status.has_staged ? 'staged changes present' : 'no staged changes'}`
         : `branch=${branch}; clean working tree`;
+      const omittedCount = totalChangedFiles - displayedChangedFiles.length;
+      const changedFilesDetail =
+        displayedChangedFiles.length > 0
+          ? `changed_files=${displayedChangedFiles.join(', ')}${omittedCount > 0 ? ` (+${omittedCount} more)` : ''}`
+          : undefined;
 
       return {
         id: 'git_metadata',
@@ -47,7 +63,8 @@ export function createGitMetadataConnector(): ContextConnector {
           `current_branch=${branch}`,
           `has_changes=${status.has_changes}`,
           `has_staged=${status.has_staged}`,
-          ...(changedFiles.length > 0 ? [`changed_files=${changedFiles.join(', ')}`] : []),
+          `total_changed_files=${totalChangedFiles}`,
+          ...(changedFilesDetail ? [changedFilesDetail] : []),
         ],
       };
     },

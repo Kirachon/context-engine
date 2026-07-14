@@ -35,7 +35,18 @@ export class ServiceClientGraphAccess {
     this.graphStoreLoadAttempted = false;
   }
 
-  getStore(): WorkspacePersistentGraphStore | null {
+  /** R6: sync peek for composite health without forcing hydrate. */
+  peekCachedSnapshot(): {
+    loadAttempted: boolean;
+    snapshot: GraphStoreSnapshot | null;
+  } {
+    return {
+      loadAttempted: this.graphStoreLoadAttempted,
+      snapshot: this.graphStore?.getSnapshot() ?? null,
+    };
+  }
+
+  async getStore(): Promise<WorkspacePersistentGraphStore | null> {
     if (this.graphStore) {
       return this.graphStore;
     }
@@ -46,10 +57,24 @@ export class ServiceClientGraphAccess {
 
     this.graphStoreLoadAttempted = true;
     try {
-      this.graphStore = createWorkspacePersistentGraphStore({
+      const store = createWorkspacePersistentGraphStore({
         workspacePath: this.options.workspacePath,
         indexStatePath: path.join(this.options.workspacePath, '.context-engine-index-state.json'),
       });
+      // Cold-start hydration (C2a, canonical-manifest-bound via C2b):
+      // validate persisted artifacts against workspace/schema/corpus/
+      // artifact fingerprints, including the current canonical discovery
+      // manifest generation, before first navigation. Any missing or
+      // mismatched canonical state leaves the store explicitly degraded
+      // instead of rebuilding opportunistically.
+      try {
+        await store.hydrate();
+      } catch (hydrateError) {
+        if (this.options.debugSearch) {
+          console.error('[graphStore] Cold-start hydration failed; remaining degraded:', hydrateError);
+        }
+      }
+      this.graphStore = store;
       return this.graphStore;
     } catch (error) {
       if (this.options.debugSearch) {
@@ -62,7 +87,7 @@ export class ServiceClientGraphAccess {
   async refresh(
     options?: { indexedFiles?: Record<string, { hash: string; indexed_at?: string }> }
   ): Promise<void> {
-    const graphStore = this.getStore();
+    const graphStore = await this.getStore();
     if (!graphStore) {
       return;
     }
@@ -81,8 +106,8 @@ export class ServiceClientGraphAccess {
     }
   }
 
-  getNavigationSnapshot(): ServiceClientGraphNavigationSnapshot {
-    const graphStore = this.getStore();
+  async getNavigationSnapshot(): Promise<ServiceClientGraphNavigationSnapshot> {
+    const graphStore = await this.getStore();
     if (!graphStore) {
       return {
         payload: null,
@@ -109,7 +134,8 @@ export class ServiceClientGraphAccess {
   }
 
   async clearArtifacts(): Promise<void> {
-    await this.getStore()?.clear();
+    const graphStore = await this.getStore();
+    await graphStore?.clear();
     this.clearCache();
   }
 }

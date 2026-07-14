@@ -8,6 +8,9 @@ import {
   splitIntoChunks,
   type ChunkParser,
 } from '../../../src/internal/retrieval/chunking.js';
+import {
+  RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR,
+} from '../../../src/internal/retrieval/discoveryAdapter.js';
 
 type IndexStateFile = {
   files: Record<string, { hash: string; indexed_at: string }>;
@@ -696,5 +699,59 @@ describe('workspace chunk search index', () => {
     expect(persisted.version).toBe(2);
     expect(persisted.chunking.version).toBe(2);
     expect(persisted.docs['src/stale.ts'].chunks[0]?.content).toContain('staleVersionTarget');
+  });
+
+  describe('R3b2: canonical discovery manifest binding', () => {
+    afterEach(() => {
+      delete process.env[RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR];
+    });
+
+    it('never chunk-indexes a path outside the canonical source set, even when index-state claims it', async () => {
+      tempDir = createTempWorkspace();
+
+      writeWorkspaceFile(tempDir, 'src/real.ts', 'export function realNeedle() { return "needle target"; }');
+      // Eligible extension, present on disk, but under a hard-excluded
+      // canonical directory name -- a stale/independently-computed
+      // index-state entry pointing at it must never be chunk-indexed.
+      writeWorkspaceFile(tempDir, 'vendor/pkg.ts', 'export function vendoredNeedle() { return "needle target"; }');
+
+      writeIndexState(tempDir, {
+        'src/real.ts': { hash: 'hash-real-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+        'vendor/pkg.ts': { hash: 'hash-vendor-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+      });
+
+      const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+      const stats = await index.refresh();
+
+      expect(stats.totalFiles).toBe(1);
+
+      const persisted = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.context-engine-chunk-index.json'), 'utf8')
+      ) as { docs: Record<string, unknown> };
+      expect(Object.keys(persisted.docs)).toEqual(['src/real.ts']);
+
+      const results = await index.search('needle target', 5);
+      expect(results.some((result) => result.path === 'vendor/pkg.ts')).toBe(false);
+    });
+
+    it('rollback lever: CE_RETRIEVAL_DISCOVERY_MANIFEST_DISABLED restores pre-R3b2 behavior', async () => {
+      tempDir = createTempWorkspace();
+
+      writeWorkspaceFile(tempDir, 'vendor/pkg.ts', 'export function vendoredNeedle() { return "needle target"; }');
+      writeIndexState(tempDir, {
+        'vendor/pkg.ts': { hash: 'hash-vendor-v1', indexed_at: '2026-03-21T00:00:00.000Z' },
+      });
+
+      process.env[RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR] = 'true';
+
+      const index = createWorkspaceChunkSearchIndex({ workspacePath: tempDir });
+      const stats = await index.refresh();
+
+      expect(stats.totalFiles).toBe(1);
+      const persisted = JSON.parse(
+        fs.readFileSync(path.join(tempDir, '.context-engine-chunk-index.json'), 'utf8')
+      ) as { docs: Record<string, unknown> };
+      expect(Object.keys(persisted.docs)).toEqual(['vendor/pkg.ts']);
+    });
   });
 });

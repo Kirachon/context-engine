@@ -7,6 +7,7 @@
  * zero impact on existing functionality until explicitly enabled.
  */
 import os from 'os';
+import { envInt } from '../config/env.js';
 
 // ============================================================================
 // Configuration Interface
@@ -82,6 +83,7 @@ export interface ReactiveConfig {
 
     /**
      * Maximum files per batch when batching is enabled
+     * Bounded to [1, 100]. Out-of-range values are clamped; malformed values fall back to the default.
      * @default 5
      */
     batch_size: number;
@@ -98,42 +100,50 @@ export interface ReactiveConfig {
 
     /**
      * Maximum parallel workers for step execution
-     * @default 3
+     * Bounded to [1, 32] (also applied to the CPU-derived value when optimize_workers is enabled).
+     * Out-of-range values are clamped; malformed values fall back to the default.
+     * @default 2
      */
     max_workers: number;
 
     /**
      * Maximum token budget for a single review
+     * Bounded to [100, 200000]. Out-of-range values are clamped; malformed values fall back to the default.
      * @default 10000
      */
     token_budget: number;
 
     /**
      * Cache TTL in milliseconds
+     * Bounded to [1000, 86400000] (1 second to 24 hours). Out-of-range values are clamped; malformed values fall back to the default.
      * @default 300000 (5 minutes)
      */
     cache_ttl_ms: number;
 
     /**
      * Step execution timeout in milliseconds
-     * @default 60000 (1 minute)
+     * Bounded to [1000, 1800000] (1 second to 30 minutes). Out-of-range values are clamped; malformed values fall back to the default.
+     * @default 180000 (3 minutes)
      */
     step_timeout_ms: number;
 
     /**
      * Maximum retries for failed steps
-     * @default 2
+     * Bounded to [0, 10]. Out-of-range values are clamped; malformed values fall back to the default.
+     * @default 3
      */
     max_retries: number;
 
     /**
      * Session TTL in milliseconds - completed/failed sessions are cleaned up after this time
+     * Bounded to [60000, 86400000] (1 minute to 24 hours). Out-of-range values are clamped; malformed values fall back to the default.
      * @default 3600000 (1 hour)
      */
     session_ttl_ms: number;
 
     /**
      * Maximum number of sessions to keep in memory
+     * Bounded to [1, 10000]. Out-of-range values are clamped; malformed values fall back to the default.
      * @default 100
      */
     max_sessions: number;
@@ -141,7 +151,8 @@ export interface ReactiveConfig {
     /**
      * Timeout for sessions in executing state without progress
      * Sessions are marked as failed if they exceed this time without completing
-     * @default 600000 (10 minutes)
+     * Bounded to [60000, 86400000] (1 minute to 24 hours). Out-of-range values are clamped; malformed values fall back to the default.
+     * @default 1800000 (30 minutes)
      */
     session_execution_timeout_ms: number;
 
@@ -197,25 +208,56 @@ const DEFAULT_CONFIG: ReactiveConfig = {
 };
 
 // ============================================================================
+// Numeric Bounds
+// ============================================================================
+
+/**
+ * Explicit [min, max] ranges for every bounded numeric reactive config field.
+ *
+ * Behavior contract (consistent across all fields below):
+ * - Malformed input (non-numeric, empty, whitespace-only) -> falls back to the documented default.
+ * - Well-formed but out-of-range input (negative, zero below min, overflow above max) -> clamped to
+ *   the nearest bound (min or max), never silently accepted unbounded.
+ * - Well-formed in-range input (including exact boundary values) -> used as-is.
+ *
+ * This "clamp in-range-shape, default on unparseable" split keeps counts/durations/retries always
+ * positive/bounded while avoiding surprising silent resets for values that are simply out of range.
+ */
+const REACTIVE_CONFIG_BOUNDS = {
+    batch_size: { min: 1, max: 100 },
+    max_workers: { min: 1, max: 32 },
+    token_budget: { min: 100, max: 200_000 },
+    cache_ttl_ms: { min: 1_000, max: 86_400_000 },
+    step_timeout_ms: { min: 1_000, max: 1_800_000 },
+    max_retries: { min: 0, max: 10 },
+    session_ttl_ms: { min: 60_000, max: 86_400_000 },
+    max_sessions: { min: 1, max: 10_000 },
+    session_execution_timeout_ms: { min: 60_000, max: 86_400_000 },
+} as const;
+
+// ============================================================================
 // Configuration Loading
 // ============================================================================
 
 /**
  * Get the current reactive configuration from environment variables
  *
- * Environment variables:
+ * Environment variables (bounded numeric fields use REACTIVE_CONFIG_BOUNDS: malformed
+ * values fall back to the default, out-of-range values are clamped to [min, max]):
  * - REACTIVE_ENABLED: Master switch (default: true)
  * - REACTIVE_COMMIT_CACHE: Phase 1 commit-keyed cache (default: false)
  * - REACTIVE_PARALLEL_EXEC: Phase 2 parallel execution (default: false)
  * - REACTIVE_SQLITE_BACKEND: Phase 3 SQLite persistence (default: false)
  * - REACTIVE_GUARDRAILS: Phase 4 validation pipeline (default: false)
- * - REACTIVE_MAX_WORKERS: Max parallel workers (default: 3)
- * - REACTIVE_TOKEN_BUDGET: Max tokens per review (default: 10000)
- * - REACTIVE_CACHE_TTL: Cache TTL in ms (default: 300000)
- * - REACTIVE_STEP_TIMEOUT: Step timeout in ms (default: 60000)
- * - REACTIVE_MAX_RETRIES: Max retries per step (default: 2)
- * - REACTIVE_SESSION_TTL: Session TTL in ms (default: 3600000)
- * - REACTIVE_MAX_SESSIONS: Max sessions in memory (default: 100)
+ * - REACTIVE_BATCH_SIZE: Max files per batch, bounded [1, 100] (default: 5)
+ * - REACTIVE_MAX_WORKERS: Max parallel workers, bounded [1, 32] (default: 2)
+ * - REACTIVE_TOKEN_BUDGET: Max tokens per review, bounded [100, 200000] (default: 10000)
+ * - REACTIVE_CACHE_TTL: Cache TTL in ms, bounded [1000, 86400000] (default: 300000)
+ * - REACTIVE_STEP_TIMEOUT: Step timeout in ms, bounded [1000, 1800000] (default: 180000)
+ * - REACTIVE_MAX_RETRIES: Max retries per step, bounded [0, 10] (default: 3)
+ * - REACTIVE_SESSION_TTL: Session TTL in ms, bounded [60000, 86400000] (default: 3600000)
+ * - REACTIVE_MAX_SESSIONS: Max sessions in memory, bounded [1, 10000] (default: 100)
+ * - REACTIVE_EXECUTION_TIMEOUT: Session execution timeout in ms, bounded [60000, 86400000] (default: 1800000)
  * - REACTIVE_SQLITE_PATH: Path to SQLite database
  */
 export function getConfig(): ReactiveConfig {
@@ -231,45 +273,40 @@ export function getConfig(): ReactiveConfig {
         use_ai_agent_executor: process.env.REACTIVE_USE_AI_AGENT_EXECUTOR === 'true',
         enable_multilayer_cache: process.env.REACTIVE_ENABLE_MULTILAYER_CACHE === 'true',
         enable_batching: process.env.REACTIVE_ENABLE_BATCHING === 'true',
-        batch_size: parseIntSafe(process.env.REACTIVE_BATCH_SIZE, DEFAULT_CONFIG.batch_size),
+        batch_size: envInt('REACTIVE_BATCH_SIZE', DEFAULT_CONFIG.batch_size, REACTIVE_CONFIG_BOUNDS.batch_size),
         optimize_workers: process.env.REACTIVE_OPTIMIZE_WORKERS === 'true',
 
         // Tuning parameters with defaults
         // Note: max_workers is dynamically adjusted based on optimize_workers flag
         max_workers: (() => {
-            const baseWorkers = parseIntSafe(process.env.REACTIVE_MAX_WORKERS, DEFAULT_CONFIG.max_workers);
+            const baseWorkers = envInt('REACTIVE_MAX_WORKERS', DEFAULT_CONFIG.max_workers, REACTIVE_CONFIG_BOUNDS.max_workers);
             const optimizeWorkers = process.env.REACTIVE_OPTIMIZE_WORKERS === 'true';
 
             if (optimizeWorkers) {
-                // Use CPU-aware optimization
+                // Use CPU-aware optimization, bounded by the same max_workers range as the manual override
                 const cpuCores = os.cpus().length;
-                const optimal = Math.min(cpuCores + 1, cpuCores * 2);
+                const rawOptimal = Math.min(cpuCores + 1, cpuCores * 2);
+                const optimal = Math.max(
+                    REACTIVE_CONFIG_BOUNDS.max_workers.min,
+                    Math.min(REACTIVE_CONFIG_BOUNDS.max_workers.max, rawOptimal)
+                );
                 console.error(`[ReactiveConfig] Worker optimization enabled: ${cpuCores} CPU cores detected, using ${optimal} workers`);
                 return optimal;
             }
 
             return baseWorkers;
         })(),
-        token_budget: parseIntSafe(process.env.REACTIVE_TOKEN_BUDGET, DEFAULT_CONFIG.token_budget),
-        cache_ttl_ms: parseIntSafe(process.env.REACTIVE_CACHE_TTL, DEFAULT_CONFIG.cache_ttl_ms),
-        step_timeout_ms: parseIntSafe(process.env.REACTIVE_STEP_TIMEOUT, DEFAULT_CONFIG.step_timeout_ms),
-        max_retries: parseIntSafe(process.env.REACTIVE_MAX_RETRIES, DEFAULT_CONFIG.max_retries),
-        session_ttl_ms: parseIntSafe(process.env.REACTIVE_SESSION_TTL, DEFAULT_CONFIG.session_ttl_ms),
-        max_sessions: parseIntSafe(process.env.REACTIVE_MAX_SESSIONS, DEFAULT_CONFIG.max_sessions),
-        session_execution_timeout_ms: parseIntSafe(process.env.REACTIVE_EXECUTION_TIMEOUT, DEFAULT_CONFIG.session_execution_timeout_ms),
+        token_budget: envInt('REACTIVE_TOKEN_BUDGET', DEFAULT_CONFIG.token_budget, REACTIVE_CONFIG_BOUNDS.token_budget),
+        cache_ttl_ms: envInt('REACTIVE_CACHE_TTL', DEFAULT_CONFIG.cache_ttl_ms, REACTIVE_CONFIG_BOUNDS.cache_ttl_ms),
+        step_timeout_ms: envInt('REACTIVE_STEP_TIMEOUT', DEFAULT_CONFIG.step_timeout_ms, REACTIVE_CONFIG_BOUNDS.step_timeout_ms),
+        max_retries: envInt('REACTIVE_MAX_RETRIES', DEFAULT_CONFIG.max_retries, REACTIVE_CONFIG_BOUNDS.max_retries),
+        session_ttl_ms: envInt('REACTIVE_SESSION_TTL', DEFAULT_CONFIG.session_ttl_ms, REACTIVE_CONFIG_BOUNDS.session_ttl_ms),
+        max_sessions: envInt('REACTIVE_MAX_SESSIONS', DEFAULT_CONFIG.max_sessions, REACTIVE_CONFIG_BOUNDS.max_sessions),
+        session_execution_timeout_ms: envInt('REACTIVE_EXECUTION_TIMEOUT', DEFAULT_CONFIG.session_execution_timeout_ms, REACTIVE_CONFIG_BOUNDS.session_execution_timeout_ms),
 
         // Optional paths
         sqlite_path: process.env.REACTIVE_SQLITE_PATH,
     };
-}
-
-/**
- * Parse an integer from a string with a default fallback
- */
-function parseIntSafe(value: string | undefined, defaultValue: number): number {
-    if (!value) return defaultValue;
-    const parsed = parseInt(value, 10);
-    return Number.isNaN(parsed) ? defaultValue : parsed;
 }
 
 // ============================================================================
@@ -433,11 +470,11 @@ export type CircuitBreakerState = 'closed' | 'open' | 'half-open';
  * Circuit breaker configuration options
  */
 export interface CircuitBreakerConfig {
-    /** Number of consecutive failures before opening circuit (default: 3) */
+    /** Number of consecutive failures before opening circuit. Bounded to [1, 100]. @default 3 */
     failureThreshold: number;
-    /** Time in ms before attempting to close circuit (default: 60000 = 1 minute) */
+    /** Time in ms before attempting to close circuit. Bounded to [100, 3600000] (100ms to 1 hour). @default 60000 (1 minute) */
     resetTimeout: number;
-    /** Number of successful operations needed to close circuit (default: 2) */
+    /** Number of successful operations needed to close circuit. Bounded to [1, 100]. @default 2 */
     successThreshold: number;
     /** Whether to fall back to sequential on circuit open (default: true) */
     fallbackToSequential: boolean;
@@ -454,13 +491,23 @@ export const DEFAULT_CIRCUIT_BREAKER_CONFIG: CircuitBreakerConfig = {
 };
 
 /**
+ * Explicit [min, max] ranges for circuit breaker numeric fields.
+ * Same clamp/default behavior contract as REACTIVE_CONFIG_BOUNDS.
+ */
+const CIRCUIT_BREAKER_BOUNDS = {
+    failureThreshold: { min: 1, max: 100 },
+    resetTimeout: { min: 100, max: 3_600_000 },
+    successThreshold: { min: 1, max: 100 },
+} as const;
+
+/**
  * Get circuit breaker configuration from environment
  */
 export function getCircuitBreakerConfig(): CircuitBreakerConfig {
     return {
-        failureThreshold: parseIntSafe(process.env.REACTIVE_CB_FAILURE_THRESHOLD, DEFAULT_CIRCUIT_BREAKER_CONFIG.failureThreshold),
-        resetTimeout: parseIntSafe(process.env.REACTIVE_CB_RESET_TIMEOUT, DEFAULT_CIRCUIT_BREAKER_CONFIG.resetTimeout),
-        successThreshold: parseIntSafe(process.env.REACTIVE_CB_SUCCESS_THRESHOLD, DEFAULT_CIRCUIT_BREAKER_CONFIG.successThreshold),
+        failureThreshold: envInt('REACTIVE_CB_FAILURE_THRESHOLD', DEFAULT_CIRCUIT_BREAKER_CONFIG.failureThreshold, CIRCUIT_BREAKER_BOUNDS.failureThreshold),
+        resetTimeout: envInt('REACTIVE_CB_RESET_TIMEOUT', DEFAULT_CIRCUIT_BREAKER_CONFIG.resetTimeout, CIRCUIT_BREAKER_BOUNDS.resetTimeout),
+        successThreshold: envInt('REACTIVE_CB_SUCCESS_THRESHOLD', DEFAULT_CIRCUIT_BREAKER_CONFIG.successThreshold, CIRCUIT_BREAKER_BOUNDS.successThreshold),
         fallbackToSequential: process.env.REACTIVE_CB_FALLBACK_SEQUENTIAL !== 'false',
     };
 }
@@ -475,11 +522,11 @@ export function getCircuitBreakerConfig(): CircuitBreakerConfig {
 export interface ChunkedProcessingConfig {
     /** Enable chunked processing for large PRs (default: true) */
     enabled: boolean;
-    /** File count threshold to trigger chunking (default: 15) */
+    /** File count threshold to trigger chunking. Bounded to [1, 10000]. @default 15 */
     chunkThreshold: number;
-    /** Maximum files per chunk (default: 10) */
+    /** Maximum files per chunk. Bounded to [1, 1000]. @default 10 */
     chunkSize: number;
-    /** Delay between chunks in ms (default: 5000 = 5 seconds) */
+    /** Delay between chunks in ms. Bounded to [0, 300000] (0 to 5 minutes). @default 5000 (5 seconds) */
     interChunkDelay: number;
 }
 
@@ -494,14 +541,24 @@ export const DEFAULT_CHUNKED_PROCESSING_CONFIG: ChunkedProcessingConfig = {
 };
 
 /**
+ * Explicit [min, max] ranges for chunked processing numeric fields.
+ * Same clamp/default behavior contract as REACTIVE_CONFIG_BOUNDS.
+ */
+const CHUNKED_PROCESSING_BOUNDS = {
+    chunkThreshold: { min: 1, max: 10_000 },
+    chunkSize: { min: 1, max: 1_000 },
+    interChunkDelay: { min: 0, max: 300_000 },
+} as const;
+
+/**
  * Get chunked processing configuration from environment
  */
 export function getChunkedProcessingConfig(): ChunkedProcessingConfig {
     return {
         enabled: process.env.REACTIVE_CHUNKED_PROCESSING !== 'false',
-        chunkThreshold: parseIntSafe(process.env.REACTIVE_CHUNK_THRESHOLD, DEFAULT_CHUNKED_PROCESSING_CONFIG.chunkThreshold),
-        chunkSize: parseIntSafe(process.env.REACTIVE_CHUNK_SIZE, DEFAULT_CHUNKED_PROCESSING_CONFIG.chunkSize),
-        interChunkDelay: parseIntSafe(process.env.REACTIVE_INTER_CHUNK_DELAY, DEFAULT_CHUNKED_PROCESSING_CONFIG.interChunkDelay),
+        chunkThreshold: envInt('REACTIVE_CHUNK_THRESHOLD', DEFAULT_CHUNKED_PROCESSING_CONFIG.chunkThreshold, CHUNKED_PROCESSING_BOUNDS.chunkThreshold),
+        chunkSize: envInt('REACTIVE_CHUNK_SIZE', DEFAULT_CHUNKED_PROCESSING_CONFIG.chunkSize, CHUNKED_PROCESSING_BOUNDS.chunkSize),
+        interChunkDelay: envInt('REACTIVE_INTER_CHUNK_DELAY', DEFAULT_CHUNKED_PROCESSING_CONFIG.interChunkDelay, CHUNKED_PROCESSING_BOUNDS.interChunkDelay),
     };
 }
 

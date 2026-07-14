@@ -816,6 +816,45 @@ describe('retrieve internal pipeline', () => {
     expect(cache.set).not.toHaveBeenCalled();
   });
 
+  it('R1b: suppresses cache publication when the caller aborted after retrieve() resolved', async () => {
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
+    const backing = new Map<string, unknown>();
+    const cache = {
+      get: jest.fn((key: string) => backing.get(key)),
+      set: jest.fn((key: string, value: unknown) => backing.set(key, value)),
+    };
+    setInternalCache(cache as any);
+
+    const controller = new AbortController();
+    const serviceClient = {
+      // Weak score triggers the quality-guard fallback below, which runs
+      // strictly *after* retrieve() has already resolved -- this simulates
+      // the caller aborting in the narrow tail window between retrieve()
+      // returning and the handler publishing to cache.
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/weak.ts', content: 'weak result', relevanceScore: 0.05, lines: '1-2', matchType: 'semantic' },
+      ]),
+      localKeywordSearch: jest.fn(async () => {
+        controller.abort();
+        return [
+          { path: 'src/fallback.ts', content: 'fallback result', relevanceScore: 0.91, lines: '1-2', matchType: 'keyword' },
+        ];
+      }),
+    } as any;
+
+    const result = await internalRetrieveCode('abort race query', serviceClient, {
+      signal: controller.signal,
+      enableExpansion: false,
+      enableLexical: false,
+      enableFusion: false,
+      topK: 5,
+    } as any);
+
+    expect(result.fallbackState).toBe('active');
+    expect(result.results.some((item) => item.path === 'src/fallback.ts')).toBe(true);
+    expect(cache.set).not.toHaveBeenCalled();
+  });
+
   it('activates quality guard blend fallback when top scores are weak', async () => {
     FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
 
@@ -865,6 +904,141 @@ describe('retrieve internal pipeline', () => {
     ).rejects.toThrow(/aborted/i);
 
     expect(serviceClient.semanticSearch).not.toHaveBeenCalled();
+  });
+
+  it('R1b: releases queued fanout permits and rejects promptly when aborted mid-queue', async () => {
+    const controller = new AbortController();
+    let lexicalCalled = false;
+    let denseCalled = false;
+
+    const serviceClient = {
+      // Occupies the only concurrency slot for the life of the test so the
+      // lexical/dense tasks below are forced to sit in the queue.
+      semanticSearch: jest.fn(() => new Promise<never>(() => undefined)),
+      localKeywordSearch: jest.fn(async () => {
+        lexicalCalled = true;
+        return [];
+      }),
+    } as any;
+    const denseProvider = {
+      id: 'dense:test',
+      search: jest.fn(async () => {
+        denseCalled = true;
+        return [];
+      }),
+    };
+
+    const promise = retrieve('queue me', serviceClient, {
+      signal: controller.signal,
+      enableExpansion: false,
+      enableLexical: true,
+      enableDense: true,
+      denseProvider,
+      enableFusion: false,
+      fanoutConcurrency: 1,
+      topK: 5,
+    } as any);
+    const rejection = promise.catch((error) => error);
+
+    // Give the synchronous fanout scheduling a tick to queue lexical/dense
+    // behind the in-flight (never-resolving) semantic task before aborting.
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    controller.abort();
+
+    await expect(rejection).resolves.toMatchObject({ name: 'RetrievalAbortedError' });
+    await expect(promise).rejects.toThrow(/aborted/i);
+    expect(lexicalCalled).toBe(false);
+    expect(denseCalled).toBe(false);
+  });
+
+  it('R1b: rejects promptly on mid-provider abort without waiting for the in-flight call to settle', async () => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const semanticSearch = jest.fn(() => new Promise((resolve) => {
+        setTimeout(() => resolve([
+          { path: 'src/late.ts', content: 'late', relevanceScore: 0.9, lines: '1-2' },
+        ]), 5000);
+      }));
+      const serviceClient = {
+        semanticSearch,
+        localKeywordSearch: jest.fn(async () => []),
+      } as any;
+
+      const promise = retrieve('provider abort', serviceClient, {
+        signal: controller.signal,
+        enableExpansion: false,
+        enableLexical: false,
+        enableFusion: false,
+        topK: 5,
+      } as any);
+      let settled = false;
+      const rejection = promise.catch((error) => {
+        settled = true;
+        return error;
+      });
+
+      await jest.advanceTimersByTimeAsync(10);
+      controller.abort();
+      await jest.advanceTimersByTimeAsync(10);
+
+      expect(settled).toBe(true);
+      await expect(rejection).resolves.toMatchObject({ name: 'RetrievalAbortedError' });
+      await expect(promise).rejects.toThrow(/aborted/i);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('R1b: rejects promptly on mid-rerank abort even when an external reranker plugin ignores the signal', async () => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      const serviceClient = {
+        semanticSearch: jest.fn(async () => [
+          { path: 'src/a.ts', content: 'a', relevanceScore: 0.6, lines: '1-2' },
+          { path: 'src/b.ts', content: 'b', relevanceScore: 0.5, lines: '1-2' },
+        ]),
+        localKeywordSearch: jest.fn(async () => []),
+      } as any;
+      // Deliberately does not observe the forwarded `signal` -- exercises
+      // the raceWithAbort defense-in-depth wrapper around the provider call.
+      const reranker = {
+        id: 'test-reranker',
+        rerank: jest.fn(() => new Promise((resolve) => {
+          setTimeout(() => resolve([
+            { path: 'src/b.ts', content: 'b', relevanceScore: 0.99, lines: '1-2' },
+          ]), 100000);
+        })),
+      };
+
+      const promise = retrieve('rerank abort', serviceClient, {
+        signal: controller.signal,
+        enableExpansion: false,
+        enableLexical: false,
+        enableFusion: false,
+        enableRerank: true,
+        rerankTimeoutMs: 2000,
+        reranker,
+        topK: 5,
+      } as any);
+      let settled = false;
+      const rejection = promise.catch((error) => {
+        settled = true;
+        return error;
+      });
+
+      await jest.advanceTimersByTimeAsync(10);
+      expect(reranker.rerank).toHaveBeenCalledTimes(1);
+      controller.abort();
+      await jest.advanceTimersByTimeAsync(10);
+
+      expect(settled).toBe(true);
+      await expect(rejection).resolves.toMatchObject({ name: 'RetrievalAbortedError' });
+      await expect(promise).rejects.toThrow(/aborted/i);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('adds graph-aware query variants and provenance receipts when persisted graph artifacts are available', async () => {

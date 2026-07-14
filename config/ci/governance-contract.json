@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "hierarchy": [
     "runtime_code_and_ci_contracts",
     "architecture_reference",
@@ -12,14 +12,56 @@
     "reference-only",
     "retired"
   ],
+  "completion_states": [
+    "not-started",
+    "in-progress",
+    "completed"
+  ],
   "documentation_roles": {
     "architecture_reference": "ARCHITECTURE.md",
-    "active_delivery_plan": "context-engine-next-tranche-swarm-plan.md",
-    "execution_ledger": "context-engine-improvement-swarm-plan.md",
+    "active_delivery_plan": "context-engine-remediation-plan-2026-07-14.md",
+    "execution_ledgers": [
+      "context-engine-next-tranche-swarm-plan.md",
+      "context-engine-improvement-swarm-plan.md"
+    ],
     "planning_only": [
       "docs/advanced-mcp-ux-and-hosted-maturity-plan.md"
     ]
   },
+  "delivery_plans": [
+    {
+      "path": "context-engine-remediation-plan-2026-07-14.md",
+      "role": "active-delivery-plan",
+      "lifecycle_state": "active",
+      "completion_state": "in-progress",
+      "immutable": false,
+      "status_banner": "**Status:** Closeout `CONDITIONAL_GO` (not release-ready); Q3d/T1/A deferred"
+    },
+    {
+      "path": "context-engine-next-tranche-swarm-plan.md",
+      "role": "execution-ledger",
+      "lifecycle_state": "reference-only",
+      "completion_state": "completed",
+      "immutable": true,
+      "status_banner": "> Status: Immutable execution ledger (completed tranche)"
+    },
+    {
+      "path": "context-engine-improvement-swarm-plan.md",
+      "role": "execution-ledger",
+      "lifecycle_state": "reference-only",
+      "completion_state": "completed",
+      "immutable": true,
+      "status_banner": "> Status: Immutable execution ledger (completed tranche)"
+    },
+    {
+      "path": "docs/advanced-mcp-ux-and-hosted-maturity-plan.md",
+      "role": "planning-reference",
+      "lifecycle_state": "planning-only",
+      "completion_state": "not-started",
+      "immutable": false,
+      "status_banner": "> Status: Planning-only reference (not implementation authority)"
+    }
+  ],
   "ownership_lanes": {
     "platform_transport": "platform-transport",
     "eval_gates": "eval-gates",
@@ -31,11 +73,6 @@
     "require_consuming_gate_reference": true,
     "pr_blockers_must_be_deterministic": true,
     "nightly_to_blocker_promotion_requires_contract_update": true
-  },
-  "gate_tier_expectations": {
-    "ci:check:mcp-smoke": "pr_blocker",
-    "ci:check:retrieval-quality-gate": "pr_blocker",
-    "ci:check:retrieval-shadow-canary-gate": "pr_blocker"
   },
   "governed_contracts": [
     {

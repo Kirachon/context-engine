@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "task_id": "Q3c",
+  "title": "Shadow-required execution and calibration",
+  "owner_lane": "CI quality",
+  "file_family": "F7",
+  "depends_on": ["Q2", "Q3b", "C2b", "C3", "R5"],
+  "purpose": "Produce provenance-valid PR-sized shadow artifacts and calibrate shadow_required_artifact gates to calibrated using consecutive non-waived receipts across two commits with identical corpus/config identity. Does not promote to pr_blocker (Q3d).",
+  "promotion_target_tier": "calibrated",
+  "forbidden_tier": "pr_blocker",
+  "require_consecutive_receipts": 3,
+  "require_distinct_commits": 2,
+  "gates_to_calibrate": [
+    "ci:check:retrieval-holdout-fixture",
+    "ci:check:retrieval-quality-gate",
+    "ci:check:retrieval-shadow-canary-gate"
+  ],
+  "corpus_identity": {
+    "contract_path": "config/ci/q3a-frozen-corpus-contract.json",
+    "pr_corpus_path": "config/ci/frozen-corpora/pr-corpus.json",
+    "fixture_pack_path": "config/ci/retrieval-quality-fixture-pack.json"
+  },
+  "artifact_paths": {
+    "shadow_gate": "artifacts/bench/retrieval-shadow-canary-gate.json",
+    "quality_gate": "artifacts/bench/retrieval-quality-gate.json",
+    "holdout": "artifacts/bench/retrieval-holdout-check.json",
+    "history_dir": "artifacts/bench/shadow-calibration-history",
+    "calibration_receipt": "artifacts/bench/shadow-calibration-receipt.json"
+  },
+  "local_simulation_policy": {
+    "allows_dual_commit_local_receipts": true,
+    "external_github_workflow_history_required_for_pr_blocker": true,
+    "note": "Local dual-commit consecutive receipts calibrate to calibrated; GitHub Actions history across real workflow runs is required only for Q3d pr_blocker promotion."
+  }
+}

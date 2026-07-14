@@ -1,0 +1,23 @@
+WS20 rollout stage gate
+artifact=D:\GitProjects\context-engine\docs\rollout-evidence\2026-03-04\ws20-stage2-ramp-10-50.yaml
+thresholds_config=D:\GitProjects\context-engine\config\rollout-go-no-go-thresholds.json
+checks=18
+PASS rollout_id: rollout_id must be a non-empty string.
+PASS stage: stage must be an integer in range 0..3.
+PASS stage_name_alignment: stage_name must match controlled_ramp for stage 2.
+PASS expected_stage_match: artifact stage (2) must match --stage 2.
+PASS controlled_ramp_present: controlled_ramp section is required for stage 2.
+PASS controlled_ramp_checkpoints: controlled_ramp.checkpoints must be a non-empty array.
+PASS checkpoint_10_exists: controlled_ramp.checkpoints must include percent=10.
+PASS checkpoint_10_soak: percent=10 checkpoint requires soak_hours >= 24.
+PASS checkpoint_10_status: percent=10 checkpoint status must be 'pass'.
+PASS checkpoint_10_signoff: percent=10 checkpoint requires signed_by and evidence_ref.
+PASS checkpoint_25_exists: controlled_ramp.checkpoints must include percent=25.
+PASS checkpoint_25_soak: percent=25 checkpoint requires soak_hours >= 48.
+PASS checkpoint_25_status: percent=25 checkpoint status must be 'pass'.
+PASS checkpoint_25_signoff: percent=25 checkpoint requires signed_by and evidence_ref.
+PASS checkpoint_50_exists: controlled_ramp.checkpoints must include percent=50.
+PASS checkpoint_50_soak: percent=50 checkpoint requires soak_hours >= 72.
+PASS checkpoint_50_status: percent=50 checkpoint status must be 'pass'.
+PASS checkpoint_50_signoff: percent=50 checkpoint requires signed_by and evidence_ref.
+WS20 stage gate passed.

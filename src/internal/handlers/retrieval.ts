@@ -278,16 +278,19 @@ export async function internalRetrieveCode(
               bypassCache: normalizedOptions?.bypassCache,
               includePaths: normalizedOptions?.includePaths,
               excludePaths: normalizedOptions?.excludePaths,
+              signal: options?.signal,
             })
           : normalizedOptions?.bypassCache
             ? await serviceClient.semanticSearch(query, normalizedOptions?.topK ?? 10, {
                 bypassCache: true,
                 includePaths: normalizedOptions?.includePaths,
                 excludePaths: normalizedOptions?.excludePaths,
+                signal: options?.signal,
               })
             : await serviceClient.semanticSearch(query, normalizedOptions?.topK ?? 10, {
                 includePaths: normalizedOptions?.includePaths,
                 excludePaths: normalizedOptions?.excludePaths,
+                signal: options?.signal,
               });
         results = sortByScoreDesc(mergeUniqueResults(results, fallbackResults)).slice(
           0,
@@ -400,6 +403,13 @@ export async function internalRetrieveCode(
   }
 
   const output = await resolveResultWithOptionalFallback();
-  cache.set(cacheKey, stripFlowMetadata(output));
+  // R1b: `retrieve()` already rejects promptly once its flow signal fires
+  // (queue/provider/rerank abort checkpoints), so reaching this line with
+  // an aborted signal is only a narrow tail race -- but skip the cache
+  // publication defensively rather than rely solely on that upstream
+  // rejection.
+  if (options?.signal?.aborted !== true) {
+    cache.set(cacheKey, stripFlowMetadata(output));
+  }
   return output;
 }

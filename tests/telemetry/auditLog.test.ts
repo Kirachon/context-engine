@@ -19,6 +19,12 @@ import {
   type AuditEvent,
 } from '../../src/telemetry/auditLog.js';
 import { runWithRequestContext } from '../../src/telemetry/requestContext.js';
+import {
+  ServiceClientRuntimeAccess,
+  type RuntimeSearchQueueLike,
+  type ServiceClientRuntimeAccessOptions,
+} from '../../src/mcp/serviceClientRuntimeAccess.js';
+import { retrieve } from '../../src/internal/retrieval/retrieve.js';
 
 const SECRET_FIXTURES = {
   authHeader: 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.secret.payload',
@@ -277,5 +283,124 @@ describe('auditLog secret hygiene', () => {
     assertNoSecretsInOutput(serialized);
     auditLogToolCallCompleted('review_diff', 'success', 4, SECRET_FIXTURES.openAiKey);
     assertNoSecretsInOutput(capturedEvents.join('\n'));
+  });
+});
+
+describe('query-derived logging privacy (S2)', () => {
+  // Secret-bearing canary embedded in the query text itself. Default
+  // diagnostics must never contain the raw query, so this canary must never
+  // appear in captured stderr/stdout regardless of success or failure paths.
+  const QUERY_CANARY = `sk-proj-CANARY-${'q'.repeat(40)}`;
+
+  function createFakeSearchQueue(): RuntimeSearchQueueLike {
+    return {
+      length: 0,
+      depth: 0,
+      enqueue: async (fn) => fn(),
+    };
+  }
+
+  function createRuntimeAccess(providerCall: (...args: unknown[]) => Promise<{ text: string; model: string }>): ServiceClientRuntimeAccess {
+    const options: ServiceClientRuntimeAccessOptions = {
+      workspacePath: process.cwd(),
+      getAIProviderId: () => 'openai_session' as never,
+      getCachedProvider: () =>
+        ({
+          id: 'openai_session',
+          modelLabel: 'codex-session',
+          call: providerCall,
+        }) as never,
+      setCachedProvider: () => undefined,
+    };
+    return new ServiceClientRuntimeAccess(options);
+  }
+
+  let consoleErrorSpy: jest.SpiedFunction<typeof console.error>;
+
+  beforeEach(() => {
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    consoleErrorSpy.mockRestore();
+  });
+
+  function capturedConsoleErrorOutput(): string {
+    return consoleErrorSpy.mock.calls
+      .map((call) => call.map((arg) => (typeof arg === 'string' ? arg : String(arg))).join(' '))
+      .join('\n');
+  }
+
+  it('searchAndAsk never logs the raw query on success', async () => {
+    const runtime = createRuntimeAccess(async () => ({ text: 'ok', model: 'codex-session' }));
+
+    await runtime.searchAndAsk({
+      searchQuery: QUERY_CANARY,
+      searchQueues: {
+        interactive: createFakeSearchQueue(),
+        background: createFakeSearchQueue(),
+      },
+    });
+
+    const output = capturedConsoleErrorOutput();
+    expect(output).not.toContain(QUERY_CANARY);
+    expect(output).toContain('[searchAndAsk]');
+    expect(output).toMatch(/queryLength=\d+/);
+  });
+
+  it('searchAndAsk never logs the raw query on provider failure', async () => {
+    const runtime = createRuntimeAccess(async () => {
+      throw new Error('provider unavailable');
+    });
+
+    await expect(
+      runtime.searchAndAsk({
+        searchQuery: QUERY_CANARY,
+        searchQueues: {
+          interactive: createFakeSearchQueue(),
+          background: createFakeSearchQueue(),
+        },
+      })
+    ).rejects.toThrow('provider unavailable');
+
+    const output = capturedConsoleErrorOutput();
+    expect(output).not.toContain(QUERY_CANARY);
+    expect(output).toContain('outcome=error');
+  });
+
+  it('retrieve() fanout failure logs never contain the raw query variant text', async () => {
+    const serviceClient = {
+      semanticSearch: jest.fn(async () => {
+        throw new Error('semantic backend down');
+      }),
+      localKeywordSearch: jest.fn(async () => {
+        throw new Error('lexical backend down');
+      }),
+    } as never;
+
+    const denseProvider = {
+      id: 'dense:test',
+      search: jest.fn(async () => {
+        throw new Error('dense backend down');
+      }),
+    };
+
+    const results = await retrieve(QUERY_CANARY, serviceClient, {
+      enableExpansion: false,
+      enableLexical: true,
+      enableDense: true,
+      denseProvider,
+      enableFusion: true,
+      topK: 5,
+      log: true,
+    });
+
+    expect(results).toEqual([]);
+    const output = capturedConsoleErrorOutput();
+    expect(output).not.toContain(QUERY_CANARY);
+    expect(output).toMatch(/\[retrieve\] Semantic fanout failed/);
+    expect(output).toMatch(/\[retrieve\] Lexical fanout failed/);
+    expect(output).toMatch(/\[retrieve\] Dense fanout failed/);
+    expect(output).toMatch(/queryLength=\d+/);
   });
 });

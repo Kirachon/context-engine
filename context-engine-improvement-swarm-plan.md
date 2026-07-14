@@ -2,12 +2,14 @@
 
 **Generated**: 2026-04-10
 
-> Status: Execution ledger (completed tranche)
+> Status: Immutable execution ledger (completed tranche)
 >
-> This file is preserved as historical execution evidence for T0-T13.
-> `context-engine-next-tranche-swarm-plan.md` is the active delivery plan.
+> This file is preserved as immutable historical execution evidence for T0-T13 and must not receive new delivery work.
+> Sole active delivery plan: `context-engine-remediation-plan-2026-07-14.md`.
+> `context-engine-next-tranche-swarm-plan.md` is also an immutable completed execution ledger.
 > `ARCHITECTURE.md` remains the architecture reference.
-> `docs/advanced-mcp-ux-and-hosted-maturity-plan.md` remains a planning-only follow-on artifact.
+> `docs/advanced-mcp-ux-and-hosted-maturity-plan.md` remains a planning-only reference.
+> Governance authority: `config/ci/governance-contract.json`.
 
 ## Overview
 Recast the improvement roadmap as a dependency-aware, parallel-safe swarm plan. The first execution slices stay additive and low-risk: freeze current truth, harden the MCP transport and capability surface, then extend existing gates and observability, then move into retrieval calibration and large-file behavior. Docs cleanup and advanced MCP UX stay late so they do not interfere with transport or measurement receipts.

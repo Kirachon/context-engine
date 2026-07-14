@@ -17,6 +17,9 @@ export type RetrievalProviderOperation =
 export interface RetrievalSearchOptions {
   bypassCache?: boolean;
   maxOutputLength?: number;
+  /** R1b: forwarded to the active provider so it can stop early and skip
+   * publishing caches/artifacts once the caller has aborted. */
+  signal?: AbortSignal;
 }
 
 export interface RetrievalProviderCallbackContext {

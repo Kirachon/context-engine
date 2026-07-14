@@ -53,6 +53,15 @@ export function errorHandler(
 ): void {
     console.error(`${formatRequestLogPrefix()} [HTTP] Error: ${err.message}`);
 
+    // R1c: a cancellation/timeout can legitimately race a second error
+    // reaching this handler (e.g. the shared request-timeout middleware and
+    // a route's own `runAbortableTool` deadline firing close together). Once
+    // the response is already finalized there is nothing left to publish --
+    // and nothing more can be sent to the client either way.
+    if (res.headersSent || res.writableEnded) {
+        return;
+    }
+
     if (err instanceof HttpError) {
         res.status(err.statusCode).json({
             error: err.message,

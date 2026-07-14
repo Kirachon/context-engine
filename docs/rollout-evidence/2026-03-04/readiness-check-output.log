@@ -1,0 +1,10 @@
+Rollout readiness check
+Required files checked: 4
+Optional artifacts checked: 5
+Artifact quality signals:
+- docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log: PASS (pass_marker=true, fail_marker=false, json=false, schema=true)
+- docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log: PASS (pass_marker=true, fail_marker=false, json=false, schema=true)
+- docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log: PASS (pass_marker=true, fail_marker=false, json=false, schema=true)
+- docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log: PASS (pass_marker=true, fail_marker=false, json=false, schema=true)
+- docs/rollout-evidence/2026-03-04/freeze-rollback-triggers.json: PASS (pass_marker=true, fail_marker=false, json=true, schema=true)
+Readiness check passed.

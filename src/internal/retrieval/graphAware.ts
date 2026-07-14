@@ -261,7 +261,11 @@ export async function buildRetrievalGraphContext(
     workspacePath,
     indexStatePath: path.join(workspacePath, '.context-engine-index-state.json'),
   });
-  const refresh = await graphStore.refresh();
+  // Cold-start/per-query safe load (C2a, canonical-manifest-bound via C2b):
+  // validates fingerprints (including the current canonical discovery
+  // manifest generation) against the persisted artifacts. Retrieval must
+  // never trigger a broad fallback rebuild scan as a side effect of a query.
+  const refresh = await graphStore.hydrate();
   const payload = graphStore.getGraph();
   if (!payload) {
     return {

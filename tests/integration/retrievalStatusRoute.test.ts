@@ -5,6 +5,7 @@ import { ContextEngineHttpServer } from '../../src/http/httpServer.js';
 
 type MockServiceClient = {
   getIndexStatus: ReturnType<typeof jest.fn>;
+  getCompositeHealth: ReturnType<typeof jest.fn>;
   indexWorkspace: ReturnType<typeof jest.fn>;
   semanticSearch: ReturnType<typeof jest.fn>;
   getContextForPrompt: ReturnType<typeof jest.fn>;
@@ -20,6 +21,18 @@ function createMockServiceClient(): MockServiceClient {
       lastIndexed: '2026-04-10T00:00:00.000Z',
       fileCount: 1,
       isStale: false,
+    })),
+    getCompositeHealth: jest.fn(() => ({
+      schema_version: 1,
+      overall: 'unknown',
+      components: {
+        corpus: { state: 'ready', critical: true },
+        lexical: { state: 'unavailable', critical: false },
+        vector: { state: 'ready', critical: true },
+        graph: { state: 'unknown', critical: true },
+        cancellation_queue: { state: 'ready', critical: true },
+        session: { state: 'ready', critical: true },
+      },
     })),
     indexWorkspace: jest.fn(async () => ({ filesIndexed: 0, chunksCreated: 0 })),
     semanticSearch: jest.fn(async () => []),

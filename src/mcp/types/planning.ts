@@ -388,6 +388,19 @@ export interface EnhancedPlanOutput {
 // ============================================================================
 
 /**
+ * Explicit planning depth/budget contract for `create_plan`.
+ *
+ * - `auto` (default): infer depth from task breadth (architecture/migration/
+ *   multi-step signals, task length) and from requested context limits that
+ *   exceed the tool's defaults. Auto-selected depth never depends on the
+ *   counts returned by context retrieval, so the profile used to decide the
+ *   retrieval clamp is the same profile used to decide compact-vs-deep output.
+ * - `compact`: force a lightweight local outline regardless of task breadth.
+ * - `deep`: force full AI-backed deep planning regardless of task brevity.
+ */
+export type PlanningDepthMode = 'auto' | 'compact' | 'deep';
+
+/**
  * Options for plan generation
  */
 export interface PlanGenerationOptions {
@@ -411,6 +424,8 @@ export interface PlanGenerationOptions {
   exclude_paths?: string[];
   /** Automatically infer likely include paths when the caller did not provide scope (default: true). */
   auto_scope?: boolean;
+  /** Explicit planning depth/budget mode: 'auto' | 'compact' | 'deep' (default: 'auto'). */
+  depth?: PlanningDepthMode;
 }
 
 /**
@@ -453,6 +468,8 @@ export interface PlanResult {
   /** Additive wrapper diagnostics about the planning request/context. */
   planning_context?: {
     prompt_profile: 'compact' | 'deep';
+    /** The depth mode that was actually requested ('auto' when unspecified). */
+    requested_depth: PlanningDepthMode;
     scope_applied: boolean;
     scope_source?: 'manual' | 'auto' | 'none';
     scope_confidence?: 'high' | 'medium' | 'low' | 'none';
@@ -461,6 +478,20 @@ export interface PlanResult {
     context_file_count: number;
     token_budget: number;
     clarification_triggered: boolean;
+    /**
+     * Additive diagnostics distinguishing what was requested, what was
+     * actually sent to context retrieval after profile-based clamping, and
+     * what retrieval actually returned. Lets callers detect when a request
+     * was silently narrowed instead of only seeing the final result.
+     */
+    context_budget: {
+      requested_max_context_files: number;
+      clamped_max_context_files: number;
+      actual_context_file_count: number;
+      requested_token_budget: number;
+      clamped_token_budget: number;
+      actual_total_tokens: number;
+    };
   };
 }
 

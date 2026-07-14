@@ -377,6 +377,40 @@ describe('ContextServiceClient', () => {
       ]);
     });
 
+    it('R1b: does not publish to the semantic search cache when the caller aborted mid-flight', async () => {
+      const controller = new AbortController();
+      (client as any).retrievalProvider = {
+        id: 'local_native',
+        // Aborts strictly *after* the provider call has already produced a
+        // result -- the tail-race window the R1b cache-write guard defends.
+        search: jest.fn(async () => {
+          controller.abort();
+          return [{ path: 'src/provider-abort.ts', content: 'result', relevanceScore: 0.9 }];
+        }),
+        indexWorkspace: jest.fn(),
+        indexFiles: jest.fn(),
+        clearIndex: jest.fn(),
+        getIndexStatus: jest.fn(async () => client.getIndexStatus()),
+        health: jest.fn(async () => ({ ok: true })),
+      };
+      const setCacheSpy = jest.spyOn(client as any, 'setCachedSearch');
+
+      const abortedResults = await client.semanticSearch('provider abort race query', 3, {
+        signal: controller.signal,
+      });
+
+      expect(abortedResults).toEqual([
+        expect.objectContaining({ path: 'src/provider-abort.ts' }),
+      ]);
+      expect(setCacheSpy).not.toHaveBeenCalled();
+
+      const followUpResults = await client.semanticSearch('provider abort race query', 3);
+      expect(followUpResults).toEqual([
+        expect.objectContaining({ path: 'src/provider-abort.ts' }),
+      ]);
+      expect(setCacheSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('should route index lifecycle methods through active retrieval provider instance', async () => {
       const indexWorkspace = jest.fn(async () => ({ indexed: 2, skipped: 0, errors: [], duration: 1 }));
       const indexFiles = jest.fn(async (_paths: string[]) => ({ indexed: 1, skipped: 0, errors: [], duration: 1 }));
@@ -1038,6 +1072,39 @@ describe('ContextServiceClient', () => {
       expect(rootDiscoveryCalls).toHaveLength(2);
       expect(firstResults.length).toBeGreaterThan(0);
       expect(secondResults.length).toBeGreaterThan(0);
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('R1b: does not publish to the keyword fallback cache when the caller aborted', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-semantic-fallback-abort-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'cache.ts'),
+        'export const fallbackAbortProbe = true;',
+        'utf-8'
+      );
+
+      const fallbackClient = new ContextServiceClient(tempDir);
+      const setCacheSpy = jest.spyOn(fallbackClient as any, 'setCachedKeywordFallbackSearch');
+      const controller = new AbortController();
+      controller.abort();
+
+      const abortedResults = await (fallbackClient as any).keywordFallbackSearch('fallbackAbortProbe', 5, {
+        bypassCache: false,
+        signal: controller.signal,
+      });
+      // Fail-open: an already-aborted signal still returns real results
+      // (the caller is expected to have already stopped waiting), it just
+      // must not be published to the shared cache.
+      expect(abortedResults.length).toBeGreaterThan(0);
+      expect(setCacheSpy).not.toHaveBeenCalled();
+
+      const followUpResults = await (fallbackClient as any).keywordFallbackSearch('fallbackAbortProbe', 5, {
+        bypassCache: false,
+      });
+      expect(followUpResults.length).toBeGreaterThan(0);
+      expect(setCacheSpy).toHaveBeenCalledTimes(1);
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
@@ -1719,7 +1786,7 @@ describe('ContextServiceClient', () => {
       expect(defaultClient.getActiveRetrievalProviderId()).toBe('local_native');
       expect(explicitClient.getActiveRetrievalProviderId()).toBe('local_native');
       expect(defaultKey).toEqual(explicitKey);
-      expect(defaultKey.startsWith('local_native:')).toBe(true);
+      expect(defaultKey.startsWith('v2:local_native:')).toBe(true);
     });
 
     it('should cache results under retrieval-provider-scoped keys', async () => {
@@ -1739,7 +1806,7 @@ describe('ContextServiceClient', () => {
       );
       const query = 'cache isolation query';
       const openAIKey = (openAIClient as any).getCommitAwareCacheKey(query, 5);
-      expect(openAIKey.startsWith('local_native:')).toBe(true);
+      expect(openAIKey.startsWith('v2:local_native:')).toBe(true);
 
       const firstResults = await openAIClient.semanticSearch(query, 5);
       const secondResults = await openAIClient.semanticSearch(query, 5);
@@ -1759,7 +1826,7 @@ describe('ContextServiceClient', () => {
       const cacheKey = (localNativeClient as any).getCommitAwareCacheKey('cache mix', 3);
       expect(localNativeClient.getActiveAIProviderId()).toBe('openai_session');
       expect(localNativeClient.getActiveRetrievalProviderId()).toBe('local_native');
-      expect(cacheKey.startsWith('local_native:')).toBe(true);
+      expect(cacheKey.startsWith('v2:local_native:')).toBe(true);
     });
 
     it('should run retrieval shadow compare without changing primary semantic results', async () => {
@@ -2759,6 +2826,124 @@ describe('ContextServiceClient', () => {
     });
   });
 
+  describe('Versioned semantic-search cache key (C3 collision matrix)', () => {
+    it('embeds the key version and maxOutputLength in the cache identity', () => {
+      const keyClient = new ContextServiceClient(testWorkspace);
+      const key = (keyClient as any).getCommitAwareCacheKey('cache mix', 3, undefined, undefined, 256);
+
+      expect(key.startsWith('v2:local_native:')).toBe(true);
+      expect(key).toContain('maxOutputLength=256');
+    });
+
+    it('defaults maxOutputLength to the literal "default" when unset', () => {
+      const keyClient = new ContextServiceClient(testWorkspace);
+      const key = (keyClient as any).getCommitAwareCacheKey('cache mix', 3);
+
+      expect(key).toContain('maxOutputLength=default');
+    });
+
+    it('collision matrix: pairs differing only in one previously-omitted or existing field never share a key', () => {
+      const keyClient = new ContextServiceClient(testWorkspace);
+      const buildKey = (
+        query: string,
+        topK: number,
+        providerId?: string,
+        scope?: { includePaths?: string[]; excludePaths?: string[] },
+        maxOutputLength?: number
+      ) => (keyClient as any).getCommitAwareCacheKey(query, topK, providerId, scope, maxOutputLength);
+
+      const baseline = buildKey('same query', 5, 'local_native', undefined, 100);
+
+      const variants: Record<string, string> = {
+        differentQuery: buildKey('different query', 5, 'local_native', undefined, 100),
+        differentTopK: buildKey('same query', 10, 'local_native', undefined, 100),
+        differentProvider: buildKey('same query', 5, 'local_native_v2', undefined, 100),
+        differentScope: buildKey('same query', 5, 'local_native', { includePaths: ['src/'] }, 100),
+        differentMaxOutputLength: buildKey('same query', 5, 'local_native', undefined, 500),
+        unsetMaxOutputLength: buildKey('same query', 5, 'local_native', undefined, undefined),
+      };
+
+      // Every previously-omitted or existing result-affecting field must, on its own,
+      // produce a distinct key from the baseline (C3 acceptance: different result
+      // contracts cannot share an entry).
+      for (const [label, variant] of Object.entries(variants)) {
+        expect(variant).not.toEqual(baseline);
+        expect(variant.length > 0).toBe(true); // guard against accidental empty-string collisions
+        void label;
+      }
+
+      // No two variants collide with each other either.
+      const allKeys = [baseline, ...Object.values(variants)];
+      expect(new Set(allKeys).size).toBe(allKeys.length);
+    });
+
+    it('produces identical keys for byte-for-byte unchanged requests', () => {
+      const keyClient = new ContextServiceClient(testWorkspace);
+      const first = (keyClient as any).getCommitAwareCacheKey(
+        'same query', 5, 'local_native', { includePaths: ['src/'] }, 100
+      );
+      const second = (keyClient as any).getCommitAwareCacheKey(
+        'same query', 5, 'local_native', { includePaths: ['src/'] }, 100
+      );
+
+      expect(first).toEqual(second);
+    });
+
+    it('should treat different maxOutputLength values as separate cache entries end-to-end', async () => {
+      const providerCall = configureOpenAISemanticProvider(
+        client,
+        JSON.stringify([{ path: 'file.ts', content: 'content', relevanceScore: 0.7 }])
+      );
+
+      await client.semanticSearch('max output length collision test', 5, { maxOutputLength: 100 });
+      await client.semanticSearch('max output length collision test', 5, { maxOutputLength: 500 });
+
+      // Previously these shared a memory-cache key (defect); now they must miss independently.
+      expect(providerCall).toHaveBeenCalledTimes(2);
+    });
+
+    it('should reuse the cache for an unchanged maxOutputLength request (cache hit)', async () => {
+      const providerCall = configureOpenAISemanticProvider(
+        client,
+        JSON.stringify([{ path: 'file.ts', content: 'content', relevanceScore: 0.7 }])
+      );
+
+      await client.semanticSearch('max output length repeat test', 5, { maxOutputLength: 250 });
+      await client.semanticSearch('max output length repeat test', 5, { maxOutputLength: 250 });
+
+      expect(providerCall).toHaveBeenCalledTimes(1);
+    });
+
+    it('should keep the in-flight dedup key aligned with the memory cache key for a given maxOutputLength', async () => {
+      const providerCall = jest.fn(async () => ({
+        text: JSON.stringify([{ path: 'src/inflight.ts', content: 'deduped', relevanceScore: 0.9 }]),
+        model: 'codex-session',
+      }));
+
+      (client as any).aiProvider = {
+        id: 'openai_session',
+        modelLabel: 'codex-session',
+        call: providerCall,
+      };
+      (client as any).aiProviderId = 'openai_session';
+
+      // All three calls are issued in the same synchronous tick, so the two
+      // sharing a maxOutputLength=100 identity must coalesce into one in-flight
+      // request while the maxOutputLength=900 request gets its own.
+      const [firstSearch, secondSearch, thirdSearchDifferentLimit] = await Promise.all([
+        client.semanticSearch('inflight alignment query', 5, { maxOutputLength: 100 }),
+        client.semanticSearch('inflight alignment query', 5, { maxOutputLength: 100 }),
+        client.semanticSearch('inflight alignment query', 5, { maxOutputLength: 900 }),
+      ]);
+
+      expect(firstSearch).toHaveLength(1);
+      expect(secondSearch).toHaveLength(1);
+      expect(thirdSearchDifferentLimit).toHaveLength(1);
+      // Two distinct requests: {maxOutputLength: 100} (shared/deduped) and {maxOutputLength: 900}.
+      expect(providerCall).toHaveBeenCalledTimes(2);
+    });
+  });
+
   describe('Context For Prompt retrieval fast path', () => {
     it('should prefer local keyword search first for operational docs queries', async () => {
       const localSearchSpy = jest.spyOn(client as any, 'localKeywordSearch').mockResolvedValue([
@@ -3268,7 +3453,9 @@ describe('ContextServiceClient', () => {
       });
 
       expect(semanticSearchSpy).toHaveBeenCalled();
-      expect(bundle.metadata.memoryCandidates).toBe(3);
+      // priority: archive memories are hard-excluded from the default candidate pool
+      // (memoryQuarantine.ts), so only the critical + helpful entries count here.
+      expect(bundle.metadata.memoryCandidates).toBe(2);
       expect(bundle.metadata.memoriesIncluded).toBeGreaterThan(0);
       expect(bundle.metadata.memoriesStartupPackIncluded).toBeGreaterThan(0);
       expect(bundle.hints.some((hint) => hint.startsWith('Startup memory pack:'))).toBe(true);
@@ -3280,6 +3467,8 @@ describe('ContextServiceClient', () => {
       expect(bundle.memories?.some((memory) =>
         memory.startupPack === true
       )).toBe(true);
+      expect(bundle.memories?.some((memory) => memory.priority === 'archive')).toBe(false);
+      expect(bundle.memories?.some((memory) => memory.content.includes('Older baseline note'))).toBe(false);
     });
 
     it('should preserve backward compatibility for memory entries without metadata fields', async () => {
@@ -3557,6 +3746,93 @@ describe('ContextServiceClient', () => {
         tool: 'symbol_definition',
         backend: 'graph',
       }));
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should resolve graph-backed definitions from a fresh process without heuristic fallback (C2b)', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-graph-fresh-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      // Index with one client instance, then query with a brand-new
+      // instance against the same workspace -- this is the only way to
+      // genuinely exercise `hydrate()`'s cold-start path (a client that
+      // already ran `refresh()` keeps its graph store cached in memory).
+      const indexingClient = new ContextServiceClient(tempDir);
+      await indexingClient.indexWorkspace();
+
+      const freshClient = new ContextServiceClient(tempDir);
+      const keywordSpy = jest.spyOn(freshClient as any, 'localKeywordSearch');
+      const result = await freshClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(result.found).toBe(true);
+      if (result.found) {
+        expect(result.file).toContain('src/provider.ts');
+        expect(result.metadata).toEqual(expect.objectContaining({
+          backend: 'graph',
+          graph_status: 'ready',
+          fallback_reason: null,
+        }));
+      }
+      expect(keywordSpy).not.toHaveBeenCalled();
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it('should fall back to heuristic search when the canonical manifest generation has moved on since indexing (C2b)', async () => {
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      FEATURE_FLAGS.index_state_store = true;
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-symbol-definition-graph-mismatch-'));
+      fs.mkdirSync(path.join(tempDir, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'provider.ts'),
+        [
+          'export function resolveAIProviderId() {',
+          '  return "openai_session";',
+          '}',
+          '',
+        ].join('\n'),
+        'utf-8'
+      );
+
+      const indexingClient = new ContextServiceClient(tempDir);
+      await indexingClient.indexWorkspace();
+
+      // A new eligible file lands on disk after indexing completes, moving
+      // the canonical discovery manifest's generation on without a
+      // corresponding graph refresh.
+      fs.writeFileSync(
+        path.join(tempDir, 'src', 'untracked.ts'),
+        'export const untracked = 1;\n',
+        'utf-8'
+      );
+
+      const freshClient = new ContextServiceClient(tempDir);
+      const keywordSpy = jest.spyOn(freshClient as any, 'localKeywordSearch');
+      const result = await freshClient.symbolDefinition('resolveAIProviderId', {
+        bypassCache: true,
+      });
+
+      expect(keywordSpy).toHaveBeenCalled();
+      if (result.found) {
+        expect(result.metadata).toEqual(expect.objectContaining({
+          backend: 'heuristic_fallback',
+        }));
+      }
 
       fs.rmSync(tempDir, { recursive: true, force: true });
     });

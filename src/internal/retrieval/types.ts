@@ -77,12 +77,16 @@ export interface RetrievalSelectionExplainability {
 
 export interface DenseSearchProvider {
   id: string;
-  search: (query: string, topK: number) => Promise<SearchResult[]>;
+  search: (query: string, topK: number, options?: { signal?: AbortSignal }) => Promise<SearchResult[]>;
 }
 
 export interface RetrievalReranker {
   id: string;
-  rerank: (query: string, candidates: InternalSearchResult[], options?: { timeoutMs?: number }) => Promise<InternalSearchResult[]>;
+  rerank: (
+    query: string,
+    candidates: InternalSearchResult[],
+    options?: { timeoutMs?: number; signal?: AbortSignal }
+  ) => Promise<InternalSearchResult[]>;
 }
 
 export interface RetrievalOptions {

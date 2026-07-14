@@ -163,6 +163,12 @@ describe('Planning MCP Tools', () => {
         ).rejects.toThrow(/auto_scope/i);
       });
 
+      it('should reject invalid depth values', async () => {
+        await expect(
+          handleCreatePlan({ task: 'plan auth', depth: 'thorough' as any }, mockServiceClient)
+        ).rejects.toThrow(/depth must be one of/i);
+      });
+
       it('should forward an abort signal to the planning service', async () => {
         const controller = new AbortController();
         mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
@@ -241,6 +247,118 @@ describe('Planning MCP Tools', () => {
       });
     });
 
+    describe('C0a: explicit depth and budget contract', () => {
+      it('does not silently clamp a broad architecture request to a compact outline', async () => {
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(6, 7000));
+        mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Deep architecture plan'));
+
+        const result = await handleCreatePlan(
+          {
+            task: 'Perform a multi-step architecture migration with rollout and reliability work',
+            auto_save: false,
+          },
+          mockServiceClient
+        );
+
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+          'Perform a multi-step architecture migration with rollout and reliability work',
+          expect.objectContaining({ maxFiles: 8, tokenBudget: 8000 })
+        );
+
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({ prompt_profile: 'deep', requested_depth: 'auto' })
+        );
+        expect(result).toContain('**Resolved Depth:** deep');
+      });
+
+      it('forces a compact outline when depth=compact is explicit, even for a broad task', async () => {
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1500));
+
+        const result = await handleCreatePlan(
+          {
+            task: 'Perform a multi-step architecture migration with rollout and reliability work',
+            depth: 'compact',
+            auto_save: false,
+          },
+          mockServiceClient
+        );
+
+        expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({ prompt_profile: 'compact', requested_depth: 'compact' })
+        );
+      });
+
+      it('forces deep AI planning when depth=deep is explicit, even for a trivial task', async () => {
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 500));
+        mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Forced deep plan'));
+
+        const result = await handleCreatePlan(
+          { task: 'Fix a typo in the README', depth: 'deep', auto_save: false },
+          mockServiceClient
+        );
+
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({ prompt_profile: 'deep', requested_depth: 'deep' })
+        );
+      });
+
+      it('surfaces requested, clamped, and actual context budgets in the response', async () => {
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+
+        const result = await handleCreatePlan(
+          { task: 'Fix a typo in the README', auto_save: false },
+          mockServiceClient
+        );
+
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({
+            context_budget: {
+              requested_max_context_files: 8,
+              clamped_max_context_files: 4,
+              actual_context_file_count: 2,
+              requested_token_budget: 8000,
+              clamped_token_budget: 6000,
+              actual_total_tokens: 1800,
+            },
+          })
+        );
+        expect(result).toContain('Context Files (requested → clamped → actual):** 8 → 4 → 2');
+        expect(result).toContain('Token Budget (requested → clamped → actual):** 8000 → 6000 → 1800');
+      });
+
+      it('classifies a large explicitly-requested budget as deep under auto depth', async () => {
+        mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(15, 18000));
+        mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Large-budget plan'));
+
+        const result = await handleCreatePlan(
+          {
+            task: 'Update the settings page copy',
+            max_context_files: 20,
+            context_token_budget: 20000,
+            auto_save: false,
+          },
+          mockServiceClient
+        );
+
+        expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+        expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledWith(
+          'Update the settings page copy',
+          expect.objectContaining({ maxFiles: 20, tokenBudget: 20000 })
+        );
+        const details = extractJsonDetails(result);
+        expect(details.planning_context).toEqual(
+          expect.objectContaining({ prompt_profile: 'deep', requested_depth: 'auto' })
+        );
+      });
+    });
+
     describe('Tool Schema', () => {
       it('should have correct name', () => {
         expect(createPlanTool.name).toBe('create_plan');
@@ -263,6 +381,13 @@ describe('Planning MCP Tools', () => {
         expect(props.auto_scope).toBeDefined();
         expect(props.include_paths).toBeDefined();
         expect(props.exclude_paths).toBeDefined();
+      });
+
+      it('should define a depth enum of auto/compact/deep defaulting to auto', () => {
+        const depth = createPlanTool.inputSchema.properties.depth;
+        expect(depth).toBeDefined();
+        expect(depth.enum).toEqual(['auto', 'compact', 'deep']);
+        expect(depth.default).toBe('auto');
       });
 
       it('should describe scoped path parameters using the shared contract', () => {

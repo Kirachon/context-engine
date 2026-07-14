@@ -1,35 +1,418 @@
 {
-  "version": 1,
-  "pr_blockers": {
-    "stable_local_transport_contract": "config/ci/local-transport-contract.json",
-    "scripts": [
-      "build",
-      "ci:check:mcp-smoke",
-      "ci:check:retrieval-holdout-fixture",
-      "ci:check:retrieval-quality-gate",
-      "ci:check:retrieval-shadow-canary-gate",
-      "ci:check:enhancement-error-taxonomy-report",
-      "ci:check:enhance-prompt-contract"
+  "version": 2,
+  "lifecycle_tiers": [
+    "report_only",
+    "shadow_required_artifact",
+    "calibrated",
+    "pr_blocker"
+  ],
+  "mapping_scope": {
+    "workflow_globs": [
+      ".github/workflows/*.yml",
+      ".github/workflows/*.yaml"
     ],
-    "deterministic_review_quality": {
-      "receipt_type": "jest",
-      "corpus": "config/ci/review-quality-corpus.json",
-      "tests": [
-        "tests/tools/reviewDiff.test.ts",
-        "tests/ci/reviewDiffArtifacts.test.ts"
+    "explicit_npm_entrypoints_only": true,
+    "follow_package_script_chains": true,
+    "npm_lifecycle_side_effects": "excluded"
+  },
+  "external_enforcement_policy": {
+    "provider": "github_branch_protection",
+    "statuses": [
+      "not-verified",
+      "verified"
+    ],
+    "verified_receipt_path_prefix": "artifacts/ci/branch-protection/",
+    "verified_receipt_schema_version": 1,
+    "pr_blocker_requires_verified_receipt": true
+  },
+  "workflow_executions": {
+    "perf-nightly-build": {
+      "workflow": ".github/workflows/perf_gates.yml",
+      "job": "nightly_gate",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "schedule",
+        "workflow_dispatch"
+      ],
+      "job_condition": "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    },
+    "perf-pr-build": {
+      "workflow": ".github/workflows/perf_gates.yml",
+      "job": "pr_gate",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "pull_request"
+      ],
+      "job_condition": "github.event_name == 'pull_request'"
+    },
+    "perf-nightly-bench": {
+      "workflow": ".github/workflows/perf_gates.yml",
+      "job": "nightly_gate",
+      "step_index": 5,
+      "step_name": "Run benchmark suite and compare (Nightly mode)",
+      "entrypoint_script": "bench:ci:nightly",
+      "events": [
+        "schedule",
+        "workflow_dispatch"
+      ],
+      "job_condition": "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    },
+    "perf-weekly-report": {
+      "workflow": ".github/workflows/perf_gates.yml",
+      "job": "nightly_gate",
+      "step_index": 8,
+      "step_name": "Generate and validate weekly retrieval trend artifact (Monday UTC)",
+      "entrypoint_script": "ci:generate:retrieval-quality-report",
+      "events": [
+        "schedule"
+      ],
+      "job_condition": "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    },
+    "perf-weekly-generate": {
+      "workflow": ".github/workflows/perf_gates.yml",
+      "job": "nightly_gate",
+      "step_index": 8,
+      "step_name": "Generate and validate weekly retrieval trend artifact (Monday UTC)",
+      "entrypoint_script": "ci:generate:weekly-retrieval-trend-report",
+      "events": [
+        "schedule"
+      ],
+      "job_condition": "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    },
+    "perf-weekly-check": {
+      "workflow": ".github/workflows/perf_gates.yml",
+      "job": "nightly_gate",
+      "step_index": 8,
+      "step_name": "Generate and validate weekly retrieval trend artifact (Monday UTC)",
+      "entrypoint_script": "ci:check:weekly-retrieval-trend-report",
+      "events": [
+        "schedule"
+      ],
+      "job_condition": "github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'"
+    },
+    "release-build": {
+      "workflow": ".github/workflows/release_perf_gate.yml",
+      "job": "release_gate",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "workflow_dispatch"
       ]
+    },
+    "required-build": {
+      "workflow": ".github/workflows/required-lane-catch-rate.yml",
+      "job": "required_lane_catch_rate",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "schedule",
+        "workflow_dispatch"
+      ]
+    },
+    "required-shadow-gate": {
+      "workflow": ".github/workflows/required-lane-catch-rate.yml",
+      "job": "required_lane_catch_rate",
+      "step_index": 4,
+      "step_name": "Run existing canary failure gate artifact generation",
+      "entrypoint_script": "ci:check:retrieval-shadow-canary-gate",
+      "events": [
+        "schedule",
+        "workflow_dispatch"
+      ]
+    },
+    "required-catch-rate": {
+      "workflow": ".github/workflows/required-lane-catch-rate.yml",
+      "job": "required_lane_catch_rate",
+      "step_index": 5,
+      "step_name": "Compute required-lane catch-rate against Q3a seeded-failure corpus",
+      "entrypoint_script": "ci:check:required-lane-catch-rate",
+      "events": [
+        "schedule",
+        "workflow_dispatch"
+      ]
+    },
+    "review-build": {
+      "workflow": ".github/workflows/review_diff.yml",
+      "job": "review",
+      "step_index": 3,
+      "step_name": null,
+      "entrypoint_script": "build",
+      "events": [
+        "pull_request",
+        "push"
+      ]
+    },
+    "review-mcp-smoke": {
+      "workflow": ".github/workflows/review_diff.yml",
+      "job": "review",
+      "step_index": 12,
+      "step_name": "Run MCP smoke harness",
+      "entrypoint_script": "ci:check:mcp-smoke",
+      "events": [
+        "pull_request",
+        "push"
+      ]
+    },
+    "test-suite-build": {
+      "workflow": ".github/workflows/test.yml",
+      "job": "test",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "pull_request",
+        "push"
+      ]
+    },
+    "test-suite-all": {
+      "workflow": ".github/workflows/test.yml",
+      "job": "test",
+      "step_index": 4,
+      "step_name": "Run all tests",
+      "entrypoint_script": "test",
+      "events": [
+        "pull_request",
+        "push"
+      ]
+    },
+    "test-compatibility-build": {
+      "workflow": ".github/workflows/test.yml",
+      "job": "compatibility",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "pull_request",
+        "push"
+      ]
+    },
+    "test-compatibility-mcp-smoke": {
+      "workflow": ".github/workflows/test.yml",
+      "job": "compatibility",
+      "step_index": 4,
+      "step_name": "Run MCP smoke check",
+      "entrypoint_script": "ci:check:mcp-smoke",
+      "events": [
+        "pull_request",
+        "push"
+      ]
+    },
+    "test-quality-build": {
+      "workflow": ".github/workflows/test.yml",
+      "job": "quality-gates",
+      "step_index": 3,
+      "step_name": "Build",
+      "entrypoint_script": "build",
+      "events": [
+        "pull_request"
+      ],
+      "job_condition": "github.event_name == 'pull_request'"
+    },
+    "test-quality-coverage": {
+      "workflow": ".github/workflows/test.yml",
+      "job": "quality-gates",
+      "step_index": 4,
+      "step_name": "Coverage threshold check",
+      "entrypoint_script": "test:coverage",
+      "events": [
+        "pull_request"
+      ],
+      "job_condition": "github.event_name == 'pull_request'"
     }
   },
-  "nightly_report_only": {
-    "scripts": [
-      "bench:ci:nightly",
-      "ci:generate:weekly-retrieval-trend-report",
-      "ci:check:weekly-retrieval-trend-report",
-      "ci:generate:semantic-latency-report"
-    ],
-    "grader_based_scoring": {
-      "mode": "report_only",
-      "activation": "post-calibration"
+  "gates": [
+    {
+      "id": "stable-local-transport-contract",
+      "kind": "jest_receipt",
+      "declared_tier": "calibrated",
+      "entrypoint_scripts": [
+        "test",
+        "test:coverage"
+      ],
+      "receipts": {
+        "contract": "config/ci/local-transport-contract.json",
+        "tests": [
+          "tests/ci/localTransportContract.test.ts"
+        ]
+      },
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "test-suite-all", "invocation": "direct" },
+        { "execution": "test-quality-coverage", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "build",
+      "kind": "package_script",
+      "declared_tier": "calibrated",
+      "package_script": "build",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "perf-nightly-build", "invocation": "direct" },
+        { "execution": "perf-pr-build", "invocation": "direct" },
+        { "execution": "release-build", "invocation": "direct" },
+        { "execution": "required-build", "invocation": "direct" },
+        { "execution": "review-build", "invocation": "direct" },
+        { "execution": "test-compatibility-build", "invocation": "direct" },
+        { "execution": "test-quality-build", "invocation": "direct" },
+        { "execution": "test-suite-build", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:mcp-smoke",
+      "kind": "package_script",
+      "declared_tier": "calibrated",
+      "package_script": "ci:check:mcp-smoke",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "review-mcp-smoke", "invocation": "direct" },
+        { "execution": "test-compatibility-mcp-smoke", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:retrieval-holdout-fixture",
+      "kind": "package_script",
+      "declared_tier": "calibrated",
+      "package_script": "ci:check:retrieval-holdout-fixture",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "perf-weekly-report", "invocation": "transitive" },
+        { "execution": "required-shadow-gate", "invocation": "transitive" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:retrieval-quality-gate",
+      "kind": "package_script",
+      "declared_tier": "calibrated",
+      "package_script": "ci:check:retrieval-quality-gate",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "required-shadow-gate", "invocation": "transitive" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:retrieval-shadow-canary-gate",
+      "kind": "package_script",
+      "declared_tier": "calibrated",
+      "package_script": "ci:check:retrieval-shadow-canary-gate",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "required-shadow-gate", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:required-lane-catch-rate",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "ci:check:required-lane-catch-rate",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "required-catch-rate", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:enhancement-error-taxonomy-report",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "ci:check:enhancement-error-taxonomy-report",
+      "workflow_status": "unwired",
+      "workflow_mappings": [],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:enhance-prompt-contract",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "ci:check:enhance-prompt-contract",
+      "workflow_status": "unwired",
+      "workflow_mappings": [],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "deterministic-review-quality",
+      "kind": "jest_receipt",
+      "declared_tier": "calibrated",
+      "entrypoint_scripts": [
+        "test",
+        "test:coverage"
+      ],
+      "receipts": {
+        "corpus": "config/ci/review-quality-corpus.json",
+        "tests": [
+          "tests/tools/reviewDiff.test.ts",
+          "tests/ci/reviewDiffArtifacts.test.ts"
+        ]
+      },
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "test-suite-all", "invocation": "direct" },
+        { "execution": "test-quality-coverage", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "bench:ci:nightly",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "bench:ci:nightly",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "perf-nightly-bench", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:generate:weekly-retrieval-trend-report",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "ci:generate:weekly-retrieval-trend-report",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "perf-weekly-generate", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:check:weekly-retrieval-trend-report",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "ci:check:weekly-retrieval-trend-report",
+      "workflow_status": "wired",
+      "workflow_mappings": [
+        { "execution": "perf-weekly-check", "invocation": "direct" }
+      ],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "ci:generate:semantic-latency-report",
+      "kind": "package_script",
+      "declared_tier": "report_only",
+      "package_script": "ci:generate:semantic-latency-report",
+      "workflow_status": "unwired",
+      "workflow_mappings": [],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
+    },
+    {
+      "id": "grader-based-scoring",
+      "kind": "policy_marker",
+      "declared_tier": "report_only",
+      "activation": "post-calibration",
+      "workflow_status": "unwired",
+      "workflow_mappings": [],
+      "external_enforcement": { "status": "not-verified", "receipt": null }
     }
-  }
+  ]
 }

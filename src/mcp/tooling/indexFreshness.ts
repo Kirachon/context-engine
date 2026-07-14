@@ -49,10 +49,17 @@ export function evaluateIndexFreshness(status: IndexStatus): IndexFreshnessInfo 
   }
 
   if (status.isStale) {
+    const causes = status.staleCauses?.filter((cause) => cause !== 'age' && cause !== 'unindexed') ?? [];
+    const causeSuffix =
+      causes.length > 0
+        ? ` Causes: ${causes.join(', ')}.`
+        : status.staleCauses?.includes('age')
+          ? ' Causes: age.'
+          : '';
     return {
       code: 'stale',
       severity: 'warning',
-      summary: 'Index appears stale and may not reflect recent file changes.',
+      summary: `Index appears stale and may not reflect recent file changes.${causeSuffix}`,
       guidance: ['Run `index_workspace` to refresh or `reindex_workspace` for a full rebuild.'],
     };
   }

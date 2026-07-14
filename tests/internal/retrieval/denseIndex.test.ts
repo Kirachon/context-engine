@@ -7,6 +7,7 @@ import {
 } from '../../../src/internal/handlers/performance.js';
 import { createHashEmbeddingRuntime } from '../../../src/internal/retrieval/embeddingRuntime.js';
 import { createWorkspaceDenseRetriever } from '../../../src/internal/retrieval/denseIndex.js';
+import { RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR } from '../../../src/internal/retrieval/discoveryAdapter.js';
 
 function writeJson(filePath: string, value: unknown): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -256,5 +257,78 @@ describe('createWorkspaceDenseRetriever', () => {
     expect(denseFile.vector_dimension).toBe(32);
 
     fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  describe('R3b2: canonical discovery manifest binding', () => {
+    it('never dense-indexes a path outside the canonical source set, even when index-state claims it', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-canonical-'));
+      const fileReal = path.join(tmp, 'src', 'real.ts');
+      // Eligible extension, present on disk, but under a hard-excluded
+      // canonical directory name -- a stale/independently-computed
+      // index-state entry pointing at it must never be dense-indexed.
+      const fileVendored = path.join(tmp, 'vendor', 'pkg.ts');
+      fs.mkdirSync(path.dirname(fileReal), { recursive: true });
+      fs.mkdirSync(path.dirname(fileVendored), { recursive: true });
+      fs.writeFileSync(fileReal, 'export const real = "auth login";', 'utf8');
+      fs.writeFileSync(fileVendored, 'export const vendored = "auth login";', 'utf8');
+
+      const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+      const denseIndexPath = path.join(tmp, '.context-engine-dense-index.json');
+      writeJson(indexStatePath, {
+        files: {
+          'src/real.ts': { hash: 'h1', indexed_at: new Date().toISOString() },
+          'vendor/pkg.ts': { hash: 'h2', indexed_at: new Date().toISOString() },
+        },
+      });
+
+      const retriever = createWorkspaceDenseRetriever({
+        workspacePath: tmp,
+        indexStatePath,
+        denseIndexPath,
+        embeddingRuntime: createHashEmbeddingRuntime(32),
+      });
+
+      await retriever.search('auth', 5);
+
+      const denseFile = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as {
+        docs: Record<string, unknown>;
+      };
+      expect(Object.keys(denseFile.docs)).toEqual(['src/real.ts']);
+
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
+
+    it('rollback lever: CE_RETRIEVAL_DISCOVERY_MANIFEST_DISABLED restores pre-R3b2 behavior', async () => {
+      const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-dense-rollback-'));
+      const fileVendored = path.join(tmp, 'vendor', 'pkg.ts');
+      fs.mkdirSync(path.dirname(fileVendored), { recursive: true });
+      fs.writeFileSync(fileVendored, 'export const vendored = "auth login";', 'utf8');
+
+      const indexStatePath = path.join(tmp, '.context-engine-index-state.json');
+      const denseIndexPath = path.join(tmp, '.context-engine-dense-index.json');
+      writeJson(indexStatePath, {
+        files: {
+          'vendor/pkg.ts': { hash: 'h1', indexed_at: new Date().toISOString() },
+        },
+      });
+
+      process.env[RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR] = 'true';
+
+      const retriever = createWorkspaceDenseRetriever({
+        workspacePath: tmp,
+        indexStatePath,
+        denseIndexPath,
+        embeddingRuntime: createHashEmbeddingRuntime(32),
+      });
+
+      await retriever.search('auth', 5);
+
+      const denseFile = JSON.parse(fs.readFileSync(denseIndexPath, 'utf8')) as {
+        docs: Record<string, unknown>;
+      };
+      expect(Object.keys(denseFile.docs)).toEqual(['vendor/pkg.ts']);
+
+      fs.rmSync(tmp, { recursive: true, force: true });
+    });
   });
 });

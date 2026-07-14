@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "D1a",
+  "title": "Generated docs and version reconciliation",
+  "owner_lane": "Governance / F0",
+  "depends_on_note": "Full post-T1d2 re-verification remains required after transport migration; this contract freezes current 52-tool / 1.9.0 alignment now.",
+  "depends_on": ["R6"],
+  "expected": {
+    "package_version": "1.9.0",
+    "mcp_server_version_export": "MCP_SERVER_VERSION",
+    "mcp_tool_count": 52,
+    "rest_mapping_count": 20,
+    "output_schema_covered_tool_count": 14
+  },
+  "live_sources": {
+    "package_json": "package.json",
+    "manifest": "src/mcp/tools/manifest.ts",
+    "discoverability": "src/mcp/tooling/discoverability.ts",
+    "output_schema": "src/mcp/utils/outputSchemaContract.ts",
+    "architecture_doc": "ARCHITECTURE.md",
+    "tool_manifest_parity_script": "scripts/ci/check-tool-manifest-parity.ts"
+  },
+  "doc_assertions": [
+    {
+      "path": "ARCHITECTURE.md",
+      "must_mention_substrings": ["tool_manifest", "semantic_search", "create_plan", "review_changes"]
+    },
+    {
+      "path": "README.md",
+      "must_mention_substrings": ["context-engine-mcp", "MCP"]
+    }
+  ],
+  "post_t1d2_reverification_required": true
+}

@@ -46,8 +46,134 @@ export interface GitStatusResult {
   current_branch?: string;
   /** Whether there are uncommitted changes */
   has_changes: boolean;
-  /** Whether there are staged changes */
+  /** Whether there are staged (index) changes, excluding unmerged/conflicted paths */
   has_staged: boolean;
+  /** Whether there are unstaged (worktree) changes, excluding unmerged/conflicted paths */
+  has_unstaged?: boolean;
+  /** Whether there are unresolved merge conflicts */
+  has_conflicts?: boolean;
+  /** Exact file counts derived from every porcelain line; never truncated for display */
+  file_counts?: GitStatusFileCounts;
+}
+
+/**
+ * Exact counts of changed files by category. These are always derived from
+ * every parsed porcelain line and must never be limited by any display
+ * truncation applied to a rendered list of file names.
+ */
+export interface GitStatusFileCounts {
+  staged: number;
+  unstaged: number;
+  untracked: number;
+  conflicted: number;
+  /** Total number of distinct porcelain entries (one per changed path) */
+  total: number;
+}
+
+/**
+ * A single parsed `git status --porcelain` (v1) entry.
+ *
+ * The porcelain v1 format is `XY PATH` (or `XY ORIG_PATH -> PATH` for
+ * renames/copies), where:
+ * - `X` (indexStatus) describes the state of the index (staged/HEAD diff)
+ * - `Y` (worktreeStatus) describes the state of the worktree (index diff)
+ *
+ * Unmerged/conflicted paths use a fixed set of XY combinations (e.g. `UU`,
+ * `AA`, `DD`, `AU`, `UA`, `UD`, `DU`) that are distinct from ordinary
+ * staged/unstaged states and must not be counted as "staged".
+ */
+export interface ParsedGitStatusEntry {
+  /** Raw index-column status character (X) */
+  indexStatus: string;
+  /** Raw worktree-column status character (Y) */
+  worktreeStatus: string;
+  /** Current path (destination path for renames/copies) */
+  path: string;
+  /** Original path, present only for renames/copies */
+  originalPath?: string;
+  isStaged: boolean;
+  isUnstaged: boolean;
+  isUntracked: boolean;
+  isConflicted: boolean;
+}
+
+const UNMERGED_XY_CODES = new Set(['DD', 'AU', 'UD', 'UA', 'DU', 'AA', 'UU']);
+const RENAME_ARROW = ' -> ';
+
+/**
+ * Parse a single `git status --porcelain` (v1) line, preserving the
+ * distinction between the index (X) and worktree (Y) status columns.
+ *
+ * Returns `null` for blank/malformed lines that cannot contain a valid
+ * `XY PATH` entry.
+ */
+export function parseGitPorcelainLine(line: string): ParsedGitStatusEntry | null {
+  if (line.length < 3 || line[2] !== ' ') {
+    return null;
+  }
+
+  const indexStatus = line[0];
+  const worktreeStatus = line[1];
+  const rest = line.slice(3);
+  const xy = `${indexStatus}${worktreeStatus}`;
+
+  const isUntracked = xy === '??';
+  const isConflicted = !isUntracked && UNMERGED_XY_CODES.has(xy);
+
+  let path = rest;
+  let originalPath: string | undefined;
+  if ((indexStatus === 'R' || worktreeStatus === 'R' || indexStatus === 'C' || worktreeStatus === 'C')) {
+    const arrowIndex = rest.indexOf(RENAME_ARROW);
+    if (arrowIndex !== -1) {
+      originalPath = rest.slice(0, arrowIndex);
+      path = rest.slice(arrowIndex + RENAME_ARROW.length);
+    }
+  }
+
+  if (path.length === 0) {
+    return null;
+  }
+
+  return {
+    indexStatus,
+    worktreeStatus,
+    path,
+    originalPath,
+    isStaged: !isUntracked && !isConflicted && indexStatus !== ' ',
+    isUnstaged: !isUntracked && !isConflicted && worktreeStatus !== ' ',
+    isUntracked,
+    isConflicted,
+  };
+}
+
+/**
+ * Parse the full output of `git status --porcelain` into per-file entries.
+ * Every non-blank line becomes exactly one entry; totals derived from this
+ * list must never be reduced by a downstream display limit.
+ */
+export function parseGitPorcelainStatus(statusOutput: string): ParsedGitStatusEntry[] {
+  return statusOutput
+    .split('\n')
+    .map((line) => line.replace(/\r$/, ''))
+    .filter((line) => line.length > 0)
+    .map(parseGitPorcelainLine)
+    .filter((entry): entry is ParsedGitStatusEntry => entry !== null);
+}
+
+function countGitStatusEntries(entries: ParsedGitStatusEntry[]): GitStatusFileCounts {
+  let staged = 0;
+  let unstaged = 0;
+  let untracked = 0;
+  let conflicted = 0;
+
+  for (const entry of entries) {
+    if (entry.isStaged) staged++;
+    if (entry.isUnstaged) unstaged++;
+    if (entry.isUntracked) untracked++;
+    if (entry.isConflicted) conflicted++;
+  }
+
+  return { staged, unstaged, untracked, conflicted, total: entries.length };
 }
 
 const GIT_REF_MAX_LENGTH = 1024;
@@ -179,21 +305,20 @@ export async function getGitStatus(workspacePath: string): Promise<GitStatusResu
   const branchResult = await execGitCommand(['branch', '--show-current'], workspacePath);
   const current_branch = branchResult.stdout.trim() || undefined;
 
-  // Check for uncommitted changes
+  // Check for uncommitted changes, parsing the XY index/worktree columns
+  // explicitly so conflicted (unmerged) paths are never counted as staged.
   const statusResult = await execGitCommand(['status', '--porcelain'], workspacePath);
-  const statusLines = statusResult.stdout.trim().split('\n').filter(Boolean);
-  
-  const has_changes = statusLines.length > 0;
-  const has_staged = statusLines.some(line => {
-    // Staged files have non-space in first column
-    return line.length > 0 && line[0] !== ' ' && line[0] !== '?';
-  });
+  const entries = parseGitPorcelainStatus(statusResult.stdout);
+  const file_counts = countGitStatusEntries(entries);
 
   return {
     is_git_repo: true,
     current_branch,
-    has_changes,
-    has_staged,
+    has_changes: file_counts.total > 0,
+    has_staged: file_counts.staged > 0,
+    has_unstaged: file_counts.unstaged > 0,
+    has_conflicts: file_counts.conflicted > 0,
+    file_counts,
   };
 }
 

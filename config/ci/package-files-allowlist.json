@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "P1a",
+  "title": "Supported-distribution package files allowlist",
+  "owner_lane": "Release engineering / F8",
+  "publish_authorized": false,
+  "package_json_files_field": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "size_ceiling_bytes": 52428800,
+  "required_pack_paths": [
+    "package.json",
+    "README.md",
+    "bin/context-engine-mcp.js",
+    "dist/index.js"
+  ],
+  "forbidden_pack_path_prefixes": [
+    "src/",
+    "tests/",
+    "artifacts/",
+    ".memories/",
+    ".git/",
+    "node_modules/"
+  ],
+  "smoke": {
+    "help_args": ["--help"],
+    "help_must_contain": ["Context Engine MCP Server", "--workspace"]
+  }
+}

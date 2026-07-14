@@ -1,5 +1,11 @@
 # Context Engine Next Tranche Swarm Plan
 
+> Status: Immutable execution ledger (completed tranche)
+>
+> This file preserves the completed T0-T10 tranche as historical execution evidence. It is reference-only and must not receive new delivery work.
+> Sole active delivery plan: `context-engine-remediation-plan-2026-07-14.md`.
+> Governance authority: `config/ci/governance-contract.json`.
+
 ## Summary
 The current `context-engine-improvement-swarm-plan.md` is now a completed execution ledger, not the right artifact for upcoming work. The next tranche should split historical receipts from active planning, harden contract governance around the new CI/transport surfaces, and then deliver a bounded memory upgrade on top of the memory system that already exists in `src/mcp/tools/memory.ts` and `src/mcp/serviceClient.ts`.
 

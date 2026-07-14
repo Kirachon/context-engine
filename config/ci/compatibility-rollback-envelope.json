@@ -1,0 +1,187 @@
+{
+  "schema_version": 1,
+  "task_id": "K0",
+  "title": "Compatibility and rollback envelope",
+  "owner_lane": "compatibility",
+  "file_family": "F9",
+  "purpose": "Freeze a machine-checkable compatibility and rollback envelope so later remediation-plan tasks can identify intentional versus accidental deltas across the 52-tool MCP surface, REST mappings, auth/config precedence, plan/index/cache/graph artifact formats, the Node/package matrix, and rollback policy.",
+  "source_plan": "context-engine-remediation-plan-2026-07-14.md",
+  "source_plan_task": "K0",
+  "baseline_receipt": {
+    "machine_receipt_path": "artifacts/plan/context-engine-remediation-b0-baseline.json",
+    "human_receipt_path": "docs/plan-execution/context-engine-remediation-b0-baseline-2026-07-14.md",
+    "note": "B0 owns the frozen pre-change fingerprints (commit, manifest digest, index/graph state, gate inventory). K0 references B0 by path and does not duplicate or rewrite any baseline value."
+  },
+  "mcp_tool_contract": {
+    "expected_tool_count": 52,
+    "expected_tool_names": [
+      "index_workspace", "codebase_retrieval", "semantic_search", "symbol_search",
+      "symbol_references", "symbol_definition", "call_relationships", "find_callers",
+      "find_callees", "trace_symbol", "impact_analysis", "why_this_context",
+      "get_file", "get_context_for_prompt", "enhance_prompt", "index_status",
+      "reindex_workspace", "clear_index", "tool_manifest", "add_memory",
+      "list_memories", "review_memory_suggestions", "create_plan", "refine_plan",
+      "visualize_plan", "execute_plan", "save_plan", "load_plan", "list_plans",
+      "delete_plan", "request_approval", "respond_approval", "start_step",
+      "complete_step", "fail_step", "view_progress", "view_history",
+      "compare_plan_versions", "rollback_plan", "review_changes", "review_git_diff",
+      "review_diff", "review_auto", "check_invariants", "run_static_analysis",
+      "reactive_review_pr", "get_review_status", "pause_review", "resume_review",
+      "get_review_telemetry", "scrub_secrets", "validate_content"
+    ],
+    "live_sources": {
+      "tool_name_list": "src/mcp/tools/manifest.ts",
+      "runtime_tool_registry": "src/mcp/toolRegistry.ts",
+      "runtime_registry_builder": "src/mcp/server.ts",
+      "discoverability_metadata": "src/mcp/tooling/discoverability.ts",
+      "output_schema_registry": "src/mcp/utils/outputSchemaContract.ts",
+      "output_schema_definitions": "src/mcp/schemas/convertedToolOutputSchemas.ts",
+      "tool_result_types": "src/mcp/types/toolResult.ts",
+      "result_builder": "src/mcp/utils/resultBuilder.ts",
+      "manifest_parity_test": "tests/mcp/discoverability.test.ts",
+      "output_schema_parity_test": "tests/mcp/outputSchemaContract.test.ts",
+      "manifest_shape_script": "scripts/ci/check-tool-manifest-parity.ts",
+      "manifest_shape_test": "tests/ci/checkToolManifestParity.test.ts"
+    },
+    "output_schema_covered_tool_count": 14,
+    "output_schema_covered_tools": [
+      "call_relationships", "codebase_retrieval", "find_callees", "find_callers",
+      "get_context_for_prompt", "impact_analysis", "index_status", "semantic_search",
+      "symbol_definition", "symbol_references", "symbol_search", "tool_manifest",
+      "trace_symbol", "why_this_context"
+    ],
+    "input_output_error_text_structured_contract": {
+      "description": "Every registered tool returns legacy-compatible text content plus additive structured_content; error results use the same content envelope with isError=true. Converted tools additionally validate structuredContent against a frozen JSON schema.",
+      "sources": {
+        "tool_result_types": "src/mcp/types/toolResult.ts",
+        "result_builder": "src/mcp/utils/resultBuilder.ts",
+        "output_schema_registry": "src/mcp/utils/outputSchemaContract.ts",
+        "error_parity_test": "tests/integration/mcpErrorParity.test.ts",
+        "transport_parity_test": "tests/integration/mcpTransportParity.test.ts",
+        "legacy_client_compat_test": "tests/integration/client-compat.test.ts"
+      }
+    }
+  },
+  "rest_mapping_contract": {
+    "mount_prefix": "/api/v1",
+    "live_sources": {
+      "route_handlers": "src/http/routes/tools.ts",
+      "status_routes": "src/http/routes/status.ts",
+      "health_route": "src/http/routes/health.ts",
+      "route_index": "src/http/routes/index.ts",
+      "route_mount": "src/http/httpServer.ts",
+      "rest_mapping_registry_function": "src/mcp/tooling/discoverability.ts:listRestApiToolMappings",
+      "http_tool_executor": "src/http/httpToolExecutor.ts",
+      "compatibility_test": "tests/integration/httpCompatibility.test.ts",
+      "manifest_rest_parity_test": "tests/mcp/discoverability.test.ts"
+    },
+    "note": "listRestApiToolMappings() in src/mcp/tooling/discoverability.ts is the single production source of truth for tool-to-REST-path mappings; tests/mcp/discoverability.test.ts already asserts it stays in sorted-path-equality with manifest shared_contract declarations.",
+    "known_tool_route_paths": [
+      "/index", "/search", "/symbol-search", "/symbol-references", "/find-callers",
+      "/find-callees", "/symbol-definition", "/call-relationships", "/trace-symbol",
+      "/impact-analysis", "/codebase-retrieval", "/enhance-prompt", "/plan",
+      "/context", "/why-this-context", "/file", "/tool-manifest", "/review-changes",
+      "/review-git-diff", "/review-auto"
+    ],
+    "known_non_tool_routes": [
+      { "path": "/health", "source": "src/http/routes/health.ts" },
+      { "path": "/api/v1/status", "source": "src/http/routes/status.ts" },
+      { "path": "/api/v1/retrieval/status", "source": "src/http/routes/status.ts" }
+    ]
+  },
+  "auth_config_precedence": {
+    "http_bind_and_port": {
+      "cli_flags": ["--workspace", "-w", "--http", "--http-only", "--port", "-p"],
+      "source": "src/index.ts"
+    },
+    "http_auth": {
+      "enabled_env": "CONTEXT_ENGINE_HTTP_AUTH_ENABLED",
+      "tokens_env": "CONTEXT_ENGINE_HTTP_AUTH_TOKENS",
+      "default_when_unset": "disabled",
+      "note": "S1 (Wave 1) is the approved task allowed to change this default for non-loopback binds; any change is an intentional delta that must be appended below, not a silent edit of this file.",
+      "sources": {
+        "auth_scopes": "src/http/authScopes.ts",
+        "auth_middleware": "src/http/middleware/httpAuth.ts",
+        "local_transport_contract": "config/ci/local-transport-contract.json"
+      }
+    },
+    "reactive_and_numeric_env": {
+      "source": "src/config/env.ts",
+      "helper_functions": ["envBool", "envMs", "envPerfProfile"]
+    },
+    "feature_flags": {
+      "source": "src/config/features.ts",
+      "kill_switch_env": "CE_FEATURE_KILL_SWITCHES",
+      "flag_count": 26,
+      "flag_names": [
+        "rollout_kill_switch", "memory_suggestions_v1", "memory_draft_retrieval_v1",
+        "memory_autosave_v1", "index_state_store", "skip_unchanged_indexing",
+        "hash_normalize_eol", "metrics", "http_metrics", "retrieval_rewrite_v2",
+        "retrieval_ranking_v2", "retrieval_ranking_v3", "retrieval_request_memo_v2",
+        "retrieval_hybrid_v1", "context_packs_v2", "retrieval_quality_guard_v1",
+        "retrieval_provider_v2", "retrieval_artifacts_v2", "retrieval_shadow_control_v2",
+        "retrieval_tree_sitter_v1", "retrieval_chunk_search_v1",
+        "retrieval_declaration_routing_v1", "retrieval_sqlite_fts5_v1",
+        "retrieval_lancedb_v1", "retrieval_transformer_embeddings_v1",
+        "retrieval_cross_encoder_rerank_v1"
+      ],
+      "test": "tests/config/features.test.ts"
+    }
+  },
+  "artifact_format_contract": {
+    "note": "Preferred/legacy workspace-artifact file-name pairs are read verbatim from the owning module constants; K0 freezes the pointer, not a copy of the value, so later tasks compare against the live constant.",
+    "index_state": { "preferred": ".context-engine-index-state.json", "legacy": ".augment-index-state.json", "source": "src/mcp/indexStateStore.ts" },
+    "chunk_index": { "preferred": ".context-engine-chunk-index.json", "legacy": ".augment-chunk-index.json", "source": "src/internal/retrieval/chunkIndex.ts" },
+    "dense_index": { "preferred": ".context-engine-dense-index.json", "legacy": ".augment-dense-index.json", "source": "src/internal/retrieval/denseIndex.ts" },
+    "lancedb_vector_index": { "preferred": ".context-engine-lancedb-index.json", "legacy": ".augment-lancedb-index.json", "source": "src/internal/retrieval/lancedbVectorIndex.ts" },
+    "lexical_index_sqlite": { "preferred": ".context-engine-lexical-index.sqlite", "legacy": ".augment-lexical-index.sqlite", "source": "src/internal/retrieval/sqliteLexicalIndex.ts" },
+    "context_state": { "preferred": ".context-engine-context-state.json", "legacy": ".augment-context-state.json", "source": "src/mcp/serviceClient.ts" },
+    "index_fingerprint": { "preferred": ".context-engine-index-fingerprint.json", "legacy": ".augment-index-fingerprint.json", "source": "src/mcp/serviceClient.ts" },
+    "search_cache": { "preferred": ".context-engine-search-cache.json", "legacy": ".augment-search-cache.json", "source": "src/mcp/serviceClient.ts" },
+    "context_cache": { "preferred": ".context-engine-context-cache.json", "legacy": ".augment-context-cache.json", "source": "src/mcp/serviceClient.ts" },
+    "embedding_reuse_cache": { "preferred": ".context-engine-embedding-cache.json", "legacy": null, "source": "src/internal/handlers/performance.ts" },
+    "graph_metadata": { "preferred": ".context-engine-graph-index.json", "payload_file": "graph.json", "legacy": null, "source": "src/internal/graph/persistentGraphStore.ts" },
+    "startup_lock": { "preferred": ".context-engine-startup.lock", "legacy": null, "source": "src/runtime/workspaceLock.ts" },
+    "plan_persistence": { "example_receipt": "artifacts/plan/context-engine-remediation-b0-baseline.json", "source": "src/mcp/tools/planManagement.ts" }
+  },
+  "transport_contract": {
+    "live_sources": {
+      "local_transport_contract": "config/ci/local-transport-contract.json",
+      "local_transport_contract_test": "tests/ci/localTransportContract.test.ts",
+      "mcp_compatibility_matrix": "config/ci/mcp-compatibility-matrix.json",
+      "stdio_mcp_source": "src/mcp/server.ts",
+      "streamable_http_mcp_source": "src/http/httpServer.ts"
+    }
+  },
+  "node_and_package_matrix": {
+    "package_json_path": "package.json",
+    "package_json_version": "1.9.0",
+    "package_engines_declared": false,
+    "ci_node_matrix_source": ".github/workflows/test.yml",
+    "ci_node_matrix": ["18.x", "20.x", "22.x"],
+    "single_pinned_node_version_workflows": {
+      ".github/workflows/release_perf_gate.yml": "20",
+      ".github/workflows/required-lane-catch-rate.yml": "20",
+      ".github/workflows/review_diff.yml": "20",
+      ".github/workflows/perf_gates.yml": "20"
+    }
+  },
+  "rollback_policy": {
+    "source_plan": "context-engine-remediation-plan-2026-07-14.md",
+    "frozen_invariants_section": "Frozen invariants",
+    "wave_rollback_section": "Wave-level rollback rules",
+    "policy": {
+      "security": "Security rollback is fail-closed; never restore an unauthenticated remote bind.",
+      "cache": "Cache rollback is bypass/quarantine; never restore collision-prone reuse.",
+      "graph": "Graph rollback is explicit degraded mode; never broad source scanning.",
+      "cancellation": "Cancellation rollback is whole-lane; never mixed MCP/REST semantics.",
+      "ci_gates": "CI rollback is demotion to shadow/report-only with evidence preserved.",
+      "transport": "Transport rollback is one route family at a time.",
+      "architecture": "Architecture rollback is one capability extraction at a time.",
+      "package": "Package rollback never implies publish or evidence deletion.",
+      "general": "One task equals one reviewable commit or PR boundary; roll back the smallest task boundary; never use a destructive workspace reset.",
+      "k0_specific": "Revert only the proposed contract amendment in this file; never rewrite B0 baseline evidence."
+    }
+  },
+  "intentional_deltas": []
+}

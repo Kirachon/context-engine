@@ -32,6 +32,7 @@ export interface ServiceClientRetrievalSearchOptions {
   priority?: 'interactive' | 'background';
   includePaths?: string[];
   excludePaths?: string[];
+  signal?: AbortSignal;
 }
 
 export type ServiceClientRetrievalRuntimeMetadata = RetrievalRuntimeMetadata;

@@ -16,6 +16,7 @@ import {
   setReusableEmbeddingVector,
   type InternalEmbeddingReuse,
 } from '../handlers/performance.js';
+import { filterIndexStateFilesToCanonicalManifest } from './discoveryAdapter.js';
 import type { DenseRetriever } from './embeddingProvider.js';
 import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
@@ -380,11 +381,19 @@ export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOp
 
   return {
     id: `dense:${options.embeddingRuntime.id}`,
-    async search(query: string, topK: number): Promise<SearchResult[]> {
+    async search(query: string, topK: number, searchOptions?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+      const signal = searchOptions?.signal;
       const embeddingReuse = getInternalEmbeddingReuse();
       const safeTopK = clampTopK(topK);
       try {
-        const indexState = readIndexState(indexStatePath);
+        const rawIndexState = readIndexState(indexStatePath);
+        // R3b2: never dense-index a path outside the canonical R3a
+        // discovery manifest, even if a stale/independently-computed
+        // index-state file claims it. See discoveryAdapter.ts for the
+        // rollback lever.
+        const indexState: IndexStateFile = {
+          files: await filterIndexStateFilesToCanonicalManifest(options.workspacePath, rawIndexState.files),
+        };
         const existingDense = readDenseIndex(denseIndexReadPath, options.embeddingRuntime);
         const refreshedDense = await refreshDenseIndex(
           options.workspacePath,
@@ -393,7 +402,16 @@ export function createWorkspaceDenseRetriever(options: WorkspaceDenseRetrieverOp
           options.embeddingRuntime,
           embeddingReuse
         );
-        safeWriteJson(denseIndexWritePath, refreshedDense);
+        // R1b: never publish a refreshed on-disk index snapshot for a
+        // search whose caller has already given up -- the in-memory
+        // `refreshedDense` is still used below so this request's own
+        // ranking stays correct, it just isn't persisted as an artifact.
+        if (!signal?.aborted) {
+          safeWriteJson(denseIndexWritePath, refreshedDense);
+        }
+        if (signal?.aborted) {
+          throw new Error('Dense retrieval aborted before query embedding.');
+        }
 
         const queryLookup = createEmbeddingReuseLookup(
           options.embeddingRuntime,

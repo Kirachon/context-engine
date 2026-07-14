@@ -58,6 +58,11 @@ The legacy semantic parallel-fallback toggle is retired from the active operator
 | `CE_HTTP_METRICS` | Expose HTTP `/metrics` endpoint when HTTP server is enabled. |
 | `CE_TOOL_RESPONSE_CACHE` | Enable cross-request tool response caching (when index state is enabled). |
 | `CE_SKIP_UNCHANGED_INDEXING` | Skip indexing unchanged files (when index state is enabled). |
+| `CE_DISCOVERY_MANIFEST_DISABLED` | Disable canonical discovery manifest production (R3a rollback lever); `produceAndPersistDiscoveryManifest` skips production and leaves any previously persisted manifest untouched. No consumer reads this manifest yet. |
+| `CE_WATCHER_DISCOVERY_MANIFEST_DISABLED` | Disable watcher adoption of the canonical discovery manifest (R3b1 rollback lever); the MCP server's file watcher falls back to the legacy `getIgnorePatterns`/`getExcludedDirectories`/`normalizeIgnoredPatterns` ignore wiring with no post-event eligibility gate. |
+| `CE_RETRIEVAL_DISCOVERY_MANIFEST_DISABLED` | Disable chunk/dense/vector/lexical store adoption of the canonical discovery manifest (R3b2 rollback lever); `chunkIndex.ts`, `denseIndex.ts`, `lancedbVectorIndex.ts`, and `sqliteLexicalIndex.ts` fall back to their exact pre-R3b2 behavior (trusting `.context-engine-index-state.json` entries and, for the lexical store's empty-state bootstrap, its own ad hoc directory walk) with no canonical-manifest filtering. |
+| `CE_RETRIEVAL_DISCOVERY_MANIFEST_CACHE_TTL_MS` | Optional post-completion cache TTL (milliseconds) for the R3b2 canonical-manifest walk shared by the chunk/dense/vector/lexical stores. Defaults to `0` (no staleness window; only concurrent in-flight callers are de-duplicated) so add/delete changes are always reflected on the next refresh. |
+| `CE_GRAPH_DISCOVERY_MANIFEST_DISABLED` | Disable graph-store adoption of the canonical discovery manifest (R3b3 rollback lever). Unlike R3b1/R3b2's levers, this does **not** restore a prior recursive-walk fallback (that fallback was removed) -- `persistentGraphStore.ts`'s `refresh()` instead reports an explicit `graph_manifest_unavailable` degraded result and never touches whatever graph artifacts are already persisted on disk. |
 
 ## Operator usage
 

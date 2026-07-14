@@ -23,6 +23,7 @@ import {
   PlanRefinementOptions,
   PlanResult,
   PlanStatus,
+  PlanningDepthMode,
   DependencyGraph,
   DependencyNode,
   DependencyEdge,
@@ -73,9 +74,19 @@ const DEFAULT_OPTIONS: ResolvedPlanGenerationOptions = {
   analyze_parallelism: true,
   mvp_only: false,
   auto_scope: true,
+  depth: 'auto',
   include_paths: undefined,
   exclude_paths: undefined,
 };
+
+/** Hard ceiling/floor applied to context retrieval when the resolved profile is 'compact'. */
+const COMPACT_MAX_CONTEXT_FILES = 4;
+const COMPACT_MIN_TOKEN_BUDGET = 2_000;
+const COMPACT_MAX_TOKEN_BUDGET = 6_000;
+
+/** Keyword signals that indicate a task spans more than a single narrow change. */
+const BROAD_TASK_PATTERN =
+  /architecture|migration|refactor|rollout|performance|reliab|parallel|dependency|redesign|multi-step|multi step|end-to-end|end to end|system-wide|cross-cutting/;
 
 function throwIfAborted(signal?: AbortSignal): void {
   if (!signal?.aborted) return;
@@ -85,11 +96,13 @@ function throwIfAborted(signal?: AbortSignal): void {
 }
 
 function clampContextFileCount(maxFiles: number, profile: PlanningPromptProfile): number {
-  return profile === 'deep' ? maxFiles : Math.max(1, Math.min(maxFiles, 4));
+  return profile === 'deep' ? maxFiles : Math.max(1, Math.min(maxFiles, COMPACT_MAX_CONTEXT_FILES));
 }
 
 function clampContextTokenBudget(tokenBudget: number, profile: PlanningPromptProfile): number {
-  return profile === 'deep' ? tokenBudget : Math.max(2_000, Math.min(tokenBudget, 6_000));
+  return profile === 'deep'
+    ? tokenBudget
+    : Math.max(COMPACT_MIN_TOKEN_BUDGET, Math.min(tokenBudget, COMPACT_MAX_TOKEN_BUDGET));
 }
 
 function truncateText(text: string, maxChars: number): string {
@@ -140,6 +153,57 @@ export class PlanningService {
     const compactScore = compactSignals.filter(Boolean).length;
     const deepScore = deepSignals.filter(Boolean).length;
     return deepScore >= 3 ? 'deep' : 'compact';
+  }
+
+  /**
+   * Resolve the planning depth/budget profile for `create_plan`.
+   *
+   * Explicit `compact`/`deep` requests always win. `auto` (the default)
+   * classifies breadth from the task text and from requested context limits
+   * only - never from context that has already been retrieved - so the same
+   * profile is used to both clamp retrieval and choose the compact-outline
+   * vs. deep-AI path. This avoids the chicken-and-egg bug where a broad task
+   * gets a clamped (compact-sized) context fetch, and the resulting small
+   * file/token counts are then used to reclassify the task as compact again.
+   */
+  private resolveCreatePlanDepth(
+    task: string,
+    options: ResolvedPlanGenerationOptions
+  ): { profile: PlanningPromptProfile; requestedDepth: PlanningDepthMode } {
+    const requestedDepth: PlanningDepthMode = options.depth ?? 'auto';
+    if (requestedDepth === 'compact' || requestedDepth === 'deep') {
+      return { profile: requestedDepth, requestedDepth };
+    }
+    return { profile: this.classifyAutoPlanningDepth(task, options), requestedDepth };
+  }
+
+  /**
+   * Auto-classify planning depth from task breadth and requested context
+   * limits. A task is treated as broad (and therefore 'deep') when it
+   * mentions architecture/migration/multi-step-style work, is unusually
+   * long, explicitly asks for more context files/tokens than the tool's own
+   * defaults, or asks for diagrams on an architecture-flavored task.
+   */
+  private classifyAutoPlanningDepth(
+    task: string,
+    options: ResolvedPlanGenerationOptions
+  ): PlanningPromptProfile {
+    const normalizedTask = task.trim().toLowerCase();
+
+    const isBroadTask = BROAD_TASK_PATTERN.test(normalizedTask);
+    const isLongTask = normalizedTask.length > 160;
+    const wantsMoreFilesThanDefault = options.max_context_files > DEFAULT_OPTIONS.max_context_files;
+    const wantsMoreTokensThanDefault = options.context_token_budget > DEFAULT_OPTIONS.context_token_budget;
+    const wantsArchitectureDiagram =
+      options.generate_diagrams === true && /diagram|architecture/.test(normalizedTask);
+
+    return isBroadTask ||
+      isLongTask ||
+      wantsMoreFilesThanDefault ||
+      wantsMoreTokensThanDefault ||
+      wantsArchitectureDiagram
+      ? 'deep'
+      : 'compact';
   }
 
   private parseRuntimeJsonResponse<TParsed>(responseText: string, parseErrorPrefix: string): {
@@ -199,18 +263,18 @@ export class PlanningService {
           : opts.include_paths,
       };
 
-      // Step 1: Get relevant codebase context
-      const contextProfile = this.choosePlanningPromptProfile(task, scopedOptions);
-      const context = await this.getRelevantContext(task, scopedOptions, contextProfile);
-      console.error(`[PlanningService] Retrieved context from ${context.files.length} files`);
-
-      // Step 2: Build the planning prompt with context
-      const promptProfile = this.choosePlanningPromptProfile(
-        task,
-        scopedOptions,
-        context.files.length,
-        context.metadata.totalTokens
+      // Step 1: Resolve depth (explicit override, or auto-classify from task
+      // breadth + requested limits) BEFORE fetching context, then reuse that
+      // single profile for both the retrieval clamp and the compact/deep
+      // decision. Classifying again from post-retrieval counts would just
+      // re-observe the clamp we already applied and could never "discover"
+      // that a broad task deserves deep planning.
+      const { profile: promptProfile, requestedDepth } = this.resolveCreatePlanDepth(task, scopedOptions);
+      const context = await this.getRelevantContext(task, scopedOptions, promptProfile);
+      console.error(
+        `[PlanningService] Retrieved context from ${context.files.length} files (depth=${promptProfile}, requested=${requestedDepth})`
       );
+
       // Fast path: compact planning returns a lightweight local outline immediately.
       // Deep planning still uses the AI path for complex, architecture-heavy tasks.
       if (promptProfile === 'compact') {
@@ -232,6 +296,7 @@ export class PlanningService {
           duration_ms: Date.now() - startTime,
           planning_context: this.buildPlanningContextDiagnostics(
             promptProfile,
+            requestedDepth,
             context,
             scopedOptions,
             status,
@@ -318,6 +383,7 @@ export class PlanningService {
         duration_ms: Date.now() - startTime,
         planning_context: this.buildPlanningContextDiagnostics(
           promptProfile,
+          requestedDepth,
           context,
           scopedOptions,
           status,
@@ -523,13 +589,18 @@ export class PlanningService {
 
   private buildPlanningContextDiagnostics(
     promptProfile: PlanningPromptProfile,
+    requestedDepth: PlanningDepthMode,
     context: ContextBundle,
-    options: Pick<PlanGenerationOptions, 'include_paths' | 'exclude_paths'>,
+    options: ResolvedPlanGenerationOptions,
     status: PlanStatus,
     scopeDecision: PlanningScopeDecision
   ): NonNullable<PlanResult['planning_context']> {
+    const clampedMaxContextFiles = clampContextFileCount(options.max_context_files, promptProfile);
+    const clampedTokenBudget = clampContextTokenBudget(options.context_token_budget, promptProfile);
+
     return {
       prompt_profile: promptProfile,
+      requested_depth: requestedDepth,
       scope_applied: this.hasScopedPathFilters(options),
       scope_source: scopeDecision.source,
       scope_confidence: scopeDecision.confidence,
@@ -538,6 +609,14 @@ export class PlanningService {
       context_file_count: context.files.length,
       token_budget: context.metadata.tokenBudget,
       clarification_triggered: status === 'needs_clarification',
+      context_budget: {
+        requested_max_context_files: options.max_context_files,
+        clamped_max_context_files: clampedMaxContextFiles,
+        actual_context_file_count: context.files.length,
+        requested_token_budget: options.context_token_budget,
+        clamped_token_budget: clampedTokenBudget,
+        actual_total_tokens: context.metadata.totalTokens,
+      },
     };
   }
 
@@ -776,85 +855,12 @@ export class PlanningService {
   // ==========================================================================
 
   /**
-   * Parse and validate the LLM response into a structured plan
-   */
-  private async parseAndValidatePlan(
-    response: string,
-    context: ContextBundle | null,
-    previousPlan?: EnhancedPlanOutput
-  ): Promise<EnhancedPlanOutput> {
-    // Extract JSON from response
-    const jsonStr = extractJsonFromResponse(response);
-    if (!jsonStr) {
-      throw new Error('Failed to extract JSON from LLM response');
-    }
-
-    let parsed: Record<string, unknown>;
-    try {
-      parsed = JSON.parse(jsonStr);
-    } catch (error) {
-      throw new Error(`Failed to parse plan JSON: ${error instanceof Error ? error.message : String(error)}`);
-    }
-
-    // Build the validated plan with defaults
-    const now = new Date().toISOString();
-    const plan: EnhancedPlanOutput = {
-      // Metadata
-      id: previousPlan?.id || this.generatePlanId(),
-      version: previousPlan ? previousPlan.version + 1 : 1,
-      created_at: previousPlan?.created_at || now,
-      updated_at: now,
-
-      // Core plan
-      goal: String(parsed.goal || ''),
-      scope: this.validateScope(parsed.scope),
-
-      // Features
-      mvp_features: this.validateFeatures(parsed.mvp_features),
-      nice_to_have_features: this.validateFeatures(parsed.nice_to_have_features),
-
-      // Architecture
-      architecture: this.validateArchitecture(parsed.architecture),
-
-      // Risks
-      risks: this.validateRisks(parsed.risks),
-
-      // Milestones and steps
-      milestones: this.validateMilestones(parsed.milestones),
-      steps: this.validateSteps(parsed.steps),
-
-      // Dependency graph (will be populated later)
-      dependency_graph: {
-        nodes: [],
-        edges: [],
-        critical_path: [],
-        parallel_groups: [],
-        execution_order: [],
-      },
-
-      // Quality
-      testing_strategy: this.validateTestingStrategy(parsed.testing_strategy),
-      acceptance_criteria: this.validateAcceptanceCriteria(parsed.acceptance_criteria),
-
-      // Confidence
-      confidence_score: this.validateConfidenceScore(parsed.confidence_score),
-      questions_for_clarification: this.validateStringArray(parsed.questions_for_clarification),
-      alternative_approaches: this.validateAlternatives(parsed.alternative_approaches),
-
-      // Context
-      context_files: context?.files.map(f => f.path) || previousPlan?.context_files || [],
-      codebase_insights: this.validateStringArray(parsed.codebase_insights),
-    };
-
-    return plan;
-  }
-
-  /**
    * Parse and validate plan from already-parsed JSON object
    *
-   * This is an optimized version of parseAndValidatePlan that skips the
-   * JSON extraction/parsing step since it's already done. Used for
-   * concurrent post-processing where JSON is parsed once and shared.
+   * This is the single validated plan-object construction path used by both
+   * `generatePlan` and `refinePlan`. JSON extraction/parsing happens once via
+   * `parseRuntimeJsonResponse`/`extractJsonFromResponse` before this is
+   * called, so this method only owns field-level validation/defaulting.
    *
    * @param parsed - Already-parsed JSON object from the LLM response
    * @param context - Context bundle used for the planning request

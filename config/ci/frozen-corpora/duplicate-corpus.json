@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-duplicate-v1",
+  "intended_lane": "duplicate",
+  "description": "Frozen duplicate/near-duplicate chunk-window corpus for the M1 RRF-identity experiment. Pins exact-duplicate, near-duplicate-window, and distinct groups with predeclared top-k duplicate-rate, MRR, and NDCG thresholds; RRF identity work remains gated behind M1's frozen-threshold disposition.",
+  "cases": [
+    {
+      "id": "dup-exact-identical-chunk-a",
+      "query": "computeTotal sums price times quantity across order items",
+      "language": "typescript",
+      "labels": ["exact-duplicate"],
+      "intended_lane": "duplicate",
+      "duplicate_group_id": "group-exact-1"
+    },
+    {
+      "id": "dup-exact-identical-chunk-b",
+      "query": "computeTotal sums price times quantity across order items",
+      "language": "typescript",
+      "labels": ["exact-duplicate"],
+      "intended_lane": "duplicate",
+      "duplicate_group_id": "group-exact-1"
+    },
+    {
+      "id": "dup-near-window-shifted-a",
+      "query": "OrderProcessor process method applies tax rate then returns total",
+      "language": "typescript",
+      "labels": ["near-duplicate-window"],
+      "intended_lane": "duplicate",
+      "duplicate_group_id": "group-window-1"
+    },
+    {
+      "id": "dup-near-window-shifted-b",
+      "query": "OrderProcessor process method returns total after applying tax rate",
+      "language": "typescript",
+      "labels": ["near-duplicate-window"],
+      "intended_lane": "duplicate",
+      "duplicate_group_id": "group-window-1"
+    },
+    {
+      "id": "dup-distinct-unrelated-case",
+      "query": "watcher discovery adapter binds chokidar events to canonical manifest",
+      "language": "typescript",
+      "labels": ["distinct"],
+      "intended_lane": "duplicate",
+      "duplicate_group_id": "group-distinct-1"
+    }
+  ]
+}

@@ -16,6 +16,7 @@ import {
   type ChunkParser,
   type ChunkRecord,
 } from './chunking.js';
+import { resolveCanonicalWorkspacePathSet } from './discoveryAdapter.js';
 import {
   computeExactMatchBoost,
   normalizeSearchText,
@@ -604,12 +605,20 @@ export function createWorkspaceLexicalSearchIndex(
   };
 
   const resolveWorkspaceFiles = async (): Promise<Map<string, string>> => {
+    // R3b2: bind the source set to the canonical R3a discovery manifest so
+    // this store can never index a path outside it -- neither via a
+    // stale/independently-computed index-state file, nor via the store's
+    // own ad hoc fallback walk below. `null` (rollback lever) restores
+    // exact pre-R3b2 behavior (no canonical filtering at all).
+    const canonicalPaths = await resolveCanonicalWorkspacePathSet({ workspacePath });
+
     const state = indexStateStore ? { files: indexStateStore.loadWithMetadata().state.files } : readIndexState(indexStatePath);
     if (state.files && Object.keys(state.files).length > 0) {
       const map = new Map<string, string>();
       for (const [rawPath, entry] of Object.entries(state.files)) {
         const sanitized = sanitizePath(rawPath);
         if (!sanitized || !entry?.hash) continue;
+        if (canonicalPaths && !canonicalPaths.has(sanitized)) continue;
         const fullPath = path.join(workspacePath, sanitized);
         if (!fs.existsSync(fullPath)) continue;
         map.set(sanitized, entry.hash);
@@ -619,7 +628,14 @@ export function createWorkspaceLexicalSearchIndex(
       }
     }
 
-    const discovered = await discoverFiles(workspacePath);
+    // No usable index-state entries: fall back to a source-set discovery
+    // pass. When canonical filtering is active, that source set is the
+    // canonical manifest's own path list (never the store-local ad hoc
+    // walk), so a workspace with no index state still can't be indexed
+    // outside the canonical set. Hashing stays with this store's own
+    // `hashContent` regardless of source, so change detection remains
+    // self-consistent across refreshes.
+    const discovered = canonicalPaths ? [...canonicalPaths] : await discoverFiles(workspacePath);
     const map = new Map<string, string>();
     for (const relativePath of discovered) {
       const fullPath = path.join(workspacePath, relativePath);
@@ -699,6 +715,11 @@ export function createWorkspaceLexicalSearchIndex(
     const runApply = async (): Promise<SqliteLexicalIndexRefreshStats> => {
       const db = await ensureDb();
       const existingFiles = loadExistingFileMap(db);
+      // R3b2: gate incremental add/change events against the canonical R3a
+      // manifest too, so an ineligible path can never be indexed through
+      // this incremental path even when the caller's own upstream
+      // eligibility gate (e.g. a disabled watcher adapter) is bypassed.
+      const canonicalPaths = await resolveCanonicalWorkspacePathSet({ workspacePath });
       const latestByPath = new Map<string, WorkspaceSqliteLexicalIndexChange['type']>();
       for (const change of changes) {
         if (!change || typeof change.path !== 'string') {
@@ -733,6 +754,15 @@ export function createWorkspaceLexicalSearchIndex(
 
       for (const [filePath, changeType] of latestByPath.entries()) {
         if (changeType === 'unlink') {
+          if (existingFiles.has(filePath)) {
+            deleteFileFromIndex(db, filePath);
+            existingFiles.delete(filePath);
+            removedFiles += 1;
+          }
+          continue;
+        }
+
+        if (canonicalPaths && !canonicalPaths.has(filePath)) {
           if (existingFiles.has(filePath)) {
             deleteFileFromIndex(db, filePath);
             existingFiles.delete(filePath);

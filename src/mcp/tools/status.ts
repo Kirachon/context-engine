@@ -25,6 +25,10 @@ export type IndexStatusStructuredContent = {
     fileCount: number;
     isStale: boolean;
     lastError: string | null;
+    /** R4 additive — omitted when healthy / unavailable. */
+    staleCauses?: IndexStatus['staleCauses'];
+    indexedGenerationFingerprint?: string | null;
+    currentGenerationFingerprint?: string | null;
   };
   freshness: {
     code: string;
@@ -54,6 +58,9 @@ export type IndexStatusStructuredContent = {
     loadFailures: number | null;
     hashFallbackActive: boolean | null;
   };
+  /** R6 additive composite health. */
+  composite?: NonNullable<IndexStatus['composite']>;
+  components?: NonNullable<IndexStatus['components']>;
 };
 
 function formatTableCell(value: string | undefined): string {
@@ -100,6 +107,15 @@ export function buildIndexStatusStructuredContent(status: IndexStatus): IndexSta
       fileCount: status.fileCount,
       isStale: status.isStale,
       lastError: status.lastError ?? null,
+      ...(status.staleCauses && status.staleCauses.length > 0
+        ? { staleCauses: status.staleCauses }
+        : {}),
+      ...(status.indexedGenerationFingerprint !== undefined
+        ? { indexedGenerationFingerprint: status.indexedGenerationFingerprint }
+        : {}),
+      ...(status.currentGenerationFingerprint !== undefined
+        ? { currentGenerationFingerprint: status.currentGenerationFingerprint }
+        : {}),
     },
     freshness: {
       code: freshness.code,
@@ -108,6 +124,7 @@ export function buildIndexStatusStructuredContent(status: IndexStatus): IndexSta
     },
     guidance: freshness.guidance,
     embeddingRuntime: normalizeEmbeddingRuntime(status),
+    ...(status.composite ? { composite: status.composite, components: status.components } : {}),
   };
 }
 
@@ -136,6 +153,16 @@ export function formatIndexStatusText(status: IndexStatus): string {
     `| **Freshness** | ${freshnessEmoji} ${freshness.code} |\n` +
     `| **Freshness Summary** | ${freshness.summary} |\n`;
 
+  if (status.staleCauses && status.staleCauses.length > 0) {
+    output += `| **Stale Causes** | ${status.staleCauses.join(', ')} |\n`;
+  }
+  if (status.indexedGenerationFingerprint) {
+    output += `| **Indexed Generation** | \`${status.indexedGenerationFingerprint.slice(0, 12)}…\` |\n`;
+  }
+  if (status.currentGenerationFingerprint) {
+    output += `| **Current Generation** | \`${status.currentGenerationFingerprint.slice(0, 12)}…\` |\n`;
+  }
+
   if (status.embeddingRuntime && status.embeddingRuntime.state !== 'uninitialized') {
     const embeddingStatus =
       status.embeddingRuntime.state === 'degraded'
@@ -148,6 +175,14 @@ export function formatIndexStatusText(status: IndexStatus): string {
         `| **Embedding Retry** | ${status.embeddingRuntime.nextRetryAt ?? 'pending'} |\n` +
         `| **Embedding Load Failures** | ${status.embeddingRuntime.loadFailures} |\n`;
     }
+  }
+
+  if (status.composite) {
+    output += `| **Composite Overall** | ${status.composite.overall} |\n`;
+    const parts = Object.entries(status.composite.components)
+      .map(([id, report]) => `${id}=${report.state}`)
+      .join(', ');
+    output += `| **Components** | ${formatTableCell(parts)} |\n`;
   }
 
   if (freshness.guidance.length > 0) {

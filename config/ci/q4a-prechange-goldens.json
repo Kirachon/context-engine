@@ -1,0 +1,323 @@
+{
+  "schema_version": 1,
+  "task_id": "Q4a",
+  "title": "Pre-change compatibility goldens",
+  "owner_lane": "compatibility",
+  "file_family": "F9",
+  "purpose": "Freeze, by pointer, the pre-change (before S1, C*, R1, or R2) behavior of the highest-risk compatibility families -- MCP tool contracts, REST mappings, security/auth decisions, graph cold-start/degraded behavior, and cache identity -- and name, for every Wave 1 / early Wave 2 task, exactly which existing golden suites it is allowed to change. This is characterization only: no production behavior changes, no golden values are copied or duplicated here.",
+  "source_plan": "context-engine-remediation-plan-2026-07-14.md",
+  "source_plan_task": "Q4a",
+  "depends_on": ["K0", "Q0", "G0b"],
+  "upstream_receipts": {
+    "k0_envelope_path": "config/ci/compatibility-rollback-envelope.json",
+    "k0_receipt_path": "docs/plan-execution/context-engine-remediation-k0-compatibility-envelope-2026-07-14.md",
+    "b0_baseline_machine_receipt": "artifacts/plan/context-engine-remediation-b0-baseline.json",
+    "note": "Q4a does not duplicate K0's frozen tool/REST/auth/artifact pointers. Q4a references config/ci/compatibility-rollback-envelope.json by path and adds the executable golden-suite inventory and per-task allow-list that K0 left for a later task."
+  },
+  "validation_matrix": {
+    "description": "Every golden family below is required to be exercised by at least one existing suite covering each of these seven behaviors, per the Q4a plan-card validation clause.",
+    "dimensions": [
+      "success",
+      "invalid_input",
+      "handler_error",
+      "legacy_text",
+      "structured_output",
+      "auth_decision",
+      "degraded_behavior"
+    ],
+    "coverage": {
+      "success": ["tests/integration/httpCompatibility.test.ts", "tests/integration/mcpHttpTransport.test.ts", "tests/mcp/outputSchemaContract.test.ts"],
+      "invalid_input": ["tests/integration/mcpErrorParity.test.ts", "tests/mcp/outputSchemaContract.test.ts"],
+      "handler_error": ["tests/integration/mcpErrorParity.test.ts", "tests/integration/mcpTransportParity.test.ts"],
+      "legacy_text": ["tests/integration/client-compat.test.ts", "tests/snapshots/oldClientFixtures.test.ts"],
+      "structured_output": ["tests/mcp/outputSchemaContract.test.ts", "tests/mcp/discoverability.test.ts"],
+      "auth_decision": ["tests/integration/httpHardening.test.ts", "tests/integration/httpAuthScopes.test.ts", "tests/ci/localTransportContract.test.ts"],
+      "degraded_behavior": ["tests/internal/graph/persistentGraphStore.test.ts", "tests/retrieval/embeddingRuntime.degradation.test.ts"]
+    }
+  },
+  "golden_families": {
+    "mcp_manifest_and_output_schema": {
+      "description": "52-tool manifest shape, discoverability metadata, and 14-tool converted JSON-schema structuredContent contract.",
+      "suites": [
+        "tests/mcp/discoverability.test.ts",
+        "tests/mcp/outputSchemaContract.test.ts",
+        "tests/ci/checkToolManifestParity.test.ts",
+        "tests/ci/compatibilityRollbackEnvelope.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/tools/manifest.ts",
+        "src/mcp/server.ts",
+        "src/mcp/utils/outputSchemaContract.ts",
+        "src/mcp/schemas/convertedToolOutputSchemas.ts"
+      ]
+    },
+    "mcp_legacy_text_and_transport_parity": {
+      "description": "Legacy plain-text client compatibility, error-envelope parity, and transport (stdio vs HTTP) response-shape parity, including old-client snapshot fixtures.",
+      "suites": [
+        "tests/integration/client-compat.test.ts",
+        "tests/integration/mcpErrorParity.test.ts",
+        "tests/integration/mcpTransportParity.test.ts",
+        "tests/integration/mcpHttpTransport.test.ts",
+        "tests/snapshots/oldClientFixtures.test.ts"
+      ],
+      "fixtures": [
+        "tests/snapshots/phase2/fixtures/old-client-tool-families.json",
+        "tests/snapshots/phase2/baseline"
+      ],
+      "live_sources": [
+        "src/mcp/types/toolResult.ts",
+        "src/mcp/utils/resultBuilder.ts"
+      ]
+    },
+    "rest_mappings": {
+      "description": "REST tool-route mappings, HTTP method/path shape, and non-tool routes (/health, /api/v1/status, /api/v1/retrieval/status).",
+      "suites": [
+        "tests/integration/httpCompatibility.test.ts",
+        "tests/mcp/discoverability.test.ts",
+        "tests/integration/retrievalStatusRoute.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/tooling/discoverability.ts:listRestApiToolMappings",
+        "src/http/routes/tools.ts",
+        "src/http/routes/status.ts",
+        "src/http/routes/health.ts",
+        "src/http/httpServer.ts"
+      ]
+    },
+    "security_auth_http_hardening": {
+      "description": "HTTP auth-scope decisions, loopback vs remote bind classification precursors, and the frozen local-transport contract that S1 must preserve for loopback while changing remote-bind default.",
+      "suites": [
+        "tests/integration/httpHardening.test.ts",
+        "tests/integration/httpAuthScopes.test.ts",
+        "tests/ci/localTransportContract.test.ts",
+        "tests/ci/mcpCompatibilityMatrix.test.ts"
+      ],
+      "live_sources": [
+        "src/http/httpServer.ts",
+        "src/http/authScopes.ts",
+        "src/http/middleware/httpAuth.ts",
+        "config/ci/local-transport-contract.json",
+        "config/ci/mcp-compatibility-matrix.json"
+      ]
+    },
+    "privacy_observability": {
+      "description": "Query-derived logging/audit privacy boundary that S2 must preserve (metadata-only diagnostics) while removing raw-query/hash emission.",
+      "suites": [
+        "tests/telemetry/auditLog.test.ts",
+        "tests/ai/contract/privacyBoundary.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/serviceClientRuntimeAccess.ts"
+      ]
+    },
+    "graph_cold_start_degraded": {
+      "description": "Graph access/store cold-start, missing/corrupt/mismatched-fingerprint artifact handling, and explicit degraded status (never a broad fallback scan) that C2a must preserve while adding defensive validation.",
+      "suites": [
+        "tests/internal/graph/persistentGraphStore.test.ts",
+        "tests/tools/graphNativeTools.test.ts",
+        "tests/mcp/graphNativeRegistration.test.ts"
+      ],
+      "live_sources": [
+        "src/internal/graph/persistentGraphStore.ts"
+      ]
+    },
+    "git_status_correctness": {
+      "description": "Git porcelain XY-column parsing and status/total counts that C1 must correct without breaking existing staged/unstaged/mixed/rename/delete/conflict/untracked fixtures.",
+      "suites": [
+        "tests/utils/gitUtils.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/utils/gitUtils.ts"
+      ]
+    },
+    "planning_contract": {
+      "description": "Planner depth/budget behavior, saved-plan JSON/Markdown schema, and generated/refined plan shape that C0a must extend additively.",
+      "suites": [
+        "tests/services/planningService.test.ts",
+        "tests/tools/plan.test.ts",
+        "tests/tools/planManagement.contract.test.ts",
+        "tests/tools/planLifecycle.contract.test.ts",
+        "tests/services/planPersistenceService.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/services/planningService.ts",
+        "src/mcp/types/planning.ts"
+      ]
+    },
+    "cache_identity_and_semantic_cache": {
+      "description": "Service-client cache-key construction (commit-aware / semantic-search cache reuse) and reactive ResponseCache multi-layer behavior that C3 must extend to a fully versioned, collision-resistant key without breaking unchanged-request cache hits.",
+      "suites": [
+        "tests/serviceClient.test.ts",
+        "tests/cache/ResponseCache.test.ts",
+        "tests/reactive/cache/ResponseCache.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/serviceClient.ts",
+        "src/reactive/cache/ResponseCache.ts"
+      ],
+      "notes": "tests/serviceClient.test.ts 'Cache Management' and 'Semantic Search (openai_session default)' describe blocks exercise getCommitAwareCacheKey(); this is the pre-change golden for C3's collision matrix."
+    },
+    "reactive_numeric_config": {
+      "description": "Bounded/parsed reactive numeric environment configuration (timeouts, worker counts, circuit breaker, chunking) that C4 must define fail/default/clamp behavior for.",
+      "suites": [
+        "tests/integration/timeoutResilience.test.ts",
+        "tests/tools/reactiveReview.test.ts"
+      ],
+      "live_sources": [
+        "src/reactive/config.ts",
+        "src/config/env.ts"
+      ],
+      "characterization_gap": true,
+      "gap_note": "No dedicated tests/config/env.test.ts exists yet for envBool/envMs/envPerfProfile boundary cases. C4 is expected to add that suite as part of its own change; Q4a records the gap explicitly rather than inventing a synthetic pre-change golden."
+    },
+    "cancellation_and_session_placeholders": {
+      "description": "Placeholder golden family for R1a/R1b/R1c cancellation work and R2 bounded-session work. No cancellation vocabulary exists yet, so this family points only at the existing error/parity/session suites that already characterize today's (uncancellable) request lifecycle; R1a/R2 must not regress these while adding the new contract.",
+      "suites": [
+        "tests/integration/mcpErrorParity.test.ts",
+        "tests/integration/mcpTransportParity.test.ts",
+        "tests/integration/timeoutResilience.test.ts",
+        "tests/integration/zombieSessionRecovery.test.ts",
+        "tests/integration/mcpHttpTransport.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/services/executionTrackingService.ts",
+        "src/http/httpServer.ts"
+      ],
+      "inherits_to": "Q4b",
+      "note": "Q4b (Wave 3) is the hard post-change gate for cancellation/session parity; this family is the pre-change reference it diffs against."
+    }
+  },
+  "task_golden_map": {
+    "S1": {
+      "task_title": "Fail closed for unauthenticated non-loopback HTTP",
+      "owner_lock": "HTTP transport / F3",
+      "allowed_goldens": ["security_auth_http_hardening", "rest_mappings"],
+      "allowed_to_change": [
+        "tests/integration/httpHardening.test.ts",
+        "tests/integration/httpAuthScopes.test.ts"
+      ],
+      "must_not_change_without_delta": [
+        "tests/ci/localTransportContract.test.ts",
+        "config/ci/local-transport-contract.json",
+        "config/ci/mcp-compatibility-matrix.json"
+      ],
+      "rationale": "S1 changes bind-target classification and auth-readiness gating in httpServer.ts/authScopes.ts, so it owns the hardening/auth-scope suites; the frozen local-transport contract and compatibility matrix stay as the loopback-preserving baseline unless S1 records an intentional delta."
+    },
+    "S2": {
+      "task_title": "Remove query-derived logging",
+      "owner_lock": "Security observability / F1",
+      "allowed_goldens": ["privacy_observability"],
+      "allowed_to_change": [
+        "tests/telemetry/auditLog.test.ts",
+        "tests/ai/contract/privacyBoundary.test.ts"
+      ],
+      "must_not_change_without_delta": [
+        "tests/serviceClient.test.ts"
+      ],
+      "rationale": "S2 touches serviceClientRuntimeAccess.ts logging only; it owns the audit/privacy suites and must not need to touch serviceClient cache/search behavior tests."
+    },
+    "C2a": {
+      "task_title": "Defensive graph artifact load",
+      "owner_lock": "Retrieval/graph / F6",
+      "allowed_goldens": ["graph_cold_start_degraded"],
+      "allowed_to_change": [
+        "tests/internal/graph/persistentGraphStore.test.ts"
+      ],
+      "must_not_change_without_delta": [
+        "tests/tools/graphNativeTools.test.ts",
+        "tests/mcp/graphNativeRegistration.test.ts"
+      ],
+      "rationale": "C2a adds workspace/schema/source/fingerprint validation ahead of graph hydration; it owns the persisted-store cold-start suite and may add new degraded fixtures there, but must not need to change graph-native tool registration/output contracts."
+    },
+    "C1": {
+      "task_title": "Correct Git porcelain and totals",
+      "owner_lock": "Core orchestration / F5",
+      "allowed_goldens": ["git_status_correctness"],
+      "allowed_to_change": [
+        "tests/utils/gitUtils.test.ts"
+      ],
+      "must_not_change_without_delta": [],
+      "rationale": "C1 is scoped to the Git porcelain parser and its own fixture suite."
+    },
+    "C0a": {
+      "task_title": "Explicit planner depth and budget contract",
+      "owner_lock": "Planning / F2",
+      "allowed_goldens": ["planning_contract"],
+      "allowed_to_change": [
+        "tests/services/planningService.test.ts",
+        "tests/tools/plan.test.ts"
+      ],
+      "must_not_change_without_delta": [
+        "tests/tools/planManagement.contract.test.ts",
+        "tests/tools/planLifecycle.contract.test.ts",
+        "tests/services/planPersistenceService.test.ts"
+      ],
+      "rationale": "C0a adds an additive depth/budget request-and-report contract; saved-plan JSON/Markdown persistence and lifecycle contracts must remain byte-for-byte compatible unless an intentional delta is recorded."
+    },
+    "C3": {
+      "task_title": "Versioned complete semantic cache key",
+      "owner_lock": "Core orchestration / F5",
+      "allowed_goldens": ["cache_identity_and_semantic_cache"],
+      "allowed_to_change": [
+        "tests/serviceClient.test.ts",
+        "tests/cache/ResponseCache.test.ts",
+        "tests/reactive/cache/ResponseCache.test.ts"
+      ],
+      "must_not_change_without_delta": [],
+      "rationale": "C3 is the approved task allowed to change cache-key composition; per the compatibility envelope's rollback policy, any resulting cache-key-format delta is intentional (namespace bump), never a silent collision-prone edit."
+    },
+    "C4": {
+      "task_title": "Bound reactive numeric configuration",
+      "owner_lock": "Runtime configuration / F10",
+      "allowed_goldens": ["reactive_numeric_config"],
+      "allowed_to_change": [
+        "tests/integration/timeoutResilience.test.ts",
+        "tests/tools/reactiveReview.test.ts"
+      ],
+      "may_add_new_suite": "tests/config/env.test.ts",
+      "must_not_change_without_delta": [],
+      "rationale": "C4 owns reactive/config.ts and src/config/env.ts numeric parsing; the family is marked characterization_gap because no dedicated boundary-case suite exists pre-change, so C4 is expected to add one rather than modify an existing frozen golden."
+    },
+    "R1a": {
+      "task_title": "Cancellation and error contract",
+      "owner_lock": "Runtime contract / F11",
+      "allowed_goldens": ["cancellation_and_session_placeholders"],
+      "allowed_to_change": [
+        "tests/integration/mcpErrorParity.test.ts",
+        "tests/integration/mcpTransportParity.test.ts"
+      ],
+      "must_not_change_without_delta": [
+        "tests/integration/timeoutResilience.test.ts",
+        "tests/integration/zombieSessionRecovery.test.ts"
+      ],
+      "rationale": "R1a defines the first cancellation vocabulary; Q4a/F9 is read-only input per the plan card, so R1a may extend the error/transport-parity suites with new cancellation cases but must not regress existing timeout/zombie-session characterization. Q4b (Wave 3) is the hard post-change gate."
+    },
+    "R2": {
+      "task_title": "Bounded stateful HTTP sessions",
+      "owner_lock": "HTTP transport / F3",
+      "allowed_goldens": ["cancellation_and_session_placeholders", "security_auth_http_hardening"],
+      "allowed_to_change": [
+        "tests/integration/mcpHttpTransport.test.ts",
+        "tests/integration/zombieSessionRecovery.test.ts"
+      ],
+      "must_not_change_without_delta": [
+        "tests/integration/httpHardening.test.ts",
+        "tests/integration/httpAuthScopes.test.ts"
+      ],
+      "rationale": "R2 adds idle TTL/hard cap/eviction to existing stateful session semantics; it owns the session-lifecycle suites and must preserve the S1 auth-decision suites it depends on."
+    }
+  },
+  "inheritance_note": {
+    "description": "Tasks not enumerated in task_golden_map above inherit their pre-change golden posture from the families their dependency chain already touches, and are gated for post-change parity by Q4b rather than re-deriving a Q4a entry.",
+    "inherits_via_q4b": [
+      "C0b", "R1b", "R3a", "R3b1", "R3b2", "R3b3", "C2b", "R4", "R5", "R1c", "R6",
+      "Q1", "Q2", "Q3a", "Q3b", "Q3c", "Q3d", "M1", "M2", "M3"
+    ]
+  },
+  "rollback_policy": {
+    "goldens_are_baseline_evidence": true,
+    "update_rule": "A golden fixture/suite listed under allowed_to_change for a task may change only as part of that task's own reviewed commit, with an intentional-delta entry appended to config/ci/compatibility-rollback-envelope.json intentional_deltas (or this file's own delta ledger below) describing what changed and why.",
+    "revert_rule": "Revert only the specific task's suite changes; never bulk-restore or bulk-rewrite goldens belonging to a different task's family."
+  },
+  "intentional_deltas": []
+}

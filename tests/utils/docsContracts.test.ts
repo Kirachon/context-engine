@@ -5,6 +5,10 @@ function readUtf8(path: string): string {
   return fs.readFileSync(path, 'utf-8');
 }
 
+function readBanner(path: string): string {
+  return readUtf8(path).split(/\r?\n/).slice(0, 24).join('\n');
+}
+
 describe('documentation contracts', () => {
   it('docs/archive/API_REFERENCE.md matches current MCP tool names (no legacy tool drift)', () => {
     const text = readUtf8('docs/archive/API_REFERENCE.md');
@@ -47,18 +51,31 @@ describe('documentation contracts', () => {
     expect(text).not.toContain('generate_plan');
   });
 
-  it('active documentation status points to the next-tranche plan as active and preserves the prior plan as ledger', () => {
-    const architecture = readUtf8('ARCHITECTURE.md');
-    const advancedPlan = readUtf8('docs/advanced-mcp-ux-and-hosted-maturity-plan.md');
+  it('active documentation status points only to the remediation plan and freezes completed ledgers', () => {
+    const activePlan = 'context-engine-remediation-plan-2026-07-14.md';
+    const architecture = readBanner('ARCHITECTURE.md');
+    const remediationPlan = readBanner(activePlan);
+    const nextTrancheLedger = readBanner('context-engine-next-tranche-swarm-plan.md');
+    const improvementLedger = readBanner('context-engine-improvement-swarm-plan.md');
+    const advancedPlan = readBanner('docs/advanced-mcp-ux-and-hosted-maturity-plan.md');
+    const governedBanners = [architecture, nextTrancheLedger, improvementLedger, advancedPlan];
 
-    expect(architecture).toContain('Active delivery plan: `context-engine-next-tranche-swarm-plan.md`');
-    expect(architecture).toContain('Execution ledger: `context-engine-improvement-swarm-plan.md`');
-    expect(advancedPlan).toContain(
-      '`context-engine-next-tranche-swarm-plan.md` is the active execution plan.'
-    );
-    expect(advancedPlan).toContain(
-      '`context-engine-improvement-swarm-plan.md` is the completed execution ledger.'
-    );
+    expect(architecture).toContain(`Sole active delivery plan: \`${activePlan}\``);
+    expect(remediationPlan).toContain('**Status:**');
+    expect(remediationPlan).toMatch(/Execution in progress|CONDITIONAL_GO|Closeout/);
+    expect(nextTrancheLedger).toContain('Status: Immutable execution ledger (completed tranche)');
+    expect(improvementLedger).toContain('Status: Immutable execution ledger (completed tranche)');
+    expect(advancedPlan).toContain('Status: Planning-only reference (not implementation authority)');
+
+    for (const banner of governedBanners) {
+      expect(banner).toContain(`Sole active delivery plan: \`${activePlan}\``);
+      expect(banner).not.toContain(
+        'Active delivery plan: `context-engine-next-tranche-swarm-plan.md`'
+      );
+      expect(banner).not.toContain(
+        '`context-engine-next-tranche-swarm-plan.md` is the active execution plan.'
+      );
+    }
   });
 
   it('vibe-coder memory review contract makes checkpoint, batch-cap, undo, and suppression rules explicit', () => {

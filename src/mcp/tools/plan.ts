@@ -36,6 +36,7 @@ import {
   PlanGenerationOptions,
   PlanRefinementOptions,
   PlanResult,
+  PlanningDepthMode,
   ExecutionMode,
   ExecutePlanResult,
   StepExecutionResult,
@@ -55,6 +56,8 @@ import {
 const planningServiceFactory = createClientBoundFactory(
   (serviceClient: ContextServiceClient) => new PlanningService(serviceClient)
 );
+
+const PLANNING_DEPTH_MODES = ['auto', 'compact', 'deep'] as const;
 
 function getPlanningService(serviceClient: ContextServiceClient): PlanningService {
   return planningServiceFactory.get(serviceClient);
@@ -141,6 +144,13 @@ export interface CreatePlanArgs {
   task: string;
   /** Automatically infer likely include paths when no explicit scope is provided (default: true) */
   auto_scope?: boolean;
+  /**
+   * Explicit planning depth/budget mode (default: 'auto').
+   * - 'auto': infer depth from task breadth and requested context limits.
+   * - 'compact': force a lightweight local outline regardless of task breadth.
+   * - 'deep': force full AI-backed deep planning regardless of task brevity.
+   */
+  depth?: PlanningDepthMode;
   /** Maximum files to include in context (default: 8) */
   max_context_files?: number;
   /** Token budget for context retrieval (default: 8000) */
@@ -216,6 +226,7 @@ export async function handleCreatePlan(
   const {
     task,
     auto_scope = true,
+    depth,
     max_context_files,
     context_token_budget,
     generate_diagrams,
@@ -230,6 +241,9 @@ export async function handleCreatePlan(
 
   const validatedTask = validateTrimmedNonEmptyString(task, 'Task is required and must be a non-empty string');
   validateBoolean(auto_scope, 'auto_scope must be a boolean when provided');
+  if (depth !== undefined) {
+    validateOneOf(depth, PLANNING_DEPTH_MODES, 'depth must be one of "auto", "compact", or "deep"');
+  }
   const normalizedIncludePaths = validatePathScopeGlobs(include_paths, 'include_paths');
   const normalizedExcludePaths = validatePathScopeGlobs(exclude_paths, 'exclude_paths');
 
@@ -238,14 +252,20 @@ export async function handleCreatePlan(
 
   const planningService = getPlanningService(serviceClient);
 
+  // Build options with only defined keys so unspecified fields fall back to
+  // PlanningService's own defaults instead of an explicit `undefined` value
+  // shadowing them (object spread copies keys even when their value is
+  // undefined). This matters here specifically because the auto-depth
+  // classifier compares requested limits against those defaults.
   const options: PlanGenerationOptions = {
-    max_context_files,
-    context_token_budget,
-    generate_diagrams,
-    mvp_only,
     auto_scope,
     include_paths: normalizedIncludePaths,
     exclude_paths: normalizedExcludePaths,
+    ...(depth !== undefined ? { depth } : {}),
+    ...(max_context_files !== undefined ? { max_context_files } : {}),
+    ...(context_token_budget !== undefined ? { context_token_budget } : {}),
+    ...(generate_diagrams !== undefined ? { generate_diagrams } : {}),
+    ...(mvp_only !== undefined ? { mvp_only } : {}),
   };
 
   console.error(`[create_plan] Generating plan for: "${planningTask.substring(0, 100)}..."`);
@@ -1147,7 +1167,8 @@ function formatPlanResult(
 
   if (result.planning_context) {
     output += `## Planning Context\n`;
-    output += `- **Prompt Profile:** ${result.planning_context.prompt_profile}\n`;
+    output += `- **Requested Depth:** ${result.planning_context.requested_depth}\n`;
+    output += `- **Resolved Depth:** ${result.planning_context.prompt_profile}\n`;
     output += `- **Scope Applied:** ${result.planning_context.scope_applied ? 'yes' : 'no'}\n`;
     output += `- **Scope Source:** ${result.planning_context.scope_source ?? 'none'}\n`;
     output += `- **Scope Confidence:** ${result.planning_context.scope_confidence ?? 'none'}\n`;
@@ -1159,6 +1180,11 @@ function formatPlanResult(
     }
     output += `- **Context Files Retrieved:** ${result.planning_context.context_file_count}\n`;
     output += `- **Token Budget:** ${result.planning_context.token_budget}\n`;
+    if (result.planning_context.context_budget) {
+      const budget = result.planning_context.context_budget;
+      output += `- **Context Files (requested → clamped → actual):** ${budget.requested_max_context_files} → ${budget.clamped_max_context_files} → ${budget.actual_context_file_count}\n`;
+      output += `- **Token Budget (requested → clamped → actual):** ${budget.requested_token_budget} → ${budget.clamped_token_budget} → ${budget.actual_total_tokens}\n`;
+    }
     output += `- **Clarification Triggered:** ${result.planning_context.clarification_triggered ? 'yes' : 'no'}\n\n`;
 
     if (result.planning_context.scope_source === 'auto' && result.planning_context.scope_applied) {
@@ -1358,6 +1384,16 @@ By default, plans are persisted so they can be executed later via plan_id.`,
         type: 'boolean',
         description: getCreatePlanToolFieldDescription('auto_scope'),
         default: true,
+      },
+      depth: {
+        type: 'string',
+        enum: [...PLANNING_DEPTH_MODES],
+        description:
+          'Explicit planning depth/budget mode (default: "auto"). "auto" infers depth from task breadth ' +
+          '(architecture/migration/multi-step signals) and from requested context limits; broad requests are ' +
+          'never silently downgraded to a compact outline. "compact" forces a lightweight local outline. ' +
+          '"deep" forces full AI-backed planning regardless of task brevity.',
+        default: 'auto',
       },
       max_context_files: {
         type: 'number',

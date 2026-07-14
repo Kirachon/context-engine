@@ -17,6 +17,7 @@ import { EnhancedPlanOutput } from '../../src/mcp/types/planning.js';
 import {
     calculateAdaptiveTimeout,
     getRecommendedTimeout,
+    getConfig,
     getCircuitBreakerConfig,
     getChunkedProcessingConfig,
     splitIntoChunks,
@@ -259,6 +260,261 @@ describe('Timeout Resilience Integration Tests', () => {
 
             // 27 files / 5 per chunk = 6 chunks (5+5+5+5+5+2)
             expect(chunks.length).toBe(6);
+        });
+    });
+
+    // ==========================================================================
+    // Bounded Reactive Numeric Configuration Tests (C4)
+    //
+    // Every bounded numeric field in src/reactive/config.ts follows the same
+    // contract: malformed input falls back to the documented default,
+    // out-of-range (negative/zero/overflow) input is clamped to [min, max],
+    // and boundary/valid values pass through unchanged.
+    // ==========================================================================
+
+    describe('Bounded Reactive Numeric Configuration', () => {
+        const REACTIVE_NUMERIC_ENV_VARS = [
+            'REACTIVE_BATCH_SIZE',
+            'REACTIVE_MAX_WORKERS',
+            'REACTIVE_TOKEN_BUDGET',
+            'REACTIVE_CACHE_TTL',
+            'REACTIVE_STEP_TIMEOUT',
+            'REACTIVE_MAX_RETRIES',
+            'REACTIVE_SESSION_TTL',
+            'REACTIVE_MAX_SESSIONS',
+            'REACTIVE_EXECUTION_TIMEOUT',
+            'REACTIVE_OPTIMIZE_WORKERS',
+            'REACTIVE_CB_FAILURE_THRESHOLD',
+            'REACTIVE_CB_RESET_TIMEOUT',
+            'REACTIVE_CB_SUCCESS_THRESHOLD',
+            'REACTIVE_CHUNK_THRESHOLD',
+            'REACTIVE_CHUNK_SIZE',
+            'REACTIVE_INTER_CHUNK_DELAY',
+        ];
+
+        beforeEach(() => {
+            // The host shell/CI environment may already export some of these
+            // (e.g. REACTIVE_MAX_WORKERS) for unrelated reasons; start every
+            // test from a clean slate so "unset" truly means unset.
+            for (const name of REACTIVE_NUMERIC_ENV_VARS) {
+                delete process.env[name];
+            }
+        });
+
+        afterEach(() => {
+            for (const name of REACTIVE_NUMERIC_ENV_VARS) {
+                delete process.env[name];
+            }
+        });
+
+        describe('getConfig() numeric fields', () => {
+            it('uses documented defaults when unset', () => {
+                const config = getConfig();
+                expect(config.batch_size).toBe(5);
+                expect(config.max_workers).toBe(2);
+                expect(config.token_budget).toBe(10000);
+                expect(config.cache_ttl_ms).toBe(300000);
+                expect(config.step_timeout_ms).toBe(180000);
+                expect(config.max_retries).toBe(3);
+                expect(config.session_ttl_ms).toBe(3600000);
+                expect(config.max_sessions).toBe(100);
+                expect(config.session_execution_timeout_ms).toBe(1800000);
+            });
+
+            it('falls back to the default for malformed values', () => {
+                process.env.REACTIVE_BATCH_SIZE = 'not-a-number';
+                process.env.REACTIVE_MAX_RETRIES = '';
+                process.env.REACTIVE_MAX_WORKERS = '   ';
+
+                const config = getConfig();
+                expect(config.batch_size).toBe(5);
+                expect(config.max_retries).toBe(3);
+                expect(config.max_workers).toBe(2);
+            });
+
+            it('clamps negative values up to the minimum bound', () => {
+                process.env.REACTIVE_BATCH_SIZE = '-5';
+                process.env.REACTIVE_MAX_WORKERS = '-1';
+                process.env.REACTIVE_TOKEN_BUDGET = '-100';
+                process.env.REACTIVE_CACHE_TTL = '-1';
+                process.env.REACTIVE_STEP_TIMEOUT = '-1';
+                process.env.REACTIVE_SESSION_TTL = '-1';
+                process.env.REACTIVE_MAX_SESSIONS = '-1';
+                process.env.REACTIVE_EXECUTION_TIMEOUT = '-1';
+
+                const config = getConfig();
+                expect(config.batch_size).toBe(1);
+                expect(config.max_workers).toBe(1);
+                expect(config.token_budget).toBe(100);
+                expect(config.cache_ttl_ms).toBe(1_000);
+                expect(config.step_timeout_ms).toBe(1_000);
+                expect(config.session_ttl_ms).toBe(60_000);
+                expect(config.max_sessions).toBe(1);
+                expect(config.session_execution_timeout_ms).toBe(60_000);
+
+                // max_retries has a min of 0, so a negative value still clamps up to 0
+                process.env.REACTIVE_MAX_RETRIES = '-1';
+                expect(getConfig().max_retries).toBe(0);
+            });
+
+            it('clamps zero to the minimum bound when the minimum is positive', () => {
+                process.env.REACTIVE_BATCH_SIZE = '0';
+                process.env.REACTIVE_MAX_WORKERS = '0';
+                process.env.REACTIVE_MAX_SESSIONS = '0';
+
+                const config = getConfig();
+                expect(config.batch_size).toBe(1);
+                expect(config.max_workers).toBe(1);
+                expect(config.max_sessions).toBe(1);
+
+                // max_retries allows zero (min: 0)
+                process.env.REACTIVE_MAX_RETRIES = '0';
+                expect(getConfig().max_retries).toBe(0);
+            });
+
+            it('clamps overflow values down to the maximum bound', () => {
+                process.env.REACTIVE_BATCH_SIZE = '999999';
+                process.env.REACTIVE_MAX_WORKERS = '999999';
+                process.env.REACTIVE_TOKEN_BUDGET = '99999999';
+                process.env.REACTIVE_CACHE_TTL = '99999999999';
+                process.env.REACTIVE_STEP_TIMEOUT = '99999999999';
+                process.env.REACTIVE_MAX_RETRIES = '99999999';
+                process.env.REACTIVE_SESSION_TTL = '99999999999';
+                process.env.REACTIVE_MAX_SESSIONS = '99999999';
+                process.env.REACTIVE_EXECUTION_TIMEOUT = '99999999999';
+
+                const config = getConfig();
+                expect(config.batch_size).toBe(100);
+                expect(config.max_workers).toBe(32);
+                expect(config.token_budget).toBe(200_000);
+                expect(config.cache_ttl_ms).toBe(86_400_000);
+                expect(config.step_timeout_ms).toBe(1_800_000);
+                expect(config.max_retries).toBe(10);
+                expect(config.session_ttl_ms).toBe(86_400_000);
+                expect(config.max_sessions).toBe(10_000);
+                expect(config.session_execution_timeout_ms).toBe(86_400_000);
+            });
+
+            it('accepts exact boundary values unchanged', () => {
+                process.env.REACTIVE_BATCH_SIZE = '1';
+                process.env.REACTIVE_MAX_WORKERS = '32';
+                process.env.REACTIVE_MAX_RETRIES = '0';
+
+                const config = getConfig();
+                expect(config.batch_size).toBe(1);
+                expect(config.max_workers).toBe(32);
+                expect(config.max_retries).toBe(0);
+            });
+
+            it('accepts valid in-range values unchanged', () => {
+                process.env.REACTIVE_BATCH_SIZE = '20';
+                process.env.REACTIVE_MAX_WORKERS = '4';
+                process.env.REACTIVE_TOKEN_BUDGET = '50000';
+                process.env.REACTIVE_MAX_RETRIES = '5';
+
+                const config = getConfig();
+                expect(config.batch_size).toBe(20);
+                expect(config.max_workers).toBe(4);
+                expect(config.token_budget).toBe(50000);
+                expect(config.max_retries).toBe(5);
+            });
+
+            it('caps the CPU-optimized worker count to the same max_workers bound', () => {
+                process.env.REACTIVE_OPTIMIZE_WORKERS = 'true';
+
+                const config = getConfig();
+                expect(config.max_workers).toBeGreaterThanOrEqual(1);
+                expect(config.max_workers).toBeLessThanOrEqual(32);
+            });
+        });
+
+        describe('getCircuitBreakerConfig() numeric fields', () => {
+            it('uses documented defaults when unset', () => {
+                const cbConfig = getCircuitBreakerConfig();
+                expect(cbConfig).toEqual(DEFAULT_CIRCUIT_BREAKER_CONFIG);
+            });
+
+            it('falls back to the default for malformed values', () => {
+                process.env.REACTIVE_CB_FAILURE_THRESHOLD = 'nope';
+                expect(getCircuitBreakerConfig().failureThreshold).toBe(DEFAULT_CIRCUIT_BREAKER_CONFIG.failureThreshold);
+            });
+
+            it('clamps negative and zero values up to the minimum (1)', () => {
+                process.env.REACTIVE_CB_FAILURE_THRESHOLD = '-1';
+                process.env.REACTIVE_CB_SUCCESS_THRESHOLD = '0';
+                process.env.REACTIVE_CB_RESET_TIMEOUT = '-1';
+
+                const cbConfig = getCircuitBreakerConfig();
+                expect(cbConfig.failureThreshold).toBe(1);
+                expect(cbConfig.successThreshold).toBe(1);
+                expect(cbConfig.resetTimeout).toBe(100);
+            });
+
+            it('clamps overflow values down to the maximum bound', () => {
+                process.env.REACTIVE_CB_FAILURE_THRESHOLD = '999999';
+                process.env.REACTIVE_CB_SUCCESS_THRESHOLD = '999999';
+                process.env.REACTIVE_CB_RESET_TIMEOUT = '999999999';
+
+                const cbConfig = getCircuitBreakerConfig();
+                expect(cbConfig.failureThreshold).toBe(100);
+                expect(cbConfig.successThreshold).toBe(100);
+                expect(cbConfig.resetTimeout).toBe(3_600_000);
+            });
+
+            it('accepts exact boundary and valid in-range values unchanged', () => {
+                process.env.REACTIVE_CB_FAILURE_THRESHOLD = '1';
+                process.env.REACTIVE_CB_SUCCESS_THRESHOLD = '100';
+                process.env.REACTIVE_CB_RESET_TIMEOUT = '5000';
+
+                const cbConfig = getCircuitBreakerConfig();
+                expect(cbConfig.failureThreshold).toBe(1);
+                expect(cbConfig.successThreshold).toBe(100);
+                expect(cbConfig.resetTimeout).toBe(5000);
+            });
+        });
+
+        describe('getChunkedProcessingConfig() numeric fields', () => {
+            it('uses documented defaults when unset', () => {
+                const chunkConfig = getChunkedProcessingConfig();
+                expect(chunkConfig).toEqual(DEFAULT_CHUNKED_PROCESSING_CONFIG);
+            });
+
+            it('falls back to the default for malformed values', () => {
+                process.env.REACTIVE_CHUNK_SIZE = 'lots';
+                expect(getChunkedProcessingConfig().chunkSize).toBe(DEFAULT_CHUNKED_PROCESSING_CONFIG.chunkSize);
+            });
+
+            it('clamps negative and zero values up to the minimum bound', () => {
+                process.env.REACTIVE_CHUNK_THRESHOLD = '-1';
+                process.env.REACTIVE_CHUNK_SIZE = '0';
+                process.env.REACTIVE_INTER_CHUNK_DELAY = '-1';
+
+                const chunkConfig = getChunkedProcessingConfig();
+                expect(chunkConfig.chunkThreshold).toBe(1);
+                expect(chunkConfig.chunkSize).toBe(1);
+                // interChunkDelay allows 0 as its minimum
+                expect(chunkConfig.interChunkDelay).toBe(0);
+            });
+
+            it('clamps overflow values down to the maximum bound', () => {
+                process.env.REACTIVE_CHUNK_THRESHOLD = '99999999';
+                process.env.REACTIVE_CHUNK_SIZE = '99999999';
+                process.env.REACTIVE_INTER_CHUNK_DELAY = '99999999';
+
+                const chunkConfig = getChunkedProcessingConfig();
+                expect(chunkConfig.chunkThreshold).toBe(10_000);
+                expect(chunkConfig.chunkSize).toBe(1_000);
+                expect(chunkConfig.interChunkDelay).toBe(300_000);
+            });
+
+            it('accepts exact boundary values unchanged', () => {
+                process.env.REACTIVE_CHUNK_SIZE = '1';
+                process.env.REACTIVE_INTER_CHUNK_DELAY = '0';
+
+                const chunkConfig = getChunkedProcessingConfig();
+                expect(chunkConfig.chunkSize).toBe(1);
+                expect(chunkConfig.interChunkDelay).toBe(0);
+            });
         });
     });
 

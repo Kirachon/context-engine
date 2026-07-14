@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-14T23:31:24.363Z",
+  "inputs": {
+    "contract": "D:\\GitProjects\\context-engine\\config\\ci\\q3a-frozen-corpus-contract.json",
+    "base_dir": "D:\\GitProjects\\context-engine"
+  },
+  "contract_version": 1,
+  "lanes_fingerprint": "5fa4f0c04adf88934ebc713bb8b6483e3fae64df3d50e2466f4f8f404f93162d",
+  "lanes": [
+    {
+      "lane": "pr",
+      "content_sha256_actual": "f898d47ef47369e418edd4ed9afc0ba82f00b2e560e49fb99e263c73a2476a25",
+      "case_count_actual": 6,
+      "languages_actual": [
+        "go",
+        "python",
+        "typescript"
+      ],
+      "labels_actual": [
+        "fast-path",
+        "polyglot"
+      ]
+    },
+    {
+      "lane": "nightly",
+      "content_sha256_actual": "b1cbaafdea983d07d27c7eee10a18b0f37505f8a22c42abb3c9c3d5432114be4",
+      "case_count_actual": 8,
+      "languages_actual": [
+        "go",
+        "java",
+        "python",
+        "rust",
+        "typescript"
+      ],
+      "labels_actual": [
+        "broad-coverage",
+        "polyglot"
+      ]
+    },
+    {
+      "lane": "release",
+      "content_sha256_actual": "35b1d28a9c4a5db6257b979d44419be70a4fd6dd9d58affce6a44fce11bff743",
+      "case_count_actual": 10,
+      "languages_actual": [
+        "csharp",
+        "go",
+        "java",
+        "python",
+        "rust",
+        "typescript"
+      ],
+      "labels_actual": [
+        "polyglot",
+        "release-gate"
+      ]
+    },
+    {
+      "lane": "seeded_failure",
+      "content_sha256_actual": "8a3368f9b27d364f7091ba922098a75d6a0d6019586b170f62f9e280a947c114",
+      "case_count_actual": 6,
+      "languages_actual": [
+        "typescript"
+      ],
+      "labels_actual": [
+        "control-pass",
+        "regression-seed"
+      ]
+    },
+    {
+      "lane": "ambiguity",
+      "content_sha256_actual": "fa1b1aa2e2da09fe03f6f2d3a20be87d35f442ab07f65094137c36ef01b94ebb",
+      "case_count_actual": 5,
+      "languages_actual": [
+        "typescript"
+      ],
+      "labels_actual": [
+        "alias",
+        "import",
+        "method",
+        "re_export",
+        "same_name"
+      ]
+    },
+    {
+      "lane": "duplicate",
+      "content_sha256_actual": "1346af17cdab776d30c87e0271f11d77c05c8df322800d2a70877d3b8e35295c",
+      "case_count_actual": 5,
+      "languages_actual": [
+        "typescript"
+      ],
+      "labels_actual": [
+        "distinct",
+        "exact-duplicate",
+        "near-duplicate-window"
+      ]
+    },
+    {
+      "lane": "performance",
+      "content_sha256_actual": "fa4ce4309fe20f71db874e8807d22baf85ab9745d228fcc7ebd5b44c6ce58774",
+      "case_count_actual": 4,
+      "languages_actual": [
+        "mixed"
+      ],
+      "labels_actual": [
+        "full-index",
+        "incremental-refresh",
+        "large-corpus",
+        "sustained-load",
+        "synthetic"
+      ]
+    }
+  ],
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  }
+}
