@@ -3,10 +3,10 @@
   "task_id": "D1a",
   "title": "Generated docs and version reconciliation",
   "owner_lane": "Governance / F0",
-  "depends_on_note": "Full post-T1d2 re-verification remains required after transport migration; this contract freezes current 52-tool / 1.9.0 alignment now.",
+  "depends_on_note": "Full post-T1d2 re-verification remains required after transport migration; this contract freezes current 52-tool / 1.9.1 alignment now.",
   "depends_on": ["R6"],
   "expected": {
-    "package_version": "1.9.0",
+    "package_version": "1.9.1",
     "mcp_server_version_export": "MCP_SERVER_VERSION",
     "mcp_tool_count": 52,
     "rest_mapping_count": 20,

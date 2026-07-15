@@ -24,7 +24,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
       "tool": {
         "driver": {
           "name": "context-engine-review",
-          "version": "1.9.0",
+          "version": "1.9.1",
           "rules": [
             {
               "id": "PRE001",
@@ -173,7 +173,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
     "llm_findings_added": 0
   },
   "metadata": {
-    "tool_version": "1.9.0",
+    "tool_version": "1.9.1",
     "warnings": []
   },
   "sarif": {
@@ -184,7 +184,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
         "tool": {
           "driver": {
             "name": "context-engine-review",
-            "version": "1.9.0",
+            "version": "1.9.1",
             "rules": [
               {
                 "id": "PRE001",
@@ -304,7 +304,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
       "tool": {
         "driver": {
           "name": "context-engine-review",
-          "version": "1.9.0",
+          "version": "1.9.1",
           "rules": [
             {
               "id": "PRE001",
@@ -453,7 +453,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
     "llm_findings_added": 0
   },
   "metadata": {
-    "tool_version": "1.9.0",
+    "tool_version": "1.9.1",
     "warnings": []
   },
   "sarif": {
@@ -464,7 +464,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
         "tool": {
           "driver": {
             "name": "context-engine-review",
-            "version": "1.9.0",
+            "version": "1.9.1",
             "rules": [
               {
                 "id": "PRE001",
@@ -588,7 +588,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
       "tool": {
         "driver": {
           "name": "context-engine-review",
-          "version": "1.9.0",
+          "version": "1.9.1",
           "rules": [
             {
               "id": "SEC001",
@@ -739,7 +739,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
     "llm_findings_added": 0
   },
   "metadata": {
-    "tool_version": "1.9.0",
+    "tool_version": "1.9.1",
     "warnings": []
   },
   "sarif": {
@@ -750,7 +750,7 @@ exports[`CI artifacts: scripts/ci/review-diff.ts (deterministic, LLM-off) produc
         "tool": {
           "driver": {
             "name": "context-engine-review",
-            "version": "1.9.0",
+            "version": "1.9.1",
             "rules": [
               {
                 "id": "SEC001",

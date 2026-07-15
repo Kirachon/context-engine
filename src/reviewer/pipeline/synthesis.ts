@@ -8,7 +8,7 @@ import type { EnterpriseFinding, EnterpriseReviewResult } from '../types.js';
 import type { ReviewAnalyzerResults, ReviewDiffStaticAnalysisMetadata } from './analyzerOrchestrator.js';
 import type { ReviewDiffInput } from '../reviewDiff.js';
 
-const TOOL_VERSION = '1.9.0';
+const TOOL_VERSION = '1.9.1';
 
 export type ReviewDiffResultWithStaticMetadata = EnterpriseReviewResult & {
   static_analysis?: ReviewDiffStaticAnalysisMetadata;

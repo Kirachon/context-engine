@@ -16,7 +16,7 @@ export interface ToolManifestArgs {
   // No arguments
 }
 
-export const MCP_SERVER_VERSION = '1.9.0';
+export const MCP_SERVER_VERSION = '1.9.1';
 
 export const toolManifest = {
   version: MCP_SERVER_VERSION,
