@@ -42,6 +42,7 @@ Changed-file SHA-256 values:
 | `npm run ci:check:docs-version-reconciliation` | PASS |
 | `npm run ci:check:evidence-date-contract` | PASS |
 | `npm run ci:check:mcp-compatibility` | PASS: 6/6 checks and eval smoke |
+| `npm run ci:check:supported-distribution-pack-proof` | PASS: clean install and CLI help |
 | `npm run ci:run:measurement-gated-experiments` | RECORDED: M1-M3 `not-verified` |
 | `git diff --check` | PASS |
 | Context Engine deterministic diff review | PASS: no findings |
