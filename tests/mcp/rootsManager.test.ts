@@ -177,9 +177,14 @@ describe('RootsManager', () => {
     const discoverWorkspaceFiles = (serviceClient as unknown as {
       discoverWorkspaceFiles: () => Promise<string[]>;
     }).discoverWorkspaceFiles.bind(serviceClient);
+    const nativeAllowedPath = path.join('src', 'allowed.ts');
+    const nativeBlockedPath = path.join('docs', 'blocked.md');
     await expect(discoverWorkspaceFiles()).resolves.toEqual([path.join('src', 'allowed.ts')]);
     expect(manager.filterAllowedRelativePaths(['src/allowed.ts', 'docs/blocked.md'])).toEqual([
       'src/allowed.ts',
+    ]);
+    expect(manager.filterAllowedRelativePaths([nativeAllowedPath, nativeBlockedPath])).toEqual([
+      nativeAllowedPath,
     ]);
   });
 

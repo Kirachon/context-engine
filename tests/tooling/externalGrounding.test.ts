@@ -62,7 +62,9 @@ describe('externalGrounding', () => {
       const normalized = validateAndNormalizeExternalSources([
         { type: 'docs_url', url: 'https://example.com/docs' },
       ]);
-      const result = await fetchExternalGrounding(normalized);
+      const result = await fetchExternalGrounding(normalized, {
+        dnsLookup: async () => [{ address: '93.184.216.34', family: 4 }],
+      });
 
       expect(result.references).toEqual([]);
       expect(result.warnings).toEqual([

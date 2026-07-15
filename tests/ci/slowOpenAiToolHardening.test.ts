@@ -205,8 +205,9 @@ describe('slow OpenAI tool hardening gate', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('aborts slow tool work when the request closes or times out', async () => {
+  it('aborts slow tool work when the response closes or times out', async () => {
     const closeReq = new EventEmitter() as unknown as Request;
+    const closeRes = Object.assign(new EventEmitter(), { writableEnded: false }) as unknown as Response;
     const closePromise = runAbortableTool(closeReq, 250, 'Slow OpenAI tool', async (signal) => {
       await new Promise<void>((resolve, reject) => {
         signal.addEventListener(
@@ -218,8 +219,8 @@ describe('slow OpenAI tool hardening gate', () => {
         );
       });
       return 'done';
-    });
-    closeReq.emit('close');
+    }, closeRes);
+    closeRes.emit('close');
     await expect(closePromise).rejects.toMatchObject({ name: 'AbortError' });
 
     const timeoutReq = new EventEmitter() as unknown as Request;
@@ -236,6 +237,20 @@ describe('slow OpenAI tool hardening gate', () => {
       return 'done';
     });
     await expect(timeoutPromise).rejects.toThrow('timed out after 20ms');
+  });
+
+  it('does not cancel normal work when the request body closes', async () => {
+    const req = new EventEmitter() as unknown as Request;
+    const res = Object.assign(new EventEmitter(), { writableEnded: false }) as unknown as Response;
+
+    const resultPromise = runAbortableTool(req, 250, 'Slow OpenAI tool', async (signal) => {
+      req.emit('close');
+      await Promise.resolve();
+      expect(signal.aborted).toBe(false);
+      return 'done';
+    }, res);
+
+    await expect(resultPromise).resolves.toBe('done');
   });
 
   it('extends request and response socket timeouts to match the tool budget', async () => {

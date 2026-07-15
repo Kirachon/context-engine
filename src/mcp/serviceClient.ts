@@ -2636,7 +2636,7 @@ export class ContextServiceClient {
 
       for (const entry of entries) {
         const fullPath = path.join(dirPath, entry.name);
-        const relativePath = path.relative(relativeTo, fullPath).replace(/\\/g, '/');
+        const relativePath = path.relative(relativeTo, fullPath);
 
         // Skip hidden files/directories (starting with .) except for special dotfiles
         if (entry.name.startsWith('.') && !INDEXABLE_FILES_BY_NAME.has(entry.name)) {
