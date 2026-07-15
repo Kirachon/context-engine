@@ -937,6 +937,15 @@ function buildExpandedQueries(query: string, options: NormalizedRetrievalOptions
   return expanded;
 }
 
+function isOfflineLocalNativeClient(serviceClient: ContextServiceClient): boolean {
+  const offlineFlag = process.env.CONTEXT_ENGINE_OFFLINE_ONLY?.toLowerCase();
+  if (offlineFlag !== '1' && offlineFlag !== 'true' && offlineFlag !== 'yes' && offlineFlag !== 'on') {
+    return false;
+  }
+  return typeof serviceClient.getActiveRetrievalProviderId === 'function'
+    && serviceClient.getActiveRetrievalProviderId() === 'local_native';
+}
+
 function resolveFusionWeights(
   query: string,
   settings: NormalizedRetrievalOptions
@@ -1114,7 +1123,10 @@ export async function retrieve(
         noteRetrievalStage(flow, `graph:seed_symbols:${graphContext.seedSymbols.length}`);
       }
       const expandedQueries = withStageTiming(flow, 'expand_queries', () =>
-        mergeExpandedQueriesWithGraph(buildExpandedQueries(query, settings), graphContext)
+        mergeExpandedQueriesWithGraph(
+          buildExpandedQueries(query, settings),
+          settings.enableExpansion ? graphContext : { ...graphContext, graphVariants: [] }
+        )
       );
       setRetrievalTraceAttributes({ 'retrieval.expanded_query_count': expandedQueries.length });
       noteRetrievalStage(flow, `expanded_queries:${expandedQueries.length}`);
@@ -1135,8 +1147,10 @@ export async function retrieve(
           }
         ) => Promise<SearchResult[]>;
       }).localKeywordSearch;
-      const enabledBackends: FanoutBackend[] = ['semantic'];
-      if (settings.enableLexical && typeof localKeywordSearch === 'function') {
+      const offlineLocalNative = isOfflineLocalNativeClient(serviceClient);
+      const canUseLexical = settings.enableLexical && typeof localKeywordSearch === 'function';
+      const enabledBackends: FanoutBackend[] = offlineLocalNative && canUseLexical ? ['lexical'] : ['semantic'];
+      if (!offlineLocalNative && canUseLexical) {
         enabledBackends.push('lexical');
       }
       if (settings.enableDense && denseProvider) {
@@ -1223,25 +1237,27 @@ export async function retrieve(
         async () => Promise.all(
           expandedQueries.map(async (variant) => {
             assertRetrievalFlowActive(flow, `variant:${variant.index}`);
-            const semanticPromise = runFanoutSearch(
-              'semantic',
-              variant,
-              () => runAbortAwareFanoutOperation(
-                flow,
-                `variant:${variant.index}:semantic`,
-                () => semanticSearch(variant.query, settings.perQueryTopK),
-                settings.timeoutMs,
-                [] as SearchResult[],
-                (error) => {
-                  if (settings.log) {
-                    console.error(
-                      `[retrieve] Semantic fanout failed (variantIndex=${variant.index}, queryLength=${variant.query.length}):`,
-                      error
-                    );
-                  }
-                }
-              )
-            );
+            const semanticPromise = offlineLocalNative && canUseLexical
+              ? Promise.resolve([] as SearchResult[])
+              : runFanoutSearch(
+                  'semantic',
+                  variant,
+                  () => runAbortAwareFanoutOperation(
+                    flow,
+                    `variant:${variant.index}:semantic`,
+                    () => semanticSearch(variant.query, settings.perQueryTopK),
+                    settings.timeoutMs,
+                    [] as SearchResult[],
+                    (error) => {
+                      if (settings.log) {
+                        console.error(
+                          `[retrieve] Semantic fanout failed (variantIndex=${variant.index}, queryLength=${variant.query.length}):`,
+                          error
+                        );
+                      }
+                    }
+                  )
+                );
 
             const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
               ? runFanoutSearch(
@@ -1364,10 +1380,11 @@ export async function retrieve(
         [...semanticCandidates, ...lexicalCandidates, ...denseCandidates],
         graphContext
       );
-      flow.metadata.graphVariantCount = graphContext.graphVariants.length;
-      if (graphContext.graphVariants.length > 0) {
-        flow.metadata.graphExpandedQueries = graphContext.graphVariants.map((variant) => variant.query);
-        noteRetrievalStage(flow, `graph:variants:${graphContext.graphVariants.length}`);
+      const appliedGraphVariants = settings.enableExpansion ? graphContext.graphVariants : [];
+      flow.metadata.graphVariantCount = appliedGraphVariants.length;
+      if (appliedGraphVariants.length > 0) {
+        flow.metadata.graphExpandedQueries = appliedGraphVariants.map((variant) => variant.query);
+        noteRetrievalStage(flow, `graph:variants:${appliedGraphVariants.length}`);
       }
 
       if (settings.enableDedupe) {

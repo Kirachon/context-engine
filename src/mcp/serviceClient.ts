@@ -742,6 +742,11 @@ type LexicalSearchEngine = {
   clearCache?: () => void;
 };
 
+// A lexical index is a workspace resource, not a per-client resource. Reusing
+// the initialized engine prevents every short-lived client from rescanning and
+// hashing the entire workspace before its first local-native retrieval.
+const sharedLexicalSearchEngines = new Map<string, LexicalSearchEngine>();
+
 type LexicalSearchOptions = {
   bypassCache?: boolean;
   workspacePath?: string;
@@ -885,6 +890,45 @@ const FALLBACK_SEARCH_READ_CONCURRENCY = envInt('CE_FALLBACK_SEARCH_READ_CONCURR
   min: 1,
   max: 16,
 });
+
+type SharedFallbackFileList = {
+  workspacePath: string;
+  cacheKey: string;
+  cachedAt: number;
+  files: string[];
+};
+
+const sharedFallbackFileListCache = new Map<string, SharedFallbackFileList>();
+
+function clearSharedFallbackFileListCache(workspacePath: string): void {
+  const normalizedWorkspacePath = path.resolve(workspacePath);
+  for (const [cacheKey, entry] of sharedFallbackFileListCache.entries()) {
+    if (entry.workspacePath === normalizedWorkspacePath) {
+      sharedFallbackFileListCache.delete(cacheKey);
+    }
+  }
+}
+
+type SharedFallbackFileContent = {
+  workspacePath: string;
+  mtimeMs: number;
+  size: number;
+  cachedAt: number;
+  content: string;
+};
+
+const MAX_SHARED_FALLBACK_FILE_CONTENT_ENTRIES = 4096;
+const sharedFallbackFileContentCache = new Map<string, SharedFallbackFileContent>();
+
+function clearSharedFallbackFileContentCache(workspacePath: string): void {
+  const normalizedWorkspacePath = path.resolve(workspacePath);
+  for (const [filePath, entry] of sharedFallbackFileContentCache.entries()) {
+    if (entry.workspacePath === normalizedWorkspacePath) {
+      sharedFallbackFileContentCache.delete(filePath);
+    }
+  }
+}
+
 type SearchAndAskPriority = 'interactive' | 'background';
 
 function formatScopedLog(message: string): string {
@@ -1915,6 +1959,19 @@ export class ContextServiceClient {
       return cached.files;
     }
 
+    if (!bypassCache) {
+      const sharedCached = sharedFallbackFileListCache.get(cacheKey);
+      if (
+        sharedCached
+        && sharedCached.workspacePath === path.resolve(this.workspacePath)
+        && sharedCached.cacheKey === cacheKey
+        && (now - sharedCached.cachedAt) <= FALLBACK_DISCOVER_FILES_CACHE_TTL_MS
+      ) {
+        this.fallbackDiscoverFilesCache = sharedCached;
+        return sharedCached.files;
+      }
+    }
+
     const fetchFiles = this.discoverWorkspaceFiles();
     if (!bypassCache) {
       this.fallbackDiscoverFilesInFlight = fetchFiles;
@@ -1930,14 +1987,69 @@ export class ContextServiceClient {
     }
 
     if (!bypassCache) {
-      this.fallbackDiscoverFilesCache = {
+      const sharedCacheEntry = {
+        workspacePath: path.resolve(this.workspacePath),
         cacheKey,
         cachedAt: Date.now(),
         files,
       };
+      sharedFallbackFileListCache.set(cacheKey, sharedCacheEntry);
+      this.fallbackDiscoverFilesCache = sharedCacheEntry;
     }
 
     return files;
+  }
+
+  private async getFallbackSearchFileContent(filePath: string, bypassCache: boolean): Promise<string> {
+    const workspacePath = path.resolve(this.workspacePath);
+    const candidatePath = path.resolve(this.workspacePath, filePath);
+
+    if (!bypassCache) {
+      const cached = sharedFallbackFileContentCache.get(candidatePath);
+      if (cached && cached.workspacePath === workspacePath) {
+        try {
+          const safeFullPath = resolveRealPathInsideWorkspace(this.workspacePath, candidatePath);
+          const stats = fs.statSync(safeFullPath);
+          if (
+            (Date.now() - cached.cachedAt) <= FALLBACK_DISCOVER_FILES_CACHE_TTL_MS
+            && stats.size <= MAX_FILE_SIZE
+            && cached.mtimeMs === stats.mtimeMs
+            && cached.size === stats.size
+          ) {
+            return cached.content;
+          }
+        } catch {
+          // Fall through to the secure getFile path for missing or changed files.
+        }
+      }
+    }
+
+    const content = await this.getFile(filePath);
+    if (!bypassCache) {
+      try {
+        const fullPath = this.validateFilePath(filePath);
+        const safeFullPath = resolveRealPathInsideWorkspace(this.workspacePath, fullPath);
+        const stats = fs.statSync(safeFullPath);
+        if (stats.size <= MAX_FILE_SIZE) {
+          if (sharedFallbackFileContentCache.size >= MAX_SHARED_FALLBACK_FILE_CONTENT_ENTRIES) {
+            const oldestKey = sharedFallbackFileContentCache.keys().next().value;
+            if (oldestKey) {
+              sharedFallbackFileContentCache.delete(oldestKey);
+            }
+          }
+          sharedFallbackFileContentCache.set(path.resolve(safeFullPath), {
+            workspacePath,
+            mtimeMs: stats.mtimeMs,
+            size: stats.size,
+            cachedAt: Date.now(),
+            content,
+          });
+        }
+      } catch {
+        // Test doubles or a disappearing file: return the secure getFile result without caching.
+      }
+    }
+    return content;
   }
 
   private getIndexStateStore(): JsonIndexStateStore | null {
@@ -2032,6 +2144,7 @@ export class ContextServiceClient {
 
   setRootsManager(rootsManager: RootsManager | null): void {
     this.rootsManager = rootsManager;
+    clearSharedFallbackFileListCache(this.workspacePath);
     this.fallbackDiscoverFilesCache = null;
   }
 
@@ -2870,6 +2983,8 @@ export class ContextServiceClient {
     this.keywordFallbackSearchInFlight.clear();
     this.clearChunkSearchEngineCache();
     this.clearLexicalSqliteSearchEngineCache();
+    clearSharedFallbackFileListCache(this.workspacePath);
+    clearSharedFallbackFileContentCache(this.workspacePath);
     this.cacheHits = 0;
     this.cacheMisses = 0;
     this.fallbackDiscoverFilesCache = null;
@@ -2920,7 +3035,7 @@ export class ContextServiceClient {
     await this.graphAccess.refresh(options);
   }
 
-  private async getGraphNavigationSnapshot(): Promise<ServiceClientGraphNavigationSnapshot> {
+  async getGraphNavigationSnapshot(): Promise<ServiceClientGraphNavigationSnapshot> {
     return this.graphAccess.getNavigationSnapshot();
   }
 
@@ -3242,13 +3357,39 @@ export class ContextServiceClient {
       return null;
     }
 
+    const workspaceKey = path.resolve(this.workspacePath);
+    const sharedEngine = sharedLexicalSearchEngines.get(workspaceKey);
+    if (sharedEngine) {
+      this.lexicalSqliteSearchEngine = sharedEngine;
+      return sharedEngine;
+    }
+
     this.lexicalSqliteSearchEngineLoadAttempted = true;
 
     try {
-      const moduleExports = nodeRequire('../internal/retrieval/sqliteLexicalIndex.js') as Record<string, unknown>;
+      const modulePaths = [
+        '../internal/retrieval/sqliteLexicalIndex.js',
+        path.resolve(
+          path.dirname(fileURLToPath(import.meta.url)),
+          '../../dist/internal/retrieval/sqliteLexicalIndex.js'
+        ),
+      ];
+      let moduleExports: Record<string, unknown> | null = null;
+      for (const modulePath of modulePaths) {
+        try {
+          moduleExports = nodeRequire(modulePath) as Record<string, unknown>;
+          break;
+        } catch {
+          // Source-mode execution may not have a sibling .js helper; try dist.
+        }
+      }
+      if (!moduleExports) {
+        return null;
+      }
       const engine = this.buildLexicalSqliteSearchEngineFromModule(moduleExports);
       if (engine) {
         this.lexicalSqliteSearchEngine = engine;
+        sharedLexicalSearchEngines.set(workspaceKey, engine);
         return engine;
       }
     } catch (error) {
@@ -6077,7 +6218,7 @@ export class ContextServiceClient {
           candidate: { filePath: string; score: number }
         ): Promise<(SearchResult & { __score: number }) | null> => {
           try {
-            const content = await this.getFile(candidate.filePath);
+            const content = await this.getFallbackSearchFileContent(candidate.filePath, bypassCache);
             const lowerContent = content.toLowerCase();
             let matchIndex = lowerContent.indexOf(normalizedQuery);
             if (matchIndex === -1) {

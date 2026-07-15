@@ -1094,6 +1094,11 @@ describe('retrieve internal pipeline', () => {
           return [];
         }),
         localKeywordSearch: jest.fn(async () => []),
+        getGraphNavigationSnapshot: jest.fn(async () => ({
+          payload: graphStore.getGraph(),
+          snapshot: graphStore.getSnapshot(),
+          fallbackReason: null,
+        })),
       } as any;
 
       const results = await retrieve('login service', serviceClient, {
