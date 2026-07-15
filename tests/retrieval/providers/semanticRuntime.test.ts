@@ -14,6 +14,10 @@ describe('semanticRuntime helpers', () => {
     expect(sanitizeResultPath('nested\\file.ts')).toBe('nested/file.ts');
     expect(sanitizeResultPath('../secret.ts')).toBeNull();
     expect(sanitizeResultPath('C:/abs/file.ts')).toBeNull();
+    expect(sanitizeResultPath('C:\\abs\\file.ts')).toBeNull();
+    expect(sanitizeResultPath('C:relative/file.ts')).toBeNull();
+    expect(sanitizeResultPath('\\\\server\\share\\file.ts')).toBeNull();
+    expect(sanitizeResultPath('/abs/file.ts')).toBeNull();
   });
 
   it('builds a strict JSON-only semantic search prompt', () => {

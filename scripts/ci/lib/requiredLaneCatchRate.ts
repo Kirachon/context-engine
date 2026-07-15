@@ -15,8 +15,8 @@
 import fs from 'fs';
 import path from 'path';
 import {
+  eolInvariantSha256Hexes,
   readJson,
-  sha256Hex,
   type CorpusCase,
   type CorpusFile,
   type FrozenCorpusContract,
@@ -265,12 +265,15 @@ export function loadSeededFailureCorpus(
   }
 
   const raw = fs.readFileSync(resolvedCorpus, 'utf8');
-  const corpusSha256 = sha256Hex(raw);
-  if (corpusSha256 !== lane.content_sha256) {
+  if (!eolInvariantSha256Hexes(raw).includes(lane.content_sha256)) {
+    const actualHash = eolInvariantSha256Hexes(raw)[0];
     throw new RequiredLaneCatchRateError(
-      `Corpus sha256 mismatch for seeded_failure: expected ${lane.content_sha256}, got ${corpusSha256}`
+      `Corpus sha256 mismatch for seeded_failure: expected ${lane.content_sha256}, got ${actualHash}`
     );
   }
+  // Keep the receipt's provenance stable across Git's platform-dependent
+  // working-tree line endings by reporting the pinned contract hash.
+  const corpusSha256 = lane.content_sha256;
 
   const corpus = JSON.parse(raw) as CorpusFile;
   const minCatchRatePct = Number(lane.thresholds?.min_catch_rate_pct);

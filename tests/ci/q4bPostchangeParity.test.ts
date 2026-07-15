@@ -68,6 +68,15 @@ function sha256(input: string): string {
   return crypto.createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
+function sha256EolVariants(input: string): string[] {
+  const normalized = input.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return [...new Set([
+    sha256(input),
+    sha256(normalized),
+    sha256(normalized.replace(/\n/g, '\r\n')),
+  ])];
+}
+
 const inventory = readJson<Inventory>('config/ci/q4b-postchange-parity.json');
 
 describe('config/ci/q4b-postchange-parity.json', () => {
@@ -193,6 +202,6 @@ describe('Q4b live fingerprint cross-check (inherits Q4a frozen hashes)', () => 
       'artifacts/plan/context-engine-remediation-q4b-parity.json'
     );
     const text = fs.readFileSync(path.join(REPO_ROOT, receipt.parity_inventory_path), 'utf8');
-    expect(sha256(text)).toBe(receipt.parity_inventory_sha256);
+    expect(sha256EolVariants(text)).toContain(receipt.parity_inventory_sha256);
   });
 });

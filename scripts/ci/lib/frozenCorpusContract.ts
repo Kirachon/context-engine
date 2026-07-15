@@ -87,6 +87,25 @@ export function sha256Hex(value: string): string {
   return createHash('sha256').update(value).digest('hex');
 }
 
+/** Normalize transport-level line endings without changing JSON semantics. */
+export function normalizeLineEndings(value: string): string {
+  return value.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+}
+
+/**
+ * Return the raw, LF, and CRLF hashes for a text file. Frozen corpus receipts
+ * were authored on Windows, while CI validates the same Git blobs on Linux;
+ * line-ending conversion must not be mistaken for corpus content drift.
+ */
+export function eolInvariantSha256Hexes(value: string): string[] {
+  const normalized = normalizeLineEndings(value);
+  return [...new Set([
+    sha256Hex(value),
+    sha256Hex(normalized),
+    sha256Hex(normalized.replace(/\n/g, '\r\n')),
+  ])];
+}
+
 /**
  * Deterministic canonical JSON serialization: object keys are sorted
  * recursively so semantically identical content always fingerprints
@@ -204,7 +223,7 @@ export function validateFrozenCorpusContract(
     const rawText = fs.readFileSync(resolvedCorpusPath, 'utf8');
     const actualHash = sha256Hex(rawText);
     detail.content_sha256_actual = actualHash;
-    if (actualHash !== entry.content_sha256) {
+    if (!eolInvariantSha256Hexes(rawText).includes(entry.content_sha256)) {
       reasons.push(
         `lane "${laneKey}": corpus content hash mismatch (pinned=${entry.content_sha256} actual=${actualHash}); bump the contract version if this drift is intentional`
       );

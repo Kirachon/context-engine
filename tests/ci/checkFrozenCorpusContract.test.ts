@@ -11,6 +11,7 @@ import {
 } from '../../scripts/ci/lib/frozenCorpusContract';
 
 const CONTRACT_PATH = 'config/ci/q3a-frozen-corpus-contract.json';
+const DEFAULT_TEST_OUT = path.join(os.tmpdir(), `context-engine-frozen-corpus-check-${process.pid}.json`);
 
 function writeContract(filePath: string, contract: FrozenCorpusContract): void {
   fs.mkdirSync(path.dirname(filePath), { recursive: true });
@@ -29,7 +30,8 @@ function copyFrozenCorpora(destDir: string): void {
 function runChecker(args: string[]): { status: number; stdout: string; stderr: string } {
   const tsxCli = path.join(process.cwd(), 'node_modules', 'tsx', 'dist', 'cli.mjs');
   const script = path.join(process.cwd(), 'scripts', 'ci', 'check-frozen-corpus-contract.ts');
-  const res = spawnSync(process.execPath, [tsxCli, script, ...args], {
+  const effectiveArgs = args.includes('--out') ? args : [...args, '--out', DEFAULT_TEST_OUT];
+  const res = spawnSync(process.execPath, [tsxCli, script, ...effectiveArgs], {
     cwd: process.cwd(),
     env: process.env,
     encoding: 'utf-8',
@@ -51,7 +53,9 @@ describe('scripts/ci/check-frozen-corpus-contract.ts', () => {
   });
 
   it('passes for the real, unmodified contract and pinned corpora', () => {
-    const result = runChecker(['--contract', CONTRACT_PATH]);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-frozen-corpus-real-contract-'));
+    const outPath = path.join(tmpDir, 'q3a-frozen-corpus-contract-check.json');
+    const result = runChecker(['--contract', CONTRACT_PATH, '--out', outPath]);
 
     expect(result.status).toBe(0);
     expect(result.stdout).toContain('Frozen corpus contract validation passed.');

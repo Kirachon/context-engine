@@ -78,7 +78,9 @@ describe('getGitStatus', () => {
     const result = await getGitStatus(workspacePath);
 
     expect(result.is_git_repo).toBe(true);
-    expect(result.current_branch).toBeDefined();
+    // GitHub Actions checks out commits in detached HEAD state, so there is
+    // no branch name in CI even though the directory is a valid Git repo.
+    expect(result.current_branch === undefined || result.current_branch.length > 0).toBe(true);
   });
 
   it('should detect non-existent path as not a git repo', async () => {

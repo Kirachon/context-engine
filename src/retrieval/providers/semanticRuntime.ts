@@ -284,7 +284,10 @@ export function buildSemanticSearchPrompt(
 export function sanitizeResultPath(rawPath: string): string | null {
   const normalized = rawPath.trim().replace(/\\/g, '/');
   if (!normalized) return null;
-  if (path.isAbsolute(normalized)) return null;
+  // `path.isAbsolute` only recognizes the host platform's syntax. Provider
+  // results can originate on another platform, so reject POSIX roots and
+  // Windows drive/UNC paths explicitly before applying traversal checks.
+  if (path.isAbsolute(normalized) || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return null;
   if (normalized.startsWith('..') || normalized.includes('/../') || normalized.includes('..' + path.posix.sep)) return null;
 
   return normalized;

@@ -2071,6 +2071,27 @@ describe('ContextServiceClient', () => {
       fs.rmSync(tempDir, { recursive: true, force: true });
     });
 
+    it('should use the local-native index in offline mode without calling searchAndAsk', async () => {
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-offline-local-native-'));
+      process.env.CONTEXT_ENGINE_OFFLINE_ONLY = '1';
+      process.env.CE_RETRIEVAL_PROVIDER = 'local_native';
+      const offlineClient = new ContextServiceClient(tempDir);
+      const searchAndAskSpy = jest.spyOn(offlineClient, 'searchAndAsk');
+      fs.writeFileSync(
+        path.join(tempDir, 'offline-native.ts'),
+        'export const offlineNativeNeedle = true;\n',
+        'utf-8'
+      );
+
+      await offlineClient.indexWorkspace();
+      const results = await offlineClient.semanticSearch('offlineNativeNeedle', 5, { bypassCache: true });
+
+      expect(results.some((result) => result.path === 'offline-native.ts')).toBe(true);
+      expect(searchAndAskSpy).not.toHaveBeenCalled();
+
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    });
+
     it('should reject searchAndAsk when offline mode is enabled with openai_session provider', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-offline-openai-'));
       process.env.CONTEXT_ENGINE_OFFLINE_ONLY = '1';

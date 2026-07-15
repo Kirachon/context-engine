@@ -71,6 +71,15 @@ function sha256(input: string): string {
   return crypto.createHash('sha256').update(input, 'utf8').digest('hex');
 }
 
+function sha256EolVariants(input: string): string[] {
+  const normalized = input.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+  return [...new Set([
+    sha256(input),
+    sha256(normalized),
+    sha256(normalized.replace(/\n/g, '\r\n')),
+  ])];
+}
+
 const inventory = readJson<Inventory>('config/ci/q4a-prechange-goldens.json');
 
 describe('config/ci/q4a-prechange-goldens.json', () => {
@@ -240,6 +249,6 @@ describe('Q4a live fingerprint cross-check (fails closed on undeclared drift bef
       'artifacts/plan/context-engine-remediation-q4a-goldens.json'
     );
     const inventoryText = fs.readFileSync(path.join(REPO_ROOT, receipt.golden_inventory_path), 'utf8');
-    expect(sha256(inventoryText)).toBe(receipt.golden_inventory_sha256);
+    expect(sha256EolVariants(inventoryText)).toContain(receipt.golden_inventory_sha256);
   });
 });
