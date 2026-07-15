@@ -109,7 +109,11 @@ function waitForServerReady(
 
 function stopChildProcess(child: ReturnType<typeof spawn>): Promise<void> {
   return new Promise((resolve, reject) => {
-    if (child.exitCode !== null) {
+    if (
+      child.exitCode !== null
+      && (child.stdout?.readableEnded ?? true)
+      && (child.stderr?.readableEnded ?? true)
+    ) {
       resolve();
       return;
     }
@@ -121,7 +125,7 @@ function stopChildProcess(child: ReturnType<typeof spawn>): Promise<void> {
       }
       settled = true;
       clearTimeout(forceTimer);
-      child.off('exit', onExit);
+      child.off('close', onClose);
       child.off('error', onError);
       if (error) {
         reject(error);
@@ -130,7 +134,7 @@ function stopChildProcess(child: ReturnType<typeof spawn>): Promise<void> {
       resolve();
     };
 
-    const onExit = (): void => finish();
+    const onClose = (): void => finish();
     const onError = (error: Error): void => finish(error);
 
     const forceTimer = setTimeout(() => {
@@ -147,9 +151,18 @@ function stopChildProcess(child: ReturnType<typeof spawn>): Promise<void> {
       finish();
     }, 5000);
 
-    child.once('exit', onExit);
+    child.once('close', onClose);
     child.once('error', onError);
     child.kill('SIGTERM');
+  });
+}
+
+function removeTempTree(target: string): void {
+  fs.rmSync(target, {
+    recursive: true,
+    force: true,
+    maxRetries: 5,
+    retryDelay: 100,
   });
 }
 
@@ -354,7 +367,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(server.stderr).not.toContain('Background indexing scheduled');
     } finally {
       await server.stop();
-      fs.rmSync(repoRoot, { recursive: true, force: true });
+      removeTempTree(repoRoot);
     }
   });
 
@@ -392,7 +405,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(stderrRef.value).not.toContain(`Workspace: ${path.resolve(nested)}`);
     } finally {
       await stopChildProcess(child);
-      fs.rmSync(tempRoot, { recursive: true, force: true });
+      removeTempTree(tempRoot);
     }
   });
 
@@ -432,7 +445,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(stderrRef.value).not.toContain(`Workspace: ${path.resolve(repoRoot)}`);
     } finally {
       await stopChildProcess(child);
-      fs.rmSync(tempRoot, { recursive: true, force: true });
+      removeTempTree(tempRoot);
     }
   });
 
@@ -459,7 +472,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(result.stderr).toContain('Error: --workspace requires a path argument');
       expect(result.stderr).not.toContain('Starting MCP server (stdio)...');
     } finally {
-      fs.rmSync(repoRoot, { recursive: true, force: true });
+      removeTempTree(repoRoot);
     }
   });
 
@@ -487,7 +500,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(result.stderr).toContain('Workspace path does not exist');
       expect(result.stderr).not.toContain('Starting MCP server (stdio)...');
     } finally {
-      fs.rmSync(repoRoot, { recursive: true, force: true });
+      removeTempTree(repoRoot);
     }
   });
 
@@ -573,7 +586,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(server.stderr).toContain('Server ready. Waiting for requests...');
     } finally {
       await server.stop();
-      fs.rmSync(repoRoot, { recursive: true, force: true });
+      removeTempTree(repoRoot);
     }
   });
 
@@ -599,7 +612,7 @@ describe('repo-aware launcher startup smoke', () => {
       expect(server.child.exitCode).toBe(0);
     } finally {
       await server.stop();
-      fs.rmSync(repoRoot, { recursive: true, force: true });
+      removeTempTree(repoRoot);
     }
   });
 });

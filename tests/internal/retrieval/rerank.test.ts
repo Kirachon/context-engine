@@ -64,8 +64,10 @@ async function createTransformersModule(extractor: ReturnType<typeof createVecto
 
 describe('reranker', () => {
   const originalCrossEncoderRerank = FEATURE_FLAGS.retrieval_cross_encoder_rerank_v1;
+  const originalEnvironment = { ...process.env };
 
   afterEach(() => {
+    process.env = { ...originalEnvironment };
     FEATURE_FLAGS.retrieval_cross_encoder_rerank_v1 = originalCrossEncoderRerank;
     clearRerankerRuntimeCacheForTests();
     clearConfiguredEmbeddingRuntimeCacheForTests();
@@ -568,6 +570,13 @@ describe('reranker', () => {
   });
 
   it('records provider path selection and fail-open details on retrieval flow metadata', async () => {
+    process.env.CE_MEMORY_PRESSURE_RSS_ELEVATED_BYTES = String(Number.MAX_SAFE_INTEGER);
+    process.env.CE_MEMORY_PRESSURE_RSS_HIGH_BYTES = String(Number.MAX_SAFE_INTEGER);
+    process.env.CE_MEMORY_PRESSURE_RSS_CRITICAL_BYTES = String(Number.MAX_SAFE_INTEGER);
+    process.env.CE_MEMORY_PRESSURE_HEAP_ELEVATED_RATIO = '1';
+    process.env.CE_MEMORY_PRESSURE_HEAP_HIGH_RATIO = '1';
+    process.env.CE_MEMORY_PRESSURE_HEAP_CRITICAL_RATIO = '1';
+
     const flow = createRetrievalFlowContext('xy');
     const serviceClient = {
       semanticSearch: jest.fn(async () => [
