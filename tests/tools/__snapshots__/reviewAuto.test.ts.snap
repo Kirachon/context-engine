@@ -44,7 +44,7 @@ exports[`review_auto tool selects review_diff when diff is provided 1`] = `
     "hotspots": [],
     "metadata": {
       "reviewed_at": "<fixed>",
-      "tool_version": "1.9.0",
+      "tool_version": "1.9.1",
       "warnings": [],
     },
     "risk_score": 4,
@@ -137,4 +137,3 @@ exports[`review_auto tool selects review_git_diff when no diff is provided 1`] =
   "selected_tool": "review_git_diff",
 }
 `;
-

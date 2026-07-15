@@ -55,7 +55,7 @@ describe('D1b memory governance verification', () => {
 });
 
 describe('D1a docs/version reconciliation contract', () => {
-  it('pins expected 52-tool / 1.9.0 contract fields', () => {
+  it('pins expected 52-tool / 1.9.1 contract fields', () => {
     const contract = JSON.parse(
       fs.readFileSync(path.join(REPO_ROOT, 'config/ci/docs-version-reconciliation.json'), 'utf8')
     ) as {
@@ -66,7 +66,7 @@ describe('D1a docs/version reconciliation contract', () => {
         output_schema_covered_tool_count: number;
       };
     };
-    expect(contract.expected.package_version).toBe('1.9.0');
+    expect(contract.expected.package_version).toBe('1.9.1');
     expect(contract.expected.mcp_tool_count).toBe(52);
     expect(contract.expected.rest_mapping_count).toBe(20);
     expect(contract.expected.output_schema_covered_tool_count).toBe(14);

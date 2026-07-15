@@ -3,7 +3,7 @@
   "decision": "supported",
   "owner_lane": "Release engineering / F8",
   "package_name": "context-engine-mcp-server",
-  "package_version": "1.9.0",
+  "package_version": "1.9.1",
   "closure_task": "P1a",
   "rejected_task": "P1b",
   "node_matrix": ["18.x", "20.x", "22.x"],
