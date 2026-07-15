@@ -12,7 +12,13 @@ function envBool(name: string, fallback: boolean): boolean {
 }
 
 function git(args: string[]): string {
-  return execFileSync('git', args, { stdio: ['ignore', 'pipe', 'pipe'] }).toString('utf-8');
+  return execFileSync('git', args, {
+    stdio: ['ignore', 'pipe', 'pipe'],
+    // Evidence artifacts can make a legitimate review diff exceed Node's
+    // default 1 MiB spawnSync buffer. Keep the complete diff available to the
+    // reviewer instead of truncating changed files or silently dropping them.
+    maxBuffer: 64 * 1024 * 1024,
+  }).toString('utf-8');
 }
 
 function tryGit(args: string[]): string | null {
