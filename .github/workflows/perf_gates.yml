@@ -25,6 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CE_RETRIEVAL_PROVIDER: local_native
+      CONTEXT_ENGINE_OFFLINE_ONLY: '1'
       BENCH_PROVIDER_LANE: local_native
       BENCH_DATASET_ID: context-engine-retrieval-pr-v1
       BENCH_WORKSPACE_ID: ${{ github.repository }}:retrieval-pr-v1
@@ -71,6 +72,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CE_RETRIEVAL_PROVIDER: local_native
+      CONTEXT_ENGINE_OFFLINE_ONLY: '1'
       BENCH_PROVIDER_LANE: local_native
       BENCH_DATASET_ID: context-engine-retrieval-nightly-v1
       BENCH_WORKSPACE_ID: ${{ github.repository }}:retrieval-nightly-v1
