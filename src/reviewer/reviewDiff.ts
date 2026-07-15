@@ -5,7 +5,7 @@ import { runReviewAnalyzers } from './pipeline/analyzerOrchestrator.js';
 import { buildDeterministicFindings, buildReviewDiffResult } from './pipeline/synthesis.js';
 import type { EnterpriseReviewResult } from './types.js';
 
-export const TOOL_VERSION = '1.9.0';
+export const TOOL_VERSION = '1.9.1';
 
 export interface ReviewDiffOptions {
   confidence_threshold?: number;

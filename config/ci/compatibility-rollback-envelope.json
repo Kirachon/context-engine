@@ -155,7 +155,7 @@
   },
   "node_and_package_matrix": {
     "package_json_path": "package.json",
-    "package_json_version": "1.9.0",
+    "package_json_version": "1.9.1",
     "package_engines_declared": true,
     "package_engines": { "node": ">=18" },
     "ci_node_matrix_source": ".github/workflows/test.yml",
