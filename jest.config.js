@@ -19,6 +19,7 @@ export default {
     ],
   },
   testMatch: ['**/tests/**/*.test.ts'],
+  coverageProvider: 'v8',
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
