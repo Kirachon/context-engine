@@ -31,6 +31,7 @@ jobs:
       BENCH_WORKSPACE_ID: ${{ github.repository }}:retrieval-pr-v1
       BENCH_INDEX_FINGERPRINT: context-engine-local-native-index-v1
       BENCH_BASELINE_PATH: artifacts/bench/pr-baseline-remediation-2026-07-15.json
+      BENCH_SUITE_PROBE_TIMEOUT_MS: '120000'
     steps:
       - uses: actions/checkout@v4
 
@@ -77,6 +78,7 @@ jobs:
       BENCH_DATASET_ID: context-engine-retrieval-nightly-v1
       BENCH_WORKSPACE_ID: ${{ github.repository }}:retrieval-nightly-v1
       BENCH_INDEX_FINGERPRINT: context-engine-local-native-index-v1
+      BENCH_SUITE_PROBE_TIMEOUT_MS: '120000'
     steps:
       - uses: actions/checkout@v4
 

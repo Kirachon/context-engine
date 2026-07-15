@@ -161,10 +161,10 @@
     "ci_node_matrix_source": ".github/workflows/test.yml",
     "ci_node_matrix": ["18.x", "20.x", "22.x"],
     "single_pinned_node_version_workflows": {
-      ".github/workflows/release_perf_gate.yml": "20",
+      ".github/workflows/release_perf_gate.yml": "22",
       ".github/workflows/required-lane-catch-rate.yml": "20",
       ".github/workflows/review_diff.yml": "20",
-      ".github/workflows/perf_gates.yml": "20"
+      ".github/workflows/perf_gates.yml": "22"
     }
   },
   "rollback_policy": {
