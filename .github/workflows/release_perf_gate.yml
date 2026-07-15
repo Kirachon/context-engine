@@ -41,6 +41,9 @@ jobs:
     env:
       CE_RETRIEVAL_PROVIDER: local_native
       BENCH_PROVIDER_LANE: local_native
+      BENCH_DATASET_ID: context-engine-retrieval-release-v1
+      BENCH_WORKSPACE_ID: ${{ github.repository }}:retrieval-release-v1
+      BENCH_INDEX_FINGERPRINT: context-engine-local-native-index-v1
       BENCH_MODE: ${{ inputs.mode }}
       BASELINE_PATH: ${{ inputs.baseline_path }}
       CANDIDATE_PATH_INPUT: ${{ inputs.candidate_path }}

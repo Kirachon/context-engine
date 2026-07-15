@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "task_id": "P1a",
+  "disposition": "implemented",
+  "publish_authorized": false,
+  "package_name": "context-engine-mcp-server",
+  "package_version": "1.9.0",
+  "tarball": "context-engine-mcp-server-1.9.0.tgz",
+  "tarball_size_bytes": 986125,
+  "packed_path_count": 1027,
+  "required_paths_present": [
+    "package.json",
+    "README.md",
+    "bin/context-engine-mcp.js",
+    "dist/index.js"
+  ],
+  "forbidden_paths_absent": true,
+  "clean_install": true,
+  "cli_help_smoke": true,
+  "temp_dir": "C:\\Users\\preda\\AppData\\Local\\Temp\\ce-p1a-pack-Cb55xP",
+  "generated_at_utc": "2026-07-15T01:09:54.828Z"
+}

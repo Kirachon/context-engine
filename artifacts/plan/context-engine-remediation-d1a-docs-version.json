@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "task_id": "D1a",
+  "package_version": "1.9.0",
+  "mcp_server_version": "1.9.0",
+  "mcp_tool_count": 52,
+  "runtime_tool_count": 52,
+  "rest_mapping_count": 20,
+  "output_schema_covered_tool_count": 14,
+  "mcp_tool_names_sha256": "0331c8409d514690cf5cf8296d54ad1ee70e015c19196a1ae39b4f8a2bd853b6",
+  "errors": [],
+  "status": "pass",
+  "generated_at_utc": "2026-07-15T01:05:47.953Z"
+}

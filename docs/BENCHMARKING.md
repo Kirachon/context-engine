@@ -375,6 +375,7 @@ Related env knobs:
 - `BENCH_SUITE_PROBE_TIMEOUT_MS` (probe timeout budget included in error diagnostics)
 - `BENCH_SUITE_PR_ITERATIONS=<n>` (optional local override; default `30`)
 - `BENCH_SUITE_NIGHTLY_ITERATIONS=<n>` (optional override; default `80`)
+- `BENCH_DATASET_ID`, `BENCH_WORKSPACE_ID`, and `BENCH_INDEX_FINGERPRINT` (CI-only logical identities used to keep baseline and candidate provenance portable across checkout paths)
 
 Optional strict mode-lock gate (fails if baseline/candidate bench mode is not `retrieve` or `search`):
 

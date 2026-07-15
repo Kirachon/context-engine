@@ -191,8 +191,12 @@ function resolveDatasetId(workspace: string): string {
   return `workspace:${path.basename(workspace) || 'root'}`;
 }
 
+function resolveDatasetWorkspaceIdentity(workspace: string): string {
+  return process.env.BENCH_WORKSPACE_ID?.trim() || path.basename(workspace) || 'root';
+}
+
 function resolveDatasetHash(benchMode: BenchMode, workspace: string): string {
-  const normalizedWorkspace = path.resolve(workspace).replace(/\\/g, '/');
+  const normalizedWorkspace = resolveDatasetWorkspaceIdentity(workspace);
   const workload = benchMode === 'scan'
     ? {
         bench_mode: benchMode,

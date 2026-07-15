@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "task_id": "Q4a",
+  "title": "Pre-change compatibility goldens fingerprint receipt",
+  "source_plan": "context-engine-remediation-plan-2026-07-14.md",
+  "source_plan_task": "Q4a",
+  "depends_on": ["K0", "Q0", "G0b"],
+  "generated_at": "2026-07-14T00:00:00.000Z",
+  "generation_method": "deterministic: sha256 over the sorted (localeCompare) canonical string built from live production sources; no wall-clock or random input feeds any hash.",
+  "golden_inventory_path": "config/ci/q4a-prechange-goldens.json",
+  "golden_inventory_sha256": "d9b4d133ab4f16b20ed2a56eb6a73ed1093d47b9d7b35e8384426f9ccda4c1ad",
+  "fingerprints": {
+    "mcp_tool_count": 52,
+    "mcp_tool_names_sha256": "0331c8409d514690cf5cf8296d54ad1ee70e015c19196a1ae39b4f8a2bd853b6",
+    "mcp_tool_names_source": "getToolManifest() in src/mcp/tools/manifest.ts",
+    "runtime_tool_count": 52,
+    "runtime_tool_names_sha256": "0331c8409d514690cf5cf8296d54ad1ee70e015c19196a1ae39b4f8a2bd853b6",
+    "runtime_tool_names_source": "buildToolRegistryEntries() in src/mcp/server.ts",
+    "rest_mapping_count": 20,
+    "rest_mapping_paths_sha256": "1bf3edc28d4604179489750642e0c082331330245d4d077f575c4d3e69a3b8e4",
+    "rest_mapping_paths_source": "listRestApiToolMappings() in src/mcp/tooling/discoverability.ts",
+    "output_schema_covered_tool_count": 14,
+    "output_schema_covered_tools_sha256": "e114bba8437e6a0f6524c67882c58522a494935694d3e18ed70e62bce43259d2",
+    "output_schema_covered_tools_source": "listConvertedToolsWithOutputSchema() in src/mcp/utils/outputSchemaContract.ts"
+  },
+  "fingerprint_algorithm": {
+    "hash": "sha256 hex digest over a UTF-8 canonical string",
+    "tool_name_canonicalization": "array of tool names sorted with String.prototype.localeCompare, joined with '|'",
+    "rest_mapping_canonicalization": "array of '<METHOD> <path>' sorted by path with localeCompare, joined with '|'",
+    "reproduce_with": "npx tsx <ad-hoc script importing buildToolRegistryEntries/getToolManifest/listRestApiToolMappings/listConvertedToolsWithOutputSchema and hashing per tool_name_canonicalization/rest_mapping_canonicalization>"
+  },
+  "cross_checked_by": "tests/ci/q4aPrechangeGoldens.test.ts",
+  "note": "This receipt is baseline evidence for Q4a. It may be updated only alongside an approved intentional-delta entry in config/ci/q4a-prechange-goldens.json (or config/ci/compatibility-rollback-envelope.json) that names which Wave 1/2 task caused the fingerprint to change."
+}

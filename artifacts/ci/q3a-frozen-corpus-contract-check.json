@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generated_at": "2026-07-14T23:31:24.363Z",
+  "generated_at": "2026-07-15T01:50:46.969Z",
   "inputs": {
     "contract": "D:\\GitProjects\\context-engine\\config\\ci\\q3a-frozen-corpus-contract.json",
     "base_dir": "D:\\GitProjects\\context-engine"

@@ -1,0 +1,138 @@
+{
+  "schema_version": 1,
+  "run_id": "context-engine-remediation-20260714T105252Z-w0-1",
+  "wave_id": "wave-0-w0-1",
+  "timestamp_utc": "2026-07-14T10:52:52.8769593Z",
+  "workspace_root": "D:/GitProjects/context-engine",
+  "commit_sha": "06ff69f72c5aee12768e713d42b217d8f62dcb16",
+  "branch": "main",
+  "tree": {
+    "dirty_entry_count_before_receipt": 29,
+    "dirty_tree_sha256_before_receipt": "c2eb0ea707bea84c9c5287b562c9275599361b7fba36217ccb7dc964fa167ba2",
+    "restricted_unstaged_diff_sha256_before_receipt": "b79f955a7b3624ee2879156b0293f56076b47cce0255522c3d15e64428767c94",
+    "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "foreign_dirty_paths": [
+      "artifacts/bench/mcp-compatibility-matrix.json",
+      "docs/rollout-evidence/2026-05-31/mcp-compatibility-matrix.log",
+      "artifacts/evals/mcp-compatibility.json",
+      "artifacts/evals/mcp-compatibility.normalized.json",
+      "artifacts/evals/mcp-eval-smoke.json",
+      "artifacts/evals/mcp-eval-smoke.normalized.json",
+      "context-engine-mcp-structured-results-swarm-plan.md",
+      "context-engine.zip",
+      "docs/context-engine-research-backed-enhancement-goal.md",
+      "docs/plan-execution/openai-mcp-gap-closure-graph-artifact-contract.md",
+      "docs/rollout-evidence/2026-03-04/readiness-check-output.log",
+      "docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log",
+      "docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log",
+      "docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log",
+      "docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log",
+      "openai_mcp_enhancement_plan.md",
+      "peer-context-engine-adoption-plan.md",
+      "peer-context-engine-adoption-swarm-plan.md"
+    ],
+    "protected_path_check": {
+      "path_count": 18,
+      "mismatch_count": 0,
+      "baseline_receipt": "artifacts/plan/context-engine-remediation-b0-baseline.json"
+    }
+  },
+  "environment": {
+    "node": "v25.2.1",
+    "npm": "11.6.2",
+    "ce_environment_names": []
+  },
+  "tasks": [
+    {
+      "task_id": "G0a",
+      "owner_lane": "governance",
+      "claimed_file_family": "F0",
+      "disposition": "implemented",
+      "actual_files_edited": [
+        "ARCHITECTURE.md",
+        "config/ci/governance-contract.json",
+        "context-engine-next-tranche-swarm-plan.md",
+        "context-engine-improvement-swarm-plan.md",
+        "docs/advanced-mcp-ux-and-hosted-maturity-plan.md",
+        "tests/ci/governanceContract.test.ts",
+        "tests/utils/docsContracts.test.ts"
+      ],
+      "output_sha256": {
+        "ARCHITECTURE.md": "7bd4a261df0d4a04f0c076b7d0c5444021a2fe0f28df67f9b52974cbce299019",
+        "config/ci/governance-contract.json": "dff895fbfd66aa181cb1b7bb14a7cd934ec5a1cb21d08d7998d539924f0557e3",
+        "context-engine-next-tranche-swarm-plan.md": "825bc47ec4b0817332144851291439ced7d290245bd428ecb5cc0085caf60b33",
+        "context-engine-improvement-swarm-plan.md": "96747eefffe58405350a8f9ee9a1d0ec284d538a23abe8e7796ae5925ff41d30",
+        "docs/advanced-mcp-ux-and-hosted-maturity-plan.md": "2081e2c88b6df2183c52815364d8b6e43059d9aadcdaafa73c4f2f5858e4b487",
+        "tests/ci/governanceContract.test.ts": "fe333b561c271a7f5741029ca75c7ef96d0278299713eead744324ee9974c14e",
+        "tests/utils/docsContracts.test.ts": "194b1e1a4ee38b4ddb5212bf6848b0bb9218735ac9c8c799769fba4044dcdc67"
+      },
+      "relevant_config_sha256": "dff895fbfd66aa181cb1b7bb14a7cd934ec5a1cb21d08d7998d539924f0557e3",
+      "intentional_contract_deltas": [
+        "Exactly one authoritative active plan now points to context-engine-remediation-plan-2026-07-14.md.",
+        "Completed swarm plans are immutable execution ledgers and the advanced MCP plan is planning-only.",
+        "Governance consumers resolve the gate-tier v2 contract instead of carrying an obsolete duplicate gate list."
+      ],
+      "rollback": "Reverse only the seven G0a allowlisted file diffs; preserve B0 and all append-only receipts. Rollback was not executed."
+    },
+    {
+      "task_id": "Q0",
+      "owner_lane": "ci-quality",
+      "claimed_file_family": "F7",
+      "disposition": "implemented",
+      "actual_files_edited": [
+        "config/ci/gate-tier-contract.json",
+        "tests/ci/gateTierContract.test.ts"
+      ],
+      "output_sha256": {
+        "config/ci/gate-tier-contract.json": "3577b90b4faf73890e08fdbc1bf7f5d935c21ffde8f65d8ef5cd2a3a66cbc632",
+        "tests/ci/gateTierContract.test.ts": "b39882c3ca23c9b833fe85bb5e69dd3b2d4042f8ee0a0be177e211bb9dd84e46"
+      },
+      "relevant_config_sha256": "3577b90b4faf73890e08fdbc1bf7f5d935c21ffde8f65d8ef5cd2a3a66cbc632",
+      "intentional_contract_deltas": [
+        "Gate declarations, workflow execution evidence, and external enforcement are independent facts.",
+        "No repository gate is declared a PR blocker because external branch protection is not verified.",
+        "Workflow mappings distinguish direct, transitive, scheduled, manual, and unwired evidence."
+      ],
+      "rollback": "Reverse only the two Q0 allowlisted file diffs; preserve B0 and all append-only receipts. Rollback was not executed."
+    }
+  ],
+  "generation_identifiers": {
+    "index_last_indexed": "2026-07-14T08:52:02.153Z",
+    "index_file_count": 817,
+    "graph_status": "ready",
+    "graph_artifact_sha256": "2ce4689338e77f1e66fc712100c2ec42302e31db7c0c8e9294364196b4e7a831",
+    "artifact_format_change": "not-applicable",
+    "corpus_generation_change": "not-applicable"
+  },
+  "commands": [
+    {
+      "command": "npm test -- --runInBand tests/ci/governanceContract.test.ts tests/utils/docsContracts.test.ts tests/ci/gateTierContract.test.ts",
+      "exit_code": 1,
+      "duration_ms": 381,
+      "output_sha256": "99518e5cc742b9e7d8fa6fd3e3a6e14ba2cfaf1b21343e8149b899c5034026ce",
+      "result": "PowerShell executable-resolution probe failed with Unknown command: pm; retained as failed evidence."
+    },
+    {
+      "command": "npm.cmd test -- --runInBand tests/ci/governanceContract.test.ts tests/utils/docsContracts.test.ts tests/ci/gateTierContract.test.ts",
+      "exit_code": 0,
+      "duration_ms": 2603,
+      "output_sha256": "b35ee729ec1be14487384abd8fe3149d9a21fe8092a39b01c97d00100d4a55ca",
+      "result": "3 suites passed; 12 tests passed; 0 snapshots."
+    },
+    {
+      "command": "git diff --check -- <W0-1 allowlist>",
+      "exit_code": 0,
+      "duration_ms": 75,
+      "output_sha256": "d5c2bbbe53476d3a89fd949469714d52a239416380f116fa0ddafcb70ecda03f",
+      "result": "No whitespace errors; Git emitted line-ending conversion warnings only."
+    }
+  ],
+  "review": {
+    "path": "review_auto forced to review_diff",
+    "run_id": "730b1cd8-c9cc-45eb-be92-bd27af236434",
+    "risk_score": 1,
+    "finding_count": 0,
+    "should_fail": false,
+    "reviewer_approver": "main orchestrator; no promotion or waiver requested"
+  }
+}

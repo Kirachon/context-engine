@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "task_id": "M1-M3",
+  "generated_at_utc": "2026-07-15T01:05:46.928Z",
+  "experiments": [
+    {
+      "task_id": "M1",
+      "lane": "duplicate",
+      "disposition": "not-verified",
+      "rationale": "M1: frozen duplicate corpus/thresholds are intact, but no treatment measurement run was executed against a live index/event-loop harness in this closeout pass; speculative implementation is forbidden.",
+      "metrics": {
+        "case_count": 5,
+        "thresholds": {
+          "max_duplicate_rate_pct": 5,
+          "min_mrr_at_10_pct": 60,
+          "min_ndcg_at_10_pct": 55
+        },
+        "treatment_executed": false
+      }
+    },
+    {
+      "task_id": "M2",
+      "lane": "ambiguity",
+      "disposition": "not-verified",
+      "rationale": "M2: frozen ambiguity corpus/thresholds are intact, but no treatment measurement run was executed against a live index/event-loop harness in this closeout pass; speculative implementation is forbidden.",
+      "metrics": {
+        "case_count": 5,
+        "thresholds": {
+          "min_precision_pct": 95,
+          "min_recall_pct": 95
+        },
+        "treatment_executed": false
+      }
+    },
+    {
+      "task_id": "M3",
+      "lane": "performance",
+      "disposition": "not-verified",
+      "rationale": "M3: frozen performance corpus/thresholds are intact, but no treatment measurement run was executed against a live index/event-loop harness in this closeout pass; speculative implementation is forbidden.",
+      "metrics": {
+        "case_count": 4,
+        "thresholds": {
+          "max_event_loop_delay_ms": 100,
+          "max_p99_request_latency_ms": 1200,
+          "max_rss_growth_pct": 25
+        },
+        "treatment_executed": false
+      }
+    }
+  ]
+}

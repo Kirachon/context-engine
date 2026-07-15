@@ -1,0 +1,163 @@
+{
+  "meta": {
+    "harness_version": 2,
+    "node": "v24.5.0",
+    "platform": "win32 x64",
+    "pid": 12508,
+    "started_at": "2026-07-15T01:43:37.268Z",
+    "retrieval_provider": "local_native",
+    "retrieval_provider_source": "CE_RETRIEVAL_PROVIDER",
+    "env": {
+      "CE_RETRIEVAL_PROVIDER": "local_native"
+    },
+    "dataset": {
+      "source": "single_query",
+      "dataset_id": null,
+      "dataset_hash": null,
+      "query_count": 1,
+      "fixture_pack": "D:\\GitProjects\\context-engine\\.tmp\\context-engine-baseline\\config\\ci\\retrieval-quality-fixture-pack.json"
+    },
+    "dataset_id": "workspace:context-engine-baseline",
+    "dataset_hash": "9bbbb6a2090b446f8e2e08a508260b13d8c4633bd740ecea005e65ec63fbb180",
+    "execution": {
+      "iterations": 1,
+      "cache_mode": "cold",
+      "warmup_iterations": 0,
+      "cold": true
+    }
+  },
+  "total_ms": 7627.5759,
+  "payload": {
+    "mode": "retrieve",
+    "workspace": "D:\\GitProjects\\context-engine\\.tmp\\context-engine-baseline",
+    "query_source": "single_query",
+    "query_count": 1,
+    "query": "search queue",
+    "topK": 10,
+    "iterations": 1,
+    "cold": true,
+    "bypass_cache": false,
+    "retrieve_mode": "fast",
+    "last_result_count": 10,
+    "last_unique_files": 10,
+    "cache": {
+      "mode": "cold",
+      "cold": true,
+      "warmup_iterations": 0,
+      "query_cycle_length": 1,
+      "bypass_cache": false,
+      "retrieve_mode": "fast"
+    },
+    "timing": {
+      "count": 1,
+      "avg_ms": 4316.122300000001,
+      "p50_ms": 4316.122300000001,
+      "p95_ms": 4316.122300000001,
+      "p99_ms": 4316.122300000001,
+      "min_ms": 4316.122300000001,
+      "max_ms": 4316.122300000001
+    },
+    "resources": {
+      "process_memory": {
+        "sampling": "process.memoryUsage",
+        "sample_count": 1,
+        "start": {
+          "rss_bytes": 171859968,
+          "heap_total_bytes": 108613632,
+          "heap_used_bytes": 62729656,
+          "external_bytes": 2865498,
+          "array_buffers_bytes": 46271
+        },
+        "end": {
+          "rss_bytes": 279109632,
+          "heap_total_bytes": 168984576,
+          "heap_used_bytes": 36104344,
+          "external_bytes": 4658829,
+          "array_buffers_bytes": 67447
+        },
+        "peak": {
+          "rss_bytes": 279109632,
+          "heap_total_bytes": 168984576,
+          "heap_used_bytes": 62729656,
+          "external_bytes": 4658829,
+          "array_buffers_bytes": 67447
+        },
+        "delta_bytes": {
+          "rss_bytes": 107249664,
+          "heap_total_bytes": 60370944,
+          "heap_used_bytes": -26625312,
+          "external_bytes": 1793331,
+          "array_buffers_bytes": 21176
+        },
+        "rss_bytes": {
+          "count": 1,
+          "avg_bytes": 279109632,
+          "p50_bytes": 279109632,
+          "p95_bytes": 279109632,
+          "p99_bytes": 279109632,
+          "min_bytes": 279109632,
+          "max_bytes": 279109632
+        },
+        "heap_total_bytes": {
+          "count": 1,
+          "avg_bytes": 168984576,
+          "p50_bytes": 168984576,
+          "p95_bytes": 168984576,
+          "p99_bytes": 168984576,
+          "min_bytes": 168984576,
+          "max_bytes": 168984576
+        },
+        "heap_used_bytes": {
+          "count": 1,
+          "avg_bytes": 36104344,
+          "p50_bytes": 36104344,
+          "p95_bytes": 36104344,
+          "p99_bytes": 36104344,
+          "min_bytes": 36104344,
+          "max_bytes": 36104344
+        },
+        "external_bytes": {
+          "count": 1,
+          "avg_bytes": 4658829,
+          "p50_bytes": 4658829,
+          "p95_bytes": 4658829,
+          "p99_bytes": 4658829,
+          "min_bytes": 4658829,
+          "max_bytes": 4658829
+        },
+        "array_buffers_bytes": {
+          "count": 1,
+          "avg_bytes": 67447,
+          "p50_bytes": 67447,
+          "p95_bytes": 67447,
+          "p99_bytes": 67447,
+          "min_bytes": 67447,
+          "max_bytes": 67447
+        }
+      }
+    }
+  },
+  "provenance": {
+    "timestamp_utc": "2026-07-15T01:43:45.942Z",
+    "commit_sha": "06ff69f72c5aee12768e713d42b217d8f62dcb16",
+    "branch_or_tag": "detached-head",
+    "workspace_fingerprint": "workspace:0f73e7b3065c3e60a9c24916d391dc3c5a56831457fa60ba2677e7d9e73f1e86",
+    "index_fingerprint": "fingerprint:context-engine-local-native-index-v1",
+    "bench_mode": "retrieve",
+    "dataset_id": "context-engine-retrieval-pr-v1",
+    "dataset_hash": "e01fe5e0ef6bcd14b537f24f7f2c1843cda637a0d0061ea334d224a7ad731cf7",
+    "retrieval_provider": "local_native",
+    "feature_flags_snapshot": "{\"context_packs_v2\":false,\"hash_normalize_eol\":false,\"http_metrics\":false,\"index_state_store\":false,\"memory_autosave_v1\":false,\"memory_draft_retrieval_v1\":false,\"memory_suggestions_v1\":false,\"metrics\":false,\"retrieval_artifacts_v2\":false,\"retrieval_chunk_search_v1\":false,\"retrieval_cross_encoder_rerank_v1\":false,\"retrieval_declaration_routing_v1\":false,\"retrieval_hybrid_v1\":false,\"retrieval_lancedb_v1\":false,\"retrieval_provider_v2\":false,\"retrieval_quality_guard_v1\":false,\"retrieval_ranking_v2\":false,\"retrieval_ranking_v3\":false,\"retrieval_request_memo_v2\":false,\"retrieval_rewrite_v2\":false,\"retrieval_shadow_control_v2\":false,\"retrieval_sqlite_fts5_v1\":false,\"retrieval_transformer_embeddings_v1\":false,\"retrieval_tree_sitter_v1\":false,\"rollout_kill_switch\":false,\"skip_unchanged_indexing\":false}",
+    "node_version": "v24.5.0",
+    "os_version": "Windows_NT 10.0.26200 (x64)",
+    "env_fingerprint": "1de7e3ff5e66a88d"
+  },
+  "suite": {
+    "role": "baseline",
+    "bench_mode": "retrieve",
+    "aggregated_from_runs": 1,
+    "p95_samples_ms": [
+      4316.122300000001
+    ]
+  }
+}

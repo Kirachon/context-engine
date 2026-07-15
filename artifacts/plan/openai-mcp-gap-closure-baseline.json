@@ -1,0 +1,63 @@
+{
+  "baseline_snapshot_id": "openai-mcp-gap-closure-baseline-2026-04-23T00-00-00Z",
+  "timestamp_utc": "2026-04-23T00:00:00Z",
+  "commit_sha": "7d31294858f07b5e8936445cd52f43250f572ba1",
+  "branch_or_tag": "main",
+  "workspace_root": "D:\\GitProjects\\context-engine",
+  "dirty_tree": true,
+  "feature_flag_snapshot": {
+    "source": "environment",
+    "ce_env_vars_present": []
+  },
+  "manifest_receipt": {
+    "snapshot_path": "tests/snapshots/phase2/baseline/tool_manifest_basic.baseline.txt",
+    "sha256": "b8d054c03c16b05454076ac0dab7639fcd11edf1a904b66046228f62011c0a5c"
+  },
+  "retrieval_artifacts": [
+    {
+      "path": "artifacts/bench/retrieval-holdout-check.json",
+      "sha256": "0da80709b4474acb52e5190a5e3784d098ea278106c6a3af120e77d1e92de4df"
+    },
+    {
+      "path": "artifacts/bench/retrieval-quality-report.json",
+      "sha256": "e5f1125ddd5b0cc233208ab7c067d139717bf198ad4d21003d337e46b6ab19bb"
+    },
+    {
+      "path": "artifacts/bench/retrieval-quality-telemetry.json",
+      "sha256": "61e9abb6b802b58654bb684fb52420d75800dfc66731ad1e59ca869c66ad36d0"
+    },
+    {
+      "path": "artifacts/bench/retrieval-shadow-canary-gate.json",
+      "sha256": "b57d349cf2bae61788073d384d8fa39b9fdbdb7335daff919c5e944585d217cb"
+    }
+  ],
+  "review_artifacts": [
+    {
+      "path": "artifacts/review_auto_timeout_smoke.json",
+      "sha256": "3846eda7284243307e09165da4b6bb3de98e53e5ac17ea47456c5b026fc695a4"
+    }
+  ],
+  "compatibility_surfaces": [
+    {
+      "surface": "stdio_mcp",
+      "anchors": [
+        "src/mcp/server.ts",
+        "src/mcp/tools/manifest.ts",
+        "src/mcp/tooling/discoverability.ts"
+      ]
+    },
+    {
+      "surface": "streamable_http_mcp",
+      "anchors": [
+        "src/http/httpServer.ts"
+      ]
+    },
+    {
+      "surface": "api_v1_rest",
+      "anchors": [
+        "src/http/routes/tools.ts",
+        "tests/integration/httpCompatibility.test.ts"
+      ]
+    }
+  ]
+}

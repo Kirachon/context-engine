@@ -96,24 +96,40 @@ export function resolveBranchOrTag(): string {
 }
 
 export function resolveWorkspaceFingerprint(workspace: string): string {
+  const configuredIdentity = process.env.BENCH_WORKSPACE_ID?.trim();
+  if (configuredIdentity) {
+    return `workspace:${hashString(configuredIdentity)}`;
+  }
   return `workspace:${hashString(normalizeWorkspacePath(workspace))}`;
 }
 
 export function resolveIndexFingerprint(workspace: string): string {
+  const configuredFingerprint = process.env.BENCH_INDEX_FINGERPRINT?.trim();
+  if (configuredFingerprint) {
+    return configuredFingerprint.startsWith('fingerprint:')
+      ? configuredFingerprint
+      : `fingerprint:${configuredFingerprint}`;
+  }
+
   const resolvedWorkspace = path.resolve(workspace);
-  const fingerprintPath = path.join(resolvedWorkspace, '.augment-index-fingerprint.json');
-  if (fs.existsSync(fingerprintPath)) {
-    try {
-      const raw = fs.readFileSync(fingerprintPath, 'utf8');
-      const parsed = JSON.parse(raw) as {
-        version?: number;
-        fingerprint?: unknown;
-      };
-      if (parsed?.version === 1 && typeof parsed.fingerprint === 'string' && parsed.fingerprint.trim()) {
-        return `fingerprint:${parsed.fingerprint.trim()}`;
+  const fingerprintPaths = [
+    path.join(resolvedWorkspace, '.context-engine-index-fingerprint.json'),
+    path.join(resolvedWorkspace, '.augment-index-fingerprint.json'),
+  ];
+  for (const fingerprintPath of fingerprintPaths) {
+    if (fs.existsSync(fingerprintPath)) {
+      try {
+        const raw = fs.readFileSync(fingerprintPath, 'utf8');
+        const parsed = JSON.parse(raw) as {
+          version?: number;
+          fingerprint?: unknown;
+        };
+        if (parsed?.version === 1 && typeof parsed.fingerprint === 'string' && parsed.fingerprint.trim()) {
+          return `fingerprint:${parsed.fingerprint.trim()}`;
+        }
+      } catch {
+        // Try the next compatible sidecar before falling back.
       }
-    } catch {
-      // Fall back to a deterministic workspace-based fingerprint.
     }
   }
 

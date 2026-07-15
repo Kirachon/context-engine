@@ -1,0 +1,131 @@
+{
+  "schema_version": 1,
+  "run_id": "context-engine-remediation-20260714T085325Z-06ff69f",
+  "task_id": "B0",
+  "wave_id": "wave-0",
+  "owner_lane": "governance",
+  "file_family": "F0",
+  "disposition": "implemented",
+  "timestamp_utc": "2026-07-14T08:53:25.5774124Z",
+  "workspace_root": "D:/GitProjects/context-engine",
+  "commit_sha": "06ff69f72c5aee12768e713d42b217d8f62dcb16",
+  "branch": "main",
+  "plan": {
+    "path": "context-engine-remediation-plan-2026-07-14.md",
+    "sha256": "09e84fd7445cf781adc2708e3a01fef6ec716f256754e946e4a3f3d9051cf4de"
+  },
+  "tree": {
+    "dirty_tree_sha256": "cef5425a04b966d16c83e3f8a2e83ca5dd5987c162641de252f600906183fad1",
+    "unstaged_diff_sha256": "2d560d296d29ba4d44eedfdc8bfd70a158d032b2f6732d3ff9705ea71c92b66c",
+    "staged_diff_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "staged_paths": [],
+    "dirty_entries": [
+      { "kind": "tracked_modified", "path": "artifacts/bench/mcp-compatibility-matrix.json", "length": 3869, "sha256": "93050882a218b0488eb76211e4f8cce60d4c407b71490d2b2cda2b86e42679b3" },
+      { "kind": "tracked_modified", "path": "docs/rollout-evidence/2026-05-31/mcp-compatibility-matrix.log", "length": 2264, "sha256": "fbed157bb73240ca62d79a66a48d9ef031941af446a85ac0e269718ad822c0a5" },
+      { "kind": "untracked", "path": "artifacts/evals/mcp-compatibility.json", "length": 720, "sha256": "f664c628eeef88b1ac25eae952b949178a58a1478a2fd092478819a7ff447cb1" },
+      { "kind": "untracked", "path": "artifacts/evals/mcp-compatibility.normalized.json", "length": 483, "sha256": "9f5a0a561ac1a7330202b7ad431670b1317cdaf0224e7dcb00d0d8c70ca4d556" },
+      { "kind": "untracked", "path": "artifacts/evals/mcp-eval-smoke.json", "length": 13054, "sha256": "7e60243eb65daca6f9492dc6b2d00db27fe1a5210e2ca3c23d8a8361342e10ec" },
+      { "kind": "untracked", "path": "artifacts/evals/mcp-eval-smoke.normalized.json", "length": 8805, "sha256": "442584bdfa39337ee932f80c194c369e6429e4e568a8000ddb993c10ee367c8c" },
+      { "kind": "untracked", "path": "context-engine-mcp-structured-results-swarm-plan.md", "length": 10506, "sha256": "5583b73df43ae585c84e45bfca92c2bed3ab243202ac7f5afcd1068debf6cbd1" },
+      { "kind": "untracked", "path": "context-engine-remediation-plan-2026-07-14.md", "length": 52625, "sha256": "09e84fd7445cf781adc2708e3a01fef6ec716f256754e946e4a3f3d9051cf4de" },
+      { "kind": "untracked", "path": "context-engine.zip", "length": 616660, "sha256": "9eead97bc5523096f46b9a9dc68d5008b04ce9a163e9dd9b32bc16d8f57ae8b0" },
+      { "kind": "untracked", "path": "docs/context-engine-research-backed-enhancement-goal.md", "length": 13604, "sha256": "41f1ebf4c1c46cf175eee5cb490b4890b76261db45f92b6d69b282bf4b71c34c" },
+      { "kind": "untracked", "path": "docs/plan-execution/openai-mcp-gap-closure-graph-artifact-contract.md", "length": 18423, "sha256": "26f95edfbc9fc40e2689d7073096b57e867817dc7083a0286b2c88b9c1305c81" },
+      { "kind": "untracked", "path": "docs/rollout-evidence/2026-03-04/readiness-check-output.log", "length": 801, "sha256": "76b9bf30f1fef9b20de063dd1a01abe4ef3b629e4fa48f6189b2c31c4c509e6f" },
+      { "kind": "untracked", "path": "docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log", "length": 879, "sha256": "cfe52fdf1e1621c1e0033ea9c7b36322204439966b6fbf4db4ad5d47f72140d7" },
+      { "kind": "untracked", "path": "docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log", "length": 1630, "sha256": "04202c7d24435bc245de6e8f2fc23d9091b1af21d80a7d23782b8d0a362a4294" },
+      { "kind": "untracked", "path": "docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log", "length": 827, "sha256": "3ab89566c41234bff6b34fbf92639a08be257894fb61b03d274c9ed3c0450d35" },
+      { "kind": "untracked", "path": "docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log", "length": 161, "sha256": "426f2e2b0f32c1b4870905672c6bde9cb01c594faff709a6e1c1c0bbd8a4eb6e" },
+      { "kind": "untracked", "path": "openai_mcp_enhancement_plan.md", "length": 15357, "sha256": "719b7b98a9d6820c30be5392eb8a200b20d58ed6ed8918e75c453a0de38d7002" },
+      { "kind": "untracked", "path": "peer-context-engine-adoption-plan.md", "length": 6673, "sha256": "7e77d408a905e1dfd32abc7434b9cf2bf2e893ce5053d95cc8404d60b7541d0e" },
+      { "kind": "untracked", "path": "peer-context-engine-adoption-swarm-plan.md", "length": 14174, "sha256": "e1e00516c9ee3c57e03c2f1fa21654d6b0b256fd9dcd3e56a88bbe14e68fc8fb" }
+    ]
+  },
+  "protected_foreign_dirty_paths": [
+    "artifacts/bench/mcp-compatibility-matrix.json",
+    "docs/rollout-evidence/2026-05-31/mcp-compatibility-matrix.log",
+    "artifacts/evals/mcp-compatibility.json",
+    "artifacts/evals/mcp-compatibility.normalized.json",
+    "artifacts/evals/mcp-eval-smoke.json",
+    "artifacts/evals/mcp-eval-smoke.normalized.json",
+    "context-engine-mcp-structured-results-swarm-plan.md",
+    "context-engine.zip",
+    "docs/context-engine-research-backed-enhancement-goal.md",
+    "docs/plan-execution/openai-mcp-gap-closure-graph-artifact-contract.md",
+    "docs/rollout-evidence/2026-03-04/readiness-check-output.log",
+    "docs/rollout-evidence/2026-03-04/ws20-stage1-gate-output.log",
+    "docs/rollout-evidence/2026-03-04/ws20-stage2-gate-output.log",
+    "docs/rollout-evidence/2026-03-04/ws20-stage3-gate-output.log",
+    "docs/rollout-evidence/2026-03-04/ws21-drill-check-output.log",
+    "openai_mcp_enhancement_plan.md",
+    "peer-context-engine-adoption-plan.md",
+    "peer-context-engine-adoption-swarm-plan.md"
+  ],
+  "config": {
+    "tree_sha256": "a6b87a7899f8947a37a29372bae1327686af5fc3b327b88c9f68a1d41a265715",
+    "package_json_sha256": "71e437031f404aba4ad37af2002d8ec93dbb4709c6699635747f1ecd44d6e659",
+    "feature_config_sha256": "b6b10fc7704d2adfc92d0b301a8453a8edd801dd017e6945f1072709ae1781fb",
+    "governance_contract_sha256": "fb425984aa73d04497862e6c92467a0b67ac4e57ebec5bc4144746c1e4d0eda7",
+    "gate_tier_contract_sha256": "b12d84f5ea7e2323218bbb8cf5460f2d4bc8824423b346553c88635860b21f77",
+    "ce_environment_names": []
+  },
+  "runtime": {
+    "node": "v25.2.1",
+    "npm": "11.6.2",
+    "platform": "Microsoft Windows NT 10.0.26200.0"
+  },
+  "context_engine": {
+    "server_version": "1.9.0",
+    "tool_count": 52,
+    "capability_count": 21,
+    "manifest_canonical_sha256": "e37dc3a25140a069c4fb6bc57980ef7bff7e234c84f7784251714e80c266c9b2",
+    "index": {
+      "state": "idle",
+      "last_indexed": "2026-07-14T08:52:02.153Z",
+      "file_count": 817,
+      "is_stale": false,
+      "freshness": "healthy",
+      "state_sha256": "78bd2c343265c7471fb6124339d0fbb0e0f27f9f9efbd2c2c6a32dc96d0cf565",
+      "file_state_sha256": "8c1154f89e75ffe97580412aae890fd7e9df53d7450eb9e9aebbb80b1374085a",
+      "fingerprint_sha256": "2360d28daaa5004ce61e2426bd80969567de816829839705d4889a54400440b2"
+    },
+    "graph": {
+      "status": "ready",
+      "backend": "graph",
+      "degraded": false,
+      "artifact_sha256": "2ce4689338e77f1e66fc712100c2ec42302e31db7c0c8e9294364196b4e7a831"
+    },
+    "cache": {
+      "context_cache_sha256": "c22ed17486426322b3f8ec659a1b6fed4e621618a01beea96b47fb7e055c2d47",
+      "search_cache_sha256": "73b0fdcf2c201e46360d78878ed5485487bd58ffca3b2acb344a62f5fea14d2d"
+    }
+  },
+  "gates": {
+    "declared_pr_blockers": [
+      "build",
+      "ci:check:mcp-smoke",
+      "ci:check:retrieval-holdout-fixture",
+      "ci:check:retrieval-quality-gate",
+      "ci:check:retrieval-shadow-canary-gate",
+      "ci:check:enhancement-error-taxonomy-report",
+      "ci:check:enhance-prompt-contract"
+    ],
+    "workflow_files": [
+      { "path": ".github/workflows/perf_gates.yml", "sha256": "ec21ceaf094debbd808f0211388d504f027954a2a6376013a58972b2ce617d5f" },
+      { "path": ".github/workflows/release_perf_gate.yml", "sha256": "f844bb8761a499efd108b1fd2d2bd4deb33bb59d7b7b66a751f7ecc4f42ec818" },
+      { "path": ".github/workflows/required-lane-catch-rate.yml", "sha256": "709340e7e9e43b3623b22feaf2f0e11f6aa7debd6d011b16dbca5c4717319cab" },
+      { "path": ".github/workflows/review_diff.yml", "sha256": "a915381b302d7e31bf85b035d78dc1ad5c4cd6b6cd347c462a80c8c71b6c4cab" },
+      { "path": ".github/workflows/test.yml", "sha256": "5ebd980806142d44b44957d92ee25c89e68cd7f21425eb03c97b74f8c170ea2e" }
+    ],
+    "external_branch_protection": "not-verified"
+  },
+  "commands": [
+    { "command": "index_workspace(force=true)", "exit_code": 0, "duration_ms": 4428, "result": "817 files indexed; 0 errors" },
+    { "command": "tool_manifest", "exit_code": 0, "result": "52 tools; server 1.9.0" },
+    { "command": "trace_symbol(ContextServiceClient)", "exit_code": 0, "result": "graph ready; no degraded operations" },
+    { "command": "PowerShell baseline fingerprint capture", "exit_code": 0, "duration_ms": 2000, "result": "19 dirty entries; 0 staged paths" }
+  ],
+  "intentional_contract_deltas": [],
+  "rollback": "Append a B0 cancellation or supersession receipt; never delete or rewrite this baseline.",
+  "reviewer_approver": "user execution approval in active thread goal"
+}

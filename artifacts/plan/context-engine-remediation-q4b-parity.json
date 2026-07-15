@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "task_id": "Q4b",
+  "title": "Post-change cancellation/session parity fingerprint receipt",
+  "source_plan": "context-engine-remediation-plan-2026-07-14.md",
+  "source_plan_task": "Q4b",
+  "depends_on": [
+    "R1c",
+    "R2",
+    "R6"
+  ],
+  "generated_at": "2026-07-14T00:00:00.000Z",
+  "parity_inventory_path": "config/ci/q4b-postchange-parity.json",
+  "parity_inventory_sha256": "4786cfe89b849c74e4c3f8860502a61ec8d25b1cbdb8d245115a01a6b8e67238",
+  "hard_gate_for": [
+    "T1a",
+    "T1b1",
+    "T1b2",
+    "T1c1",
+    "T1c2",
+    "T1c3",
+    "T1d1",
+    "T1d2"
+  ],
+  "inherits_q4a_fingerprints_from": "artifacts/plan/context-engine-remediation-q4a-goldens.json",
+  "cross_checked_by": "tests/ci/q4bPostchangeParity.test.ts",
+  "note": "Q4b is the hard gate for T1. Fingerprints inherit Q4a unless intentional_deltas are recorded."
+}
