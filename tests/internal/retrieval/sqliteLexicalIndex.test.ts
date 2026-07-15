@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { FEATURE_FLAGS } from '../../../src/config/features.js';
 import { hashIndexStateContent } from '../../../src/mcp/indexStateStore.js';
@@ -41,7 +42,20 @@ function writeIndexState(
   );
 }
 
-describe('sqlite lexical index', () => {
+const hasNodeSqlite = (() => {
+  try {
+    const sqlite = createRequire(import.meta.url)('node:sqlite') as { DatabaseSync?: unknown };
+    return typeof sqlite.DatabaseSync === 'function';
+  } catch {
+    return false;
+  }
+})();
+
+// The SQLite backend is an optional runtime capability. Keep the supported
+// Node 18/20 compatibility lanes green while the Node 22 lane exercises it.
+const describeSqlite = hasNodeSqlite ? describe : describe.skip;
+
+describeSqlite('sqlite lexical index', () => {
   let workspacePath = '';
   let activeIndex: WorkspaceSqliteLexicalIndex | null = null;
 
