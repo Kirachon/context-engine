@@ -15,6 +15,12 @@ import type { ContextEngineToolResult } from '../types/toolResult.js';
 import { okResult } from '../utils/resultBuilder.js';
 import { getIndexFreshnessWarning } from '../tooling/indexFreshness.js';
 import {
+  buildPathFilterDiagnostics,
+  deriveRetrievalFallbackState,
+  type PathFilterDiagnostics,
+  type RetrievalFallbackReason,
+} from '../tooling/pathFilterReceipts.js';
+import {
   validateFiniteNumberInRange,
   validateMaxLength,
   validateOneOf,
@@ -87,35 +93,28 @@ export interface CodebaseRetrievalOutput {
       lastError?: string;
     };
     freshnessWarning?: string;
+    /** Legacy filter labels (compatibility). */
     filtersApplied: string[];
     filteredPathsCount: number;
     secondPassUsed: boolean;
+    /**
+     * R5 — path-filter receipts. Separate from retrieval fallback so ordinary
+     * path filters never inflate fallback ratios used for gating.
+     */
+    path_filters?: PathFilterDiagnostics | null;
     responseVersion?: 'v2';
     providerResolution?: string;
     query_mode?: 'semantic' | 'keyword' | 'hybrid';
     hybrid_components?: Array<'semantic' | 'keyword' | 'dense'>;
     quality_guard_state?: 'enabled' | 'disabled';
     fallback_state?: 'active' | 'inactive';
+    /** R5 — reason enum derived only from retrieval outcome. */
+    fallback_reason?: RetrievalFallbackReason;
     ranking_diagnostics?: RankingDiagnostics;
   };
 }
 
 export type CodebaseRetrievalStructuredContent = CodebaseRetrievalOutput & Record<string, unknown>;
-
-type FallbackDiagnostics = {
-  filtersApplied?: string[];
-  filteredPathsCount?: number;
-  secondPassUsed?: boolean;
-};
-
-type RawFallbackDiagnostics = {
-  filters_applied?: string[];
-  filtered_paths_count?: number;
-  second_pass_used?: boolean;
-  filtersApplied?: string[];
-  filteredPathsCount?: number;
-  secondPassUsed?: boolean;
-};
 
 type RetrievalProfile = 'fast' | 'balanced' | 'rich';
 
@@ -131,6 +130,7 @@ type RetrievalSignalSummary = {
   hybridComponents: Array<'semantic' | 'keyword' | 'dense'>;
   qualityGuardState: 'enabled' | 'disabled';
   fallbackState: 'active' | 'inactive';
+  fallbackReason: RetrievalFallbackReason;
 };
 
 type InternalRetrievalSignalMetadata = {
@@ -201,7 +201,22 @@ const RETRIEVAL_PROFILE_MAP: Record<RetrievalProfile, RetrievalProfileSettings> 
   },
 };
 
-function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDiagnostics | null {
+type PathFilterDiagnosticsInput = {
+  filtersApplied?: string[];
+  filteredPathsCount?: number;
+  secondPassUsed?: boolean;
+};
+
+type RawPathFilterDiagnostics = {
+  filters_applied?: string[];
+  filtered_paths_count?: number;
+  second_pass_used?: boolean;
+  filtersApplied?: string[];
+  filteredPathsCount?: number;
+  secondPassUsed?: boolean;
+};
+
+function getPathFilterDiagnostics(serviceClient: ContextServiceClient): PathFilterDiagnosticsInput | null {
   const maybeClient = serviceClient as unknown as {
     getLastSearchDiagnostics?: () => unknown;
     getLastFallbackDiagnostics?: () => unknown;
@@ -214,7 +229,7 @@ function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDi
       : typeof fallbackDiagnosticsGetter === 'function'
         ? fallbackDiagnosticsGetter.call(maybeClient)
         : null
-  ) as RawFallbackDiagnostics | null | undefined;
+  ) as RawPathFilterDiagnostics | null | undefined;
   if (!diagnostics) {
     return null;
   }
@@ -227,8 +242,9 @@ function getFallbackDiagnostics(serviceClient: ContextServiceClient): FallbackDi
 
 function summarizeRetrievalSignals(
   results: Array<{ matchType?: string; retrievalSource?: string }>,
-  fallbackDiagnostics: FallbackDiagnostics | null,
-  metadata?: InternalRetrievalSignalMetadata
+  metadata?: InternalRetrievalSignalMetadata,
+  rankingDiagnostics?: RankingDiagnostics | null,
+  providerFailed = false
 ): RetrievalSignalSummary {
   const components = new Set<'semantic' | 'keyword' | 'dense'>();
 
@@ -255,14 +271,21 @@ function summarizeRetrievalSignals(
         ? 'keyword'
         : 'semantic';
 
-  const diagnosticsFallbackActive = (fallbackDiagnostics?.filtersApplied?.length ?? 0) > 0;
-  const metadataFallbackActive = metadata?.fallbackState === 'active';
+  // R5 — fallback is derived only from retrieval outcome / ranking diagnostics.
+  // Path filters must never activate fallback_state.
+  const fallback = deriveRetrievalFallbackState({
+    retrievalFallbackState: metadata?.fallbackState,
+    rankingFallbackState: rankingDiagnostics?.fallbackState,
+    rankingFallbackReason: rankingDiagnostics?.fallbackReason,
+    providerFailed,
+  });
 
   return {
     queryMode: metadata?.queryMode ?? computedQueryMode,
     hybridComponents: metadata?.hybridComponents ?? Array.from(components.values()),
     qualityGuardState: metadata?.qualityGuardState ?? (featureEnabled('retrieval_quality_guard_v1') ? 'enabled' : 'disabled'),
-    fallbackState: metadataFallbackActive || diagnosticsFallbackActive ? 'active' : 'inactive',
+    fallbackState: fallback.fallback_state,
+    fallbackReason: fallback.fallback_reason,
   };
 }
 
@@ -369,7 +392,7 @@ export function buildCodebaseRetrievalStructuredContent(params: {
   useV2: boolean;
   useCompactPreview: boolean;
   queryTimeMs: number;
-  fallbackDiagnostics: FallbackDiagnostics | null;
+  pathFilterDiagnostics: PathFilterDiagnosticsInput | null;
   signalSummary: RetrievalSignalSummary;
   status: ReturnType<typeof internalIndexStatus>;
   freshnessWarning: string | null;
@@ -382,7 +405,7 @@ export function buildCodebaseRetrievalStructuredContent(params: {
     useV2,
     useCompactPreview,
     queryTimeMs,
-    fallbackDiagnostics,
+    pathFilterDiagnostics,
     signalSummary,
     status,
     freshnessWarning,
@@ -407,6 +430,8 @@ export function buildCodebaseRetrievalStructuredContent(params: {
     };
   });
 
+  const pathFilters = buildPathFilterDiagnostics(pathFilterDiagnostics);
+
   return {
     results,
     metadata: {
@@ -421,15 +446,17 @@ export function buildCodebaseRetrievalStructuredContent(params: {
         lastError: status.lastError,
       },
       freshnessWarning: freshnessWarning ?? undefined,
-      filtersApplied: fallbackDiagnostics?.filtersApplied ?? [],
-      filteredPathsCount: fallbackDiagnostics?.filteredPathsCount ?? 0,
-      secondPassUsed: fallbackDiagnostics?.secondPassUsed ?? false,
+      filtersApplied: pathFilterDiagnostics?.filtersApplied ?? [],
+      filteredPathsCount: pathFilterDiagnostics?.filteredPathsCount ?? 0,
+      secondPassUsed: pathFilterDiagnostics?.secondPassUsed ?? false,
+      path_filters: pathFilters,
       ...(useV2 ? { responseVersion: 'v2' as const } : {}),
       ...(providerResolution ? { providerResolution } : {}),
       query_mode: signalSummary.queryMode,
       hybrid_components: signalSummary.hybridComponents,
       quality_guard_state: signalSummary.qualityGuardState,
       fallback_state: signalSummary.fallbackState,
+      fallback_reason: signalSummary.fallbackReason,
       ranking_diagnostics: rankingDiagnostics,
     },
   };
@@ -441,7 +468,8 @@ export function formatCodebaseRetrievalText(structuredContent: CodebaseRetrieval
 
 export async function handleCodebaseRetrieval(
   args: CodebaseRetrievalArgs,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<ContextEngineToolResult<CodebaseRetrievalStructuredContent>> {
   const startTime = Date.now();
   const {
@@ -493,17 +521,40 @@ export async function handleCodebaseRetrieval(
         : 'v1' as const,
     includePaths: normalizedIncludePaths,
     excludePaths: normalizedExcludePaths,
+    signal,
   };
 
-  const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, retrievalOptions);
-  const searchResults = retrieval.results;
-  const fallbackDiagnostics = getFallbackDiagnostics(serviceClient);
+  let searchResults: Awaited<ReturnType<typeof internalRetrieveCode>>['results'] = [];
+  let rankingDiagnostics: RankingDiagnostics | undefined;
+  let retrievalMeta: InternalRetrievalSignalMetadata | undefined;
+  let providerFailed = false;
+
+  try {
+    const retrieval = await internalRetrieveCode(normalizedQuery, serviceClient, retrievalOptions);
+    searchResults = retrieval.results;
+    retrievalMeta = retrieval;
+    rankingDiagnostics = retrieval.rankingDiagnostics
+      ? (retrieval.rankingDiagnostics as RankingDiagnostics)
+      : undefined;
+  } catch {
+    providerFailed = true;
+    searchResults = [];
+  }
+
+  const status = internalIndexStatus(serviceClient);
+  // Provider/runtime failures may be swallowed into empty results by lower layers;
+  // treat an unhealthy index + empty payload as an explicit provider failure receipt.
+  if (!providerFailed && searchResults.length === 0 && status.status === 'error') {
+    providerFailed = true;
+  }
+
+  const pathFilterDiagnostics = getPathFilterDiagnostics(serviceClient);
   const signalSummary = summarizeRetrievalSignals(
     searchResults as Array<{ matchType?: string; retrievalSource?: string }>,
-    fallbackDiagnostics,
-    retrieval
+    retrievalMeta,
+    rankingDiagnostics,
+    providerFailed
   );
-  const status = internalIndexStatus(serviceClient);
   const freshnessWarning = getIndexFreshnessWarning(status);
 
   const maybeClient = serviceClient as unknown as {
@@ -527,13 +578,11 @@ export async function handleCodebaseRetrieval(
     useV2,
     useCompactPreview,
     queryTimeMs: Date.now() - startTime,
-    fallbackDiagnostics,
+    pathFilterDiagnostics,
     signalSummary,
     status,
     freshnessWarning,
-    rankingDiagnostics: retrieval.rankingDiagnostics
-      ? (retrieval.rankingDiagnostics as RankingDiagnostics)
-      : undefined,
+    rankingDiagnostics,
     providerResolution,
   });
 

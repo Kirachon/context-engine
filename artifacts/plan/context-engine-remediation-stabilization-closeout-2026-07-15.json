@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "receipt_id": "B2",
+  "task": "context-engine-remediation-stabilization",
+  "date": "2026-07-15",
+  "branch": "remediation/2026-07-15-stabilize",
+  "checkpoint_commit": "222c63aa10c878ca062b099b0e360f8253284bd0",
+  "rollback_parent": "06ff69f72c5aee12768e713d42b217d8f62dcb16",
+  "disposition": "CONDITIONAL_GO",
+  "changed_files": [
+    {
+      "path": "config/ci/compatibility-rollback-envelope.json",
+      "sha256": "b5d86927ae491bb2c930c899087afc42ca48a4c667f4740ad34724783b24763a"
+    },
+    {
+      "path": "src/mcp/serviceClient.ts",
+      "sha256": "d280c19148247590cc0ea1cf901f42cfa72c57d41b2df3d6f653cc94c7eb8614"
+    },
+    {
+      "path": "src/mcp/tooling/externalGrounding.ts",
+      "sha256": "4c6e4fa8336ff2eb39b6efb9d57a836871fc8ec927b1964125c8b7d0c80bb4d8"
+    },
+    {
+      "path": "tests/ci/slowOpenAiToolHardening.test.ts",
+      "sha256": "b74ef80f21893be73fdb3e7d946d7f99e31f7410b7798ee9150de5ccf4fd2506"
+    },
+    {
+      "path": "tests/mcp/rootsManager.test.ts",
+      "sha256": "37e1c7e72dd5d7aa72acbf8ca3f933ba770c8a1efb527a2934511f1d48a2c5bf"
+    },
+    {
+      "path": "tests/tooling/externalGrounding.test.ts",
+      "sha256": "791bcad96dc1135be9614bc0ed05e0b8cdcecc7e42e02902894e52e5de8376d3"
+    },
+    {
+      "path": "docs/plan-execution/context-engine-remediation-stabilization-plan-2026-07-15.md",
+      "sha256": "18e6ec76a146b845fb5479639777adeb0cb8867b82a384cee882bf66cc1e5a1b"
+    },
+    {
+      "path": "docs/plan-execution/context-engine-remediation-stabilization-closeout-2026-07-15.md",
+      "sha256": "3e0d076d5056a0cdedec1be7a325449d77be5bd05e8092dbdc192e5aa9b70af6"
+    }
+  ],
+  "evidence": {
+    "b0_human_sha256": "5359cc4437965b02670d58cc9bf4662e608250aa8d39b48369f882747c74bf3f",
+    "b0_machine_sha256": "fe008fda3ac11041b463719e6aa099d7e6528ab668a1e848c8f3a92586401b6d",
+    "z0_human_sha256": "93387f1bdf128a5af0f7267a2dca6cba49bc19d4913aaf3d394856e61888ba5d",
+    "b1_human_sha256": "2450d776dbf7eb4f045af3c6d52fcb1f9f736c15a83869a1d9e6b87e76138964",
+    "b1_machine_sha256": "baf0c108c40f7406e0508072e70e9eb7ad3689a2006e57cf52a5ee52ba6e8d7f",
+    "execution_plan_sha256": "aa9dbb5fb85717b42a9ca325107ef242e7b2f20c736a11213a12ba54bbf64cbc"
+  },
+  "protected_foreign_paths": [
+    {
+      "path": "artifacts/bench/mcp-compatibility-matrix.json",
+      "b0_sha256": "93050882a218b0488eb76211e4f8cce60d4c407b71490d2b2cda2b86e42679b3",
+      "b1_sha256": "b857f6014c822b4d06f43027161ac5e513d13c5494a7324b8f2834b5411011dd",
+      "final_status": "unchanged_from_b1"
+    },
+    {
+      "path": "docs/rollout-evidence/2026-05-31/mcp-compatibility-matrix.log",
+      "b0_sha256": "fbed157bb73240ca62d79a66a48d9ef031941af446a85ac0e269718ad822c0a5",
+      "b1_sha256": "04c85a9fc7703dfda1cbabd5d51807cb9b2fa79b477edaea7148725d4afd7bef",
+      "final_status": "unchanged_from_b1"
+    },
+    {
+      "path": "artifacts/evals/mcp-compatibility.json",
+      "b0_sha256": "f664c628eeef88b1ac25eae952b949178a58a1478a2fd092478819a7ff447cb1",
+      "b1_sha256": "8c1aff09c7b31f9b451709d36c3419866dc2dc086cc0cb13fb662fdfcbbde65b",
+      "final_status": "unchanged_from_b1"
+    },
+    {
+      "path": "artifacts/evals/mcp-compatibility.normalized.json",
+      "b0_sha256": "9f5a0a561ac1a7330202b7ad431670b1317cdaf0224e7dcb00d0d8c70ca4d556",
+      "b1_sha256": "1a45317e23fd306fd8c4cab324372ac0928417420223750de68c8a69887a2c07",
+      "final_status": "unchanged_from_b1"
+    },
+    {
+      "path": "artifacts/evals/mcp-eval-smoke.json",
+      "b0_sha256": "7e60243eb65daca6f9492dc6b2d00db27fe1a5210e2ca3c23d8a8361342e10ec",
+      "b1_sha256": "25d4dfd9b87ce5d4df8e07832888fb6486bd2180d7318e986ed218de7e01421a",
+      "final_status": "unchanged_from_b1"
+    }
+  ],
+  "validation": {
+    "build": "pass",
+    "targeted_suites": { "suites": 5, "tests_passed": 39, "status": "pass" },
+    "full_suite": {
+      "suites_passed": 221,
+      "suites_total": 222,
+      "tests_passed": 2130,
+      "tests_failed": 1,
+      "status": "conditional",
+      "failure": "existing reranker metadata test under RSS memory-pressure guardrails"
+    },
+    "standalone_reranker": { "tests_passed": 16, "tests_total": 16, "status": "pass" },
+    "gate_tier_contract": "pass",
+    "frozen_corpus_contract": "pass",
+    "docs_version_reconciliation": "pass",
+    "evidence_date_contract": "pass",
+    "mcp_compatibility": { "checks_passed": 6, "checks_total": 6, "status": "pass" },
+    "supported_distribution_pack_proof": "pass",
+    "coverage": {
+      "suites_passed": 221,
+      "suites_total": 222,
+      "status": "conditional",
+      "failure": "unrelated Windows launcher temporary-directory cleanup EPERM",
+      "isolated_launcher": { "tests_passed": 9, "tests_total": 9, "status": "pass" }
+    },
+    "diff_check": "pass",
+    "context_engine_invariants": { "checked": 6, "findings": 0, "status": "pass" },
+    "ai_review": "timeout; deterministic review fallback completed"
+  },
+  "dispositions": {
+    "Q3d": "deferred",
+    "T1*": "deferred",
+    "A*": "deferred",
+    "M1-M3": "not-verified",
+    "release_status": "CONDITIONAL_GO"
+  },
+  "non_scope_validation_artifact": {
+    "path": "artifacts/ci/q3a-frozen-corpus-contract-check.json",
+    "sha256": "3b1d6ed22a989e6735ca3dc9b321038f85a411d8ce5bac740438ce84a29c05e5",
+    "status": "semantic_content_restored; EOF-only working-tree representation differs after negative-test regeneration"
+  }
+}

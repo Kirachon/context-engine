@@ -5,5 +5,6 @@
  */
 
 export { ContextEngineHttpServer, type HttpServerOptions } from './httpServer.js';
+export * from './bindTarget.js';
 export * from './middleware/index.js';
 export * from './routes/index.js';

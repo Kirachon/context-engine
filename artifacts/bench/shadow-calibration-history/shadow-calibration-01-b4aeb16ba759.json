@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "task_id": "Q3c",
+  "generated_at_utc": "2026-07-14T12:00:00.000Z",
+  "commit_sha": "b4aeb16ba759b9caf728714c5429dc0d4249de6f",
+  "waived": false,
+  "corpus_identity": {
+    "q3a_contract_sha256": "11ca718c91f80ddb37936b93f135d236a857c73a7a72bea64c41b3657518b41f",
+    "pr_corpus_sha256": "f898d47ef47369e418edd4ed9afc0ba82f00b2e560e49fb99e263c73a2476a25",
+    "fixture_pack_sha256": "fb924d5831a2fe849fd1ff2a033ad36564178ad28bc836b0c70a23dc83ecd643"
+  },
+  "gate_artifacts": {
+    "shadow_gate_status": "pass",
+    "quality_gate_status": "pass",
+    "holdout_status": "pass",
+    "shadow_gate_sha256": "b57d349cf2bae61788073d384d8fa39b9fdbdb7335daff919c5e944585d217cb",
+    "quality_gate_sha256": "c3e1c34b869db445a625c8e809dae6e30fc893d70c53b135de6e71835f8f855f",
+    "holdout_sha256": "eb75d1a750592e9270deeeb28084b63f1b5a16f6c59585c74e786220e36548ab"
+  },
+  "provenance": {
+    "simulation": "local-dual-commit",
+    "note": "Local dual-commit receipt simulation for calibration; not a GitHub Actions workflow run."
+  }
+}

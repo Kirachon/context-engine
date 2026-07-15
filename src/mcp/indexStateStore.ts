@@ -38,6 +38,11 @@ export interface IndexStateFile {
   updated_at: string;
   workspace_fingerprint?: string;
   feature_flags_snapshot?: string;
+  /**
+   * R4 — generation fingerprint over the indexed `{path, hash}` set at last
+   * successful index. Compared against the live corpus independently of mtimes.
+   */
+  generation_fingerprint?: string;
   files: Record<string, IndexStateFileEntry>;
 }
 
@@ -51,8 +56,16 @@ export interface IndexStateLoadResult {
   metadata: IndexStateLoadMetadata;
 }
 
-type IndexStateSaveInput = Omit<IndexStateFile, 'schema_version' | 'provider_id' | 'workspace_fingerprint' | 'feature_flags_snapshot'> &
-  Partial<Pick<IndexStateFile, 'schema_version' | 'provider_id' | 'workspace_fingerprint' | 'feature_flags_snapshot'>>;
+type IndexStateSaveInput = Omit<
+  IndexStateFile,
+  'schema_version' | 'provider_id' | 'workspace_fingerprint' | 'feature_flags_snapshot' | 'generation_fingerprint'
+> &
+  Partial<
+    Pick<
+      IndexStateFile,
+      'schema_version' | 'provider_id' | 'workspace_fingerprint' | 'feature_flags_snapshot' | 'generation_fingerprint'
+    >
+  >;
 
 export class JsonIndexStateStore {
   private workspacePath: string;
@@ -138,6 +151,10 @@ export class JsonIndexStateStore {
             typeof parsed.feature_flags_snapshot === 'string' && parsed.feature_flags_snapshot.trim().length > 0
               ? parsed.feature_flags_snapshot
               : undefined,
+          generation_fingerprint:
+            typeof parsed.generation_fingerprint === 'string' && parsed.generation_fingerprint.trim().length > 0
+              ? parsed.generation_fingerprint
+              : undefined,
           files,
         },
         metadata: { warnings: [] },
@@ -165,6 +182,10 @@ export class JsonIndexStateStore {
       feature_flags_snapshot:
         typeof data.feature_flags_snapshot === 'string' && data.feature_flags_snapshot.trim().length > 0
           ? data.feature_flags_snapshot
+          : undefined,
+      generation_fingerprint:
+        typeof data.generation_fingerprint === 'string' && data.generation_fingerprint.trim().length > 0
+          ? data.generation_fingerprint
           : undefined,
       files: data.files ?? {},
     };

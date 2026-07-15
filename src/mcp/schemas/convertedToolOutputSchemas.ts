@@ -35,6 +35,22 @@ export const indexStatusOutputSchema: JsonSchema = {
         fileCount: { type: 'integer' },
         isStale: { type: 'boolean' },
         lastError: { type: ['string', 'null'] },
+        staleCauses: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: [
+              'age',
+              'unindexed',
+              'generation_changed',
+              'files_added',
+              'files_deleted',
+              'content_changed',
+            ],
+          },
+        },
+        indexedGenerationFingerprint: { type: ['string', 'null'] },
+        currentGenerationFingerprint: { type: ['string', 'null'] },
       },
     },
     freshness: {
@@ -75,6 +91,21 @@ export const indexStatusOutputSchema: JsonSchema = {
         hashFallbackActive: { type: ['boolean', 'null'] },
       },
     },
+    // R6 additive composite health (optional for rollback / older clients).
+    composite: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['schema_version', 'overall', 'components'],
+      properties: {
+        schema_version: { type: 'integer', const: 1 },
+        overall: {
+          type: 'string',
+          enum: ['healthy', 'degraded', 'stale', 'unhealthy', 'unknown'],
+        },
+        components: { type: 'object', additionalProperties: true },
+      },
+    },
+    components: { type: 'object', additionalProperties: true },
   },
 };
 
@@ -575,6 +606,56 @@ const codebaseRetrievalMetadataSchema: JsonSchema = {
     },
     quality_guard_state: { type: 'string', enum: ['enabled', 'disabled'] },
     fallback_state: { type: 'string', enum: ['active', 'inactive'] },
+    fallback_reason: {
+      type: 'string',
+      enum: ['none', 'quality_guard', 'rerank_timeout', 'rerank_error', 'provider_failure', 'second_pass'],
+    },
+    path_filters: {
+      type: ['object', 'null'],
+      additionalProperties: false,
+      required: [
+        'filters_applied',
+        'filter_reasons',
+        'filter_receipts',
+        'filtered_paths_count',
+        'second_pass_used',
+      ],
+      properties: {
+        filters_applied: { type: 'array', items: { type: 'string' } },
+        filter_reasons: {
+          type: 'array',
+          items: {
+            type: 'string',
+            enum: [
+              'exclude_artifacts',
+              'exclude_docs',
+              'exclude_json',
+              'deprioritize_docs',
+              'deprioritize_json',
+              'scope_include_paths',
+              'scope_exclude_paths',
+              'scope_lexical',
+              'scope_chunk',
+              'other',
+            ],
+          },
+        },
+        filter_receipts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            additionalProperties: false,
+            required: ['reason', 'label'],
+            properties: {
+              reason: { type: 'string' },
+              label: { type: 'string' },
+            },
+          },
+        },
+        filtered_paths_count: { type: 'integer' },
+        second_pass_used: { type: 'boolean' },
+      },
+    },
     ranking_diagnostics: {
       type: 'object',
       additionalProperties: true,

@@ -20,6 +20,7 @@ import {
   type InternalEmbeddingReuse,
 } from '../handlers/performance.js';
 import { splitIntoChunks } from './chunking.js';
+import { filterIndexStateFilesToCanonicalManifest } from './discoveryAdapter.js';
 import type { DenseRetriever } from './embeddingProvider.js';
 import type { EmbeddingRuntime } from './embeddingRuntime.js';
 
@@ -744,13 +745,24 @@ export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbV
 
   return {
     id: `lancedb:${options.embeddingRuntime.id}`,
-    async search(query: string, topK: number): Promise<SearchResult[]> {
+    async search(query: string, topK: number, searchOptions?: { signal?: AbortSignal }): Promise<SearchResult[]> {
+      const signal = searchOptions?.signal;
       const safeTopK = clampTopK(topK);
       const embeddingReuse = getInternalEmbeddingReuse();
       const runSearch = async (): Promise<SearchResult[]> => {
         try {
+          if (signal?.aborted) {
+            throw new Error('LanceDB retrieval aborted before search.');
+          }
           await options.embeddingRuntime.prepareForSearch?.();
-          const indexState = readIndexState(indexStatePath);
+          const rawIndexState = readIndexState(indexStatePath);
+          // R3b2: never vector-index a path outside the canonical R3a
+          // discovery manifest, even if a stale/independently-computed
+          // index-state file claims it. See discoveryAdapter.ts for the
+          // rollback lever.
+          const indexState: IndexStateFile = {
+            files: await filterIndexStateFilesToCanonicalManifest(options.workspacePath, rawIndexState.files),
+          };
           const existingVectorIndex = readVectorIndex(vectorIndexReadPath, options.embeddingRuntime);
           let refreshedVectorIndex: VectorIndexFile;
           try {
@@ -765,8 +777,17 @@ export function createWorkspaceLanceDbVectorRetriever(options: WorkspaceLanceDbV
           } catch (error) {
             throw toVectorSearchFailure('refresh', error);
           }
-          if (shouldPersistVectorIndex(existingVectorIndex, refreshedVectorIndex)) {
+          // R1b: skip publishing the refreshed vector-index artifact once
+          // the caller has already aborted -- the table itself may still
+          // have been mutated by `refreshVectorIndex` (that mutation is not
+          // safely revertible mid-flight), but the on-disk index-state
+          // artifact -- the thing future reads treat as the cache of
+          // record -- is only written for still-active callers.
+          if (shouldPersistVectorIndex(existingVectorIndex, refreshedVectorIndex) && !signal?.aborted) {
             safeWriteJson(vectorIndexWritePath, refreshedVectorIndex);
+          }
+          if (signal?.aborted) {
+            throw new Error('LanceDB retrieval aborted after refresh.');
           }
   
           let connection!: lancedb.Connection;

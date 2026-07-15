@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "description": "Q3a frozen corpus and threshold contract. Pins the PR, nightly, release, seeded-failure, ambiguity, duplicate, and performance corpora with content hashes and predeclared thresholds so a treatment cannot be measured against a corpus or threshold that moved after the fact. scripts/ci/lib/frozenCorpusContract.ts and scripts/ci/check-frozen-corpus-contract.ts are the single validators; tests/ci/frozenCorpusContract.test.ts and tests/ci/checkFrozenCorpusContract.test.ts are the paired tests. Any lane content or threshold change must bump `version` and append a matching `version_ledger` entry, or validation fails closed.",
+  "lanes": {
+    "pr": {
+      "corpus_path": "config/ci/frozen-corpora/pr-corpus.json",
+      "intended_lane": "pr",
+      "content_sha256": "f898d47ef47369e418edd4ed9afc0ba82f00b2e560e49fb99e263c73a2476a25",
+      "expected": {
+        "case_count": 6,
+        "languages": ["go", "python", "typescript"],
+        "labels": ["fast-path", "polyglot"]
+      },
+      "thresholds": {
+        "max_p95_latency_ms": 350,
+        "min_ndcg_at_10": 0.55,
+        "min_pass_rate_pct": 100
+      }
+    },
+    "nightly": {
+      "corpus_path": "config/ci/frozen-corpora/nightly-corpus.json",
+      "intended_lane": "nightly",
+      "content_sha256": "b1cbaafdea983d07d27c7eee10a18b0f37505f8a22c42abb3c9c3d5432114be4",
+      "expected": {
+        "case_count": 8,
+        "languages": ["go", "java", "python", "rust", "typescript"],
+        "labels": ["broad-coverage", "polyglot"]
+      },
+      "thresholds": {
+        "max_p95_latency_regression_pct": 20,
+        "min_pass_rate_pct": 95
+      }
+    },
+    "release": {
+      "corpus_path": "config/ci/frozen-corpora/release-corpus.json",
+      "intended_lane": "release",
+      "content_sha256": "35b1d28a9c4a5db6257b979d44419be70a4fd6dd9d58affce6a44fce11bff743",
+      "expected": {
+        "case_count": 10,
+        "languages": ["csharp", "go", "java", "python", "rust", "typescript"],
+        "labels": ["polyglot", "release-gate"]
+      },
+      "thresholds": {
+        "max_p95_latency_regression_pct": 20,
+        "min_pass_rate_pct": 100,
+        "max_provider_failure_rate_pct": 1
+      }
+    },
+    "seeded_failure": {
+      "corpus_path": "config/ci/frozen-corpora/seeded-failure-corpus.json",
+      "intended_lane": "seeded_failure",
+      "content_sha256": "8a3368f9b27d364f7091ba922098a75d6a0d6019586b170f62f9e280a947c114",
+      "expected": {
+        "case_count": 6,
+        "languages": ["typescript"],
+        "labels": ["control-pass", "regression-seed"]
+      },
+      "thresholds": {
+        "min_catch_rate_pct": 95,
+        "source_threshold_ref": "config/ci/ci-thresholds.json#requiredLaneCatchRateMinPct"
+      }
+    },
+    "ambiguity": {
+      "corpus_path": "config/ci/frozen-corpora/ambiguity-corpus.json",
+      "intended_lane": "ambiguity",
+      "content_sha256": "fa1b1aa2e2da09fe03f6f2d3a20be87d35f442ab07f65094137c36ef01b94ebb",
+      "expected": {
+        "case_count": 5,
+        "languages": ["typescript"],
+        "labels": ["alias", "import", "method", "re_export", "same_name"]
+      },
+      "thresholds": {
+        "min_precision_pct": 95,
+        "min_recall_pct": 95
+      }
+    },
+    "duplicate": {
+      "corpus_path": "config/ci/frozen-corpora/duplicate-corpus.json",
+      "intended_lane": "duplicate",
+      "content_sha256": "1346af17cdab776d30c87e0271f11d77c05c8df322800d2a70877d3b8e35295c",
+      "expected": {
+        "case_count": 5,
+        "languages": ["typescript"],
+        "labels": ["distinct", "exact-duplicate", "near-duplicate-window"]
+      },
+      "thresholds": {
+        "max_duplicate_rate_pct": 5,
+        "min_mrr_at_10_pct": 60,
+        "min_ndcg_at_10_pct": 55
+      }
+    },
+    "performance": {
+      "corpus_path": "config/ci/frozen-corpora/performance-corpus.json",
+      "intended_lane": "performance",
+      "content_sha256": "fa4ce4309fe20f71db874e8807d22baf85ab9745d228fcc7ebd5b44c6ce58774",
+      "expected": {
+        "case_count": 4,
+        "languages": ["mixed"],
+        "labels": ["full-index", "incremental-refresh", "large-corpus", "sustained-load", "synthetic"]
+      },
+      "thresholds": {
+        "max_event_loop_delay_ms": 100,
+        "max_p99_request_latency_ms": 1200,
+        "max_rss_growth_pct": 25
+      }
+    }
+  },
+  "version_ledger": [
+    {
+      "version": 1,
+      "fingerprint_sha256": "5fa4f0c04adf88934ebc713bb8b6483e3fae64df3d50e2466f4f8f404f93162d",
+      "frozen_at_utc": "2026-07-14T00:00:00.000Z",
+      "note": "Initial Q3a freeze: pr/nightly/release/seeded_failure/ambiguity/duplicate/performance corpora and predeclared thresholds."
+    }
+  ]
+}

@@ -18,6 +18,21 @@ This file stores important architectural and technical decisions made during dev
 **Rationale:** Zero new infrastructure, leverages existing semantic search, human-readable and git-friendly
 **Alternatives Considered:** Wait for SDK updates (unknown timeline), build custom memory system (too complex)
 
+<!--
+Quarantine note: "indexed by Auggie" is Auggie-era and stale; the project has since
+migrated to a local-native retrieval runtime (see ARCHITECTURE.md). The underlying
+decision to store memories as markdown files under .memories/ is unaffected by this
+note. Preserved verbatim above (non-destructive); marked archive below so this entry is
+hard-excluded from default memory retrieval and handoff ranking (see
+src/mcp/memoryQuarantine.ts) while remaining available via explicit archive access
+(list_memories, or includeArchive: true). See .memories/README.md.
+-->
+- [meta] priority: archive
+- [meta] subtype: quarantine
+- [meta] tags: auggie-era, stale
+- [meta] created_at: 2024-12-17T00:00:00.000Z
+- [meta] updated_at: 2026-07-14T11:04:00.000Z
+
 ## Technology Choices
 
 <!-- Add technology selection decisions here. Examples:

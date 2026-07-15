@@ -75,6 +75,17 @@ export class ServiceClientRetrievalAccess {
     topK: number,
     options?: ServiceClientRetrievalSearchOptions
   ): Promise<SearchResult[]> {
+    const offlineFlag = process.env.CONTEXT_ENGINE_OFFLINE_ONLY?.toLowerCase();
+    if (offlineFlag === '1' || offlineFlag === 'true' || offlineFlag === 'yes' || offlineFlag === 'on') {
+      // Offline CI must exercise the local-native index directly. The semantic
+      // wrapper is allowed to call searchAndAsk for online local-native flows,
+      // but that path is intentionally blocked when offline mode is enforced.
+      return this.options.keywordFallbackSearch(query, topK, {
+        includePaths: options?.includePaths,
+        excludePaths: options?.excludePaths,
+      });
+    }
+
     return runProviderSemanticRuntime(query, topK, options, {
       searchAndAsk: (searchQuery, prompt, runtimeOptions) =>
         this.options.searchAndAsk(searchQuery, prompt, {

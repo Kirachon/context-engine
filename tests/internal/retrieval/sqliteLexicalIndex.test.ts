@@ -1,6 +1,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { createRequire } from 'node:module';
 import { afterEach, describe, expect, it } from '@jest/globals';
 import { FEATURE_FLAGS } from '../../../src/config/features.js';
 import { hashIndexStateContent } from '../../../src/mcp/indexStateStore.js';
@@ -8,6 +9,7 @@ import {
   createWorkspaceSqliteLexicalIndex,
   type WorkspaceSqliteLexicalIndex,
 } from '../../../src/internal/retrieval/sqliteLexicalIndex.js';
+import { RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR } from '../../../src/internal/retrieval/discoveryAdapter.js';
 
 function createTempWorkspace(): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-lexical-index-'));
@@ -40,12 +42,26 @@ function writeIndexState(
   );
 }
 
-describe('sqlite lexical index', () => {
+const hasNodeSqlite = (() => {
+  try {
+    const sqlite = createRequire(import.meta.url)('node:sqlite') as { DatabaseSync?: unknown };
+    return typeof sqlite.DatabaseSync === 'function';
+  } catch {
+    return false;
+  }
+})();
+
+// The SQLite backend is an optional runtime capability. Keep the supported
+// Node 18/20 compatibility lanes green while the Node 22 lane exercises it.
+const describeSqlite = hasNodeSqlite ? describe : describe.skip;
+
+describeSqlite('sqlite lexical index', () => {
   let workspacePath = '';
   let activeIndex: WorkspaceSqliteLexicalIndex | null = null;
 
   afterEach(() => {
     FEATURE_FLAGS.hash_normalize_eol = false;
+    delete process.env[RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR];
     activeIndex?.clearCache?.();
     activeIndex = null;
     if (workspacePath) {
@@ -306,5 +322,77 @@ describe('sqlite lexical index', () => {
     const results = await index.search('needle', 5);
     expect(results.length).toBeGreaterThan(0);
     expect(fs.existsSync(dbPath)).toBe(true);
+  });
+
+  describe('R3b2: canonical discovery manifest binding', () => {
+    it('never indexes a path outside the canonical source set via the empty-state fallback walk', async () => {
+      workspacePath = createTempWorkspace();
+      writeWorkspaceFile(workspacePath, 'src/real.ts', 'export const real = "needle target";');
+      // Eligible extension, present on disk, but under a hard-excluded
+      // canonical directory name that this store's own (narrower) ad hoc
+      // fallback walk does not know about. No index-state file exists, so
+      // this exercises the fallback-discovery branch of resolveWorkspaceFiles.
+      writeWorkspaceFile(workspacePath, 'vendor/pkg.ts', 'export const vendored = "needle target";');
+
+      const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+      activeIndex = index;
+      const stats = await index.refresh();
+
+      expect(stats.totalFiles).toBe(1);
+
+      const results = await index.search('needle', 5);
+      expect(results.some((result) => result.path === 'vendor/pkg.ts')).toBe(false);
+      expect(results.some((result) => result.path === 'src/real.ts')).toBe(true);
+    });
+
+    it('never indexes a path outside the canonical source set when index-state claims it', async () => {
+      workspacePath = createTempWorkspace();
+      writeWorkspaceFile(workspacePath, 'src/real.ts', 'export const real = "needle target";');
+      writeWorkspaceFile(workspacePath, 'vendor/pkg.ts', 'export const vendored = "needle target";');
+      writeIndexState(workspacePath, {
+        'src/real.ts': { hash: hashIndexStateContent('export const real = "needle target";'), indexed_at: '2026-03-21T00:00:00.000Z' },
+        'vendor/pkg.ts': { hash: hashIndexStateContent('export const vendored = "needle target";'), indexed_at: '2026-03-21T00:00:00.000Z' },
+      });
+
+      const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+      activeIndex = index;
+      const stats = await index.refresh();
+
+      expect(stats.totalFiles).toBe(1);
+
+      const results = await index.search('needle', 5);
+      expect(results.some((result) => result.path === 'vendor/pkg.ts')).toBe(false);
+    });
+
+    it('never applies an incremental add/change outside the canonical source set', async () => {
+      workspacePath = createTempWorkspace();
+      writeWorkspaceFile(workspacePath, 'src/real.ts', 'export const real = "needle one";');
+
+      const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+      activeIndex = index;
+      await index.refresh();
+
+      writeWorkspaceFile(workspacePath, 'vendor/pkg.ts', 'export const vendored = "needle two";');
+      const stats = await index.applyWorkspaceChanges?.([{ type: 'add', path: 'vendor/pkg.ts' }]);
+
+      expect(stats?.refreshedFiles).toBe(0);
+      const results = await index.search('needle', 5);
+      expect(results.some((result) => result.path === 'vendor/pkg.ts')).toBe(false);
+    });
+
+    it('rollback lever: CE_RETRIEVAL_DISCOVERY_MANIFEST_DISABLED restores pre-R3b2 behavior', async () => {
+      workspacePath = createTempWorkspace();
+      writeWorkspaceFile(workspacePath, 'vendor/pkg.ts', 'export const vendored = "needle target";');
+
+      process.env[RETRIEVAL_DISCOVERY_MANIFEST_DISABLED_ENV_VAR] = 'true';
+
+      const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+      activeIndex = index;
+      const stats = await index.refresh();
+
+      expect(stats.totalFiles).toBe(1);
+      const results = await index.search('needle', 5);
+      expect(results.some((result) => result.path === 'vendor/pkg.ts')).toBe(true);
+    });
   });
 });

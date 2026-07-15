@@ -1,0 +1,247 @@
+{
+  "schema_version": 1,
+  "task_id": "Q4b",
+  "title": "Post-change cancellation/session parity",
+  "owner_lane": "compatibility",
+  "file_family": "F9",
+  "purpose": "Hard post-change gate for T1: inventory every affected mapping's post-R1c/R2/R6 legacy and new behavior receipts covering cancellation, session lifecycle, health additions, auth, errors, metrics, and structured results. Extends Q4a by pointer; does not duplicate pre-change goldens.",
+  "source_plan": "context-engine-remediation-plan-2026-07-14.md",
+  "source_plan_task": "Q4b",
+  "depends_on": ["R1c", "R2", "R6"],
+  "upstream_receipts": {
+    "q4a_inventory_path": "config/ci/q4a-prechange-goldens.json",
+    "q4a_fingerprint_receipt": "artifacts/plan/context-engine-remediation-q4a-goldens.json",
+    "q4a_human_receipt": "docs/plan-execution/context-engine-remediation-q4a-prechange-goldens-2026-07-14.md",
+    "k0_envelope_path": "config/ci/compatibility-rollback-envelope.json"
+  },
+  "hard_gate_for": ["T1a", "T1b1", "T1b2", "T1c1", "T1c2", "T1c3", "T1d1", "T1d2"],
+  "validation_matrix": {
+    "description": "Every post-change parity family must exercise at least one suite for each dimension below.",
+    "dimensions": [
+      "cancellation",
+      "session_lifecycle",
+      "health_additions",
+      "auth",
+      "errors",
+      "metrics",
+      "structured_results"
+    ],
+    "coverage": {
+      "cancellation": [
+        "tests/integration/httpCancellation.test.ts",
+        "tests/mcp/executeToolCancellation.test.ts"
+      ],
+      "session_lifecycle": [
+        "tests/integration/mcpHttpTransport.test.ts",
+        "tests/integration/zombieSessionRecovery.test.ts",
+        "tests/integration/httpCancellation.test.ts"
+      ],
+      "health_additions": [
+        "tests/mcp/compositeHealth.test.ts"
+      ],
+      "auth": [
+        "tests/integration/httpHardening.test.ts",
+        "tests/integration/httpAuthScopes.test.ts",
+        "tests/ci/localTransportContract.test.ts"
+      ],
+      "errors": [
+        "tests/integration/mcpErrorParity.test.ts",
+        "tests/integration/mcpTransportParity.test.ts",
+        "tests/mcp/executeToolCancellation.test.ts"
+      ],
+      "metrics": [
+        "tests/tools/reactiveReview.test.ts",
+        "tests/mcp/compositeHealth.test.ts"
+      ],
+      "structured_results": [
+        "tests/mcp/outputSchemaContract.test.ts",
+        "tests/mcp/discoverability.test.ts",
+        "tests/integration/httpCompatibility.test.ts"
+      ]
+    }
+  },
+  "parity_families": {
+    "http_disconnect_and_shutdown_cancellation": {
+      "description": "R1c HTTP disconnect, route timeout, session DELETE, idle-TTL eviction, and server-shutdown abort semantics for REST and MCP tools/call.",
+      "task_owners": ["R1c"],
+      "suites": [
+        "tests/integration/httpCancellation.test.ts"
+      ],
+      "live_sources": [
+        "src/http/httpServer.ts",
+        "src/http/routes/tools.ts",
+        "src/mcp/services/executionTrackingService.ts"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "config/ci/q4a-prechange-goldens.json#golden_families.cancellation_and_session_placeholders",
+        "new_behavior": "AbortSignal-aware cancellation with cancelled vocabulary; in-flight work aborted on disconnect/timeout/DELETE/idle-TTL/shutdown"
+      }
+    },
+    "execute_tool_cancellation_vocabulary": {
+      "description": "R1a/R1b executeToolCall cancelled outcome vocabulary preserved under post-change HTTP and MCP paths.",
+      "task_owners": ["R1a", "R1b", "R1c"],
+      "suites": [
+        "tests/mcp/executeToolCancellation.test.ts",
+        "tests/integration/mcpErrorParity.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/executeTool.ts",
+        "src/mcp/types/toolResult.ts"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "config/ci/q4a-prechange-goldens.json#golden_families.mcp_legacy_text_and_transport_parity",
+        "new_behavior": "Explicit cancelled classification; success/error byte-stable when signal not aborted"
+      }
+    },
+    "bounded_stateful_http_sessions": {
+      "description": "R2 idle TTL, hard cap, and deterministic eviction for MCP HTTP sessions without breaking stateful semantics.",
+      "task_owners": ["R2"],
+      "suites": [
+        "tests/integration/mcpHttpTransport.test.ts",
+        "tests/integration/zombieSessionRecovery.test.ts"
+      ],
+      "live_sources": [
+        "src/http/httpServer.ts"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "config/ci/q4a-prechange-goldens.json#task_golden_map.R2",
+        "new_behavior": "Bounded idle TTL + hard session cap with deterministic resource disposal"
+      }
+    },
+    "additive_composite_health": {
+      "description": "R6 additive composite/components health fields; unknown/unavailable critical subsystems cannot collapse to unqualified healthy.",
+      "task_owners": ["R6"],
+      "suites": [
+        "tests/mcp/compositeHealth.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/tooling/compositeHealth.ts",
+        "src/http/routes/health.ts",
+        "src/http/routes/status.ts"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "tests/integration/httpCompatibility.test.ts",
+        "new_behavior": "Legacy health/status fields retained; composite + components additive"
+      }
+    },
+    "auth_and_hardening_postchange": {
+      "description": "S1 fail-closed remote auth preserved alongside session/cancellation work.",
+      "task_owners": ["S1", "R2"],
+      "suites": [
+        "tests/integration/httpHardening.test.ts",
+        "tests/integration/httpAuthScopes.test.ts",
+        "tests/ci/localTransportContract.test.ts"
+      ],
+      "live_sources": [
+        "src/http/httpServer.ts",
+        "src/http/authScopes.ts",
+        "config/ci/local-transport-contract.json"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "config/ci/q4a-prechange-goldens.json#golden_families.security_auth_http_hardening",
+        "new_behavior": "Unauthenticated non-loopback remains fail-closed; loopback usable"
+      }
+    },
+    "error_and_transport_parity": {
+      "description": "MCP/REST error envelope and transport parity after cancellation vocabulary landed.",
+      "task_owners": ["R1a", "R1c"],
+      "suites": [
+        "tests/integration/mcpErrorParity.test.ts",
+        "tests/integration/mcpTransportParity.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/utils/resultBuilder.ts",
+        "src/mcp/types/toolResult.ts"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "config/ci/q4a-prechange-goldens.json#golden_families.mcp_legacy_text_and_transport_parity",
+        "new_behavior": "Cancelled outcomes share MCP/REST envelope shape"
+      }
+    },
+    "structured_results_and_rest_mappings": {
+      "description": "52-tool output-schema and REST mapping fingerprints remain the T1 hard baseline.",
+      "task_owners": ["Q4b"],
+      "suites": [
+        "tests/mcp/outputSchemaContract.test.ts",
+        "tests/mcp/discoverability.test.ts",
+        "tests/integration/httpCompatibility.test.ts",
+        "tests/ci/q4aPrechangeGoldens.test.ts"
+      ],
+      "live_sources": [
+        "src/mcp/tools/manifest.ts",
+        "src/mcp/tooling/discoverability.ts",
+        "src/mcp/utils/outputSchemaContract.ts"
+      ],
+      "legacy_vs_new": {
+        "legacy_receipt": "artifacts/plan/context-engine-remediation-q4a-goldens.json",
+        "new_behavior": "Fingerprints must still match Q4a receipt unless intentional delta recorded"
+      }
+    }
+  },
+  "task_parity_map": {
+    "R1c": {
+      "task_title": "HTTP disconnect and shutdown cancellation",
+      "owner_lock": "HTTP transport / F3",
+      "required_families": [
+        "http_disconnect_and_shutdown_cancellation",
+        "execute_tool_cancellation_vocabulary",
+        "error_and_transport_parity"
+      ],
+      "must_pass_suites": [
+        "tests/integration/httpCancellation.test.ts",
+        "tests/mcp/executeToolCancellation.test.ts"
+      ]
+    },
+    "R2": {
+      "task_title": "Bounded stateful HTTP sessions",
+      "owner_lock": "HTTP transport / F3",
+      "required_families": [
+        "bounded_stateful_http_sessions",
+        "auth_and_hardening_postchange"
+      ],
+      "must_pass_suites": [
+        "tests/integration/mcpHttpTransport.test.ts",
+        "tests/integration/zombieSessionRecovery.test.ts"
+      ]
+    },
+    "R6": {
+      "task_title": "Additive composite health",
+      "owner_lock": "Diagnostics / F5",
+      "required_families": [
+        "additive_composite_health"
+      ],
+      "must_pass_suites": [
+        "tests/mcp/compositeHealth.test.ts"
+      ]
+    },
+    "T1_gate": {
+      "task_title": "Hard gate inventory for all T1 transport migration tasks",
+      "owner_lock": "Compatibility / F9",
+      "required_families": [
+        "http_disconnect_and_shutdown_cancellation",
+        "execute_tool_cancellation_vocabulary",
+        "bounded_stateful_http_sessions",
+        "additive_composite_health",
+        "auth_and_hardening_postchange",
+        "error_and_transport_parity",
+        "structured_results_and_rest_mappings"
+      ],
+      "must_pass_suites": [
+        "tests/integration/httpCancellation.test.ts",
+        "tests/mcp/executeToolCancellation.test.ts",
+        "tests/integration/mcpHttpTransport.test.ts",
+        "tests/mcp/compositeHealth.test.ts",
+        "tests/integration/httpHardening.test.ts",
+        "tests/integration/mcpErrorParity.test.ts",
+        "tests/mcp/outputSchemaContract.test.ts",
+        "tests/integration/httpCompatibility.test.ts"
+      ],
+      "rationale": "No T1 route-family migration may start until every suite in this inventory resolves and the paired Q4b parity test is green."
+    }
+  },
+  "intentional_deltas": [],
+  "rollback_policy": {
+    "rule": "If Q4b fails, block T1 and retain direct routes; revert only the owning task's suite deltas.",
+    "t1_requires_green_q4b": true
+  }
+}

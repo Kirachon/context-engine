@@ -1,0 +1,459 @@
+{
+  "schema_version": 2,
+  "gate_mode": "informational",
+  "retrieval": {
+    "source_fixture_pack": "config/ci/retrieval-quality-fixture-pack.json",
+    "dataset_id": "holdout_v1",
+    "case_count": 3,
+    "judgment_count": 3,
+    "dataset_hash": "f6927774222f9cdf75e7a4d300f2ec5e1d0fcdb281d5627a5e5fd8d4644acbbb",
+    "cases": [
+      {
+        "id": "bench-suite-mode-policy",
+        "query_normalized": "buildprobefailuremessage bench_suite_allow_scan_fallback",
+        "query_hash": "e86a8cedcd6b6ea5645a904e88245a65d4ee77d58a1dc1cdd082adf56e13979d",
+        "judgment_paths": [
+          "src/ci/benchSuiteModePolicy.ts"
+        ],
+        "judgment_hash": "367a5197a116d69111c65c484d11d408cde96b9423bd8d6f880b56d3dbd498dd"
+      },
+      {
+        "id": "holdout-validator",
+        "query_normalized": "check-retrieval-holdout-fixture leakage_guard normalization",
+        "query_hash": "f2499e5de78c2656f5b123c7af0c028cafcaa285b7c6dadfefcb5ff3eb767a63",
+        "judgment_paths": [
+          "scripts/ci/check-retrieval-holdout-fixture.ts"
+        ],
+        "judgment_hash": "d6a66ae8f79db9fd2b591513fd42bb423bcb10119b21122a2b230c72961f23a4"
+      },
+      {
+        "id": "quality-report",
+        "query_normalized": "generate-retrieval-quality-report calibration gate_rules reproducibility_lock",
+        "query_hash": "e0a68077c0de91a3b9633daad50e9a0cc779fc5bcab655aa2b24df222deba625",
+        "judgment_paths": [
+          "scripts/ci/generate-retrieval-quality-report.ts"
+        ],
+        "judgment_hash": "c572051c07ef657f1475cb3912037554e75dd8112dff4083516d6f68452792b1"
+      }
+    ]
+  },
+  "context_packs": [
+    {
+      "fixture_id": "auth-flow-default",
+      "pack_id": "ctxp_712b2d6927f1fde9",
+      "item_count": 3,
+      "file_count": 1,
+      "item_ids": [
+        "ctxi_d9519b6a73200ef2",
+        "ctxi_f76acd1f270732f6",
+        "ctxi_b25ac5b19c110458"
+      ],
+      "token_budget": {
+        "requested": 8000,
+        "used": 67,
+        "truncated": false
+      },
+      "truncated": false
+    }
+  ],
+  "safety": {
+    "case_count": 4,
+    "passed_count": 4,
+    "cases": [
+      {
+        "id": "aws-access-key",
+        "secrets_detected": true,
+        "detected_types": [
+          "aws_key"
+        ],
+        "expect_secrets": true,
+        "expect_types": [
+          "aws_key"
+        ],
+        "secrets_match": true,
+        "types_match": true,
+        "scrubbed_hash": "f0efd0c92a1a1d1f5b170d99dc81a51b1a0786905d51432c7795197674de02f0",
+        "status": "pass"
+      },
+      {
+        "id": "clean-content",
+        "secrets_detected": false,
+        "detected_types": [],
+        "expect_secrets": false,
+        "expect_types": [],
+        "secrets_match": true,
+        "types_match": true,
+        "scrubbed_hash": "5bb1388525d6cee1db82c6eab0fac65ce15ca331f74148261094cbfda7475c8b",
+        "status": "pass"
+      },
+      {
+        "id": "github-token",
+        "secrets_detected": true,
+        "detected_types": [
+          "github_token"
+        ],
+        "expect_secrets": true,
+        "expect_types": [
+          "github_token"
+        ],
+        "secrets_match": true,
+        "types_match": true,
+        "scrubbed_hash": "8014f7baf5bb7e0e140cc6db282084f2072aaaa7e37dc878d39fa6d0890b2aea",
+        "status": "pass"
+      },
+      {
+        "id": "openai-api-key",
+        "secrets_detected": true,
+        "detected_types": [
+          "openai_key"
+        ],
+        "expect_secrets": true,
+        "expect_types": [
+          "openai_key"
+        ],
+        "secrets_match": true,
+        "types_match": true,
+        "scrubbed_hash": "0bb6355f9332053e019e5a6998ceb4da6f17f680131525866092d531e5aa5acd",
+        "status": "pass"
+      }
+    ]
+  },
+  "usefulness": {
+    "source_fixture": "tests/fixtures/tool-selection-intents.json",
+    "case_count": 20,
+    "top_one_rate": 0.9,
+    "cases": [
+      {
+        "intent_hash": "2046195febdda67bcc8a12a52bca11c009c6c571c9479cfdb65eecd5c42eeed7",
+        "top_tool": "index_status",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "index_status",
+          "clear_index",
+          "index_workspace"
+        ],
+        "expected_tools": [
+          "index_status"
+        ]
+      },
+      {
+        "intent_hash": "2129dde731e42b230498580a4e989cef5ec4b67a0b0cb512a0f966d8bbacf4e0",
+        "top_tool": "clear_index",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "clear_index",
+          "index_workspace",
+          "reindex_workspace"
+        ],
+        "expected_tools": [
+          "clear_index"
+        ]
+      },
+      {
+        "intent_hash": "7cca6b22d251207fc3fb624b0dcc6dd544e9e8e9db86e9978f34dd5a592a6597",
+        "top_tool": "create_plan",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "create_plan",
+          "execute_plan",
+          "compare_plan_versions"
+        ],
+        "expected_tools": [
+          "create_plan"
+        ]
+      },
+      {
+        "intent_hash": "935315c4243f21836777f777af832202de93b9b7239620c3773cefded96b5186",
+        "top_tool": "delete_plan",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "delete_plan",
+          "compare_plan_versions",
+          "create_plan"
+        ],
+        "expected_tools": [
+          "delete_plan"
+        ]
+      },
+      {
+        "intent_hash": "5d9868f39d1d36f10313140a8204580b5aba1d9d395d2f190520240341b5a7a1",
+        "top_tool": "find_callees",
+        "top_one_match": false,
+        "matched_expected": true,
+        "selected_tools": [
+          "find_callees",
+          "find_callers",
+          "impact_analysis"
+        ],
+        "expected_tools": [
+          "impact_analysis"
+        ]
+      },
+      {
+        "intent_hash": "f938bbe15316c997a5de01a9dbcc900b871276fc1f7d7986f9215adb59f69acd",
+        "top_tool": "execute_plan",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "execute_plan",
+          "respond_approval",
+          "compare_plan_versions"
+        ],
+        "expected_tools": [
+          "execute_plan",
+          "start_step"
+        ]
+      },
+      {
+        "intent_hash": "37de8d3415679053d74a27f3cbff6871aab0fdc9fd19037d21a0a7604f2800a2",
+        "top_tool": "why_this_context",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "why_this_context",
+          "get_context_for_prompt",
+          "get_file"
+        ],
+        "expected_tools": [
+          "why_this_context"
+        ]
+      },
+      {
+        "intent_hash": "e3662270525df3ab2b9f894c6f0abb26df9a464e2e68e93cd26a25b497ed742f",
+        "top_tool": "symbol_definition",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "symbol_definition",
+          "symbol_references",
+          "find_callees"
+        ],
+        "expected_tools": [
+          "symbol_definition",
+          "symbol_search"
+        ]
+      },
+      {
+        "intent_hash": "ef16a2b0760daa73391c246f75c1e3cd2ea57dfb51fe2a56904ce7b7056efe54",
+        "top_tool": "call_relationships",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "call_relationships",
+          "find_callees",
+          "find_callers"
+        ],
+        "expected_tools": [
+          "call_relationships",
+          "find_callees",
+          "find_callers"
+        ]
+      },
+      {
+        "intent_hash": "2c42687b10187e3cf5c2ab55f811f98897a6b6fbf379a012b562225c5572ab44",
+        "top_tool": "codebase_retrieval",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "codebase_retrieval",
+          "get_file",
+          "run_static_analysis"
+        ],
+        "expected_tools": [
+          "codebase_retrieval",
+          "semantic_search"
+        ]
+      },
+      {
+        "intent_hash": "128d014e42fdfde7613d5e6ab3d194ac6d553e9056193ab29ec9bc0d06e14ac6",
+        "top_tool": "get_context_for_prompt",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "get_context_for_prompt",
+          "why_this_context",
+          "create_plan"
+        ],
+        "expected_tools": [
+          "get_context_for_prompt"
+        ]
+      },
+      {
+        "intent_hash": "1b09e9e8c64e6b63ba361a9873df041f55846b046af95e6e49b0218e784713bf",
+        "top_tool": "scrub_secrets",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "scrub_secrets",
+          "validate_content",
+          "check_invariants"
+        ],
+        "expected_tools": [
+          "scrub_secrets"
+        ]
+      },
+      {
+        "intent_hash": "a7cae33148efb0f2481b876c9aeb188a01307b1c777464c2126796968cfb1db4",
+        "top_tool": "get_file",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "get_file",
+          "codebase_retrieval",
+          "call_relationships"
+        ],
+        "expected_tools": [
+          "get_file"
+        ]
+      },
+      {
+        "intent_hash": "e8bf21a376398cbda4e7e7aa1f78723f7451b6b7451cab3646437767dda4b8ac",
+        "top_tool": "index_workspace",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "index_workspace",
+          "index_status",
+          "reindex_workspace"
+        ],
+        "expected_tools": [
+          "index_workspace"
+        ]
+      },
+      {
+        "intent_hash": "9401207b8fbec191629ce6d8206c794d4bf96cb28481b17a2244c6b3179534fd",
+        "top_tool": "review_git_diff",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "review_git_diff",
+          "review_auto",
+          "review_changes"
+        ],
+        "expected_tools": [
+          "review_auto",
+          "review_git_diff"
+        ]
+      },
+      {
+        "intent_hash": "a458606cccbb4052930f888e756439909e40b4b2ea9724ea967c23e02a4148d5",
+        "top_tool": "review_diff",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "review_diff",
+          "get_review_status",
+          "get_review_telemetry"
+        ],
+        "expected_tools": [
+          "check_invariants",
+          "review_diff"
+        ]
+      },
+      {
+        "intent_hash": "fe0ce46b5f610b43c2e4d11aa554b28d6dc36fcb9925ca063d7d1009dadbb518",
+        "top_tool": "run_static_analysis",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "run_static_analysis",
+          "check_invariants",
+          "review_diff"
+        ],
+        "expected_tools": [
+          "run_static_analysis"
+        ]
+      },
+      {
+        "intent_hash": "047d8430863c8b76afc092d272836ed8670ed4427ce2c6a78080dc3a73aa0a94",
+        "top_tool": "add_memory",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "add_memory",
+          "list_memories",
+          "review_memory_suggestions"
+        ],
+        "expected_tools": [
+          "add_memory"
+        ]
+      },
+      {
+        "intent_hash": "7451e1f3cce4b6e662b051d05e92b612d107756ecdc7c280d8c94a4cf180a26e",
+        "top_tool": "semantic_search",
+        "top_one_match": true,
+        "matched_expected": true,
+        "selected_tools": [
+          "semantic_search",
+          "codebase_retrieval",
+          "symbol_search"
+        ],
+        "expected_tools": [
+          "semantic_search"
+        ]
+      },
+      {
+        "intent_hash": "5a109d3e251e5468be0fb21ea5e24e936a79149e720a764cf7ad4f8c7afb0ae5",
+        "top_tool": "get_context_for_prompt",
+        "top_one_match": false,
+        "matched_expected": true,
+        "selected_tools": [
+          "get_context_for_prompt",
+          "tool_manifest",
+          "call_relationships"
+        ],
+        "expected_tools": [
+          "tool_manifest"
+        ]
+      }
+    ]
+  },
+  "performance": {
+    "check_count": 4,
+    "passed_count": 4,
+    "checks": [
+      {
+        "id": "retrieval_case_count",
+        "metric": "case_count",
+        "value": 3,
+        "budget": 3,
+        "comparator": "min",
+        "status": "pass"
+      },
+      {
+        "id": "safety_case_count",
+        "metric": "case_count",
+        "value": 4,
+        "budget": 4,
+        "comparator": "min",
+        "status": "pass"
+      },
+      {
+        "id": "usefulness_top1_rate",
+        "metric": "top_one_rate",
+        "value": 0.9,
+        "budget": 0.85,
+        "comparator": "min",
+        "status": "pass"
+      },
+      {
+        "id": "context_pack_item_budget",
+        "metric": "item_count",
+        "value": 3,
+        "budget": 100,
+        "comparator": "max",
+        "status": "pass"
+      }
+    ]
+  },
+  "summary": {
+    "status": "pass",
+    "checks_passed": 32,
+    "checks_total": 32
+  },
+  "generated_at": "2026-07-14T23:31:27.988Z"
+}

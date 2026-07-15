@@ -6,6 +6,10 @@ export interface SemanticSearchOptions {
   maxOutputLength?: number;
   timeoutMs?: number;
   parallelFallback?: boolean;
+  /** R1b: caller-owned abort signal. Combined with the internal
+   * local-first race controller (if any) so aborting either source stops
+   * the provider round-trip. */
+  signal?: AbortSignal;
 }
 
 export interface SemanticSearchRuntimeDependencies {
@@ -19,12 +23,21 @@ export interface SemanticSearchRuntimeDependencies {
 
 const LOCAL_FIRST_GRACE_MS = 25;
 
+function createAbortError(message: string): Error {
+  const error = new Error(message);
+  error.name = 'AbortError';
+  return error;
+}
+
 export async function searchWithSemanticRuntime(
   query: string,
   topK: number,
   options: SemanticSearchOptions | undefined,
   dependencies: SemanticSearchRuntimeDependencies
 ): Promise<SearchResult[]> {
+  if (options?.signal?.aborted) {
+    throw createAbortError('Semantic search runtime aborted before starting.');
+  }
   const compatEmptyArrayFallbackEnabled = process.env.CE_SEMANTIC_EMPTY_ARRAY_COMPAT_FALLBACK === 'true';
   const normalizedQuery = query.trim();
   const queryTokens = normalizedQuery
@@ -53,12 +66,30 @@ export async function searchWithSemanticRuntime(
   }
 
   const prompt = buildSemanticSearchPrompt(query, topK, options);
-  const providerAbortController = preferLocalFirst ? new AbortController() : null;
+  // R1b: the provider round-trip is always given an abort-aware signal --
+  // either just relaying the caller's signal, or (when preferring the
+  // local-first race) a controller that also aborts when the local
+  // fallback wins the race, with the caller's signal wired in too so
+  // aborting the whole request still cancels the provider call promptly.
+  const providerAbortController = new AbortController();
+  if (options?.signal) {
+    options.signal.addEventListener('abort', () => providerAbortController.abort(), { once: true });
+  }
   const providerOutcomePromise = dependencies.searchAndAsk(query, prompt, {
     timeoutMs: options?.timeoutMs,
-    signal: providerAbortController?.signal,
+    signal: providerAbortController.signal,
   }).then((rawResponse) => ({ ok: true as const, rawResponse }))
     .catch((error) => ({ ok: false as const, error }));
+
+  // R1b: once the caller's signal has fired, no locally-computed fallback
+  // is eligible to be returned as if it were a real answer -- the caller
+  // already gave up, so any result reaching a cache/artifact write above
+  // this function would be a post-abort publication.
+  const throwIfCallerAborted = (): void => {
+    if (options?.signal?.aborted) {
+      throw createAbortError('Semantic search runtime aborted.');
+    }
+  };
 
   let providerOutcome: Awaited<typeof providerOutcomePromise>;
   try {
@@ -74,6 +105,7 @@ export async function searchWithSemanticRuntime(
         providerOutcome = firstOutcome;
       } else {
         const fallback = await fallbackPromise;
+        throwIfCallerAborted();
         if (fallback.length > 0) {
           providerAbortController?.abort();
           return fallback;
@@ -84,17 +116,21 @@ export async function searchWithSemanticRuntime(
       providerOutcome = await providerOutcomePromise;
     }
   } catch (error) {
+    throwIfCallerAborted();
     if (fallbackPromise) {
       const fallback = await fallbackPromise;
+      throwIfCallerAborted();
       if (fallback.length > 0) {
         return fallback;
       }
     }
     throw error;
   }
+  throwIfCallerAborted();
   if (!providerOutcome.ok) {
     if (fallbackPromise) {
       const fallback = await fallbackPromise;
+      throwIfCallerAborted();
       if (fallback.length > 0) {
         return fallback;
       }
@@ -248,7 +284,10 @@ export function buildSemanticSearchPrompt(
 export function sanitizeResultPath(rawPath: string): string | null {
   const normalized = rawPath.trim().replace(/\\/g, '/');
   if (!normalized) return null;
-  if (path.isAbsolute(normalized)) return null;
+  // `path.isAbsolute` only recognizes the host platform's syntax. Provider
+  // results can originate on another platform, so reject POSIX roots and
+  // Windows drive/UNC paths explicitly before applying traversal checks.
+  if (path.isAbsolute(normalized) || normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized)) return null;
   if (normalized.startsWith('..') || normalized.includes('/../') || normalized.includes('..' + path.posix.sep)) return null;
 
   return normalized;

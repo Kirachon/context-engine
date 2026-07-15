@@ -74,7 +74,8 @@ export {
 
 export async function handleSemanticSearch(
   args: SemanticSearchArgs,
-  serviceClient: ContextServiceClient
+  serviceClient: ContextServiceClient,
+  signal?: AbortSignal
 ): Promise<ContextEngineToolResult<SemanticSearchStructuredContent>> {
   const {
     query,
@@ -137,6 +138,7 @@ export async function handleSemanticSearch(
     rerankTimeoutMs: profileSettings.rerankTimeoutMs,
     includePaths: normalizedIncludePaths,
     excludePaths: normalizedExcludePaths,
+    signal,
   };
 
   const retrieval = await internalRetrieveCode(validQuery, serviceClient, retrievalOptions);

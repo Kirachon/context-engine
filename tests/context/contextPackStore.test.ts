@@ -142,7 +142,9 @@ describe('contextPackStore', () => {
 
   it('removes overflow packs beyond the configured retention limit', async () => {
     const store = createWorkspace();
-    const now = new Date('2026-05-31T12:00:00.000Z');
+    // Use wall-clock-relative timestamps so list()/get() cleanup (Date.now())
+    // does not expire every pack the way a fixed historical fixture date does.
+    const now = new Date();
     const oldest = buildFixturePack('1111111111111111');
     const middle = buildFixturePack('2222222222222222');
     const newest = buildFixturePack('3333333333333333');

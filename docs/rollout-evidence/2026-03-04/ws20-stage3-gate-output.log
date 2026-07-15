@@ -1,0 +1,13 @@
+WS20 rollout stage gate
+artifact=D:\GitProjects\context-engine\docs\rollout-evidence\2026-03-04\ws20-stage3-ga-100pct.yaml
+thresholds_config=D:\GitProjects\context-engine\config\rollout-go-no-go-thresholds.json
+checks=8
+PASS rollout_id: rollout_id must be a non-empty string.
+PASS stage: stage must be an integer in range 0..3.
+PASS stage_name_alignment: stage_name must match ga_hardening for stage 3.
+PASS expected_stage_match: artifact stage (3) must match --stage 3.
+PASS ga_hardening_present: ga_hardening section is required for stage 3.
+PASS ga_min_soak_24h: ga_hardening.soak_hours must be at least 24.
+PASS ga_stability_confirmed: ga_hardening.stability_confirmed must be true.
+PASS ga_closeout_evidence: ga_hardening.closeout_evidence_ref and ga_hardening.signed_by are required.
+WS20 stage gate passed.

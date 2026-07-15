@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-pr-v1",
+  "intended_lane": "pr",
+  "description": "Frozen fast-path corpus for the PR blocker lane. Small and deterministic so every PR run stays within latency budget.",
+  "cases": [
+    {
+      "id": "pr-bench-suite-mode-policy",
+      "query": "buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK",
+      "language": "typescript",
+      "labels": ["fast-path"],
+      "intended_lane": "pr",
+      "target_path": "src/ci/benchSuiteModePolicy.ts"
+    },
+    {
+      "id": "pr-holdout-validator",
+      "query": "check-retrieval-holdout-fixture leakage_guard normalization",
+      "language": "typescript",
+      "labels": ["fast-path"],
+      "intended_lane": "pr",
+      "target_path": "scripts/ci/check-retrieval-holdout-fixture.ts"
+    },
+    {
+      "id": "pr-quality-report",
+      "query": "generate-retrieval-quality-report calibration gate_rules reproducibility_lock",
+      "language": "typescript",
+      "labels": ["fast-path"],
+      "intended_lane": "pr",
+      "target_path": "scripts/ci/generate-retrieval-quality-report.ts"
+    },
+    {
+      "id": "pr-polyglot-python-compute-total",
+      "query": "python compute_total items price qty sum",
+      "language": "python",
+      "labels": ["fast-path", "polyglot"],
+      "intended_lane": "pr",
+      "target_path": "tests/fixtures/retrieval/polyglot/python/sample.py"
+    },
+    {
+      "id": "pr-polyglot-go-compute-total",
+      "query": "go ComputeTotal items price qty aggregate",
+      "language": "go",
+      "labels": ["fast-path", "polyglot"],
+      "intended_lane": "pr",
+      "target_path": "tests/fixtures/retrieval/polyglot/go/sample.go"
+    },
+    {
+      "id": "pr-provenance",
+      "query": "makeBenchProvenance feature_flags_snapshot dataset_hash",
+      "language": "typescript",
+      "labels": ["fast-path"],
+      "intended_lane": "pr",
+      "target_path": "scripts/ci/bench-provenance.ts"
+    }
+  ]
+}

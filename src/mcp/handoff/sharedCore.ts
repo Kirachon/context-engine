@@ -7,6 +7,7 @@ import {
   type PersistedPlanStateReadReason,
   type PersistedPlanStateReadResult,
 } from '../tools/planManagement.js';
+import { filterDefaultMemories } from '../memoryQuarantine.js';
 
 const MEMORIES_DIR = '.memories';
 const CATEGORY_FILES = {
@@ -319,7 +320,10 @@ function matchesPlanOrFiles(record: HandoffMemoryRecord, planId?: string, linked
 export { readPersistedPlanState };
 export type { PersistedPlanStateReadResult, PersistedPlanStateReadReason };
 
-export function readPersistedApprovedMemories(workspacePath: string): ApprovedMemoriesReadResult {
+export function readPersistedApprovedMemories(
+  workspacePath: string,
+  options: { includeArchive?: boolean } = {}
+): ApprovedMemoriesReadResult {
   const memoriesDir = path.join(workspacePath, MEMORIES_DIR);
   if (!fs.existsSync(memoriesDir)) {
     return { ok: true, memories: [] };
@@ -334,10 +338,14 @@ export function readPersistedApprovedMemories(workspacePath: string): ApprovedMe
     memories.push(...parsePersistedMemoryFile(category, filePath, `${MEMORIES_DIR}/${fileName}`));
   }
 
-  memories.sort(compareMemoryRecords);
+  // Hard-exclude archive-priority memories from default handoff ranking (non-destructive:
+  // the underlying .memories files are untouched; pass includeArchive: true for explicit
+  // archive access).
+  const defaultMemories = filterDefaultMemories(memories, options);
+  defaultMemories.sort(compareMemoryRecords);
   return {
     ok: true,
-    memories,
+    memories: defaultMemories,
   };
 }
 
@@ -347,10 +355,11 @@ export function readRecentReviewFindings(
     planId?: string;
     linkedFiles?: string[];
     limit?: number;
+    includeArchive?: boolean;
   } = {}
 ): ReviewFindingsReadResult {
   try {
-    const approved = readPersistedApprovedMemories(workspacePath);
+    const approved = readPersistedApprovedMemories(workspacePath, { includeArchive: options.includeArchive });
     const candidates = approved.memories.filter((memory) => memory.subtype === 'review_finding');
     if (candidates.length === 0) {
       return { ok: true, findings: [] };

@@ -5,7 +5,6 @@ import {
   GRAPH_ARTIFACT_DIRECTORY_NAME,
   GRAPH_METADATA_FILE_NAME,
   GRAPH_PAYLOAD_FILE_NAME,
-  createWorkspacePersistentGraphStore,
   type GraphCallEdgeRecord,
   type GraphContainmentRecord,
   type GraphDegradedReason,
@@ -257,16 +256,12 @@ export async function buildRetrievalGraphContext(
     };
   }
 
-  const graphStore = createWorkspacePersistentGraphStore({
-    workspacePath,
-    indexStatePath: path.join(workspacePath, '.context-engine-index-state.json'),
-  });
-  const refresh = await graphStore.refresh();
-  const payload = graphStore.getGraph();
+  const graphState = await serviceClient.getGraphNavigationSnapshot();
+  const payload = graphState.payload;
   if (!payload) {
     return {
-      graphStatus: refresh.metadata.graph_status,
-      graphDegradedReason: refresh.warning ?? refresh.metadata.degraded_reason ?? 'graph_missing',
+      graphStatus: graphState.snapshot?.graph_status ?? 'unavailable',
+      graphDegradedReason: graphState.fallbackReason ?? 'graph_missing',
       seedSymbols: [],
       neighborPaths: [],
       pathSignals: new Map(),
@@ -278,8 +273,8 @@ export async function buildRetrievalGraphContext(
   const queryTokens = tokenizeIdentifier(query);
   if (queryTokens.length === 0 && normalizedQuery.length === 0) {
     return {
-      graphStatus: refresh.metadata.graph_status,
-      graphDegradedReason: refresh.warning ?? refresh.metadata.degraded_reason,
+      graphStatus: graphState.snapshot?.graph_status ?? 'unavailable',
+      graphDegradedReason: graphState.fallbackReason,
       seedSymbols: [],
       neighborPaths: [],
       pathSignals: new Map(),
@@ -311,8 +306,8 @@ export async function buildRetrievalGraphContext(
   }
 
   return {
-    graphStatus: refresh.metadata.graph_status,
-    graphDegradedReason: refresh.warning ?? refresh.metadata.degraded_reason,
+    graphStatus: graphState.snapshot?.graph_status ?? 'ready',
+    graphDegradedReason: graphState.fallbackReason,
     seedSymbols,
     neighborPaths,
     pathSignals,

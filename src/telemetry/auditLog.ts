@@ -11,7 +11,7 @@ export type AuditEventCategory =
   | 'task'
   | 'scope_decision';
 
-export type AuditEventOutcome = 'success' | 'error' | 'denied' | 'redacted' | 'blocked';
+export type AuditEventOutcome = 'success' | 'error' | 'cancelled' | 'denied' | 'redacted' | 'blocked';
 
 export interface AuditEventBase {
   category: AuditEventCategory;
@@ -245,7 +245,7 @@ export function auditLogToolCallStarted(name: string, args: unknown): void {
 
 export function auditLogToolCallCompleted(
   name: string,
-  outcome: Extract<AuditEventOutcome, 'success' | 'error'>,
+  outcome: Extract<AuditEventOutcome, 'success' | 'error' | 'cancelled'>,
   elapsedMs: number,
   errorMessage?: string
 ): void {

@@ -990,6 +990,14 @@ function ensureProviderRequirements(_provider: RetrievalProvider, _mode: Mode): 
   // Retrieval benchmarking is local-native only in the migrated runtime.
 }
 
+async function prepareLocalNativeBenchmarkIndex(workspace: string): Promise<void> {
+  // PR and release benchmarks must remain reproducible without an external AI
+  // credential. Build the local index before measuring search/retrieval so the
+  // semantic runtime can use its keyword fallback instead of searchAndAsk().
+  const client = new ContextServiceClient(workspace);
+  await client.indexWorkspace();
+}
+
 async function benchIndex(workspace: string, provider: RetrievalProvider) {
   ensureProviderRequirements(provider, 'index');
   const client = new ContextServiceClient(workspace);
@@ -1016,6 +1024,7 @@ async function benchSearch(
   provider: RetrievalProvider
 ) {
   ensureProviderRequirements(provider, 'search');
+  await prepareLocalNativeBenchmarkIndex(workspace);
   const samples: number[] = [];
   const memoryStart = takeProcessMemorySnapshot();
   const memorySamples: ProcessMemorySnapshot[] = [];
@@ -1067,6 +1076,7 @@ async function benchRetrieve(
   provider: RetrievalProvider
 ) {
   ensureProviderRequirements(provider, 'retrieve');
+  await prepareLocalNativeBenchmarkIndex(workspace);
   const samples: number[] = [];
   const memorySamples: ProcessMemorySnapshot[] = [];
   let lastCount = 0;

@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const SERVER_PATH = 'src/mcp/server.ts';
+const TOOL_REGISTRY_PATH = 'src/mcp/toolRegistry.ts';
 const MANIFEST_PATH = 'src/mcp/tools/manifest.ts';
 const TOOL_DIR = 'src/mcp/tools';
 
@@ -220,7 +221,13 @@ function formatList(title: string, items: string[]): void {
 
 function main(): void {
   try {
-    const serverSource = readFileOrThrow(SERVER_PATH);
+    // The runtime registry moved out of server.ts. Keep the server.ts fallback
+    // for the isolated parser fixtures used by this guard's unit tests and for
+    // older checkout shapes.
+    const runtimeSourcePath = fs.existsSync(path.resolve(TOOL_REGISTRY_PATH))
+      ? TOOL_REGISTRY_PATH
+      : SERVER_PATH;
+    const serverSource = readFileOrThrow(runtimeSourcePath);
     const manifestSource = readFileOrThrow(MANIFEST_PATH);
 
     const runtimeRaw = extractRuntimeToolNames(serverSource);

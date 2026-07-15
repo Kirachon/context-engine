@@ -162,6 +162,49 @@ describe('privacy boundary (static-analysis fence)', () => {
     });
   });
 
+  describe('query-derived diagnostics contain no raw query or stable query hash (S2)', () => {
+    // These patterns previously logged the raw search query (or a stable hash
+    // of it) via console.error in the semantic search cache path, the
+    // retrieval shadow-compare diagnostic, the searchAndAsk runtime, and the
+    // retrieval fanout failure handlers. Default diagnostics must only ever
+    // carry metadata (length, lane, provider, latency, outcome) — never the
+    // query string or a hash derived from it. If any of these regexes match
+    // again, a query-derived identifier has leaked back into a console/audit
+    // log path.
+    const FORBIDDEN_QUERY_LOG_PATTERNS: ReadonlyArray<{ name: string; pattern: RegExp }> = [
+      { name: 'semanticSearch cache-hit raw query interpolation', pattern: /Cache hit for query:\s*\$\{query\}/ },
+      { name: 'retrieval shadow-compare query hash', pattern: /query_hash\s*=\s*\$\{queryHash\}/ },
+      { name: 'searchAndAsk raw query interpolation', pattern: /query\s*=\s*\$\{options\.searchQuery\}/ },
+      { name: 'retrieve fanout raw query interpolation (semantic)', pattern: /Failed variant\s*\\?"\$\{variant\.query\}/ },
+      { name: 'retrieve fanout raw query interpolation (lexical)', pattern: /Lexical retrieval failed for variant\s*\\?"\$\{variant\.query\}/ },
+      { name: 'retrieve fanout raw query interpolation (dense)', pattern: /Dense retrieval failed for variant\s*\\?"\$\{variant\.query\}/ },
+    ];
+
+    const SCANNED_FILES: ReadonlyArray<string> = [
+      'src/mcp/serviceClient.ts',
+      'src/mcp/serviceClientRuntimeAccess.ts',
+      'src/internal/retrieval/retrieve.ts',
+    ];
+
+    it.each(SCANNED_FILES)('%s contains no forbidden query-derived log pattern', (relFile) => {
+      const content = fs.readFileSync(path.join(REPO_ROOT, ...relFile.split('/')), 'utf8');
+      for (const { name, pattern } of FORBIDDEN_QUERY_LOG_PATTERNS) {
+        if (pattern.test(content)) {
+          throw new Error(`${relFile} still contains forbidden query-derived log pattern: ${name}`);
+        }
+      }
+      expect(true).toBe(true);
+    });
+
+    it('src/mcp/serviceClient.ts no longer hashes the query for shadow-compare logging', () => {
+      const content = fs.readFileSync(
+        path.join(REPO_ROOT, 'src', 'mcp', 'serviceClient.ts'),
+        'utf8'
+      );
+      expect(content).not.toMatch(/crypto\.createHash\('sha1'\)\.update\(query\)/);
+    });
+  });
+
   describe('docs/providers/privacy-boundary.md mentions every privacy class', () => {
     it('contains each ProviderPrivacyClass enum member name', () => {
       const doc = fs.readFileSync(DOC_PATH, 'utf8');

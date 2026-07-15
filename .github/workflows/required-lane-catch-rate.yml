@@ -28,7 +28,5 @@ jobs:
       - name: Run existing canary failure gate artifact generation
         run: npm run -s ci:check:retrieval-shadow-canary-gate
 
-      - name: TODO scaffold required-lane catch-rate evaluator
-        run: |
-          echo "::warning::TODO: implement scripts/ci/required-lane-catch-rate.ts (or .js) to measure required-lane catch rate against the canary failure corpus and fail when it drops below 95% of the approved baseline."
-          echo "::warning::Existing canary gate artifact generation completed, but no repo script currently computes the required-lane catch-rate metric from Appendix E.6/E.8."
+      - name: Compute required-lane catch-rate against Q3a seeded-failure corpus
+        run: npm run -s ci:check:required-lane-catch-rate

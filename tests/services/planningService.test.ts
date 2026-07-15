@@ -404,6 +404,7 @@ describe('PlanningService', () => {
       expect(result.plan?.steps.length).toBe(3);
       expect(result.planning_context).toEqual({
         prompt_profile: 'compact',
+        requested_depth: 'auto',
         scope_applied: false,
         scope_source: 'none',
         scope_confidence: 'none',
@@ -412,10 +413,18 @@ describe('PlanningService', () => {
         context_file_count: 2,
         token_budget: 1800,
         clarification_triggered: false,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 4,
+          actual_context_file_count: 2,
+          requested_token_budget: 8000,
+          clamped_token_budget: 6000,
+          actual_total_tokens: 1800,
+        },
       });
     });
 
-    it('switches to a deep planning prompt for complex tasks', async () => {
+    it('switches to a deep planning prompt for complex tasks and stops clamping the requested context budget', async () => {
       mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(7, 9200));
       mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Deep plan'));
 
@@ -425,8 +434,13 @@ describe('PlanningService', () => {
 
       expect(result.success).toBe(true);
       expect(mockServiceClient.getContextForPrompt).toHaveBeenCalledTimes(1);
+      // The task is broad (architecture/migration/multi-step), so depth is
+      // classified as 'deep' from the task text alone, BEFORE context is
+      // fetched. The requested budget (defaults: 8 files / 8000 tokens) is
+      // therefore passed through to retrieval unclamped instead of being
+      // silently narrowed to the compact ceiling.
       expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
-        expect.objectContaining({ maxFiles: 4, tokenBudget: 6000 })
+        expect.objectContaining({ maxFiles: 8, tokenBudget: 8000 })
       );
 
       const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
@@ -436,6 +450,7 @@ describe('PlanningService', () => {
       );
       expect(result.planning_context).toEqual({
         prompt_profile: 'deep',
+        requested_depth: 'auto',
         scope_applied: false,
         scope_source: 'none',
         scope_confidence: 'none',
@@ -444,6 +459,14 @@ describe('PlanningService', () => {
         context_file_count: 7,
         token_budget: 9200,
         clarification_triggered: false,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 8,
+          actual_context_file_count: 7,
+          requested_token_budget: 8000,
+          clamped_token_budget: 8000,
+          actual_total_tokens: 9200,
+        },
       });
     });
 
@@ -479,14 +502,15 @@ describe('PlanningService', () => {
         expect.objectContaining({
           includePaths: ['src/mcp/**'],
           excludePaths: ['tests/**'],
-          maxFiles: 4,
-          tokenBudget: 6000,
+          maxFiles: 8,
+          tokenBudget: 8000,
         })
       );
       const prompt = mockServiceClient.searchAndAsk.mock.calls[0][1];
       expect(prompt).toContain('## Deep Planning Guidance');
       expect(result.planning_context).toEqual({
         prompt_profile: 'deep',
+        requested_depth: 'auto',
         scope_applied: true,
         scope_source: 'manual',
         scope_confidence: 'high',
@@ -495,6 +519,14 @@ describe('PlanningService', () => {
         context_file_count: 7,
         token_budget: 9200,
         clarification_triggered: false,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 8,
+          actual_context_file_count: 7,
+          requested_token_budget: 8000,
+          clamped_token_budget: 8000,
+          actual_total_tokens: 9200,
+        },
       });
     });
 
@@ -520,6 +552,7 @@ describe('PlanningService', () => {
       expect(result.plan?.confidence_score).toBeLessThanOrEqual(0.4);
       expect(result.planning_context).toEqual({
         prompt_profile: 'compact',
+        requested_depth: 'auto',
         scope_applied: true,
         scope_source: 'manual',
         scope_confidence: 'high',
@@ -528,6 +561,14 @@ describe('PlanningService', () => {
         context_file_count: 0,
         token_budget: 0,
         clarification_triggered: true,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 4,
+          actual_context_file_count: 0,
+          requested_token_budget: 8000,
+          clamped_token_budget: 6000,
+          actual_total_tokens: 0,
+        },
       });
     });
 
@@ -551,6 +592,7 @@ describe('PlanningService', () => {
       );
       expect(result.planning_context).toEqual({
         prompt_profile: 'compact',
+        requested_depth: 'auto',
         scope_applied: true,
         scope_source: 'auto',
         scope_confidence: 'high',
@@ -559,6 +601,14 @@ describe('PlanningService', () => {
         context_file_count: 3,
         token_budget: 2400,
         clarification_triggered: false,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 4,
+          actual_context_file_count: 3,
+          requested_token_budget: 8000,
+          clamped_token_budget: 6000,
+          actual_total_tokens: 2400,
+        },
       });
     });
 
@@ -609,6 +659,7 @@ describe('PlanningService', () => {
       );
       expect(result.planning_context).toEqual({
         prompt_profile: 'compact',
+        requested_depth: 'auto',
         scope_applied: false,
         scope_source: 'none',
         scope_confidence: 'low',
@@ -617,6 +668,14 @@ describe('PlanningService', () => {
         context_file_count: 3,
         token_budget: 2400,
         clarification_triggered: false,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 4,
+          actual_context_file_count: 3,
+          requested_token_budget: 8000,
+          clamped_token_budget: 6000,
+          actual_total_tokens: 2400,
+        },
       });
     });
 
@@ -631,6 +690,7 @@ describe('PlanningService', () => {
       expect(mockServiceClient.semanticSearch).not.toHaveBeenCalled();
       expect(result.planning_context).toEqual({
         prompt_profile: 'compact',
+        requested_depth: 'auto',
         scope_applied: false,
         scope_source: 'none',
         scope_confidence: 'none',
@@ -639,6 +699,14 @@ describe('PlanningService', () => {
         context_file_count: 2,
         token_budget: 1800,
         clarification_triggered: false,
+        context_budget: {
+          requested_max_context_files: 8,
+          clamped_max_context_files: 4,
+          actual_context_file_count: 2,
+          requested_token_budget: 8000,
+          clamped_token_budget: 6000,
+          actual_total_tokens: 1800,
+        },
       });
     });
 
@@ -763,6 +831,145 @@ describe('PlanningService', () => {
 
       expect(result.success).toBe(true);
       expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('C0a: explicit depth and budget contract', () => {
+    it('classifies a plain, short task as compact under auto depth', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Simple plan'));
+
+      const result = await planningService.generatePlan('Fix a typo in the README');
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+      expect(result.planning_context?.prompt_profile).toBe('compact');
+      expect(result.planning_context?.requested_depth).toBe('auto');
+    });
+
+    it('classifies an architecture-only task as deep under auto depth', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(6, 7000));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Architecture plan'));
+
+      const result = await planningService.generatePlan('Design the target architecture for the plugin system');
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result.planning_context?.prompt_profile).toBe('deep');
+      expect(result.planning_context?.requested_depth).toBe('auto');
+      expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ maxFiles: 8, tokenBudget: 8000 })
+      );
+    });
+
+    it('classifies a migration-only task as deep under auto depth', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(6, 7000));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Migration plan'));
+
+      const result = await planningService.generatePlan('Plan the database migration to Postgres');
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result.planning_context?.prompt_profile).toBe('deep');
+    });
+
+    it('classifies a multi-step task as deep under auto depth', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(6, 7000));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Multi-step plan'));
+
+      const result = await planningService.generatePlan('This is a multi-step task touching several services');
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result.planning_context?.prompt_profile).toBe('deep');
+    });
+
+    it('forces a compact outline for a broad task when depth=compact is explicit', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1500));
+
+      const result = await planningService.generatePlan(
+        'Perform a multi-step architecture migration with rollout and reliability work',
+        { depth: 'compact' }
+      );
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+      expect(result.planning_context?.prompt_profile).toBe('compact');
+      expect(result.planning_context?.requested_depth).toBe('compact');
+      expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ maxFiles: 4, tokenBudget: 6000 })
+      );
+    });
+
+    it('forces deep AI planning for a trivial task when depth=deep is explicit', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(1, 500));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Forced deep plan'));
+
+      const result = await planningService.generatePlan('Fix a typo in the README', { depth: 'deep' });
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result.planning_context?.prompt_profile).toBe('deep');
+      expect(result.planning_context?.requested_depth).toBe('deep');
+      // Explicit 'deep' passes the requested (default) budget through unclamped.
+      expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ maxFiles: 8, tokenBudget: 8000 })
+      );
+    });
+
+    it('classifies a plain task as deep under auto depth when a large context budget is explicitly requested', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(15, 18000));
+      mockServiceClient.searchAndAsk.mockResolvedValue(createPlanResponse('Large-budget plan'));
+
+      const result = await planningService.generatePlan('Update the settings page copy', {
+        max_context_files: 20,
+        context_token_budget: 20000,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).toHaveBeenCalledTimes(1);
+      expect(result.planning_context?.prompt_profile).toBe('deep');
+      expect(result.planning_context?.requested_depth).toBe('auto');
+      expect(mockServiceClient.getContextForPrompt.mock.calls[0][1]).toEqual(
+        expect.objectContaining({ maxFiles: 20, tokenBudget: 20000 })
+      );
+      expect(result.planning_context?.context_budget).toEqual({
+        requested_max_context_files: 20,
+        clamped_max_context_files: 20,
+        actual_context_file_count: 15,
+        requested_token_budget: 20000,
+        clamped_token_budget: 20000,
+        actual_total_tokens: 18000,
+      });
+    });
+
+    it('does not treat the tool defaults themselves as a large-budget signal', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+
+      const result = await planningService.generatePlan('Update the settings page copy', {
+        max_context_files: 8,
+        context_token_budget: 8000,
+      });
+
+      expect(result.success).toBe(true);
+      expect(mockServiceClient.searchAndAsk).not.toHaveBeenCalled();
+      expect(result.planning_context?.prompt_profile).toBe('compact');
+    });
+
+    it('surfaces requested, clamped, and actual context budgets for a compact result', async () => {
+      mockServiceClient.getContextForPrompt.mockResolvedValue(createContextBundle(2, 1800));
+
+      const result = await planningService.generatePlan('Fix a typo in the README');
+
+      expect(result.success).toBe(true);
+      expect(result.planning_context?.context_budget).toEqual({
+        requested_max_context_files: 8,
+        clamped_max_context_files: 4,
+        actual_context_file_count: 2,
+        requested_token_budget: 8000,
+        clamped_token_budget: 6000,
+        actual_total_tokens: 1800,
+      });
     });
   });
 });

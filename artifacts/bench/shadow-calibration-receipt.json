@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "task_id": "Q3c",
+  "generated_at_utc": "2026-07-14T15:01:55.524Z",
+  "disposition_target": "implemented",
+  "evaluation": {
+    "status": "pass",
+    "reasons": [],
+    "consecutive_pass_count": 3,
+    "distinct_commit_count": 2,
+    "corpus_identity_stable": true,
+    "receipts": [
+      "artifacts/bench/shadow-calibration-history/shadow-calibration-01-b4aeb16ba759.json",
+      "artifacts/bench/shadow-calibration-history/shadow-calibration-02-06ff69f72c5a.json",
+      "artifacts/bench/shadow-calibration-history/shadow-calibration-03-06ff69f72c5a.json"
+    ],
+    "promoted_tier": "calibrated",
+    "pr_blocker_claimed": false
+  },
+  "gates_to_calibrate": [
+    "ci:check:retrieval-holdout-fixture",
+    "ci:check:retrieval-quality-gate",
+    "ci:check:retrieval-shadow-canary-gate"
+  ],
+  "note": "Local dual-commit consecutive shadow receipts calibrate to calibrated. External GitHub workflow history remains required for Q3d pr_blocker only."
+}

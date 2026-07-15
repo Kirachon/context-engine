@@ -18,9 +18,11 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { normalizeIgnoredPatterns } from '../watcher/ignoreRules.js';
+import { createWatcherDiscoveryAdapter, isWatcherDiscoveryManifestDisabled } from '../watcher/discoveryAdapter.js';
 
 import { initializeContextPackStore } from '../context/contextPackStore.js';
 import { FileWatcher } from '../watcher/index.js';
+import type { WatcherChangeFilter } from '../watcher/types.js';
 import {
   ClientCapabilitiesManager,
   attachClientCapabilitiesHandlers,
@@ -84,52 +86,102 @@ export class ContextEngineMCPServer {
     attachClientCapabilitiesHandlers(this.server, this.clientCapabilitiesManager);
 
     if (this.enableWatcher) {
-      // Get ignore patterns from serviceClient to sync with indexing behavior
+      void this.initWatcher(workspacePath, options);
+    }
+  }
+
+  private async onWatcherBatch(changes: Array<{ type: 'add' | 'change' | 'unlink'; path: string }>): Promise<void> {
+    const workspaceChangeApi = (
+      this.serviceClient as ContextServiceClient & {
+        applyWorkspaceChanges?: (
+          batch: Array<{ type: 'add' | 'change' | 'unlink'; path: string }>
+        ) => Promise<void>;
+      }
+    ).applyWorkspaceChanges;
+    if (typeof workspaceChangeApi === 'function') {
+      await workspaceChangeApi.call(this.serviceClient, changes);
+      return;
+    }
+
+    try {
+      const paths = changes.filter((c) => c.type !== 'unlink').map((c) => c.path);
+      if (paths.length === 0) {
+        return;
+      }
+      await this.serviceClient.indexFiles(paths);
+    } catch (error) {
+      console.error('[watcher] Incremental indexing failed:', error);
+    }
+  }
+
+  /**
+   * R3b1: builds the watcher off the R3a canonical discovery manifest
+   * (hard-exclude-only chokidar ignore list + a post-event eligibility
+   * gate backed by `checkPathEligibility`/`applyIncrementalDiscovery`), so
+   * the watcher can never add an ineligible path or drop an eligible
+   * negation result. Falls back to the legacy `getIgnorePatterns`/
+   * `getExcludedDirectories`/`normalizeIgnoredPatterns` path (no
+   * post-event eligibility gate) when `CE_WATCHER_DISCOVERY_MANIFEST_DISABLED`
+   * is set, as an operational rollback lever.
+   */
+  private async initWatcher(
+    workspacePath: string,
+    options?: { enableWatcher?: boolean; watchDebounceMs?: number }
+  ): Promise<void> {
+    const onBatch = (changes: Array<{ type: 'add' | 'change' | 'unlink'; path: string }>) =>
+      this.onWatcherBatch(changes);
+
+    if (isWatcherDiscoveryManifestDisabled()) {
       const ignorePatterns = this.serviceClient.getIgnorePatterns();
       const excludedDirs = this.serviceClient.getExcludedDirectories();
-
       const watcherIgnored = normalizeIgnoredPatterns(workspacePath, ignorePatterns, excludedDirs);
 
-      console.error(`[watcher] Loaded ${watcherIgnored.length} ignore patterns`);
+      console.error(`[watcher] Loaded ${watcherIgnored.length} ignore patterns (legacy path)`);
 
       this.fileWatcher = new FileWatcher(
         workspacePath,
-        {
-          onBatch: async (changes) => {
-            const workspaceChangeApi = (
-              this.serviceClient as ContextServiceClient & {
-                applyWorkspaceChanges?: (
-                  batch: Array<{ type: 'add' | 'change' | 'unlink'; path: string }>
-                ) => Promise<void>;
-              }
-            ).applyWorkspaceChanges;
-            if (typeof workspaceChangeApi === 'function') {
-              await workspaceChangeApi.call(
-                this.serviceClient,
-                changes.map((change) => ({ type: change.type, path: change.path }))
-              );
-              return;
-            }
-
-            try {
-              const paths = changes
-                .filter((c) => c.type !== 'unlink')
-                .map((c) => c.path);
-              if (paths.length === 0) {
-                return;
-              }
-              await this.serviceClient.indexFiles(paths);
-            } catch (error) {
-              console.error('[watcher] Incremental indexing failed:', error);
-            }
-          },
-        },
+        { onBatch },
         {
           debounceMs: options?.watchDebounceMs ?? 500,
           ignored: watcherIgnored,
         }
       );
       this.fileWatcher.start();
+      return;
+    }
+
+    try {
+      const discoveryAdapter = await createWatcherDiscoveryAdapter(workspacePath);
+      const changeFilter: WatcherChangeFilter = {
+        applyBatch: async (changes) => {
+          const result = await discoveryAdapter.applyBatch(changes);
+          return { eligibleChanges: [...result.eligibleChanges] };
+        },
+      };
+
+      console.error(
+        `[watcher] Discovery manifest seeded with ${discoveryAdapter.getManifest().file_count} eligible files ` +
+          `(${discoveryAdapter.chokidarIgnored.length} hard-excluded directory patterns)`
+      );
+
+      if (this.isShuttingDown) {
+        // Server was torn down while the initial manifest scan was in
+        // flight; skip starting a watcher no one will stop.
+        return;
+      }
+
+      this.fileWatcher = new FileWatcher(
+        workspacePath,
+        { onBatch },
+        {
+          debounceMs: options?.watchDebounceMs ?? 500,
+          ignored: discoveryAdapter.chokidarIgnored,
+          changeFilter,
+        }
+      );
+      this.fileWatcher.start();
+    } catch (error) {
+      console.error('[watcher] Failed to initialize canonical discovery adapter, watcher disabled:', error);
     }
   }
 

@@ -5,11 +5,13 @@ Detailed architecture documentation for the Context Engine MCP Server.
 > Historical note: some older sections below are archival. The current active runtime is `local_native`, and legacy provider SDKs are not part of the live provider path.
 
 > Current doc status:
+> - Governance contract: `config/ci/governance-contract.json`
 > - Architecture reference: `ARCHITECTURE.md`
-> - Active delivery plan: `context-engine-next-tranche-swarm-plan.md`
-> - Execution ledger: `context-engine-improvement-swarm-plan.md`
-> - Planning-only follow-on artifact: `docs/advanced-mcp-ux-and-hosted-maturity-plan.md`
-> - Older roadmap and modernization docs under `docs/` are scoped reference artifacts unless they explicitly replace the active delivery plan.
+> - Sole active delivery plan: `context-engine-remediation-plan-2026-07-14.md`
+> - Immutable completed execution ledgers: `context-engine-next-tranche-swarm-plan.md` and `context-engine-improvement-swarm-plan.md`
+> - Planning-only reference: `docs/advanced-mcp-ux-and-hosted-maturity-plan.md`
+> - An `active_delivery_plan` value of `null` in the governance contract explicitly means there is no active delivery plan.
+> - Older roadmap and modernization docs under `docs/` are scoped reference artifacts and cannot replace the governance-contract pointer through prose alone.
 > - Source-of-truth hierarchy: runtime code + `config/ci/*` contracts > `ARCHITECTURE.md` > active delivery plan > execution ledger.
 
 ## Overview

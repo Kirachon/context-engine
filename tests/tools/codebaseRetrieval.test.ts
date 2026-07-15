@@ -339,7 +339,7 @@ describe('codebase_retrieval Tool', () => {
     );
   });
 
-  it('includes fallback diagnostics metadata when provided by service client', async () => {
+  it('keeps path filters separate from retrieval fallback receipts', async () => {
     mockServiceClient.semanticSearch.mockResolvedValue([]);
     mockServiceClient.getLastSearchDiagnostics.mockReturnValue({
       filters_applied: ['exclude:artifacts', 'exclude:docs'],
@@ -353,8 +353,52 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata.filtersApplied).toEqual(['exclude:artifacts', 'exclude:docs']);
     expect(parsed.metadata.filteredPathsCount).toBe(9);
     expect(parsed.metadata.secondPassUsed).toBe(true);
-    expect(parsed.metadata.fallback_state).toBe('active');
+    expect(parsed.metadata.path_filters).toEqual(
+      expect.objectContaining({
+        filters_applied: ['exclude:artifacts', 'exclude:docs'],
+        filter_reasons: expect.arrayContaining(['exclude_artifacts', 'exclude_docs']),
+        filtered_paths_count: 9,
+        second_pass_used: true,
+      })
+    );
+    // R5: ordinary path filters must NOT activate retrieval fallback.
+    expect(parsed.metadata.fallback_state).toBe('inactive');
+    expect(parsed.metadata.fallback_reason).toBe('none');
     expect(parsed.metadata.ranking_diagnostics).toBeDefined();
+  });
+
+  it('marks fallback active for quality-guard retrieval outcomes', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([
+      { path: 'src/a.ts', content: 'code', relevanceScore: 0.05, matchType: 'semantic' },
+    ]);
+    // Force quality-guard path by stubbing localKeywordSearch merge outcome via low scores
+    // and mocking ranking diagnostics through internalRetrieve — simulate via rejected
+    // high-score path isn't available, so assert derive helpers through active ranking payload.
+    const { deriveRetrievalFallbackState } = await import('../../src/mcp/tooling/pathFilterReceipts.js');
+    expect(
+      deriveRetrievalFallbackState({
+        retrievalFallbackState: 'active',
+        rankingFallbackReason: 'quality_guard',
+      })
+    ).toEqual({ fallback_state: 'active', fallback_reason: 'quality_guard' });
+    expect(
+      deriveRetrievalFallbackState({
+        rankingFallbackState: 'active',
+        rankingFallbackReason: 'rerank_error',
+      })
+    ).toEqual({ fallback_state: 'active', fallback_reason: 'rerank_error' });
+    expect(
+      deriveRetrievalFallbackState({
+        providerFailed: true,
+      })
+    ).toEqual({ fallback_state: 'active', fallback_reason: 'provider_failure' });
+
+    const result = await handleCodebaseRetrieval({ query: 'low score' }, mockServiceClient as any);
+    const parsed = JSON.parse(toolText(result));
+    // Without quality-guard / ranking fallback activated by the handler, stay inactive
+    // unless filters wrongly leak into fallback (regression guard).
+    expect(parsed.metadata.fallback_state).toBe('inactive');
+    expect(parsed.metadata.filtersApplied).toEqual([]);
   });
 
   it('supports legacy fallback diagnostics getter with camelCase fields', async () => {
@@ -394,6 +438,8 @@ describe('codebase_retrieval Tool', () => {
     expect(parsed.metadata.totalResults).toBe(0);
     expect(parsed.metadata.indexStatus.status).toBe('error');
     expect(parsed.metadata.freshnessWarning).toMatch(/index status is error/i);
+    expect(parsed.metadata.fallback_state).toBe('active');
+    expect(parsed.metadata.fallback_reason).toBe('provider_failure');
   });
 
   it('adds freshness warning metadata when index is stale', async () => {

@@ -183,7 +183,8 @@ export class ServiceClientRuntimeAccess {
           const queueLength = searchQueue.length;
           console.error(
             formatScopedLog(
-              `[searchAndAsk] Provider=${providerId}; lane=${priority}; query=${options.searchQuery}${queueLength > 0 ? ` (queue: ${queueLength} waiting)` : ''}`
+              `[searchAndAsk] provider=${providerId} lane=${priority} queryLength=${options.searchQuery.length}` +
+              `${queueLength > 0 ? ` queueWaiting=${queueLength}` : ''}`
             )
           );
 
@@ -201,10 +202,21 @@ export class ServiceClientRuntimeAccess {
               `AI provider (${provider.id}) returned invalid response: expected object with string text property`
             );
           }
-          console.error(formatScopedLog(`[searchAndAsk] Response length: ${innerResponse.text.length}`));
+          console.error(
+            formatScopedLog(
+              `[searchAndAsk] provider=${providerId} lane=${priority} outcome=success ` +
+              `responseLength=${innerResponse.text.length} latencyMs=${Date.now() - providerExecutionStart}`
+            )
+          );
           return innerResponse.text;
         } catch (error) {
-          console.error(formatScopedLog('[searchAndAsk] Failed:'), error);
+          console.error(
+            formatScopedLog(
+              `[searchAndAsk] provider=${providerId} lane=${priority} outcome=error ` +
+              `latencyMs=${Date.now() - providerExecutionStart}`
+            ),
+            error
+          );
           throw error;
         } finally {
           observeDurationMs(

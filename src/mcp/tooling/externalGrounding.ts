@@ -71,6 +71,7 @@ export interface FetchExternalGroundingResult {
 
 export interface ExternalGroundingFetchOptions {
   signal?: AbortSignal;
+  dnsLookup?: ExternalDnsLookup;
   maxResponseBytes?: number;
   maxRedirects?: number;
   perSourceTimeoutMs?: number;
@@ -78,6 +79,10 @@ export interface ExternalGroundingFetchOptions {
   maxExcerptChars?: number;
   maxTotalExcerptChars?: number;
 }
+
+export type ExternalDnsLookup = (
+  hostname: string
+) => Promise<ReadonlyArray<{ address: string; family: number }>>;
 
 const MAX_EXTERNAL_SOURCES = 3;
 const ALLOWED_GITHUB_PREFIXES = ['/blob/', '/tree/'];
@@ -161,7 +166,9 @@ function assertSafeHostname(hostname: string): void {
   }
 }
 
-async function assertSafeResolvedTarget(hostname: string): Promise<void> {
+const defaultDnsLookup: ExternalDnsLookup = async (hostname) => lookup(hostname, { all: true });
+
+async function assertSafeResolvedTarget(hostname: string, dnsLookup: ExternalDnsLookup): Promise<void> {
   const normalized = hostname.toLowerCase();
   const ipFamily = isIP(normalized);
   if (ipFamily !== 0) {
@@ -169,7 +176,7 @@ async function assertSafeResolvedTarget(hostname: string): Promise<void> {
     return;
   }
 
-  const records = await lookup(normalized, { all: true });
+  const records = await dnsLookup(normalized);
   if (!records || records.length === 0) {
     throw new Error('host could not be resolved');
   }
@@ -373,12 +380,13 @@ async function fetchSingleExternalSource(
     const perSourceTimeoutMs = options.perSourceTimeoutMs ?? DEFAULT_PER_SOURCE_TIMEOUT_MS;
     const maxResponseBytes = options.maxResponseBytes ?? MAX_RESPONSE_BYTES;
     const maxExcerptChars = options.maxExcerptChars ?? DEFAULT_MAX_EXCERPT_CHARS;
+    const dnsLookup = options.dnsLookup ?? defaultDnsLookup;
 
     let currentUrl = source.url;
     let redirects = 0;
     let response: Response;
     while (true) {
-      await assertSafeResolvedTarget(new URL(currentUrl).hostname);
+      await assertSafeResolvedTarget(new URL(currentUrl).hostname, dnsLookup);
       response = await fetchWithTimeout(currentUrl, perSourceTimeoutMs, options.signal);
       if (response.status >= 300 && response.status < 400) {
         if (redirects >= maxRedirects) {
@@ -392,7 +400,7 @@ async function fetchSingleExternalSource(
         }
         const redirected = canonicalizeUrl(new URL(location, currentUrl).toString());
         assertSourceTypeAdmission(source.type, redirected);
-        await assertSafeResolvedTarget(redirected.hostname);
+        await assertSafeResolvedTarget(redirected.hostname, dnsLookup);
         currentUrl = redirected.toString();
         redirects += 1;
         continue;

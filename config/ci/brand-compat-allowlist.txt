@@ -6,8 +6,13 @@ scripts/ci/check-brand-detachment.ts
 scripts/ci/check-legacy-provider-references.ts
 scripts/ci/check-retrieval-config-precedence.ts
 scripts/ci/check-retrieval-provider-boundary.ts
+config/ci/compatibility-rollback-envelope.json
+docs/plan-execution/context-engine-remediation-r3a-discovery-manifest-2026-07-14.md
+docs/plan-execution/openai-mcp-gap-closure-graph-artifact-contract.md
 src/mcp/serviceClient.ts
 src/mcp/indexStateStore.ts
+src/internal/discovery/ignoreCompiler.ts
+src/watcher/discoveryAdapter.ts
 src/internal/retrieval/chunkIndex.ts
 src/internal/retrieval/denseIndex.ts
 src/internal/retrieval/lancedbVectorIndex.ts

@@ -30,7 +30,10 @@ import {
   assertRetrievalFlowActive,
   createRetrievalFlowContext,
   finalizeRetrievalFlow,
+  isRetrievalFlowAborted,
   noteRetrievalStage,
+  raceWithAbort,
+  RetrievalAbortedError,
   type RetrievalFlowContext,
 } from './flow.js';
 import { evaluateRankingGate } from './rankingCalibration.js';
@@ -134,7 +137,18 @@ export function isRetrievalPipelineEnabled(): boolean {
   return !DISABLED_VALUES.has(raw.toLowerCase());
 }
 
-function createLocalSemaphore(limit: number): LocalSemaphore {
+/**
+ * R1b -- `signal`, when provided, is honored at both queue checkpoints:
+ * a caller that is already aborted before it ever reaches the front of the
+ * queue never acquires a permit (`acquire()` rejects synchronously-ish,
+ * before incrementing `active`), and a caller that is queued *behind*
+ * other in-flight work is released -- rejected, not silently resolved --
+ * the moment the signal fires, instead of waiting for an unrelated
+ * `release()` to eventually pop it off the waiter list. Either way no
+ * permit is ever held by an aborted caller, so `release()` never needs to
+ * special-case cancellation.
+ */
+function createLocalSemaphore(limit: number, signal?: AbortSignal): LocalSemaphore {
   let active = 0;
   let maxActive = 0;
   let queued = 0;
@@ -142,19 +156,44 @@ function createLocalSemaphore(limit: number): LocalSemaphore {
   let queuedEvents = 0;
   let scheduled = 0;
   let completed = 0;
-  const waiters: Array<() => void> = [];
+  const waiters: Array<{ settle: (error?: unknown) => void }> = [];
 
   const acquire = async (): Promise<void> => {
+    if (signal?.aborted) {
+      throw new RetrievalAbortedError('fanout:queue:acquire');
+    }
     scheduled += 1;
     if (active >= limit) {
       queued += 1;
       maxQueued = Math.max(maxQueued, queued);
       queuedEvents += 1;
-      await new Promise<void>((resolve) => {
-        waiters.push(() => {
-          queued = Math.max(0, queued - 1);
-          resolve();
-        });
+      await new Promise<void>((resolve, reject) => {
+        let onAbort: (() => void) | undefined;
+        const waiter = {
+          settle: (error?: unknown): void => {
+            queued = Math.max(0, queued - 1);
+            if (onAbort) {
+              signal?.removeEventListener('abort', onAbort);
+            }
+            if (error) {
+              reject(error);
+            } else {
+              resolve();
+            }
+          },
+        };
+        waiters.push(waiter);
+
+        if (signal) {
+          onAbort = (): void => {
+            const index = waiters.indexOf(waiter);
+            if (index >= 0) {
+              waiters.splice(index, 1);
+              waiter.settle(new RetrievalAbortedError('fanout:queue:queued'));
+            }
+          };
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
       });
     }
     active += 1;
@@ -164,7 +203,7 @@ function createLocalSemaphore(limit: number): LocalSemaphore {
   const release = (): void => {
     active = Math.max(0, active - 1);
     completed += 1;
-    waiters.shift()?.();
+    waiters.shift()?.settle();
   };
 
   return {
@@ -654,10 +693,18 @@ async function applyRerankStage(
   });
 
   try {
+    assertRetrievalFlowActive(flow, 'rerank:started');
     let rerankedHead: InternalSearchResult[];
     if (settings.reranker) {
+      // R1b: `raceWithAbort` guarantees a prompt rejection on abort even if
+      // the external reranker plugin itself ignores the forwarded `signal`
+      // -- defense-in-depth, matching the transformer rerank path below.
       const providerResult = await withTimeoutState<InternalSearchResult[] | null>(
-        settings.reranker.rerank(query, head, { timeoutMs: effectiveRerankTimeoutMs }),
+        raceWithAbort(
+          settings.reranker.rerank(query, head, { timeoutMs: effectiveRerankTimeoutMs, signal: flow.signal }),
+          flow.signal,
+          'rerank:provider'
+        ),
         effectiveRerankTimeoutMs,
         null
       );
@@ -705,11 +752,12 @@ async function applyRerankStage(
         rerankedHead = rerankResults(head, { originalQuery: query, mode: settings.rankingMode });
       } else {
         const heuristicResult = await withTimeoutState<InternalSearchResult[]>(
-          rerankCandidates(head, {
-            originalQuery: query,
-            mode: settings.rankingMode,
-            gateDecision,
-            onTrace: (trace) => {
+          raceWithAbort(
+            rerankCandidates(head, {
+              originalQuery: query,
+              mode: settings.rankingMode,
+              gateDecision,
+              onTrace: (trace) => {
               updateRerankDiagnostics(flow, {
                 selectedPath: trace.selectedPath,
                 appliedPath: trace.appliedPath,
@@ -724,8 +772,11 @@ async function applyRerankStage(
                 runtimeId: trace.runtimeId,
                 modelId: trace.modelId,
               });
-            },
-          }),
+              },
+            }),
+            flow.signal,
+            'rerank:transformer'
+          ),
           effectiveRerankTimeoutMs,
           rerankResults(head, { originalQuery: query, mode: settings.rankingMode })
         );
@@ -762,7 +813,10 @@ async function applyRerankStage(
     );
     noteRetrievalStage(flow, 'rerank:completed');
     return [...rerankedHead, ...tail];
-  } catch {
+  } catch (error) {
+    if (isRetrievalFlowAborted(flow)) {
+      throw error;
+    }
     incCounter(
       'context_engine_retrieval_rerank_fail_open_total',
       { reason: 'error', reranker: settings.reranker?.id ?? 'heuristic' },
@@ -785,6 +839,34 @@ async function applyRerankStage(
     noteRetrievalStage(flow, 'rerank:fail_open');
     return candidates;
   }
+}
+
+/**
+ * R1b -- Shared fanout-backend error handling: a plain timeout (the
+ * operation lost the `withTimeout` race but the flow itself is still
+ * active) still degrades to `fallback` exactly as before, but once the
+ * flow's signal has fired the rejection is rethrown instead of swallowed.
+ * Swallowing an abort into an empty-results fallback would let the
+ * pipeline sail on through dedupe/fusion/rerank/caching as if nothing
+ * happened -- rethrowing is what lets `Promise.all` (and everything
+ * awaiting it, up through `retrieve()` and `internalRetrieveCode`) reject
+ * promptly instead.
+ */
+function runAbortAwareFanoutOperation<T>(
+  flow: RetrievalFlowContext,
+  stage: string,
+  run: () => Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+  onDegraded?: (error: unknown) => void
+): Promise<T> {
+  return raceWithAbort(withTimeout(run(), timeoutMs, fallback), flow.signal, stage).catch((error) => {
+    if (isRetrievalFlowAborted(flow)) {
+      throw error;
+    }
+    onDegraded?.(error);
+    return fallback;
+  });
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, fallback: T): Promise<T> {
@@ -853,6 +935,15 @@ function buildExpandedQueries(query: string, options: NormalizedRetrievalOptions
   }
 
   return expanded;
+}
+
+function isOfflineLocalNativeClient(serviceClient: ContextServiceClient): boolean {
+  const offlineFlag = process.env.CONTEXT_ENGINE_OFFLINE_ONLY?.toLowerCase();
+  if (offlineFlag !== '1' && offlineFlag !== 'true' && offlineFlag !== 'yes' && offlineFlag !== 'on') {
+    return false;
+  }
+  return typeof serviceClient.getActiveRetrievalProviderId === 'function'
+    && serviceClient.getActiveRetrievalProviderId() === 'local_native';
 }
 
 function resolveFusionWeights(
@@ -993,11 +1084,13 @@ export async function retrieve(
         || settings.maxOutputLength !== undefined
         || settings.includePaths !== undefined
         || settings.excludePaths !== undefined
+        || flow.signal !== undefined
           ? {
               bypassCache: settings.bypassCache,
               maxOutputLength: settings.maxOutputLength,
               includePaths: settings.includePaths,
               excludePaths: settings.excludePaths,
+              signal: flow.signal,
             }
           : undefined;
       const semanticSearch = (q: string, k: number) =>
@@ -1030,7 +1123,10 @@ export async function retrieve(
         noteRetrievalStage(flow, `graph:seed_symbols:${graphContext.seedSymbols.length}`);
       }
       const expandedQueries = withStageTiming(flow, 'expand_queries', () =>
-        mergeExpandedQueriesWithGraph(buildExpandedQueries(query, settings), graphContext)
+        mergeExpandedQueriesWithGraph(
+          buildExpandedQueries(query, settings),
+          settings.enableExpansion ? graphContext : { ...graphContext, graphVariants: [] }
+        )
       );
       setRetrievalTraceAttributes({ 'retrieval.expanded_query_count': expandedQueries.length });
       noteRetrievalStage(flow, `expanded_queries:${expandedQueries.length}`);
@@ -1043,18 +1139,25 @@ export async function retrieve(
         localKeywordSearch?: (
           input: string,
           topK: number,
-          options?: { includePaths?: string[]; excludePaths?: string[]; bypassCache?: boolean }
+          options?: {
+            includePaths?: string[];
+            excludePaths?: string[];
+            bypassCache?: boolean;
+            signal?: AbortSignal;
+          }
         ) => Promise<SearchResult[]>;
       }).localKeywordSearch;
-      const enabledBackends: FanoutBackend[] = ['semantic'];
-      if (settings.enableLexical && typeof localKeywordSearch === 'function') {
+      const offlineLocalNative = isOfflineLocalNativeClient(serviceClient);
+      const canUseLexical = settings.enableLexical && typeof localKeywordSearch === 'function';
+      const enabledBackends: FanoutBackend[] = offlineLocalNative && canUseLexical ? ['lexical'] : ['semantic'];
+      if (!offlineLocalNative && canUseLexical) {
         enabledBackends.push('lexical');
       }
       if (settings.enableDense && denseProvider) {
         enabledBackends.push('dense');
       }
       const plannedFanoutTasks = expandedQueries.length * enabledBackends.length;
-      const limiter = createLocalSemaphore(settings.fanoutConcurrency);
+      const limiter = createLocalSemaphore(settings.fanoutConcurrency, flow.signal);
       const syncFanoutDiagnostics = () => {
         const snapshot = limiter.snapshot();
         updateFanoutDiagnostics(flow, {
@@ -1134,39 +1237,52 @@ export async function retrieve(
         async () => Promise.all(
           expandedQueries.map(async (variant) => {
             assertRetrievalFlowActive(flow, `variant:${variant.index}`);
-            const semanticPromise = runFanoutSearch(
-              'semantic',
-              variant,
-              () => withTimeout(
-                semanticSearch(variant.query, settings.perQueryTopK),
-                settings.timeoutMs,
-                []
-              ).catch((error) => {
-                if (settings.log) {
-                  console.error(`[retrieve] Failed variant \"${variant.query}\":`, error);
-                }
-                return [] as SearchResult[];
-              })
-            );
+            const semanticPromise = offlineLocalNative && canUseLexical
+              ? Promise.resolve([] as SearchResult[])
+              : runFanoutSearch(
+                  'semantic',
+                  variant,
+                  () => runAbortAwareFanoutOperation(
+                    flow,
+                    `variant:${variant.index}:semantic`,
+                    () => semanticSearch(variant.query, settings.perQueryTopK),
+                    settings.timeoutMs,
+                    [] as SearchResult[],
+                    (error) => {
+                      if (settings.log) {
+                        console.error(
+                          `[retrieve] Semantic fanout failed (variantIndex=${variant.index}, queryLength=${variant.query.length}):`,
+                          error
+                        );
+                      }
+                    }
+                  )
+                );
 
             const lexicalPromise = settings.enableLexical && typeof localKeywordSearch === 'function'
               ? runFanoutSearch(
                   'lexical',
                   variant,
-                  () => withTimeout(
-                    localKeywordSearch(variant.query, settings.perQueryTopK, {
+                  () => runAbortAwareFanoutOperation(
+                    flow,
+                    `variant:${variant.index}:lexical`,
+                    () => localKeywordSearch(variant.query, settings.perQueryTopK, {
                       includePaths: settings.includePaths,
                       excludePaths: settings.excludePaths,
                       bypassCache: settings.bypassCache,
+                      signal: flow.signal,
                     }),
                     settings.timeoutMs,
-                    []
-                  ).catch((error) => {
-                    if (settings.log) {
-                      console.error(`[retrieve] Lexical retrieval failed for variant \"${variant.query}\":`, error);
+                    [] as SearchResult[],
+                    (error) => {
+                      if (settings.log) {
+                        console.error(
+                          `[retrieve] Lexical fanout failed (variantIndex=${variant.index}, queryLength=${variant.query.length}):`,
+                          error
+                        );
+                      }
                     }
-                    return [] as SearchResult[];
-                  })
+                  )
                 )
               : Promise.resolve([] as SearchResult[]);
 
@@ -1174,16 +1290,21 @@ export async function retrieve(
               ? runFanoutSearch(
                   'dense',
                   variant,
-                  () => withTimeout(
-                    denseProvider.search(variant.query, settings.perQueryTopK),
+                  () => runAbortAwareFanoutOperation(
+                    flow,
+                    `variant:${variant.index}:dense`,
+                    () => denseProvider.search(variant.query, settings.perQueryTopK, { signal: flow.signal }),
                     settings.timeoutMs,
-                    []
-                  ).catch((error) => {
-                    if (settings.log) {
-                      console.error(`[retrieve] Dense retrieval failed for variant \"${variant.query}\":`, error);
+                    [] as SearchResult[],
+                    (error) => {
+                      if (settings.log) {
+                        console.error(
+                          `[retrieve] Dense fanout failed (variantIndex=${variant.index}, queryLength=${variant.query.length}):`,
+                          error
+                        );
+                      }
                     }
-                    return [] as SearchResult[];
-                  })
+                  )
                 )
               : Promise.resolve([] as SearchResult[]);
 
@@ -1204,6 +1325,7 @@ export async function retrieve(
         noteRetrievalStage(flow, 'fanout:queued');
       }
       noteRetrievalStage(flow, `fanout:max_in_flight:${limiter.snapshot().maxActive}`);
+      assertRetrievalFlowActive(flow, 'collect_candidates');
 
       noteRetrievalStage(flow, 'collected_variants');
       withStageTiming(flow, 'collect_candidates', () => {
@@ -1258,10 +1380,11 @@ export async function retrieve(
         [...semanticCandidates, ...lexicalCandidates, ...denseCandidates],
         graphContext
       );
-      flow.metadata.graphVariantCount = graphContext.graphVariants.length;
-      if (graphContext.graphVariants.length > 0) {
-        flow.metadata.graphExpandedQueries = graphContext.graphVariants.map((variant) => variant.query);
-        noteRetrievalStage(flow, `graph:variants:${graphContext.graphVariants.length}`);
+      const appliedGraphVariants = settings.enableExpansion ? graphContext.graphVariants : [];
+      flow.metadata.graphVariantCount = appliedGraphVariants.length;
+      if (appliedGraphVariants.length > 0) {
+        flow.metadata.graphExpandedQueries = appliedGraphVariants.map((variant) => variant.query);
+        noteRetrievalStage(flow, `graph:variants:${appliedGraphVariants.length}`);
       }
 
       if (settings.enableDedupe) {

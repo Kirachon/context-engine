@@ -16,7 +16,7 @@ export interface EmbeddingProvider {
  */
 export interface DenseRetriever {
   id: string;
-  search: (query: string, topK: number) => Promise<SearchResult[]>;
+  search: (query: string, topK: number, options?: { signal?: AbortSignal }) => Promise<SearchResult[]>;
 }
 
 function normalizeToken(token: string): string {

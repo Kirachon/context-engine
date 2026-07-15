@@ -14,6 +14,7 @@ import {
     describeLastEmbeddingRuntimeStatus,
     type EmbeddingRuntimeStatus,
 } from '../../internal/retrieval/embeddingRuntime.js';
+import { buildCompositeHealth } from '../../mcp/tooling/compositeHealth.js';
 
 function sanitizeDowngradeReason(reason: string): string {
     // Map internal reason strings to stable category codes so we do not leak local paths,
@@ -24,7 +25,49 @@ function sanitizeDowngradeReason(reason: string): string {
     return 'runtime_degraded';
 }
 
-function buildRetrievalStatusPayload(status: EmbeddingRuntimeStatus) {
+function buildRetrievalStatusPayload(status: EmbeddingRuntimeStatus, serviceClient?: ContextServiceClient) {
+    // R6: reuse the same composition table as index/health so vector unknown/
+    // unavailable cannot collapse to an unqualified healthy overall.
+    let composite;
+    try {
+        composite =
+            serviceClient && typeof serviceClient.getCompositeHealth === 'function'
+                ? serviceClient.getCompositeHealth()
+                : buildCompositeHealth({
+                      corpus: { status: 'idle', isStale: false, lastIndexed: null },
+                      lexical: { featureEnabled: false, engineLoaded: null, loadAttempted: false },
+                      vector: {
+                          runtimeState: status.state,
+                          hashFallbackActive: status.hashFallbackActive,
+                          loadFailures: status.loadFailures,
+                      },
+                      graph: { status: null },
+                      cancellationQueue: {
+                          interactiveDepth: 0,
+                          interactiveMax: 1,
+                          backgroundDepth: 0,
+                          backgroundMax: 1,
+                      },
+                  });
+    } catch {
+        composite = buildCompositeHealth({
+            corpus: { status: 'idle', isStale: false, lastIndexed: null },
+            lexical: { featureEnabled: false, engineLoaded: null, loadAttempted: false },
+            vector: {
+                runtimeState: status.state,
+                hashFallbackActive: status.hashFallbackActive,
+                loadFailures: status.loadFailures,
+            },
+            graph: { status: null },
+            cancellationQueue: {
+                interactiveDepth: 0,
+                interactiveMax: 1,
+                backgroundDepth: 0,
+                backgroundMax: 1,
+            },
+        });
+    }
+
     return {
         state: status.state,
         configured: status.configured,
@@ -41,6 +84,9 @@ function buildRetrievalStatusPayload(status: EmbeddingRuntimeStatus) {
         lastFailure: status.lastFailure ? 'runtime_error' : null,
         lastFailureAt: status.lastFailureAt ?? null,
         nextRetryAt: status.nextRetryAt ?? null,
+        // R6 additive
+        composite,
+        components: composite.components,
     };
 }
 
@@ -98,7 +144,7 @@ export function createStatusRouter(serviceClient: ContextServiceClient): Router 
     router.get('/retrieval/status', (_req, res) => {
         try {
             const status = resolveRetrievalStatus();
-            res.json(buildRetrievalStatusPayload(status));
+            res.json(buildRetrievalStatusPayload(status, serviceClient));
         } catch (error) {
             console.error('[api:retrieval/status]', error);
             res.status(500).json({ error: 'retrieval_status_unavailable' });

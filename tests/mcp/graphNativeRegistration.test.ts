@@ -43,10 +43,10 @@ describe('graph-native tool registration metadata', () => {
     expect(registrySource).toContain('traceSymbolTool');
     expect(registrySource).toContain('impactAnalysisTool');
     expect(registrySource).toContain('whyThisContextTool');
-    expect(registrySource).toContain("handler: (args) => handleFindCallers(args as any, serviceClient)");
-    expect(registrySource).toContain("handler: (args) => handleFindCallees(args as any, serviceClient)");
-    expect(registrySource).toContain("handler: (args) => handleTraceSymbol(args as any, serviceClient)");
-    expect(registrySource).toContain("handler: (args) => handleImpactAnalysis(args as any, serviceClient)");
-    expect(registrySource).toContain("handler: (args) => handleWhyThisContext(args as any, serviceClient)");
+    expect(registrySource).toContain('handler: bindClient(serviceClient, handleFindCallers)');
+    expect(registrySource).toContain('handler: bindClient(serviceClient, handleFindCallees)');
+    expect(registrySource).toContain('handler: bindClient(serviceClient, handleTraceSymbol)');
+    expect(registrySource).toContain('handler: bindClient(serviceClient, handleImpactAnalysis)');
+    expect(registrySource).toContain('handler: bindClient(serviceClient, handleWhyThisContext)');
   });
 });

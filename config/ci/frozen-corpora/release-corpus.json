@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-release-v1",
+  "intended_lane": "release",
+  "description": "Frozen full-coverage corpus for the release lane. Superset of nightly plus every polyglot language pair, used before a release-candidate benchmark is approved.",
+  "cases": [
+    {
+      "id": "release-bench-suite-mode-policy",
+      "query": "buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK",
+      "language": "typescript",
+      "labels": ["release-gate"],
+      "intended_lane": "release",
+      "target_path": "src/ci/benchSuiteModePolicy.ts"
+    },
+    {
+      "id": "release-provenance",
+      "query": "makeBenchProvenance feature_flags_snapshot dataset_hash",
+      "language": "typescript",
+      "labels": ["release-gate"],
+      "intended_lane": "release",
+      "target_path": "scripts/ci/bench-provenance.ts"
+    },
+    {
+      "id": "release-quality-report",
+      "query": "generate-retrieval-quality-report calibration gate_rules reproducibility_lock",
+      "language": "typescript",
+      "labels": ["release-gate"],
+      "intended_lane": "release",
+      "target_path": "scripts/ci/generate-retrieval-quality-report.ts"
+    },
+    {
+      "id": "release-polyglot-python-order-processor",
+      "query": "python OrderProcessor class tax_rate process",
+      "language": "python",
+      "labels": ["release-gate", "polyglot"],
+      "intended_lane": "release",
+      "target_path": "tests/fixtures/retrieval/polyglot/python/sample.py"
+    },
+    {
+      "id": "release-polyglot-go-order-processor",
+      "query": "go OrderProcessor struct TaxRate Process method",
+      "language": "go",
+      "labels": ["release-gate", "polyglot"],
+      "intended_lane": "release",
+      "target_path": "tests/fixtures/retrieval/polyglot/go/sample.go"
+    },
+    {
+      "id": "release-polyglot-rust-order-processor",
+      "query": "rust OrderProcessor struct tax_rate impl process",
+      "language": "rust",
+      "labels": ["release-gate", "polyglot"],
+      "intended_lane": "release",
+      "target_path": "tests/fixtures/retrieval/polyglot/rust/sample.rs"
+    },
+    {
+      "id": "release-polyglot-java-order-processor",
+      "query": "java OrderProcessor class taxRate process",
+      "language": "java",
+      "labels": ["release-gate", "polyglot"],
+      "intended_lane": "release",
+      "target_path": "tests/fixtures/retrieval/polyglot/java/Sample.java"
+    },
+    {
+      "id": "release-polyglot-csharp-order-processor",
+      "query": "csharp OrderProcessor class TaxRate Process",
+      "language": "csharp",
+      "labels": ["release-gate", "polyglot"],
+      "intended_lane": "release",
+      "target_path": "tests/fixtures/retrieval/polyglot/csharp/Sample.cs"
+    },
+    {
+      "id": "release-weekly-trend-report",
+      "query": "duplicate_identical_inputs r4_weekly_trend archive",
+      "language": "typescript",
+      "labels": ["release-gate"],
+      "intended_lane": "release",
+      "target_path": "scripts/ci/generate-weekly-retrieval-trend-report.ts"
+    },
+    {
+      "id": "release-holdout-validator",
+      "query": "check-retrieval-holdout-fixture leakage_guard normalization",
+      "language": "typescript",
+      "labels": ["release-gate"],
+      "intended_lane": "release",
+      "target_path": "scripts/ci/check-retrieval-holdout-fixture.ts"
+    }
+  ]
+}

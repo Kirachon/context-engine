@@ -7,6 +7,14 @@
   "bin": {
     "context-engine-mcp": "./bin/context-engine-mcp.js"
   },
+  "files": [
+    "dist",
+    "bin",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
@@ -46,6 +54,16 @@
     "ci:check:review-timeout-contract": "node --import tsx scripts/ci/check-review-timeout-contract.ts",
     "ci:check:review-auto-timeout-smoke": "node --import tsx scripts/ci/review-auto-timeout-smoke.ts",
     "ci:check:governance-artifacts": "node --import tsx scripts/ci/check-governance-artifacts.ts",
+    "ci:check:gate-tier-contract": "node --import tsx scripts/ci/check-gate-tier-contract.ts",
+    "ci:check:frozen-corpus-contract": "node --import tsx scripts/ci/check-frozen-corpus-contract.ts",
+    "ci:check:required-lane-catch-rate": "node --import tsx scripts/ci/required-lane-catch-rate.ts --out artifacts/bench/required-lane-catch-rate-report.json",
+    "ci:check:shadow-required-calibration": "node --import tsx scripts/ci/run-shadow-required-calibration.ts",
+    "ci:check:docs-version-reconciliation": "node --import tsx scripts/ci/check-docs-version-reconciliation.ts",
+    "ci:check:evidence-date-contract": "node --import tsx scripts/ci/check-evidence-date-contract.ts",
+    "ci:check:supported-distribution-pack-proof": "node --import tsx scripts/ci/run-supported-distribution-pack-proof.ts",
+    "ci:run:measurement-gated-experiments": "node --import tsx scripts/ci/run-measurement-gated-experiments.ts",
+    "ci:generate:coverage-evidence": "node --import tsx scripts/ci/generate-coverage-evidence.ts",
+    "ci:check:coverage-evidence": "node --import tsx scripts/ci/check-coverage-evidence.ts",
     "ci:check:ws21-rollback-drill": "node --import tsx scripts/ci/check-ws21-rollback-drill.ts docs/WS21_ROLLBACK_DRILL_TEMPLATE.md docs/WS21_ROLLBACK_DRILL_SAMPLE.md",
     "ci:generate:legacy-capability-parity-report": "node --import tsx scripts/ci/generate-legacy-capability-parity-report.ts --fixture-pack config/ci/legacy-capability-parity-fixture-pack.json --matrix config/ci/legacy-capability-matrix.json --out artifacts/bench/retrieval-parity-pr.json",
     "ci:archive:legacy-capability-parity-history": "node --import tsx scripts/ci/archive-legacy-capability-parity-history.ts --artifact artifacts/bench/legacy-capability-parity-gate.json --history-dir artifacts/bench/legacy-capability-parity-history",

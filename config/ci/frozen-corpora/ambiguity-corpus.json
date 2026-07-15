@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-ambiguity-v1",
+  "intended_lane": "ambiguity",
+  "description": "Frozen graph-ambiguity corpus for the M2 experiment (name-based call resolution across modules). Pins same-name, alias, import, re-export, and method resolution cases with predeclared precision/recall thresholds; the resolver evaluation itself remains gated behind M2's frozen-threshold disposition.",
+  "cases": [
+    {
+      "id": "ambig-same-name-across-modules",
+      "query": "two modules each declare a function named normalize with different signatures",
+      "language": "typescript",
+      "labels": ["same_name"],
+      "intended_lane": "ambiguity",
+      "ambiguity_type": "same_name",
+      "expected_resolution": "caller-module-scoped-symbol"
+    },
+    {
+      "id": "ambig-import-alias-binding",
+      "query": "import { readJson as readContract } from lib module then call readContract",
+      "language": "typescript",
+      "labels": ["alias"],
+      "intended_lane": "ambiguity",
+      "ambiguity_type": "alias",
+      "expected_resolution": "aliased-import-target"
+    },
+    {
+      "id": "ambig-namespace-import-call",
+      "query": "import * as fixture from retrieval-quality-fixture then call fixture.sha256Hex",
+      "language": "typescript",
+      "labels": ["import"],
+      "intended_lane": "ambiguity",
+      "ambiguity_type": "import",
+      "expected_resolution": "namespace-member-target"
+    },
+    {
+      "id": "ambig-re-export-barrel",
+      "query": "index.ts re-exports validateGateTierContract from lib then a consumer imports it from index",
+      "language": "typescript",
+      "labels": ["re_export"],
+      "intended_lane": "ambiguity",
+      "ambiguity_type": "re_export",
+      "expected_resolution": "original-declaration-through-barrel"
+    },
+    {
+      "id": "ambig-overloaded-method-on-two-classes",
+      "query": "two unrelated classes each define a process method with different parameter counts",
+      "language": "typescript",
+      "labels": ["method"],
+      "intended_lane": "ambiguity",
+      "ambiguity_type": "method",
+      "expected_resolution": "receiver-type-scoped-method"
+    }
+  ]
+}

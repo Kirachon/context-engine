@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "description": "Single checked-in source of truth for the coverage threshold enforced by .github/workflows/test.yml's quality-gates job. The workflow's inline --coverageThreshold value and this contract's thresholds are reconciled by tests/ci/coverageEvidenceContract.test.ts so they can never silently drift.",
+  "thresholds": {
+    "global": {
+      "branches": 70,
+      "functions": 75,
+      "lines": 75
+    }
+  },
+  "lcov_path": "coverage/lcov.info",
+  "summary_path": "coverage/coverage-summary.json",
+  "evidence_path": "artifacts/ci/coverage-evidence.json",
+  "workflow": {
+    "file": ".github/workflows/test.yml",
+    "job": "quality-gates",
+    "generate_step_name": "Coverage threshold check",
+    "evidence_step_name": "Generate coverage evidence",
+    "verify_step_name": "Verify coverage evidence provenance",
+    "upload_step_name": "Upload coverage"
+  }
+}

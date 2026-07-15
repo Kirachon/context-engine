@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-nightly-v1",
+  "intended_lane": "nightly",
+  "description": "Frozen broad-coverage corpus for the nightly report-only lane. Superset of the PR lane plus additional polyglot cases that would be too slow to run on every PR.",
+  "cases": [
+    {
+      "id": "nightly-bench-suite-mode-policy",
+      "query": "buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK",
+      "language": "typescript",
+      "labels": ["broad-coverage"],
+      "intended_lane": "nightly",
+      "target_path": "src/ci/benchSuiteModePolicy.ts"
+    },
+    {
+      "id": "nightly-holdout-validator",
+      "query": "check-retrieval-holdout-fixture leakage_guard normalization",
+      "language": "typescript",
+      "labels": ["broad-coverage"],
+      "intended_lane": "nightly",
+      "target_path": "scripts/ci/check-retrieval-holdout-fixture.ts"
+    },
+    {
+      "id": "nightly-weekly-trend-report",
+      "query": "duplicate_identical_inputs r4_weekly_trend archive",
+      "language": "typescript",
+      "labels": ["broad-coverage"],
+      "intended_lane": "nightly",
+      "target_path": "scripts/ci/generate-weekly-retrieval-trend-report.ts"
+    },
+    {
+      "id": "nightly-polyglot-python-order-processor",
+      "query": "python OrderProcessor class tax_rate process",
+      "language": "python",
+      "labels": ["broad-coverage", "polyglot"],
+      "intended_lane": "nightly",
+      "target_path": "tests/fixtures/retrieval/polyglot/python/sample.py"
+    },
+    {
+      "id": "nightly-polyglot-go-order-processor",
+      "query": "go OrderProcessor struct TaxRate Process method",
+      "language": "go",
+      "labels": ["broad-coverage", "polyglot"],
+      "intended_lane": "nightly",
+      "target_path": "tests/fixtures/retrieval/polyglot/go/sample.go"
+    },
+    {
+      "id": "nightly-polyglot-rust-compute-total",
+      "query": "rust compute_total items price qty slice",
+      "language": "rust",
+      "labels": ["broad-coverage", "polyglot"],
+      "intended_lane": "nightly",
+      "target_path": "tests/fixtures/retrieval/polyglot/rust/sample.rs"
+    },
+    {
+      "id": "nightly-polyglot-java-compute-total",
+      "query": "java computeTotal static method items price qty",
+      "language": "java",
+      "labels": ["broad-coverage", "polyglot"],
+      "intended_lane": "nightly",
+      "target_path": "tests/fixtures/retrieval/polyglot/java/Sample.java"
+    },
+    {
+      "id": "nightly-semantic-latency-report",
+      "query": "generate-semantic-latency-report profile percentile bucket",
+      "language": "typescript",
+      "labels": ["broad-coverage"],
+      "intended_lane": "nightly",
+      "target_path": "scripts/ci/generate-semantic-latency-report.ts"
+    }
+  ]
+}

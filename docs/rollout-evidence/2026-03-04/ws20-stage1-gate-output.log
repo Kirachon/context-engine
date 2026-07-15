@@ -1,0 +1,14 @@
+WS20 rollout stage gate
+artifact=D:\GitProjects\context-engine\docs\rollout-evidence\2026-03-04\ws20-stage1-canary-1pct.yaml
+thresholds_config=D:\GitProjects\context-engine\config\rollout-go-no-go-thresholds.json
+checks=9
+PASS rollout_id: rollout_id must be a non-empty string.
+PASS stage: stage must be an integer in range 0..3.
+PASS stage_name_alignment: stage_name must match canary for stage 1.
+PASS expected_stage_match: artifact stage (1) must match --stage 1.
+PASS canary_present: canary section is required for stage 1.
+PASS canary_percent_range: canary.percent must be between 1 and 5.
+PASS canary_min_soak_24h: canary soak must be at least 24 hours (canary.soak_hours or window duration).
+PASS canary_exit_criteria: canary.exit_criteria_met must be true.
+PASS canary_signoff: canary.signed_by and canary.evidence_ref are required.
+WS20 stage gate passed.

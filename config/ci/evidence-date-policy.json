@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "task_id": "D1c1",
+  "title": "Evidence-date policy reconciliation",
+  "owner_lane": "Governance / F0",
+  "depends_on": ["Q2"],
+  "policy": {
+    "directory_date": "Evidence under docs/rollout-evidence/<YYYY-MM-DD>/ uses the directory name as the authoritative event date (UTC calendar day).",
+    "generation_time": "Machine JSON evidence should include generated_at or generated_at_utc when emitted by CI scripts; human markdown receipts may use the directory date alone.",
+    "commit": "Machine receipts should record commit_sha or reproducibility_lock.commit_sha when the emitting tool supports it.",
+    "artifact_hash": "Paired fingerprint receipts record sha256 of the governing contract/inventory file; drift without an intentional exception fails closed."
+  },
+  "scope_globs": [
+    "docs/rollout-evidence/**",
+    "artifacts/plan/context-engine-remediation-*.json",
+    "artifacts/bench/*-gate.json",
+    "artifacts/bench/*-receipt.json"
+  ],
+  "intentional_exceptions": [
+    {
+      "path": "docs/rollout-evidence/2026-03-11/observe-shadow-enforce-default-on-receipt.md",
+      "reason": "Historical observe-mode receipt predates the directory-date + commit hash machine schema; retained as archival evidence."
+    },
+    {
+      "path": "docs/rollout-evidence/2026-03-04/",
+      "reason": "WS20/WS21 stage receipts are archival; generation timestamps may be embedded in filenames or body text rather than JSON fields."
+    }
+  ],
+  "ci_contract": {
+    "task_id": "D1c2",
+    "checker": "scripts/ci/check-evidence-date-contract.ts",
+    "tests": "tests/ci/evidenceDateContract.test.ts",
+    "fail_on": [
+      "directory_date_not_iso",
+      "missing_required_machine_hash_field",
+      "commit_sha_malformed",
+      "unlisted_exception_for_mismatched_date"
+    ]
+  }
+}

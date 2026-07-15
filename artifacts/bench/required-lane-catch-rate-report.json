@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-07-14T14:56:54.856Z",
+  "commit_sha": "06ff69f72c5aee12768e713d42b217d8f62dcb16",
+  "lane": "seeded_failure",
+  "corpus_id": "q3a-seeded-failure-v1",
+  "corpus_path": "config/ci/frozen-corpora/seeded-failure-corpus.json",
+  "corpus_sha256": "8a3368f9b27d364f7091ba922098a75d6a0d6019586b170f62f9e280a947c114",
+  "contract_path": "config/ci/q3a-frozen-corpus-contract.json",
+  "contract_version": 1,
+  "threshold_min_catch_rate_pct": 95,
+  "metrics": {
+    "should_catch_total": 3,
+    "caught": 3,
+    "missed": 0,
+    "should_pass_total": 3,
+    "passed": 3,
+    "false_positives": 0,
+    "catch_rate_pct": 100,
+    "control_pass_rate_pct": 100
+  },
+  "cases": [
+    {
+      "id": "seed-fail-provider-timeout",
+      "failure_category": "cancellation-regression",
+      "expected_outcome": "should_catch",
+      "verdict": "caught",
+      "detail": "executeTool retains single cancelled vocabulary + abort handling",
+      "matched_expectation": true
+    },
+    {
+      "id": "seed-fail-cache-key-collision",
+      "failure_category": "cache-identity-regression",
+      "expected_outcome": "should_catch",
+      "verdict": "caught",
+      "detail": "semantic cache identity includes maxOutputLength",
+      "matched_expectation": true
+    },
+    {
+      "id": "seed-fail-graph-broad-scan",
+      "failure_category": "graph-scope-regression",
+      "expected_outcome": "should_catch",
+      "verdict": "caught",
+      "detail": "graph hydration remains manifest-bound without broad-scan fallback",
+      "matched_expectation": true
+    },
+    {
+      "id": "seed-pass-symbol-definition-lookup",
+      "failure_category": "none",
+      "expected_outcome": "should_pass",
+      "verdict": "passed",
+      "detail": "symbol_definition surface remains registered",
+      "matched_expectation": true
+    },
+    {
+      "id": "seed-pass-holdout-leakage-guard",
+      "failure_category": "none",
+      "expected_outcome": "should_pass",
+      "verdict": "passed",
+      "detail": "holdout leakage guard script present",
+      "matched_expectation": true
+    },
+    {
+      "id": "seed-pass-git-status-totals",
+      "failure_category": "none",
+      "expected_outcome": "should_pass",
+      "verdict": "passed",
+      "detail": "git status totals remain available independently of truncation",
+      "matched_expectation": true
+    }
+  ],
+  "gate": {
+    "status": "pass",
+    "reasons": []
+  }
+}

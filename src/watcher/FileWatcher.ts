@@ -1,6 +1,6 @@
 import chokidar from 'chokidar';
 import * as path from 'path';
-import { FileChange, FileChangeType, WatcherOptions, WatcherHooks } from './types.js';
+import { FileChange, FileChangeType, WatcherOptions, WatcherHooks, WatcherChangeFilter } from './types.js';
 import { WatcherStatus } from '../mcp/serviceClient.js';
 
 /**
@@ -17,7 +17,8 @@ export class FileWatcher {
 
   private readonly root: string;
   private readonly hooks: WatcherHooks;
-  private readonly options: Required<WatcherOptions>;
+  private readonly options: Required<Omit<WatcherOptions, 'changeFilter'>>;
+  private readonly changeFilter?: WatcherChangeFilter;
 
   constructor(root: string, hooks: WatcherHooks, options?: WatcherOptions) {
     this.root = root;
@@ -28,6 +29,7 @@ export class FileWatcher {
       persistent: options?.persistent ?? false,
       maxBatchSize: options?.maxBatchSize ?? 100,
     };
+    this.changeFilter = options?.changeFilter;
   }
 
   start(): void {
@@ -109,8 +111,21 @@ export class FileWatcher {
   private async flush(): Promise<void> {
     if (this.pendingChanges.size === 0) return;
 
-    const changes = Array.from(this.pendingChanges.values());
+    let changes = Array.from(this.pendingChanges.values());
     this.pendingChanges.clear();
+
+    if (this.changeFilter) {
+      // R3b1: re-validate against the canonical discovery manifest so a
+      // batch can never add an ineligible path or drop an eligible
+      // negation result before reaching `hooks.onBatch`.
+      const { eligibleChanges } = await this.changeFilter.applyBatch(changes);
+      changes = eligibleChanges;
+    }
+
+    if (changes.length === 0) {
+      this.lastFlush = new Date().toISOString();
+      return;
+    }
 
     const batches: FileChange[][] = [];
     const batchSize = this.options.maxBatchSize;

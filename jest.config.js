@@ -19,12 +19,13 @@ export default {
     ],
   },
   testMatch: ['**/tests/**/*.test.ts'],
+  coverageProvider: 'v8',
   collectCoverageFrom: [
     'src/**/*.ts',
     '!src/**/*.d.ts',
   ],
   coverageDirectory: 'coverage',
-  coverageReporters: ['text', 'lcov', 'html'],
+  coverageReporters: ['text', 'lcov', 'html', 'json-summary'],
   verbose: true,
   testTimeout: 30000,
   // Enable jest global access in ESM

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "corpus_id": "q3a-performance-v1",
+  "intended_lane": "performance",
+  "description": "Frozen representative-workload corpus for the M3 indexing/event-loop experiment. Pins synthetic workload descriptors with predeclared event-loop delay, p99 latency, and RSS budgets; workerization/incremental work remains gated behind M3's frozen-threshold disposition.",
+  "cases": [
+    {
+      "id": "perf-full-index-small-corpus",
+      "query": "full index of a small synthetic corpus stays within the frozen event-loop budget",
+      "language": "mixed",
+      "labels": ["synthetic", "full-index"],
+      "intended_lane": "performance",
+      "workload_file_count": 500,
+      "target_p99_request_latency_ms": 300
+    },
+    {
+      "id": "perf-full-index-large-corpus",
+      "query": "full index of a large synthetic corpus stays within the frozen event-loop budget",
+      "language": "mixed",
+      "labels": ["synthetic", "full-index", "large-corpus"],
+      "intended_lane": "performance",
+      "workload_file_count": 20000,
+      "target_p99_request_latency_ms": 1200
+    },
+    {
+      "id": "perf-incremental-refresh-burst",
+      "query": "incremental graph refresh under a burst of concurrent file-change events",
+      "language": "mixed",
+      "labels": ["synthetic", "incremental-refresh"],
+      "intended_lane": "performance",
+      "workload_file_count": 2000,
+      "target_p99_request_latency_ms": 500
+    },
+    {
+      "id": "perf-sustained-search-load",
+      "query": "sustained concurrent search/retrieve load on a warm large-corpus index",
+      "language": "mixed",
+      "labels": ["synthetic", "sustained-load", "large-corpus"],
+      "intended_lane": "performance",
+      "workload_file_count": 20000,
+      "target_p99_request_latency_ms": 900
+    }
+  ]
+}

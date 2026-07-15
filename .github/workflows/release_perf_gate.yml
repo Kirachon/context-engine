@@ -40,7 +40,11 @@ jobs:
     runs-on: ubuntu-latest
     env:
       CE_RETRIEVAL_PROVIDER: local_native
+      CONTEXT_ENGINE_OFFLINE_ONLY: '1'
       BENCH_PROVIDER_LANE: local_native
+      BENCH_DATASET_ID: context-engine-retrieval-release-v1
+      BENCH_WORKSPACE_ID: ${{ github.repository }}:retrieval-release-v1
+      BENCH_INDEX_FINGERPRINT: context-engine-local-native-index-v1
       BENCH_MODE: ${{ inputs.mode }}
       BASELINE_PATH: ${{ inputs.baseline_path }}
       CANDIDATE_PATH_INPUT: ${{ inputs.candidate_path }}
@@ -53,7 +57,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Install dependencies

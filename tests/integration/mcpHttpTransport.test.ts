@@ -53,7 +53,24 @@ function createApp(
 
   return {
     app: server.getApp(),
+    server,
     serviceClient,
+  };
+}
+
+function createInitializePayload(id: number) {
+  return {
+    jsonrpc: '2.0',
+    id,
+    method: 'initialize',
+    params: {
+      protocolVersion: DEFAULT_NEGOTIATED_PROTOCOL_VERSION,
+      capabilities: {},
+      clientInfo: {
+        name: 'http-test-client',
+        version: '1.0.0',
+      },
+    },
   };
 }
 
@@ -878,5 +895,192 @@ describe('MCP HTTP transport', () => {
       });
 
     expect(authorizedPost.status).toBe(200);
+  });
+});
+
+describe('MCP HTTP transport bounded stateful sessions (R2)', () => {
+  it('defaults to a 30 minute idle TTL and a 1000 session cap when unset', () => {
+    const { server } = createApp();
+
+    expect(server.getSessionIdleTtlMs()).toBe(1_800_000);
+    expect(server.getMaxSessions()).toBe(1_000);
+    expect(server.getActiveSessionCount()).toBe(0);
+  });
+
+  it('clamps out-of-range session bound options to the documented min/max (same bound shape as C4)', () => {
+    const { server: lowServer } = createApp(createMockServiceClient(), {
+      sessionIdleTtlMs: 1,
+      maxSessions: 0,
+    });
+
+    expect(lowServer.getSessionIdleTtlMs()).toBe(60_000);
+    expect(lowServer.getMaxSessions()).toBe(1);
+
+    const { server: highServer } = createApp(createMockServiceClient(), {
+      sessionIdleTtlMs: 999_999_999_999,
+      maxSessions: 999_999,
+    });
+
+    expect(highServer.getSessionIdleTtlMs()).toBe(86_400_000);
+    expect(highServer.getMaxSessions()).toBe(10_000);
+  });
+
+  it('rejects new session admission with a 503 once the configured session cap is reached (cap pressure)', async () => {
+    const { app, server } = createApp(createMockServiceClient(), {
+      maxSessions: 2,
+      sessionSweepIntervalMs: 0,
+    });
+
+    const firstInit = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send(createInitializePayload(500));
+    expect(firstInit.status).toBe(200);
+
+    const secondInit = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send(createInitializePayload(501));
+    expect(secondInit.status).toBe(200);
+
+    expect(server.getActiveSessionCount()).toBe(2);
+
+    const rejectedInit = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send(createInitializePayload(502));
+
+    expect(rejectedInit.status).toBe(503);
+    expect(rejectedInit.headers['retry-after']).toBeDefined();
+    expect(rejectedInit.body).toMatchObject({
+      jsonrpc: '2.0',
+      error: {
+        code: -32000,
+      },
+      id: 502,
+    });
+    expect(String((rejectedInit.body as { error?: { message?: string } })?.error?.message)).toContain(
+      'capacity reached'
+    );
+
+    // The rejected admission must never grow the tracked session set.
+    expect(server.getActiveSessionCount()).toBe(2);
+  });
+
+  it('evicts idle sessions past the TTL and disposes their resources deterministically with an injected clock (fake-clock reuse + eviction)', async () => {
+    let currentTime = 1_000_000;
+    const { app, server } = createApp(createMockServiceClient(), {
+      sessionIdleTtlMs: 60_000,
+      sessionSweepIntervalMs: 0,
+      now: () => currentTime,
+    });
+
+    const initResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send(createInitializePayload(600));
+    expect(initResponse.status).toBe(200);
+    const sessionId = initResponse.headers['mcp-session-id'] as string;
+    expect(typeof sessionId).toBe('string');
+    expect(server.getActiveSessionCount()).toBe(1);
+
+    // Advance time short of the TTL: the sweep must leave the session alone.
+    currentTime += 30_000;
+    const earlySweepCount = await server.runSessionSweep();
+    expect(earlySweepCount).toBe(0);
+    expect(server.getActiveSessionCount()).toBe(1);
+
+    // Advance time past the TTL: the sweep must evict and dispose the session.
+    currentTime += 40_000;
+    const lateSweepCount = await server.runSessionSweep();
+    expect(lateSweepCount).toBe(1);
+    expect(server.getActiveSessionCount()).toBe(0);
+
+    // Resource cleanup: the evicted session id can no longer be reused.
+    const staleResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .set('mcp-session-id', sessionId)
+      .send({
+        jsonrpc: '2.0',
+        id: 601,
+        method: 'tools/list',
+        params: {},
+      });
+
+    expect(staleResponse.status).toBe(404);
+    expect(staleResponse.body).toMatchObject({
+      jsonrpc: '2.0',
+      error: {
+        code: -32001,
+        message: `MCP session not found: ${sessionId}`,
+      },
+      id: 601,
+    });
+  });
+
+  it('keeps a session alive across sweeps while the client stays active, then evicts it once abandoned', async () => {
+    let currentTime = 2_000_000;
+    const { app, server } = createApp(createMockServiceClient(), {
+      sessionIdleTtlMs: 50_000,
+      sessionSweepIntervalMs: 0,
+      now: () => currentTime,
+    });
+
+    const initResponse = await request(app)
+      .post('/mcp')
+      .set('accept', 'application/json, text/event-stream')
+      .send(createInitializePayload(700));
+    expect(initResponse.status).toBe(200);
+    const sessionId = initResponse.headers['mcp-session-id'] as string;
+
+    // The client stays active (each request touches the session) well past
+    // what the idle TTL would otherwise allow; the sweep must never evict it.
+    for (let index = 0; index < 3; index += 1) {
+      currentTime += 30_000;
+      const activeRequest = await request(app)
+        .post('/mcp')
+        .set('accept', 'application/json, text/event-stream')
+        .set('mcp-session-id', sessionId)
+        .send({ jsonrpc: '2.0', id: 701 + index, method: 'tools/list', params: {} });
+      expect(activeRequest.status).toBe(200);
+
+      const evictedCount = await server.runSessionSweep();
+      expect(evictedCount).toBe(0);
+    }
+
+    expect(server.getActiveSessionCount()).toBe(1);
+
+    // The client abandons the session: once idle past the TTL, it is evicted.
+    currentTime += 60_000;
+    const finalSweepCount = await server.runSessionSweep();
+    expect(finalSweepCount).toBe(1);
+    expect(server.getActiveSessionCount()).toBe(0);
+  });
+
+  it('disposes all active sessions and stops the sweep timer on server shutdown', async () => {
+    const { app, server } = createApp(createMockServiceClient(), {
+      sessionSweepIntervalMs: 0,
+    });
+
+    await server.start();
+    try {
+      const firstInit = await request(app)
+        .post('/mcp')
+        .set('accept', 'application/json, text/event-stream')
+        .send(createInitializePayload(800));
+      const secondInit = await request(app)
+        .post('/mcp')
+        .set('accept', 'application/json, text/event-stream')
+        .send(createInitializePayload(801));
+
+      expect(firstInit.status).toBe(200);
+      expect(secondInit.status).toBe(200);
+      expect(server.getActiveSessionCount()).toBe(2);
+    } finally {
+      await server.stop();
+    }
+
+    expect(server.getActiveSessionCount()).toBe(0);
   });
 });

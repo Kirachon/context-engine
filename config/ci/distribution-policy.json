@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "decision": "supported",
+  "owner_lane": "Release engineering / F8",
+  "package_name": "context-engine-mcp-server",
+  "package_version": "1.9.0",
+  "closure_task": "P1a",
+  "rejected_task": "P1b",
+  "node_matrix": ["18.x", "20.x", "22.x"],
+  "publish_authorized": false,
+  "deployment_authorized": false,
+  "rationale": "bin.context-engine-mcp present, license MIT, no \"private\": true, and prepare/build lifecycle hooks indicate the package is already structured for installable local/npm use; no doc or config forbids registry distribution.",
+  "receipts": {
+    "decision_record": "docs/plan-execution/context-engine-remediation-p0-distribution-policy-2026-07-14.md",
+    "node_matrix_source": ".github/workflows/test.yml",
+    "package_manifest": "package.json"
+  }
+}

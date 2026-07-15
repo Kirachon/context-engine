@@ -2,12 +2,13 @@
 
 **Generated**: 2026-04-11
 
-> Status: Planning-only follow-on artifact
+> Status: Planning-only reference (not implementation authority)
 >
 > This document is not the active delivery plan.
-> `context-engine-next-tranche-swarm-plan.md` is the active execution plan.
-> `context-engine-improvement-swarm-plan.md` is the completed execution ledger.
+> Sole active delivery plan: `context-engine-remediation-plan-2026-07-14.md`.
+> `context-engine-next-tranche-swarm-plan.md` and `context-engine-improvement-swarm-plan.md` are immutable completed execution ledgers.
 > `ARCHITECTURE.md` remains the architecture reference.
+> Governance authority: `config/ci/governance-contract.json`.
 
 ## Summary
 This plan defines the next-stage work that can begin only after the local MCP transport contract, gate-tier contract, and retrieval calibration receipts are stable. It keeps advanced MCP UX and hosted maturity additive: no capability should be advertised or enabled before the corresponding runtime behavior, tests, and rollout receipts exist.

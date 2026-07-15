@@ -32,7 +32,7 @@ function seedGuardFixture(tmpRoot: string, options: { omitServiceClientAnchor?: 
     [
       "it('should surface stale index guidance', async () => {});",
       "it('should surface error guidance for unhealthy index status', async () => {});",
-      "expect(result).toContain('reindex_workspace');",
+      "expect(result.content[0].text).toContain('reindex_workspace');",
       '',
     ].join('\n')
   );

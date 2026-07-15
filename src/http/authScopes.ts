@@ -38,6 +38,21 @@ export function isHttpAuthEnabled(): boolean {
     return envBool(HTTP_AUTH_ENABLED_ENV, false);
 }
 
+/**
+ * A "ready" auth policy means HTTP auth is enabled AND at least one
+ * non-empty/non-whitespace token is configured. `parseHttpAuthTokenRegistry`
+ * already discards whitespace-only token keys, so an empty registry here
+ * covers both "no tokens configured" and "only blank tokens configured".
+ *
+ * This is the gate S1 uses to decide whether a non-loopback bind target is
+ * allowed to open a listening socket.
+ */
+export function isHttpAuthPolicyReady(
+    registry: ReadonlyMap<string, readonly HttpAuthScope[]> = parseHttpAuthTokenRegistry()
+): boolean {
+    return isHttpAuthEnabled() && registry.size > 0;
+}
+
 function isHttpAuthScope(value: string): value is HttpAuthScope {
     return (ALL_HTTP_AUTH_SCOPES as readonly string[]).includes(value);
 }

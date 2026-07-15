@@ -27,6 +27,7 @@ import { executeHttpRegisteredTool } from '../httpToolExecutor.js';
 import { badRequest, HttpError } from '../middleware/errorHandler.js';
 import { envMs } from '../../config/env.js';
 import { validateExternalSources, validatePathScopeGlobs } from '../../mcp/tooling/validation.js';
+import { incCounter, setGauge } from '../../metrics/metrics.js';
 
 const DEFAULT_TOOL_TIMEOUT_MS = 30000;
 const CONTEXT_TIMEOUT_MS = 60000;
@@ -39,6 +40,34 @@ const PLAN_TOOL_TIMEOUT_MS = envMs('CE_HTTP_PLAN_TIMEOUT_MS', DEFAULT_HTTP_PLAN_
     min: MIN_PLAN_TIMEOUT_MS,
     max: MAX_PLAN_TIMEOUT_MS,
 });
+
+// ============================================================================
+// R1c: HTTP disconnect/timeout cancellation lanes.
+//
+// Every REST tool route is bucketed into one of these lanes so operators can
+// see outstanding (in-flight) work bounded per lane rather than as one
+// undifferentiated total -- mirrors the shape of R1b's retrieval fanout
+// in-flight gauge and R2's session gauges. `runAbortableTool` is the single
+// place that owns request-close/timeout -> AbortSignal wiring for every
+// lane; routes never invent a second cancellation mapping.
+// ============================================================================
+export type RestLane = 'default' | 'context' | 'ai' | 'index' | 'plan';
+
+const HTTP_REST_INFLIGHT_METRIC = 'context_engine_http_rest_inflight_requests';
+const HTTP_REST_CANCELLED_METRIC = 'context_engine_http_rest_cancelled_requests_total';
+
+const restLaneInFlight = new Map<string, number>();
+
+function adjustRestLaneInFlight(lane: RestLane, delta: number): void {
+    const next = Math.max(0, (restLaneInFlight.get(lane) ?? 0) + delta);
+    restLaneInFlight.set(lane, next);
+    setGauge(
+        HTTP_REST_INFLIGHT_METRIC,
+        { lane },
+        next,
+        'Outstanding REST tool-call requests currently in flight, bounded per timeout lane.'
+    );
+}
 
 function parseExternalSourcesOrBadRequest(value: unknown) {
     try {
@@ -116,24 +145,6 @@ function textPayloadFromToolResult(result: ContextEngineToolResult, operation: s
     return text;
 }
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: string): Promise<T> {
-    return new Promise<T>((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-            reject(new HttpError(504, `${operation} timed out after ${timeoutMs}ms. Check server logs and authentication.`));
-        }, timeoutMs);
-
-        promise
-            .then((result) => {
-                clearTimeout(timeoutId);
-                resolve(result);
-            })
-            .catch((error) => {
-                clearTimeout(timeoutId);
-                reject(error);
-            });
-    });
-}
-
 function createRequestAbortError(operation: string, reason?: unknown): Error {
     const message =
         typeof reason === 'string' && reason.trim()
@@ -144,22 +155,40 @@ function createRequestAbortError(operation: string, reason?: unknown): Error {
     return error;
 }
 
-function attachRequestAbortSignal(req: Request, controller: AbortController, operation: string): () => void {
-    const abort = (reason?: unknown): void => {
+type AbortableResponse = Pick<Response, 'writableEnded' | 'on' | 'off'>;
+
+/**
+ * R1c: wires a genuine client disconnect (request close/reset before the
+ * response finishes) into `controller.abort()`.
+ *
+ * NB: `req.on('close')` (and the deprecated `req.on('aborted')`) fire as
+ * soon as Express finishes *reading* the request body -- often within the
+ * same tick the handler starts, well before any response is produced. They
+ * are not a reliable disconnect signal and using them here caused spurious
+ * cancellation of ordinary, successful requests. `res.on('close')` is the
+ * correct signal: it fires once the response's underlying connection is
+ * torn down, and `res.writableEnded` distinguishes "closed after we
+ * finished responding" (normal) from "closed before we finished responding"
+ * (a genuine abort/disconnect).
+ */
+function attachRequestAbortSignal(
+    res: AbortableResponse,
+    controller: AbortController,
+    operation: string
+): () => void {
+    const onClose = (): void => {
+        if (res.writableEnded) {
+            return;
+        }
         if (!controller.signal.aborted) {
-            controller.abort(createRequestAbortError(operation, reason));
+            controller.abort(createRequestAbortError(operation, 'request closed'));
         }
     };
 
-    const onAborted = () => abort('request aborted');
-    const onClose = () => abort('request closed');
-
-    req.on('aborted', onAborted);
-    req.on('close', onClose);
+    res.on('close', onClose);
 
     return () => {
-        req.off('aborted', onAborted);
-        req.off('close', onClose);
+        res.off('close', onClose);
     };
 }
 
@@ -168,7 +197,8 @@ export async function runAbortableTool<T>(
     timeoutMs: number,
     operation: string,
     executor: (signal: AbortSignal) => Promise<T>,
-    res?: Pick<Response, 'setTimeout' | 'socket'>
+    res?: Pick<Response, 'setTimeout' | 'socket'> & Partial<AbortableResponse>,
+    lane: RestLane = 'default'
 ): Promise<T> {
     const previousRequestTimeoutMs =
         typeof req.socket?.timeout === 'number' && Number.isFinite(req.socket.timeout)
@@ -187,71 +217,104 @@ export async function runAbortableTool<T>(
     }
 
     const controller = new AbortController();
-    const detach = attachRequestAbortSignal(req, controller, operation);
+    const detach =
+        res && typeof res.on === 'function' && typeof res.off === 'function'
+            ? attachRequestAbortSignal(res as AbortableResponse, controller, operation)
+            : () => {};
     const timeoutError = new HttpError(
         504,
         `${operation} timed out after ${timeoutMs}ms. Check server logs and authentication.`
     );
 
-    return await new Promise<T>((resolve, reject) => {
-        let settled = false;
-        let timeoutId: NodeJS.Timeout | undefined;
+    adjustRestLaneInFlight(lane, 1);
+    let cancelReason: 'disconnect' | 'timeout' | undefined;
 
-        const finalize = (): void => {
-            if (timeoutId) {
-                clearTimeout(timeoutId);
-                timeoutId = undefined;
-            }
-            if (previousRequestTimeoutMs !== undefined) {
-                if (typeof req.setTimeout === 'function') {
-                    req.setTimeout(previousRequestTimeoutMs);
+    try {
+        return await new Promise<T>((resolve, reject) => {
+            let settled = false;
+            let timeoutId: NodeJS.Timeout | undefined;
+
+            const finalize = (): void => {
+                if (timeoutId) {
+                    clearTimeout(timeoutId);
+                    timeoutId = undefined;
                 }
-            }
-            if (previousResponseTimeoutMs !== undefined && res && typeof res.setTimeout === 'function') {
-                res.setTimeout(previousResponseTimeoutMs);
-            }
-            detach();
-            controller.signal.removeEventListener('abort', onAbort);
-        };
+                if (previousRequestTimeoutMs !== undefined) {
+                    if (typeof req.setTimeout === 'function') {
+                        req.setTimeout(previousRequestTimeoutMs);
+                    }
+                }
+                if (previousResponseTimeoutMs !== undefined && res && typeof res.setTimeout === 'function') {
+                    res.setTimeout(previousResponseTimeoutMs);
+                }
+                detach();
+                controller.signal.removeEventListener('abort', onAbort);
+            };
 
-        const settleResolve = (value: T): void => {
-            if (settled) return;
-            settled = true;
-            finalize();
-            resolve(value);
-        };
+            const settleResolve = (value: T): void => {
+                if (settled) return;
+                settled = true;
+                finalize();
+                resolve(value);
+            };
 
-        const settleReject = (error: unknown): void => {
-            if (settled) return;
-            settled = true;
-            finalize();
-            reject(error);
-        };
+            const settleReject = (error: unknown): void => {
+                if (settled) return;
+                settled = true;
+                finalize();
+                reject(error);
+            };
 
-        const onAbort = (): void => {
-            const reason = controller.signal.reason;
-            settleReject(reason instanceof Error ? reason : createRequestAbortError(operation, reason));
-        };
+            const onAbort = (): void => {
+                const reason = controller.signal.reason;
+                cancelReason = reason === timeoutError ? 'timeout' : 'disconnect';
+                settleReject(reason instanceof Error ? reason : createRequestAbortError(operation, reason));
+            };
 
-        controller.signal.addEventListener('abort', onAbort, { once: true });
-        timeoutId = setTimeout(() => {
-            controller.abort(timeoutError);
-        }, timeoutMs);
+            controller.signal.addEventListener('abort', onAbort, { once: true });
+            timeoutId = setTimeout(() => {
+                controller.abort(timeoutError);
+            }, timeoutMs);
 
-        Promise.resolve(executor(controller.signal))
-            .then(settleResolve)
-            .catch(settleReject);
-    });
+            Promise.resolve(executor(controller.signal))
+                .then(settleResolve)
+                .catch(settleReject);
+        });
+    } finally {
+        adjustRestLaneInFlight(lane, -1);
+        if (cancelReason) {
+            incCounter(
+                HTTP_REST_CANCELLED_METRIC,
+                { lane, reason: cancelReason },
+                1,
+                'Total REST tool-call requests cancelled by client disconnect or timeout before completion (R1c).'
+            );
+        }
+    }
 }
 
 /**
  * Async handler wrapper to catch promise rejections.
+ *
+ * R1c: guards against dispatching a second error to `next()` once the
+ * response has already been finalized. This can legitimately race when a
+ * request is cancelled: `runAbortableTool`'s own timer and the shared
+ * `/api/v1` request-timeout middleware (`createRequestTimeoutMiddleware`)
+ * both watch the same request, and either may settle first. Once headers
+ * are sent (or the response has ended), there is nothing left to publish,
+ * so the second rejection is dropped rather than crashing the error
+ * middleware with "headers already sent".
  */
 function asyncHandler(
     fn: (req: Request, res: Response, next: NextFunction) => Promise<void>
 ) {
     return (req: Request, res: Response, next: NextFunction) => {
-        Promise.resolve(fn(req, res, next)).catch(next);
+        Promise.resolve(fn(req, res, next)).catch((error) => {
+            if (res.headersSent || res.writableEnded) {
+                return;
+            }
+            next(error);
+        });
     };
 }
 
@@ -304,10 +367,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 return;
             }
 
-            const result = await withTimeout(
-                serviceClient.indexWorkspace(),
+            const result = await runAbortableTool(
+                req,
                 INDEX_TIMEOUT_MS,
-                'Indexing workspace'
+                'Indexing workspace',
+                () => serviceClient.indexWorkspace(),
+                res,
+                'index'
             );
             res.json({
                 success: true,
@@ -330,10 +396,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('query is required and must be a string');
             }
 
-            const results = await withTimeout(
-                serviceClient.semanticSearch(query, top_k),
+            const results = await runAbortableTool(
+                req,
                 DEFAULT_TOOL_TIMEOUT_MS,
-                'Semantic search'
+                'Semantic search',
+                (signal) => serviceClient.semanticSearch(query, top_k, { signal }),
+                res,
+                'default'
             );
             res.json({
                 results,
@@ -366,14 +435,17 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const results = await withTimeout(
-                serviceClient.symbolSearch(symbol, top_k, {
+            const results = await runAbortableTool(
+                req,
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Symbol search',
+                () => serviceClient.symbolSearch(symbol, top_k, {
                     bypassCache: bypass_cache === true,
                     includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
                     excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
                 }),
-                DEFAULT_TOOL_TIMEOUT_MS,
-                'Symbol search'
+                res,
+                'default'
             );
             res.json({
                 results,
@@ -406,14 +478,17 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const results = await withTimeout(
-                serviceClient.symbolReferencesSearch(symbol, top_k, {
+            const results = await runAbortableTool(
+                req,
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Symbol references',
+                () => serviceClient.symbolReferencesSearch(symbol, top_k, {
                     bypassCache: bypass_cache === true,
                     includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
                     excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
                 }),
-                DEFAULT_TOOL_TIMEOUT_MS,
-                'Symbol references'
+                res,
+                'default'
             );
             res.json({
                 results,
@@ -440,10 +515,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const toolResult = await withTimeout(
-                runRegisteredTool(serviceClient, 'find_callers', args),
+            const toolResult = await runAbortableTool(
+                req,
                 DEFAULT_TOOL_TIMEOUT_MS,
-                'Find callers'
+                'Find callers',
+                (signal) => runRegisteredTool(serviceClient, 'find_callers', args, signal),
+                res,
+                'default'
             );
 
             res.json(structuredPayloadFromToolResult(toolResult, 'Find callers'));
@@ -464,10 +542,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const toolResult = await withTimeout(
-                runRegisteredTool(serviceClient, 'find_callees', args),
+            const toolResult = await runAbortableTool(
+                req,
                 DEFAULT_TOOL_TIMEOUT_MS,
-                'Find callees'
+                'Find callees',
+                (signal) => runRegisteredTool(serviceClient, 'find_callees', args, signal),
+                res,
+                'default'
             );
 
             res.json(structuredPayloadFromToolResult(toolResult, 'Find callees'));
@@ -494,15 +575,18 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const result = await withTimeout(
-                serviceClient.symbolDefinition(symbol, {
+            const result = await runAbortableTool(
+                req,
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Symbol definition',
+                () => serviceClient.symbolDefinition(symbol, {
                     bypassCache: bypass_cache === true,
                     includePaths: validatePathScopeGlobs(include_paths, 'include_paths'),
                     excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
                     languageHint: typeof language_hint === 'string' ? language_hint : undefined,
                 }),
-                DEFAULT_TOOL_TIMEOUT_MS,
-                'Symbol definition'
+                res,
+                'default'
             );
             res.json({
                 result,
@@ -542,8 +626,11 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('top_k must be a number between 1 and 100');
             }
 
-            const result = await withTimeout(
-                serviceClient.callRelationships(symbol, {
+            const result = await runAbortableTool(
+                req,
+                DEFAULT_TOOL_TIMEOUT_MS,
+                'Call relationships',
+                () => serviceClient.callRelationships(symbol, {
                     direction,
                     topK: top_k,
                     bypassCache: bypass_cache === true,
@@ -551,8 +638,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                     excludePaths: validatePathScopeGlobs(exclude_paths, 'exclude_paths'),
                     languageHint: typeof language_hint === 'string' ? language_hint : undefined,
                 }),
-                DEFAULT_TOOL_TIMEOUT_MS,
-                'Call relationships'
+                res,
+                'default'
             );
             res.json({
                 result,
@@ -580,10 +667,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const toolResult = await withTimeout(
-                runRegisteredTool(serviceClient, 'trace_symbol', args),
+            const toolResult = await runAbortableTool(
+                req,
                 DEFAULT_TOOL_TIMEOUT_MS,
-                'Trace symbol'
+                'Trace symbol',
+                (signal) => runRegisteredTool(serviceClient, 'trace_symbol', args, signal),
+                res,
+                'default'
             );
 
             res.json(structuredPayloadFromToolResult(toolResult, 'Trace symbol'));
@@ -604,10 +694,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('symbol is required and must be a string');
             }
 
-            const toolResult = await withTimeout(
-                runRegisteredTool(serviceClient, 'impact_analysis', args),
+            const toolResult = await runAbortableTool(
+                req,
                 DEFAULT_TOOL_TIMEOUT_MS,
-                'Impact analysis'
+                'Impact analysis',
+                (signal) => runRegisteredTool(serviceClient, 'impact_analysis', args, signal),
+                res,
+                'default'
             );
 
             res.json(structuredPayloadFromToolResult(toolResult, 'Impact analysis'));
@@ -630,10 +723,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
             }
 
             const toolResult = parseJsonToolResult<CodebaseRetrievalOutput>(
-                await withTimeout(
-                    runRegisteredTool(serviceClient, 'codebase_retrieval', args),
+                await runAbortableTool(
+                    req,
                     DEFAULT_TOOL_TIMEOUT_MS,
-                    'Codebase retrieval'
+                    'Codebase retrieval',
+                    (signal) => runRegisteredTool(serviceClient, 'codebase_retrieval', args, signal),
+                    res,
+                    'default'
                 ),
                 'Codebase retrieval'
             );
@@ -684,7 +780,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         ),
                         'Prompt enhancement'
                     ),
-                res
+                res,
+                'ai'
             );
 
             res.json({
@@ -717,7 +814,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         await runRegisteredTool(serviceClient, 'create_plan', args, signal),
                         'Plan generation'
                     ),
-                res
+                res,
+                'plan'
             );
 
             res.json({ plan });
@@ -769,24 +867,22 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                     : {}),
             } as ContextOptions;
 
-            const context = await withTimeout(
-                serviceClient.getContextForPrompt(query, normalizedOptions),
+            const payload = await runAbortableTool(
+                req,
                 CONTEXT_TIMEOUT_MS,
-                'Context retrieval'
+                'Context retrieval',
+                async () => {
+                    const context = await serviceClient.getContextForPrompt(query, normalizedOptions);
+                    if (normalizedHandoffMode === 'active_plan' && normalizedPlanId) {
+                        const handoff = await buildActivePlanHandoff(serviceClient, normalizedPlanId);
+                        return { ...context, handoff };
+                    }
+                    return context;
+                },
+                res,
+                'context'
             );
-            if (normalizedHandoffMode === 'active_plan' && normalizedPlanId) {
-                const handoff = await withTimeout(
-                    buildActivePlanHandoff(serviceClient, normalizedPlanId),
-                    CONTEXT_TIMEOUT_MS,
-                    'Context handoff'
-                );
-                res.json({
-                    ...context,
-                    handoff,
-                });
-                return;
-            }
-            res.json(context);
+            res.json(payload);
         })
     );
 
@@ -804,10 +900,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('query is required and must be a string');
             }
 
-            const toolResult = await withTimeout(
-                runRegisteredTool(serviceClient, 'why_this_context', args),
+            const toolResult = await runAbortableTool(
+                req,
                 CONTEXT_TIMEOUT_MS,
-                'Why this context'
+                'Why this context',
+                (signal) => runRegisteredTool(serviceClient, 'why_this_context', args, signal),
+                res,
+                'context'
             );
 
             res.json(structuredPayloadFromToolResult(toolResult, 'Why this context'));
@@ -828,10 +927,13 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                 throw badRequest('path is required and must be a string');
             }
 
-            const content = await withTimeout(
-                serviceClient.getFile(filePath),
+            const content = await runAbortableTool(
+                req,
                 DEFAULT_TOOL_TIMEOUT_MS,
-                'File read'
+                'File read',
+                () => serviceClient.getFile(filePath),
+                res,
+                'default'
             );
             res.json({
                 path: filePath,
@@ -879,7 +981,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         ),
                         'Code review'
                     ),
-                res
+                res,
+                'ai'
             );
             const result = JSON.parse(resultJson);
             res.json(result);
@@ -910,7 +1013,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         ),
                         'Git code review'
                     ),
-                res
+                res,
+                'ai'
             );
             const result = JSON.parse(resultJson);
             res.json(result);
@@ -936,7 +1040,8 @@ export function createToolsRouter(serviceClient: ContextServiceClient): Router {
                         await runRegisteredTool(serviceClient, 'review_auto', args, signal),
                         'Auto code review'
                     ),
-                res
+                res,
+                'ai'
             );
             const result = JSON.parse(resultJson);
             res.json(result);

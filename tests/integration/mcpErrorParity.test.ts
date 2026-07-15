@@ -11,6 +11,7 @@ import { createRequestContext, runWithRequestContext } from '../../src/telemetry
 
 const PARITY_THROW_TOOL = 'parity_throw_tool';
 const PARITY_STRUCTURED_ERROR_TOOL = 'parity_structured_error_tool';
+const PARITY_ABORT_TOOL = 'parity_abort_tool';
 
 type MockServiceClient = {
   getIndexStatus: ReturnType<typeof jest.fn>;
@@ -73,6 +74,26 @@ function buildParityToolRegistry(serviceClient: MockServiceClient): ToolRegistry
         },
         isError: true,
       }),
+    },
+    {
+      tool: { name: PARITY_ABORT_TOOL },
+      handler: async (_args: unknown, signal?: AbortSignal) =>
+        new Promise<string>((_resolve, reject) => {
+          const rejectAborted = () => {
+            const abortError = new Error('parity-abort-tool aborted mid-flight');
+            abortError.name = 'AbortError';
+            reject(abortError);
+          };
+          // Guard against the (unlikely but possible) race where the signal
+          // aborts between handler invocation and listener attachment --
+          // AbortSignal does not replay a past 'abort' event to a listener
+          // added after the fact.
+          if (signal?.aborted) {
+            rejectAborted();
+            return;
+          }
+          signal?.addEventListener('abort', rejectAborted, { once: true });
+        }),
     },
   ];
 }
@@ -334,6 +355,60 @@ describe('MCP transport parity (error paths)', () => {
         code: 'VALIDATION_FAILED',
         field: 'path',
       },
+      isError: true,
+    });
+  });
+
+  // R1a -- Cancellation and error contract: `executeToolCall` is the single
+  // executor shared by the MCP stdio path (via `executeStdioLikeToolCall`
+  // above) and the REST/HTTP path (`executeHttpRegisteredTool` in
+  // `src/http/httpToolExecutor.ts`, which calls `executeToolCall` with the
+  // exact same `useObservability`/`recordMetrics` flags below). This test
+  // pins that both flavors classify a mid-flight abort identically -- one
+  // cancellation vocabulary, not two transport-specific mappings.
+  it('classifies a signal aborted mid-flight identically for the stdio-flavored and REST/HTTP-flavored executor entry points', async () => {
+    const serviceClient = createMockServiceClient();
+    const { handlers, inputSchemas } = buildParityToolHandlers(serviceClient);
+
+    const stdioController = new AbortController();
+    const stdioPromise = runWithRequestContext(
+      createRequestContext({ transport: 'stdio', method: 'tools/call', path: 'stdio' }),
+      () =>
+        executeToolCall({
+          name: PARITY_ABORT_TOOL,
+          args: {},
+          toolHandlers: handlers,
+          toolInputSchemas: inputSchemas,
+          signal: stdioController.signal,
+          // Matches executeStdioLikeToolCall's stdio flags exactly.
+          useObservability: true,
+        })
+    );
+
+    const httpController = new AbortController();
+    const httpPromise = executeToolCall({
+      name: PARITY_ABORT_TOOL,
+      args: {},
+      toolHandlers: handlers,
+      toolInputSchemas: inputSchemas,
+      signal: httpController.signal,
+      // Matches executeHttpRegisteredTool's REST/HTTP flags exactly.
+      useObservability: true,
+      recordMetrics: true,
+    });
+
+    stdioController.abort();
+    httpController.abort();
+
+    const [stdioExecution, httpExecution] = await Promise.all([stdioPromise, httpPromise]);
+
+    expect(stdioExecution.result).toBe('cancelled');
+    expect(httpExecution.result).toBe('cancelled');
+    expect(normalizeToolCallPayload(stdioExecution.response)).toEqual(
+      normalizeToolCallPayload(httpExecution.response)
+    );
+    expect(stdioExecution.response).toEqual({
+      content: [{ type: 'text', text: `Cancelled: ${PARITY_ABORT_TOOL} was cancelled before completion.` }],
       isError: true,
     });
   });
