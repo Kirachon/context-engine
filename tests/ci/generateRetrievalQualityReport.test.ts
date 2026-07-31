@@ -213,7 +213,7 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
-  it('excludes generated artifacts and test files from offline retrieval eval ranking', () => {
+  it('excludes generated artifacts, JSON files, and test files from offline retrieval eval ranking', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-quality-report-excludes-'));
     const workspace = path.join(tmp, 'workspace');
     const fixturePath = path.join(workspace, 'config', 'ci', 'retrieval-quality-fixture-pack.json');
@@ -238,6 +238,10 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
         '',
       ].join('\n')
     );
+    writeJson(path.join(workspace, 'config', 'ci', 'frozen-corpora', 'nightly-corpus.json'), {
+      query: 'buildProbeFailureMessage BENCH_SUITE_ALLOW_SCAN_FALLBACK',
+      target_path: 'config/ci/frozen-corpora/nightly-corpus.json',
+    });
 
     writeJson(fixturePath, {
       holdout: {
@@ -295,6 +299,7 @@ describe('scripts/ci/generate-retrieval-quality-report.ts', () => {
     expect(artifact.offline_eval.aggregate_metrics.p_at_1).toBe(1);
     expect(artifact.offline_eval.cases[0].actual_paths[0]).toBe('src/benchSuiteModePolicy.ts');
     expect(artifact.offline_eval.cases[0].actual_paths).not.toContain('tests/ci/benchSuiteModePolicy.test.ts');
+    expect(artifact.offline_eval.cases[0].actual_paths).not.toContain('config/ci/frozen-corpora/nightly-corpus.json');
     expect(artifact.offline_eval.cases[0].actual_paths).not.toContain('artifacts/bench/retrieval-quality-report.json');
 
     fs.rmSync(tmp, { recursive: true, force: true });

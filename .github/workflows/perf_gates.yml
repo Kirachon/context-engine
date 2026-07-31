@@ -100,6 +100,10 @@ jobs:
       # ~144-case pack from Appendix E.10 once an explicit pack/file flag exists in the
       # bench helper; current workflow still uses the default checked-in pack.
       - name: Run benchmark suite and compare (Nightly mode)
+        # The nightly benchmark is report-only per config/ci/benchmark-eval-contract.json.
+        # Keep its artifacts and allow the downstream diagnostic gates to run when
+        # hosted-runner timing jitter crosses the comparison threshold.
+        continue-on-error: true
         run: npm run bench:ci:nightly
 
       - name: Run WS19 SLO threshold gate (index/search family)
