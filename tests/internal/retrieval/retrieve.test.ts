@@ -71,6 +71,34 @@ describe('retrieve internal pipeline', () => {
     expect((results[0] as any).combinedScore).toBeGreaterThan(0);
   });
 
+  it('preserves the service client receiver for offline local-native lexical retrieval', async () => {
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = '1';
+    const serviceClient = {
+      marker: 'bound-client',
+      getActiveRetrievalProviderId: () => 'local_native',
+      semanticSearch: jest.fn(async () => []),
+      async localKeywordSearch(this: { marker: string }) {
+        if (this.marker !== 'bound-client') {
+          throw new Error('localKeywordSearch receiver was lost');
+        }
+        return [
+          { path: 'src/local.ts', content: 'local hit', relevanceScore: 0.9, lines: '1-2' },
+        ];
+      },
+    } as any;
+
+    const results = await retrieve('local hit', serviceClient, {
+      enableExpansion: false,
+      enableLexical: true,
+      enableFusion: true,
+      topK: 5,
+    });
+
+    expect(serviceClient.semanticSearch).not.toHaveBeenCalled();
+    expect(results).toHaveLength(1);
+    expect(results[0].path).toBe('src/local.ts');
+  });
+
   it('supports optional dense candidates behind enableDense flag', async () => {
     const serviceClient = {
       semanticSearch: jest.fn(async () => [
