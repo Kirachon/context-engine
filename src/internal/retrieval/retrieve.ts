@@ -1135,7 +1135,7 @@ export async function retrieve(
       const lexicalCandidates: InternalSearchResult[] = [];
       const denseCandidates: InternalSearchResult[] = [];
       const denseProvider = resolveDenseProvider(settings, serviceClient);
-      const localKeywordSearch = (serviceClient as ContextServiceClient & {
+      const localKeywordSearchMethod = (serviceClient as ContextServiceClient & {
         localKeywordSearch?: (
           input: string,
           topK: number,
@@ -1147,6 +1147,9 @@ export async function retrieve(
           }
         ) => Promise<SearchResult[]>;
       }).localKeywordSearch;
+      const localKeywordSearch = typeof localKeywordSearchMethod === 'function'
+        ? localKeywordSearchMethod.bind(serviceClient)
+        : undefined;
       const offlineLocalNative = isOfflineLocalNativeClient(serviceClient);
       const canUseLexical = settings.enableLexical && typeof localKeywordSearch === 'function';
       const enabledBackends: FanoutBackend[] = offlineLocalNative && canUseLexical ? ['lexical'] : ['semantic'];

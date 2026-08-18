@@ -1,59 +1,159 @@
 {
   "meta": {
-    "node": "v24.5.0",
+    "harness_version": 2,
+    "node": "v25.2.1",
     "platform": "win32 x64",
-    "pid": 32884,
-    "started_at": "2026-03-13T10:38:42.841Z",
+    "pid": 34560,
+    "started_at": "2026-08-18T06:54:26.919Z",
     "retrieval_provider": "local_native",
-    "retrieval_provider_source": "default",
-    "env": {},
+    "retrieval_provider_source": "CE_RETRIEVAL_PROVIDER",
+    "env": {
+      "CE_RETRIEVAL_PROVIDER": "local_native"
+    },
     "dataset": {
       "source": "single_query",
       "dataset_id": null,
       "dataset_hash": null,
       "query_count": 1,
-      "fixture_pack": "D:\\GitProjects\\context-engine\\config\\ci\\retrieval-quality-fixture-pack.json"
+      "fixture_pack": "D:\\GitProjects\\context-engine\\.tmp\\retrieval-benchmark-review\\config\\ci\\retrieval-quality-fixture-pack.json"
+    },
+    "dataset_id": "workspace:retrieval-benchmark-review",
+    "dataset_hash": "00fe66122791de565fdeba2ae1af05ad302f035afbe39d36cc0d136cd412c8ac",
+    "execution": {
+      "iterations": 30,
+      "cache_mode": "cold",
+      "warmup_iterations": 0,
+      "cold": true
     }
   },
-  "total_ms": 223.8505,
+  "total_ms": 27976.4838,
   "payload": {
-    "mode": "scan",
-    "workspace": "D:\\GitProjects\\context-engine",
-    "readFiles": true,
-    "fileCount": 549,
-    "totalBytes": 6505830,
-    "readBytes": 6505830,
-    "elapsed_ms": 223.6456,
-    "files_per_sec": 2454.7766645084903,
-    "mb_per_sec": 27.74229843066563,
+    "mode": "search",
+    "workspace": "D:\\GitProjects\\context-engine\\.tmp\\retrieval-benchmark-review",
+    "query_source": "single_query",
+    "query_count": 1,
+    "query": "search queue",
+    "topK": 10,
+    "iterations": 30,
+    "cold": true,
+    "last_result_count": 10,
+    "cache": {
+      "mode": "cold",
+      "cold": true,
+      "warmup_iterations": 0,
+      "query_cycle_length": 1,
+      "retrieve_mode": "search"
+    },
     "timing": {
-      "count": 5,
-      "avg_ms": 199.1366,
-      "p50_ms": 204.0589,
-      "p95_ms": 223.6456,
-      "p99_ms": 223.6456,
-      "min_ms": 168.8227,
-      "max_ms": 223.6456
+      "count": 1,
+      "avg_ms": 627.3577000000005,
+      "p50_ms": 627.3577000000005,
+      "p95_ms": 627.3577000000005,
+      "p99_ms": 627.3577000000005,
+      "min_ms": 627.3577000000005,
+      "max_ms": 627.3577000000005
+    },
+    "resources": {
+      "process_memory": {
+        "sampling": "process.memoryUsage",
+        "sample_count": 30,
+        "start": {
+          "rss_bytes": 215875584,
+          "heap_total_bytes": 138244096,
+          "heap_used_bytes": 103061784,
+          "external_bytes": 3771192,
+          "array_buffers_bytes": 1074071
+        },
+        "end": {
+          "rss_bytes": 287629312,
+          "heap_total_bytes": 210272256,
+          "heap_used_bytes": 132524320,
+          "external_bytes": 3724227,
+          "array_buffers_bytes": 1074871
+        },
+        "peak": {
+          "rss_bytes": 287662080,
+          "heap_total_bytes": 210436096,
+          "heap_used_bytes": 138776328,
+          "external_bytes": 3771192,
+          "array_buffers_bytes": 1075271
+        },
+        "delta_bytes": {
+          "rss_bytes": 71753728,
+          "heap_total_bytes": 72028160,
+          "heap_used_bytes": 29462536,
+          "external_bytes": -46965,
+          "array_buffers_bytes": 800
+        },
+        "rss_bytes": {
+          "count": 30,
+          "avg_bytes": 285403545.6,
+          "p50_bytes": 286474240,
+          "p95_bytes": 287629312,
+          "p99_bytes": 287662080,
+          "min_bytes": 282411008,
+          "max_bytes": 287662080
+        },
+        "heap_total_bytes": {
+          "count": 30,
+          "avg_bytes": 208163089.06666666,
+          "p50_bytes": 209125376,
+          "p95_bytes": 210272256,
+          "p99_bytes": 210436096,
+          "min_bytes": 205619200,
+          "max_bytes": 210436096
+        },
+        "heap_used_bytes": {
+          "count": 30,
+          "avg_bytes": 108992893.06666666,
+          "p50_bytes": 109227136,
+          "p95_bytes": 136458536,
+          "p99_bytes": 138776328,
+          "min_bytes": 76245072,
+          "max_bytes": 138776328
+        },
+        "external_bytes": {
+          "count": 30,
+          "avg_bytes": 3724400.3333333335,
+          "p50_bytes": 3724227,
+          "p95_bytes": 3724627,
+          "p99_bytes": 3724627,
+          "min_bytes": 3724227,
+          "max_bytes": 3724627
+        },
+        "array_buffers_bytes": {
+          "count": 30,
+          "avg_bytes": 1074937.6666666667,
+          "p50_bytes": 1074871,
+          "p95_bytes": 1075271,
+          "p99_bytes": 1075271,
+          "min_bytes": 1074871,
+          "max_bytes": 1075271
+        }
+      }
     }
   },
   "provenance": {
-    "commit_sha": "1b78c79ec2d08479ac938acb91486431fbb75609",
-    "bench_mode": "scan",
+    "timestamp_utc": "2026-08-18T06:55:27.859Z",
+    "commit_sha": "ff99af98d61a3c806bbec883c5ab36824ca85f24",
+    "branch_or_tag": "fix/retrieval-benchmark-review",
+    "workspace_fingerprint": "workspace:57b80f0011c60875036ac6a67860f1b5f885aaeb761de43660a9fad905bdd9d8",
+    "index_fingerprint": "fingerprint:8bfe8395-183f-48ac-8862-08761e649efd",
+    "bench_mode": "search",
+    "dataset_id": "workspace:retrieval-benchmark-review",
+    "dataset_hash": "8fbf7ec105b91154f94d925cc858c8e04a791806b34866f193222dd8805ee4a6",
     "retrieval_provider": "local_native",
-    "dataset_id": "workspace:context-engine",
-    "node_version": "v24.5.0",
-    "env_fingerprint": "b06e34c30aa6f240"
+    "feature_flags_snapshot": "{\"context_packs_v2\":false,\"hash_normalize_eol\":false,\"http_metrics\":false,\"index_state_store\":false,\"memory_autosave_v1\":false,\"memory_draft_retrieval_v1\":false,\"memory_suggestions_v1\":false,\"metrics\":false,\"retrieval_artifacts_v2\":false,\"retrieval_chunk_search_v1\":false,\"retrieval_cross_encoder_rerank_v1\":false,\"retrieval_declaration_routing_v1\":false,\"retrieval_hybrid_v1\":false,\"retrieval_lancedb_v1\":false,\"retrieval_provider_v2\":false,\"retrieval_quality_guard_v1\":false,\"retrieval_ranking_v2\":false,\"retrieval_ranking_v3\":false,\"retrieval_request_memo_v2\":false,\"retrieval_rewrite_v2\":false,\"retrieval_shadow_control_v2\":false,\"retrieval_sqlite_fts5_v1\":false,\"retrieval_transformer_embeddings_v1\":false,\"retrieval_tree_sitter_v1\":false,\"rollout_kill_switch\":false,\"skip_unchanged_indexing\":false}",
+    "node_version": "v25.2.1",
+    "os_version": "Windows_NT 10.0.26200 (x64)",
+    "env_fingerprint": "67dce53a5ed06f0d"
   },
   "suite": {
     "role": "candidate",
-    "bench_mode": "scan",
-    "aggregated_from_runs": 5,
+    "bench_mode": "search",
+    "aggregated_from_runs": 1,
     "p95_samples_ms": [
-      223.6456,
-      168.8227,
-      204.0589,
-      220.2813,
-      178.8745
+      627.3577000000005
     ]
   }
 }

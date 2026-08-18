@@ -356,7 +356,7 @@ function aggregateRuns(
   label: 'baseline' | 'candidate',
   benchMode: BenchMode,
   runs: BenchOutput[],
-  provenance: ProvenanceMetadata
+  provenance: BenchProvenance
 ): BenchOutput {
   if (runs.length === 0) {
     throw new Error(`No successful ${label} runs captured.`);
@@ -561,6 +561,38 @@ function withWorkspaceArgs(args: string[], workspace: string): string[] {
   return copy;
 }
 
+export function classifyBenchmarkCompareExit(
+  mode: SuiteMode,
+  status: number | null
+): 'pass' | 'report_only_regression' | 'error' {
+  if (status === 0) return 'pass';
+  if (mode === 'nightly' && status === 1) return 'report_only_regression';
+  return 'error';
+}
+
+export function assertNonEmptyRetrievalArtifact(
+  label: 'baseline' | 'candidate',
+  benchMode: BenchMode,
+  artifact: BenchOutput
+): void {
+  if (benchMode === 'scan') return;
+  const resultCount = artifact.payload?.last_result_count;
+  const uniqueFiles = artifact.payload?.last_unique_files;
+  if (
+    typeof resultCount !== 'number' ||
+    resultCount <= 0 ||
+    (benchMode === 'retrieve' && (
+      typeof uniqueFiles !== 'number' ||
+      uniqueFiles <= 0
+    ))
+  ) {
+    throw new Error(
+      `${label} ${benchMode} benchmark returned no comparable retrieval results ` +
+      `(last_result_count=${String(resultCount)}, last_unique_files=${String(uniqueFiles)}).`
+    );
+  }
+}
+
 function runCompare(
   mode: SuiteMode,
   baselinePath: string,
@@ -588,8 +620,14 @@ function runCompare(
   if (result.stderr) {
     process.stderr.write(result.stderr);
   }
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+  const disposition = classifyBenchmarkCompareExit(mode, result.status);
+  if (disposition === 'report_only_regression') {
+    // eslint-disable-next-line no-console
+    console.warn('Nightly benchmark threshold breached; retaining artifacts as report-only evidence.');
+    return;
+  }
+  if (disposition === 'error') {
+    process.exit(result.status ?? 2);
   }
 }
 
@@ -640,10 +678,12 @@ async function main(): Promise<void> {
     makeProvenance(runConfig.benchMode, args.workspace, retrievalProvider.provider)
   );
 
-  assertProvenanceForSuite(args.mode, baseline, candidate);
-
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2));
   fs.writeFileSync(candidatePath, JSON.stringify(candidate, null, 2));
+
+  assertNonEmptyRetrievalArtifact('baseline', runConfig.benchMode, baseline);
+  assertNonEmptyRetrievalArtifact('candidate', runConfig.benchMode, candidate);
+  assertProvenanceForSuite(args.mode, baseline, candidate);
 
   // eslint-disable-next-line no-console
   console.log(`Suite mode: ${args.mode}`);

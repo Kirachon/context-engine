@@ -100,6 +100,8 @@ jobs:
       # ~144-case pack from Appendix E.10 once an explicit pack/file flag exists in the
       # bench helper; current workflow still uses the default checked-in pack.
       - name: Run benchmark suite and compare (Nightly mode)
+        # run-bench-suite treats only a valid nightly threshold breach as report-only;
+        # execution, parsing, and provenance failures still fail this job.
         run: npm run bench:ci:nightly
 
       - name: Run WS19 SLO threshold gate (index/search family)

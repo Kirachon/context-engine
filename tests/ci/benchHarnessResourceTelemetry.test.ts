@@ -108,4 +108,33 @@ describe('scripts/bench.ts resource telemetry', () => {
 
     fs.rmSync(tmp, { recursive: true, force: true });
   });
+
+  it('makes the prepared local-native workspace searchable from cold clients', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce-bench-retrieve-index-'));
+    fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, 'src', 'needle.ts'),
+      'export const uniqueBenchmarkNeedle = "indexed retrieval fixture";\n',
+      'utf8'
+    );
+
+    const result = runBench([
+      '--mode', 'retrieve',
+      '--workspace', tmp,
+      '--query', 'uniqueBenchmarkNeedle',
+      '--topk', '3',
+      '--iterations', '1',
+      '--cold',
+      '--json',
+    ]);
+    expect(result.status).toBe(0);
+    const artifact = JSON.parse(result.stdout.trim()) as {
+      payload: { last_result_count: number; last_unique_files: number; cache: { bypass_cache: boolean } };
+    };
+    expect(artifact.payload.last_result_count).toBeGreaterThan(0);
+    expect(artifact.payload.last_unique_files).toBeGreaterThan(0);
+    expect(artifact.payload.cache.bypass_cache).toBe(false);
+
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
 });
