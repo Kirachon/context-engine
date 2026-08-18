@@ -693,8 +693,13 @@ function toWorkspaceRelativeGlob(workspace: string, filePath: string): string | 
 
 function buildOfflineEvalExcludePaths(args: CliArgs): string[] {
   const exclude = new Set<string>([
-    'artifacts/bench/**',
+    'artifacts/**',
+    'evals/**',
+    'config/ci/frozen-corpora/**',
     '**/*.test.*',
+    // The holdout judgments target source files. Keep checked-in evidence,
+    // corpora, and snapshots from outranking those source paths for ops-style
+    // queries that intentionally contain terms such as "report" or "metrics".
   ]);
 
   for (const candidate of [args.fixturePackPath, args.holdoutArtifactPath, args.outPath]) {

@@ -11,6 +11,9 @@ permissions:
 jobs:
   required_lane_catch_rate:
     runs-on: ubuntu-latest
+    env:
+      CE_RETRIEVAL_PROVIDER: local_native
+      CONTEXT_ENGINE_OFFLINE_ONLY: '1'
     steps:
       - uses: actions/checkout@v4
 
