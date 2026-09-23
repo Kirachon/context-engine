@@ -31,6 +31,7 @@ type MockServiceClient = {
   callRelationships: ReturnType<typeof jest.fn>;
   getContextForPrompt: ReturnType<typeof jest.fn>;
   getWorkspacePath: ReturnType<typeof jest.fn>;
+  getGraphNavigationSnapshot: ReturnType<typeof jest.fn>;
   getFile: ReturnType<typeof jest.fn>;
   searchAndAsk: ReturnType<typeof jest.fn>;
 };
@@ -119,6 +120,11 @@ function createMockServiceClient(): MockServiceClient {
       },
     })),
     getWorkspacePath: jest.fn(() => process.cwd()),
+    getGraphNavigationSnapshot: jest.fn(async () => ({
+      snapshot: { graph_status: 'unavailable' },
+      payload: null,
+      fallbackReason: 'graph_missing',
+    })),
     getFile: jest.fn(async (filePath: string) => `contents:${filePath}`),
     searchAndAsk: jest.fn(async (query: string) => `ENHANCED:${query}`),
   };
