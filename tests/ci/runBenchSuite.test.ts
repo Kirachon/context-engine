@@ -9,7 +9,7 @@ import {
 describe('scripts/ci/run-bench-suite.ts', () => {
   it('threads suite mode into bench-compare arguments', () => {
     const scriptPath = path.resolve(process.cwd(), 'scripts/ci/run-bench-suite.ts');
-    const source = fs.readFileSync(scriptPath, 'utf8');
+    const source = fs.readFileSync(scriptPath, 'utf8').replace(/\r\n/g, '\n');
 
     expect(source).toMatch(/function runCompare\(\r?\n\s+mode: SuiteMode,/);
     expect(source).toContain("'--suite-mode', mode");

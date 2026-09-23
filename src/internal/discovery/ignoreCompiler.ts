@@ -16,7 +16,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { minimatch } from 'minimatch';
+import { Minimatch } from 'minimatch';
 
 /**
  * Bump whenever the *semantics* of ignore-rule compilation or matching
@@ -182,6 +182,9 @@ function compileRule(raw: string, source: string): CompiledIgnoreRule | null {
   return { raw, negated, rootAnchored, directoryOnly, pattern, source };
 }
 
+type GlobMatchers = { direct: Minimatch; nested?: Minimatch };
+const compiledGlobMatchers = new WeakMap<CompiledIgnoreRule, GlobMatchers>();
+
 function matchesSinglePattern(relativePath: string, rule: CompiledIgnoreRule): boolean {
   const fileName = path.basename(relativePath);
   const { pattern, rootAnchored } = rule;
@@ -194,13 +197,23 @@ function matchesSinglePattern(relativePath: string, rule: CompiledIgnoreRule): b
   }
 
   try {
-    if (rootAnchored) {
-      return minimatch(relativePath, pattern, { dot: true });
+    let matchers = compiledGlobMatchers.get(rule);
+    if (!matchers) {
+      matchers = {
+        direct: new Minimatch(pattern, { dot: true, matchBase: !rootAnchored && !pattern.includes('/') }),
+        nested: !rootAnchored && !pattern.startsWith('**')
+          ? new Minimatch(`**/${pattern}`, { dot: true })
+          : undefined,
+      };
+      compiledGlobMatchers.set(rule, matchers);
     }
-    if (minimatch(relativePath, pattern, { dot: true, matchBase: !pattern.includes('/') })) {
+    if (rootAnchored) {
+      return matchers.direct.match(relativePath);
+    }
+    if (matchers.direct.match(relativePath)) {
       return true;
     }
-    if (!pattern.startsWith('**') && minimatch(relativePath, `**/${pattern}`, { dot: true })) {
+    if (matchers.nested?.match(relativePath)) {
       return true;
     }
     return false;
