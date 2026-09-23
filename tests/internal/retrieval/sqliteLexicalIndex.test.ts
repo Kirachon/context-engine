@@ -99,13 +99,13 @@ describeSqlite('sqlite lexical index', () => {
     workspacePath = createTempWorkspace();
     writeWorkspaceFile(
       workspacePath,
-      'src/alpha.ts',
-      'needle needle needle needle\nconst alpha = true;'
+      'src/z-high-frequency.ts',
+      `${'needle '.repeat(40)}\nconst highFrequency = true;`
     );
     writeWorkspaceFile(
       workspacePath,
-      'src/beta.ts',
-      'const beta = true;\nneedle'
+      'src/a-low-frequency.ts',
+      `needle ${'padding '.repeat(40)}\nconst lowFrequency = true;`
     );
 
     const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
@@ -114,7 +114,170 @@ describeSqlite('sqlite lexical index', () => {
 
     const results = await index.search('needle', 5);
     expect(results.length).toBeGreaterThan(1);
-    expect(results[0].path).toBe('src/alpha.ts');
+    expect(results[0].path).toBe('src/z-high-frequency.ts');
+  });
+
+  it('prioritizes distinct paths before additional chunks from one file', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(
+      workspacePath,
+      'docs/R4_WEEKLY_TREND_CONTRACT.md',
+      Array.from({ length: 240 }, (_, index) => `needle repeated contract detail ${index}`).join('\n')
+    );
+    writeWorkspaceFile(
+      workspacePath,
+      'scripts/ci/generate-weekly-retrieval-trend-report.ts',
+      'export const reportNeedle = "needle";'
+    );
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const results = await index.search('needle', 2);
+
+    expect(results).toHaveLength(2);
+    expect(results.map((result) => result.path)).toEqual([
+      'docs/R4_WEEKLY_TREND_CONTRACT.md',
+      'scripts/ci/generate-weekly-retrieval-trend-report.ts',
+    ]);
+    expect(new Set(results.map((result) => result.path)).size).toBe(results.length);
+
+    const repeatedChunks = await index.search('contract', 2);
+    expect(repeatedChunks).toHaveLength(2);
+    expect(repeatedChunks.every((result) => result.path === 'docs/R4_WEEKLY_TREND_CONTRACT.md')).toBe(true);
+    expect(new Set(repeatedChunks.map((result) => result.chunkId)).size).toBe(2);
+  });
+
+  it('matches punctuation in holdout queries as lexical terms', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(
+      workspacePath,
+      'scripts/ci/generate-retrieval-quality-report.ts',
+      [
+        'export const calibration = true;',
+        'export const gate_rules = true;',
+        'export const reproducibility_lock = true;',
+      ].join('\n')
+    );
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const results = await index.search(
+      'generate-retrieval-quality-report calibration gate_rules reproducibility_lock',
+      10
+    );
+
+    expect(results[0]?.path).toBe('scripts/ci/generate-retrieval-quality-report.ts');
+  });
+
+  it('excludes generated artifacts for pure code-intent queries', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(
+      workspacePath,
+      'src/compute_total.ts',
+      'export function compute_total(items: number[]) { return items.reduce((sum, item) => sum + item, 0); }'
+    );
+    writeWorkspaceFile(
+      workspacePath,
+      'artifacts/bench/retrieval-quality-report.json',
+      '{"query":"python compute_total items price qty sum", "path":"src/compute_total.ts"}'
+    );
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const results = await index.search('python compute_total items price qty sum', 10, {
+      codeIntent: true,
+      opsEvidenceIntent: false,
+    });
+
+    expect(results.some((result) => result.path === 'src/compute_total.ts')).toBe(true);
+    expect(results.some((result) => result.path.startsWith('artifacts/'))).toBe(false);
+  });
+
+  it('excludes artifacts before limiting SQL candidates', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(workspacePath, 'src/target.ts', 'export const needle = true;');
+    for (let index = 0; index < 30; index += 1) {
+      writeWorkspaceFile(workspacePath, `artifacts/bench/report-${index}.json`, '{"value":"needle"}');
+    }
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const results = await index.search('needle', 1, { codeIntent: true, opsEvidenceIntent: false });
+    expect(results.map((result) => result.path)).toEqual(['src/target.ts']);
+  });
+
+  it('ranks chunks containing every query term ahead of partial matches', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(workspacePath, 'src/combined.ts', 'authentication middleware');
+    writeWorkspaceFile(workspacePath, 'src/authentication.ts', 'authentication authentication authentication');
+    writeWorkspaceFile(workspacePath, 'src/middleware.ts', 'middleware middleware middleware');
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+
+    const results = await index.search('authentication middleware', 3);
+    expect(results[0]?.path).toBe('src/combined.ts');
+    expect(results).toHaveLength(3);
+  });
+
+  it('does not rebuild the database after an FTS query error', async () => {
+    workspacePath = createTempWorkspace();
+    writeWorkspaceFile(workspacePath, 'src/alpha.ts', 'export const needle = true;');
+
+    const index = createWorkspaceSqliteLexicalIndex({ workspacePath });
+    activeIndex = index;
+    await index.refresh();
+    const dbPath = index.getSnapshot().dbPath;
+    const snapshot = index.getSnapshot();
+
+    const sqlite = createRequire(import.meta.url)('node:sqlite') as {
+      DatabaseSync: {
+        prototype: {
+          exec: (sql: string) => void;
+          prepare: (sql: string) => unknown;
+        };
+      };
+    };
+    const databasePrototype = sqlite.DatabaseSync.prototype;
+    const originalExec = databasePrototype.exec;
+    const originalPrepare = databasePrototype.prepare;
+    let schemaInitializationCount = 0;
+
+    databasePrototype.exec = function (sql: string): void {
+      if (sql.includes('CREATE VIRTUAL TABLE IF NOT EXISTS lexical_fts')) {
+        schemaInitializationCount += 1;
+      }
+      originalExec.call(this, sql);
+    };
+    databasePrototype.prepare = function (sql: string): unknown {
+      if (sql.includes('WHERE lexical_fts MATCH ?')) {
+        throw Object.assign(new Error('no such column: retrieval'), {
+          code: 'ERR_SQLITE_ERROR',
+          errcode: 1,
+          errstr: 'SQL logic error',
+        });
+      }
+      return originalPrepare.call(this, sql);
+    };
+
+    try {
+      await expect(index.search('a query with syntax trouble', 5)).resolves.toEqual([]);
+      expect(schemaInitializationCount).toBe(0);
+      expect(fs.existsSync(dbPath)).toBe(true);
+      expect(index.getSnapshot()).toEqual(snapshot);
+    } finally {
+      databasePrototype.exec = originalExec;
+      databasePrototype.prepare = originalPrepare;
+    }
   });
 
   it('prefers exact identifier matches for camelCase queries', async () => {

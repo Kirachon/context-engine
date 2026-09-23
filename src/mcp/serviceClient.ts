@@ -17,7 +17,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
-import { minimatch } from 'minimatch';
+import { Minimatch } from 'minimatch';
 import { createRequire } from 'module';
 import { fileURLToPath } from 'url';
 import { Worker } from 'worker_threads';
@@ -1738,6 +1738,7 @@ export class ContextServiceClient {
 
   /** Loaded ignore patterns (from .gitignore and .contextignore) */
   private ignorePatterns: string[] = [];
+  private ignoreGlobMatchers = new Map<string, { direct: Minimatch; nested?: Minimatch }>();
 
   /** Flag to track if ignore patterns have been loaded */
   private ignorePatternsLoaded: boolean = false;
@@ -2375,6 +2376,7 @@ export class ContextServiceClient {
     if (this.ignorePatternsLoaded) return;
 
     this.ignorePatterns = [...DEFAULT_EXCLUDED_PATTERNS];
+    this.ignoreGlobMatchers.clear();
     const debugIndex = process.env.CE_DEBUG_INDEX === 'true';
 
     // Try to load .gitignore
@@ -2498,18 +2500,31 @@ export class ContextServiceClient {
 
       // For glob patterns, use minimatch
       try {
+        let matchers = this.ignoreGlobMatchers.get(rawPattern);
+        if (!matchers) {
+          matchers = {
+            direct: new Minimatch(pattern, {
+              dot: true,
+              matchBase: !isRootAnchored && !pattern.includes('/'),
+            }),
+            nested: !isRootAnchored && !pattern.startsWith('**')
+              ? new Minimatch(`**/${pattern}`, { dot: true })
+              : undefined,
+          };
+          this.ignoreGlobMatchers.set(rawPattern, matchers);
+        }
         // If root-anchored, match from the start
         if (isRootAnchored) {
-          if (minimatch(normalizedPath, pattern, { dot: true })) {
+          if (matchers.direct.match(normalizedPath)) {
             return true;
           }
         } else {
           // Match anywhere in path (using matchBase for simple patterns)
-          if (minimatch(normalizedPath, pattern, { dot: true, matchBase: !pattern.includes('/') })) {
+          if (matchers.direct.match(normalizedPath)) {
             return true;
           }
           // Also try matching with ** prefix for patterns without it
-          if (!pattern.startsWith('**') && minimatch(normalizedPath, `**/${pattern}`, { dot: true })) {
+          if (matchers.nested?.match(normalizedPath)) {
             return true;
           }
         }
@@ -4489,6 +4504,7 @@ export class ContextServiceClient {
       resetIgnorePatterns: () => {
         this.ignorePatternsLoaded = false;
         this.ignorePatterns = [];
+        this.ignoreGlobMatchers.clear();
       },
       clearGraphArtifacts: () => this.graphAccess.clearArtifacts(),
       updateIndexStatus: (partial) => this.updateIndexStatus(partial),

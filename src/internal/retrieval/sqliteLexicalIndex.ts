@@ -19,7 +19,6 @@ import {
 import { resolveCanonicalWorkspacePathSet } from './discoveryAdapter.js';
 import {
   computeExactMatchBoost,
-  normalizeSearchText,
   tokenizeSearchInput,
 } from './searchHeuristics.js';
 
@@ -147,6 +146,11 @@ export interface WorkspaceSqliteLexicalIndexChange {
 
 export interface SqliteLexicalSearchOptions {
   bypassCache?: boolean;
+  includeArtifacts?: boolean;
+  includeDocs?: boolean;
+  includeJson?: boolean;
+  codeIntent?: boolean;
+  opsEvidenceIntent?: boolean;
 }
 
 export interface SqliteLexicalIndexRefreshStats {
@@ -306,43 +310,88 @@ function countRows(
   return typeof row?.count === 'number' ? row.count : 0;
 }
 
+function buildFtsMatchQueries(query: string): { all: string; any: string; termCount: number } | null {
+  // Pass plain terms to FTS5 instead of its user-facing query grammar. This
+  // keeps paths and identifiers containing punctuation from becoming column
+  // filters or operators (for example, "generate-retrieval-quality-report").
+  const tokens = query.match(/[\p{L}\p{N}]+/gu);
+  if (!tokens?.length) {
+    return null;
+  }
+
+  const uniqueTokens = Array.from(new Set(tokens.map((token) => token.toLowerCase())));
+  const quotedTokens = uniqueTokens.map((token) => `"${token}"`);
+  return { all: quotedTokens.join(' AND '), any: quotedTokens.join(' OR '), termCount: quotedTokens.length };
+}
+
+function isSqliteCorruptionError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+
+  const details = error as { code?: unknown; errcode?: unknown };
+  if (typeof details.code === 'string' && /SQLITE_(?:CORRUPT|NOTADB)/i.test(details.code)) {
+    return true;
+  }
+
+  // SQLite extended result codes retain the primary code in the low byte.
+  if (typeof details.errcode !== 'number' || !Number.isInteger(details.errcode)) {
+    return false;
+  }
+  const primaryCode = details.errcode & 0xff;
+  return primaryCode === 11 /* SQLITE_CORRUPT */ || primaryCode === 26 /* SQLITE_NOTADB */;
+}
+
 function computeScore(rawScore: unknown): number {
-  if (typeof rawScore !== 'number' || Number.isNaN(rawScore)) {
+  if (typeof rawScore !== 'number' || !Number.isFinite(rawScore)) {
     return 0;
   }
-  if (rawScore <= 0) {
-    return 1;
-  }
-  return 1 / (1 + rawScore);
+
+  // FTS5's bm25() is negative by design: lower values rank as better matches.
+  // A sigmoid preserves that ordering while producing a bounded relevance
+  // component for the existing exact-match and token boosts.
+  return 1 / (1 + Math.exp(rawScore));
 }
 
 function computeLexicalRank(params: {
   query: string;
   path: string;
-  content: string;
   lines?: string;
   chunkId?: string;
   rawScore?: number;
+  codeIntent?: boolean;
+  includeDocs?: boolean;
+  includeJson?: boolean;
 }): number {
   const baseScore = typeof params.rawScore === 'number' ? computeScore(params.rawScore) : 0;
+  const normalizedPath = params.path.toLowerCase().replace(/\\/g, '/');
   const exactBoost = computeExactMatchBoost({
     query: params.query,
     path: params.path,
-    content: params.content,
+    // Keep exact identifier boosts tied to the path. Generated reports can
+    // repeat the full query many times and otherwise outrank the source file.
+    content: '',
     lines: params.lines,
     chunkId: params.chunkId,
   });
   const queryTokens = tokenizeSearchInput(params.query);
-  const normalizedContent = normalizeSearchText(params.content);
-  const normalizedPath = params.path.toLowerCase();
 
   let tokenBoost = 0;
   for (const token of queryTokens) {
     if (normalizedPath.includes(token)) {
       tokenBoost += 0.8;
     }
-    if (normalizedContent.includes(token)) {
-      tokenBoost += 0.5;
+  }
+
+  if (params.codeIntent) {
+    if (/^(?:src|tests?|scripts)\//.test(normalizedPath)) {
+      tokenBoost += 1.5;
+    }
+    if (!params.includeDocs && /^(?:docs|benchmark|bench|tmp|coverage|dist|build)\//.test(normalizedPath)) {
+      tokenBoost -= 1.5;
+    }
+    if (!params.includeJson && /\.(?:json|jsonc)$/.test(normalizedPath)) {
+      tokenBoost -= 1.5;
     }
   }
 
@@ -835,9 +884,11 @@ export function createWorkspaceLexicalSearchIndex(
     }
   };
 
-  const search = async (query: string, topK: number, _options?: SqliteLexicalSearchOptions): Promise<SearchResult[]> => {
+  const search = async (query: string, topK: number, options?: SqliteLexicalSearchOptions): Promise<SearchResult[]> => {
     const normalizedQuery = query.trim();
     if (!normalizedQuery) return [];
+    const matchQueries = buildFtsMatchQueries(normalizedQuery);
+    if (!matchQueries) return [];
 
     const runSearch = async (): Promise<SearchResult[]> => {
       const db = await ensureDb();
@@ -846,18 +897,34 @@ export function createWorkspaceLexicalSearchIndex(
       }
 
       const limit = clampTopK(topK);
-      const rows = db.prepare(
-        `SELECT path, chunk_id, lines, content, snippet(lexical_fts, 3, '', '', ' … ', 16) AS snippet, bm25(lexical_fts) AS score\n       FROM lexical_fts\n       WHERE lexical_fts MATCH ?\n       ORDER BY score\n       LIMIT ?`
-      ).all(normalizedQuery, limit) as Array<{
+      const candidateLimit = Math.min(500, limit * 10);
+      const excludeArtifacts = options?.codeIntent && !options.opsEvidenceIntent && !options.includeArtifacts;
+      const statement = db.prepare(
+        `SELECT path, chunk_id, lines, content, snippet(lexical_fts, 3, '', '', ' … ', 16) AS snippet, bm25(lexical_fts) AS score\n       FROM lexical_fts\n       WHERE lexical_fts MATCH ?${excludeArtifacts ? " AND lower(path) NOT LIKE 'artifacts/%'" : ''}\n       ORDER BY score\n       LIMIT ?`
+      );
+      type SqliteSearchRow = {
         path: string;
         chunk_id: string;
         lines: string;
         content: string;
         snippet?: string;
         score?: number;
-      }>;
+      };
+      const allRows = statement.all(matchQueries.all, candidateLimit) as SqliteSearchRow[];
+      const allPaths = new Set(allRows.map((row) => row.path));
+      const anyRows = matchQueries.any !== matchQueries.all && allPaths.size < limit
+        ? statement.all(matchQueries.any, candidateLimit) as SqliteSearchRow[]
+        : [];
+      const allChunkKeys = new Set(allRows.map((row) => `${row.path}\0${row.chunk_id}`));
+      const seenChunks = new Set<string>();
+      const rows = [...allRows, ...anyRows].filter((row) => {
+        const key = `${row.path}\0${row.chunk_id}`;
+        if (seenChunks.has(key)) return false;
+        seenChunks.add(key);
+        return true;
+      });
 
-      return rows
+      const rankedResults = rows
         .map((row) => {
         const snippet = (row.snippet ?? '').trim();
         const content = snippet || buildSnippetFallback(row.content, DEFAULT_SNIPPET_MAX_CHARS);
@@ -866,27 +933,57 @@ export function createWorkspaceLexicalSearchIndex(
           content,
           lines: row.lines,
           chunkId: row.chunk_id,
+          allTermsMatched: allChunkKeys.has(`${row.path}\0${row.chunk_id}`),
           matchType: 'keyword' as const,
           score: computeLexicalRank({
             query: normalizedQuery,
             path: row.path,
-            content,
             lines: row.lines,
             chunkId: row.chunk_id,
             rawScore: row.score,
+            codeIntent: options?.codeIntent,
+            includeDocs: options?.includeDocs,
+            includeJson: options?.includeJson,
           }),
           relevanceScore: 0,
           retrievedAt: new Date().toISOString(),
         };
       })
         .sort((a, b) => {
-          if ((b.score ?? 0) !== (a.score ?? 0)) {
-            return (b.score ?? 0) - (a.score ?? 0);
+          if (matchQueries.termCount <= 3 && a.allTermsMatched !== b.allTermsMatched) {
+            return a.allTermsMatched ? -1 : 1;
+          }
+          const aRank = (a.score ?? 0) + (a.allTermsMatched ? 2 : 0);
+          const bRank = (b.score ?? 0) + (b.allTermsMatched ? 2 : 0);
+          if (bRank !== aRank) {
+            return bRank - aRank;
           }
           return a.path.localeCompare(b.path);
-        })
+        });
+
+      // Give each file its best matching chunk before returning additional
+      // chunks from already represented files. This keeps the result list
+      // useful for file-oriented ranking while preserving chunk-level topK.
+      const seenPaths = new Set<string>();
+      const distinctPathResults: typeof rankedResults = [];
+      const additionalChunks: typeof rankedResults = [];
+      for (const result of rankedResults) {
+        if (seenPaths.has(result.path)) {
+          additionalChunks.push(result);
+          continue;
+        }
+        seenPaths.add(result.path);
+        distinctPathResults.push(result);
+      }
+      return [...distinctPathResults, ...additionalChunks]
+        .slice(0, limit)
         .map((result) => ({
-          ...result,
+          path: result.path,
+          content: result.content,
+          lines: result.lines,
+          chunkId: result.chunkId,
+          matchType: result.matchType,
+          retrievedAt: result.retrievedAt,
           score: Math.max(0, Math.min(1, result.score ?? 0)),
           relevanceScore: Math.max(0, Math.min(1, result.score ?? 0)),
         }));
@@ -894,7 +991,12 @@ export function createWorkspaceLexicalSearchIndex(
 
     try {
       return await runSearch();
-    } catch {
+    } catch (error) {
+      // Bad MATCH syntax and other query failures do not imply a damaged
+      // database. Only rebuild the disposable index for SQLite corruption.
+      if (!isSqliteCorruptionError(error)) {
+        return [];
+      }
       recoverFromCorruptDb();
       try {
         return await runSearch();
