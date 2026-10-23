@@ -14,10 +14,10 @@ function tokenize(input: string): string[] {
     .filter(Boolean);
 }
 
-function termFrequency(text: string, token: string): number {
+function termFrequency(text: string, token: string, unicode = false): number {
   if (!text) return 0;
   const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const regex = new RegExp(`\\b${escaped}\\b`, 'gi');
+  const regex = unicode ? new RegExp(`(?<![\\p{L}\\p{N}_])${escaped}(?![\\p{L}\\p{N}_])`, 'giu') : new RegExp(`\\b${escaped}\\b`, 'gi');
   const matches = text.match(regex);
   return matches ? matches.length : 0;
 }
@@ -31,6 +31,15 @@ function parseLineStart(lines?: string): number {
 }
 
 export interface LexicalScoreOptions {
+  /** Opt-in analyzer used by the local repair; legacy analysis remains unchanged. */
+  queryTokens?: string[];
+  normalizeText?: (text: string) => string;
+  /** Already analyzed path + content tokens, retaining frequency. */
+  documentTokens?: ReadonlyMap<string, readonly string[]>;
+  documentAnalysis?: ReadonlyMap<string, { length: number; frequencies: ReadonlyMap<string, number> }>;
+  exactMatchWeight?: number;
+  /** Compact local-scan statistics can preserve exact boosts without full text. */
+  exactMatchBoosts?: ReadonlyMap<string, number>;
   query: string;
   queryVariant: string;
   variantIndex: number;
@@ -43,7 +52,7 @@ export function scoreLexicalCandidates(
 ): InternalSearchResult[] {
   if (results.length === 0) return [];
 
-  const tokens = tokenizeSearchInput(options.query);
+  const tokens = options.queryTokens ?? tokenizeSearchInput(options.query);
   if (tokens.length === 0) {
     return results.map((result) => ({
       ...result,
@@ -59,9 +68,20 @@ export function scoreLexicalCandidates(
   }
 
   const docs = results.map((result) => {
-    const body = `${result.path}\n${result.content ?? ''}`.toLowerCase();
-    const length = Math.max(1, tokenize(body).length);
-    return { result, body, length };
+    const analysis = options.documentAnalysis?.get(result.path);
+    if (analysis) return { result, body: '', length: analysis.length, frequencies: analysis.frequencies };
+    const analyzed = options.documentTokens?.get(result.path);
+    if (analyzed) {
+      const frequencies = new Map<string, number>();
+      for (const token of analyzed) frequencies.set(token, (frequencies.get(token) ?? 0) + 1);
+      return { result, body: '', length: Math.max(1, analyzed.length), frequencies };
+    }
+    const rawBody = `${result.path}\n${result.content ?? ''}`;
+    const body = options.normalizeText ? options.normalizeText(rawBody) : rawBody.toLowerCase();
+    const length = Math.max(1, options.normalizeText ? body.split(/\s+/).filter(Boolean).length : tokenize(body).length);
+    // Compute term frequency once for both document frequency and scoring.
+    const frequencies = new Map(tokens.map(token => [token, termFrequency(body, token, Boolean(options.normalizeText))]));
+    return { result, body, length, frequencies };
   });
   const avgDocLength = docs.reduce((sum, doc) => sum + doc.length, 0) / docs.length;
   const k1 = 1.2;
@@ -71,7 +91,7 @@ export function scoreLexicalCandidates(
   for (const token of tokens) {
     let count = 0;
     for (const doc of docs) {
-      if (termFrequency(doc.body, token) > 0) count += 1;
+      if ((doc.frequencies.get(token) ?? 0) > 0) count += 1;
     }
     docFrequency.set(token, count);
   }
@@ -79,7 +99,7 @@ export function scoreLexicalCandidates(
   const scored = docs.map((doc) => {
     let score = 0;
     for (const token of tokens) {
-      const tf = termFrequency(doc.body, token);
+      const tf = doc.frequencies.get(token) ?? 0;
       if (tf <= 0) continue;
 
       const df = docFrequency.get(token) ?? 0;
@@ -91,13 +111,13 @@ export function scoreLexicalCandidates(
     const lowerPath = doc.result.path.toLowerCase();
     const pathHits = tokens.reduce((hits, token) => (lowerPath.includes(token) ? hits + 1 : hits), 0);
     score += pathHits * 0.12;
-    score += computeExactMatchBoost({
+    score += (options.exactMatchWeight ?? 1) * (options.exactMatchBoosts?.get(doc.result.path) ?? computeExactMatchBoost({
       query: options.query,
       path: doc.result.path,
       content: doc.result.content ?? '',
       lines: doc.result.lines,
       chunkId: doc.result.chunkId,
-    });
+    }));
 
     const identifierSignals = buildIdentifierPathSignals(options.query, doc.result.path);
     if (identifierSignals.exactBasenameMatch) {

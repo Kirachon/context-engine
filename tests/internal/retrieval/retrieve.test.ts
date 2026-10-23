@@ -15,13 +15,172 @@ describe('retrieve internal pipeline', () => {
   const originalEnv = { ...process.env };
   const originalQualityGuard = FEATURE_FLAGS.retrieval_quality_guard_v1;
   const originalLanceDbFlag = FEATURE_FLAGS.retrieval_lancedb_v1;
+  const originalLocalRepairFlag = FEATURE_FLAGS.retrieval_local_repair_v1;
+
+  beforeEach(() => {
+    // These tests exercise retrieval behavior independently of the shared Jest
+    // process's accumulated RSS. The pressure test below still forces its guard
+    // through an explicit zero threshold.
+    jest.spyOn(process, 'memoryUsage').mockReturnValue({
+      rss: 0, heapUsed: 0, heapTotal: 0, external: 0, arrayBuffers: 0,
+    });
+  });
 
   afterEach(() => {
+    jest.restoreAllMocks();
     process.env = { ...originalEnv };
     FEATURE_FLAGS.retrieval_quality_guard_v1 = originalQualityGuard;
     FEATURE_FLAGS.retrieval_lancedb_v1 = originalLanceDbFlag;
+    FEATURE_FLAGS.retrieval_local_repair_v1 = originalLocalRepairFlag;
     clearExpandQueryCacheForTests();
     setInternalCache(undefined);
+  });
+
+  it.each([undefined, 'false'])('keeps repaired local-native retrieval local with offline mode %s', async (offline) => {
+    FEATURE_FLAGS.retrieval_local_repair_v1 = true;
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
+    process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE = 'true';
+    if (offline === undefined) delete process.env.CONTEXT_ENGINE_OFFLINE_ONLY;
+    else process.env.CONTEXT_ENGINE_OFFLINE_ONLY = offline;
+    const controller = new AbortController();
+    const serviceClient = {
+      getActiveRetrievalProviderId: () => 'local_native',
+      semanticSearch: jest.fn(async () => { throw new Error('AI search must not run'); }),
+      localKeywordSearch: jest.fn(async () => [
+        { path: 'src/cache.ts', content: 'cache implementation', relevanceScore: .8, lines: '1-1' },
+      ]),
+    } as any;
+    const result = await internalRetrieveCode('cache implementation', serviceClient, {
+      enableExpansion: false, enableRerank: false, topK: 5,
+      includePaths: ['src/**'], excludePaths: ['src/generated/**'], signal: controller.signal,
+    });
+    expect(serviceClient.semanticSearch).not.toHaveBeenCalled();
+    expect(serviceClient.localKeywordSearch).toHaveBeenCalledTimes(1);
+    expect(serviceClient.localKeywordSearch).toHaveBeenCalledWith('cache implementation', 5,
+      expect.objectContaining({ includePaths: ['src/**'], excludePaths: ['src/generated/**'], signal: controller.signal }));
+    expect(result.results[0].path).toBe('src/cache.ts');
+    expect(result.flow?.metadata.fanoutBackends).toEqual(['lexical']);
+    expect(result.fallbackState).toBe('inactive');
+    expect(process.env.CONTEXT_ENGINE_OFFLINE_ONLY).toBe(offline);
+  });
+
+  it.each([
+    { repair: false, provider: 'local_native', lexical: true, available: true, pipeline: true },
+    { repair: true, provider: 'local_native_v2', lexical: true, available: true, pipeline: true },
+    { repair: true, provider: 'openai_session', lexical: true, available: true, pipeline: true },
+    { repair: true, provider: 'local_native', lexical: false, available: true, pipeline: true },
+    { repair: true, provider: 'local_native', lexical: true, available: false, pipeline: true },
+    { repair: true, provider: 'local_native', lexical: true, available: true, pipeline: false },
+  ])('preserves the semantic path outside repaired local fanout: %j', async ({ repair, provider, lexical, available, pipeline }) => {
+    FEATURE_FLAGS.retrieval_local_repair_v1 = repair;
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'false';
+    process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE = String(pipeline);
+    const serviceClient = {
+      getActiveRetrievalProviderId: () => provider,
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/semantic.ts', content: 'cache implementation', relevanceScore: .9, lines: '1-1' },
+      ]),
+      ...(available ? { localKeywordSearch: jest.fn(async () => []) } : {}),
+    } as any;
+    const results = await retrieve('cache implementation', serviceClient, {
+      enableExpansion: false, enableLexical: lexical, enableFusion: true, enableRerank: false, topK: 5,
+    });
+    expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
+    expect(results.some(result => result.path === 'src/semantic.ts')).toBe(true);
+  });
+
+  it('cancels repaired local-only retrieval without starting an AI fallback', async () => {
+    FEATURE_FLAGS.retrieval_local_repair_v1 = true;
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'false';
+    const controller = new AbortController();
+    const serviceClient = {
+      getActiveRetrievalProviderId: () => 'local_native',
+      semanticSearch: jest.fn(async () => []),
+      localKeywordSearch: jest.fn(async () => {
+        controller.abort();
+        return [];
+      }),
+    } as any;
+    await expect(retrieve('cancel local search', serviceClient, {
+      enableExpansion: false, signal: controller.signal,
+    })).rejects.toThrow(/aborted/i);
+    expect(serviceClient.semanticSearch).not.toHaveBeenCalled();
+  });
+
+  it('preserves the local search receiver without a quality-guard retry', async () => {
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = false;
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'true';
+    process.env.CONTEXT_ENGINE_RETRIEVAL_PIPELINE = 'true';
+    class ReceiverDependentClient {
+      readonly marker = 'implementation';
+      getActiveRetrievalProviderId() { return 'local_native'; }
+      async semanticSearch() { throw new Error('Offline local retrieval should not call a provider'); }
+      async localKeywordSearch() {
+        return [{ path: `src/${this.marker}.ts`, content: this.marker, relevanceScore: .9, lines: '1-1' }];
+      }
+    }
+    const result = await internalRetrieveCode('implementation', new ReceiverDependentClient() as any,
+      { enableExpansion: false, enableLexical: true, enableFusion: false, topK: 5 });
+    expect(result.results.map(item => item.path)).toEqual(['src/implementation.ts']);
+    expect(result.fallbackState).toBe('inactive');
+  });
+
+  it('does not repeat a successful identical local-only search because fusion scores are small', async () => {
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
+    FEATURE_FLAGS.retrieval_local_repair_v1 = true;
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'true';
+    const localKeywordSearch = jest.fn(async () => [
+      { path: 'src/cache.ts', content: 'cache implementation', relevanceScore: .8, lines: '1-1' },
+    ]);
+    const serviceClient = { getActiveRetrievalProviderId: () => 'local_native', localKeywordSearch,
+      semanticSearch: jest.fn(async () => []) } as any;
+    const result = await internalRetrieveCode('cache implementation', serviceClient,
+      { enableExpansion: false, enableFusion: true, enableRerank: false, topK: 5 });
+    expect(localKeywordSearch).toHaveBeenCalledTimes(1);
+    expect(result.fallbackState).toBe('inactive');
+    expect(result.results[0].path).toBe('src/cache.ts');
+  });
+
+  it('retains the quality retry for empty local results or a different result limit', async () => {
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
+    FEATURE_FLAGS.retrieval_local_repair_v1 = true;
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'true';
+    const localKeywordSearch = jest.fn(async () => [] as any[]);
+    const serviceClient = { getActiveRetrievalProviderId: () => 'local_native', localKeywordSearch,
+      semanticSearch: jest.fn(async () => []) } as any;
+    await internalRetrieveCode('cache implementation', serviceClient, { enableExpansion: false, enableRerank: false, topK: 5 });
+    expect(localKeywordSearch).toHaveBeenCalledTimes(2);
+    localKeywordSearch.mockClear();
+    localKeywordSearch.mockResolvedValue([{ path: 'src/cache.ts', content: 'cache implementation', relevanceScore: .8, lines: '1-1' }]);
+    await internalRetrieveCode('cache implementation', serviceClient,
+      { enableExpansion: false, enableFusion: true, enableRerank: false, perQueryTopK: 1, topK: 5 });
+    expect(localKeywordSearch).toHaveBeenCalledTimes(2);
+  });
+
+  it('retains quality retries for multiple variants and hybrid backends', async () => {
+    FEATURE_FLAGS.retrieval_quality_guard_v1 = true;
+    FEATURE_FLAGS.retrieval_local_repair_v1 = true;
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'true';
+    const localKeywordSearch = jest.fn(async () => [
+      { path: 'src/cache.ts', content: 'auth login service flow', relevanceScore: .8, lines: '1-1' },
+    ]);
+    const semanticSearch = jest.fn(async () => [
+      { path: 'src/semantic.ts', content: 'auth login service flow', relevanceScore: .8, lines: '1-1' },
+    ]);
+    const serviceClient = { getActiveRetrievalProviderId: () => 'local_native', localKeywordSearch, semanticSearch } as any;
+    const expanded = await internalRetrieveCode('auth login service flow', serviceClient,
+      { enableExpansion: true, rewriteMode: 'v2', profile: 'rich', maxVariants: 3, enableRerank: false, topK: 5 });
+    expect(expanded.flow!.metadata.fanoutVariantCount).toBeGreaterThan(1);
+    expect(expanded.fallbackState).toBe('active');
+    expect(localKeywordSearch.mock.calls.length).toBe(Number(expanded.flow!.metadata.fanoutPlannedTasks) + 1);
+    localKeywordSearch.mockClear(); semanticSearch.mockClear();
+    process.env.CONTEXT_ENGINE_OFFLINE_ONLY = 'false';
+    serviceClient.getActiveRetrievalProviderId = () => 'local_native_v2';
+    const hybrid = await internalRetrieveCode('auth login service flow', serviceClient,
+      { enableExpansion: false, enableFusion: true, enableRerank: false, topK: 5 });
+    expect(semanticSearch).toHaveBeenCalledTimes(1);
+    expect(localKeywordSearch).toHaveBeenCalledTimes(2);
+    expect(hybrid.fallbackState).toBe('active');
   });
 
   it('preserves semantic-only behavior when lexical/fusion are off', async () => {
@@ -744,7 +903,23 @@ describe('retrieve internal pipeline', () => {
     expect(runA.map((item) => item.path)).toEqual(runB.map((item) => item.path));
   });
 
+  it('does not request a handler cache scope when the internal cache is disabled', async () => {
+    setInternalCache(undefined);
+    const scope = jest.fn(async () => 'unused-scope');
+    const serviceClient = {
+      getResultCacheScope: scope,
+      semanticSearch: jest.fn(async () => [
+        { path: 'src/cache.ts', content: 'cache', relevanceScore: .9, lines: '1-1' },
+      ]),
+      localKeywordSearch: jest.fn(async () => []),
+    } as any;
+    const result = await internalRetrieveCode('cache', serviceClient, { topK: 3, enableExpansion: false });
+    expect(result.results.length).toBeGreaterThan(0);
+    expect(scope).not.toHaveBeenCalled();
+  });
+
   it('memoizes with stable v2 cache keys across option ordering', async () => {
+    FEATURE_FLAGS.retrieval_local_repair_v1 = true;
     const backing = new Map<string, unknown>();
     const cache = {
       get: jest.fn((key: string) => backing.get(key)),
@@ -753,6 +928,7 @@ describe('retrieve internal pipeline', () => {
     setInternalCache(cache as any);
 
     const serviceClient = {
+      getResultCacheScope: async () => 'unit-workspace:fixed-live-generation',
       semanticSearch: jest.fn(async () => [
         { path: 'src/memo.ts', content: 'memo', relevanceScore: 0.9, lines: '1-2' },
       ]),
@@ -784,7 +960,7 @@ describe('retrieve internal pipeline', () => {
     expect(serviceClient.semanticSearch).toHaveBeenCalledTimes(1);
     expect(cache.set).toHaveBeenCalled();
     const firstSetKey = String((cache.set as jest.Mock).mock.calls[0]?.[0] ?? '');
-    expect(firstSetKey).toContain('retrieve:v2:');
+    expect(firstSetKey).toContain('ce-result-cache:v1:internal-retrieve-v2:unit-workspace:fixed-live-generation:');
   });
 
   it('skips internal memoization when bypassCache=true for request safety', async () => {

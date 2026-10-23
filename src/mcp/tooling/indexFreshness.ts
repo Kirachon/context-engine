@@ -39,7 +39,11 @@ export function evaluateIndexFreshness(status: IndexStatus): IndexFreshnessInfo 
     };
   }
 
-  if (!status.lastIndexed) {
+  if (status.indexAvailability === 'empty_workspace') {
+    return { code: 'unindexed', severity: 'warning', summary: 'Workspace contains no eligible files; no searchable index is available.', guidance: [] };
+  }
+
+  if (!status.lastIndexed || status.indexAvailability === 'uninitialized') {
     return {
       code: 'unindexed',
       severity: 'warning',

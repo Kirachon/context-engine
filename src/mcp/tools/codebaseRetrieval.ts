@@ -8,6 +8,7 @@
 import { ContextServiceClient } from '../serviceClient.js';
 import { internalRetrieveCode } from '../../internal/handlers/retrieval.js';
 import { internalIndexStatus } from '../../internal/handlers/utilities.js';
+import { isLocalRetrievalBudgetError } from '../../internal/retrieval/localRepairBudget.js';
 import { featureEnabled } from '../../config/features.js';
 import type { RankingDiagnostics } from '../../internal/handlers/types.js';
 import { codebaseRetrievalOutputSchema } from '../schemas/convertedToolOutputSchemas.js';
@@ -536,12 +537,15 @@ export async function handleCodebaseRetrieval(
     rankingDiagnostics = retrieval.rankingDiagnostics
       ? (retrieval.rankingDiagnostics as RankingDiagnostics)
       : undefined;
-  } catch {
+  } catch (error) {
+    if (isLocalRetrievalBudgetError(error)) throw error;
     providerFailed = true;
     searchResults = [];
   }
 
-  const status = internalIndexStatus(serviceClient);
+  const status = typeof serviceClient.getIndexStatusAsync === 'function'
+    ? await serviceClient.getIndexStatusAsync(signal)
+    : internalIndexStatus(serviceClient);
   // Provider/runtime failures may be swallowed into empty results by lower layers;
   // treat an unhealthy index + empty payload as an explicit provider failure receipt.
   if (!providerFailed && searchResults.length === 0 && status.status === 'error') {

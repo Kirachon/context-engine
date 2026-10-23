@@ -1,4 +1,5 @@
 import { ContextServiceClient, SearchResult } from '../../mcp/serviceClient.js';
+import { isLocalRetrievalBudgetError } from './localRepairBudget.js';
 import { featureEnabled } from '../../config/features.js';
 import { envInt, envMs } from '../../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../../metrics/metrics.js';
@@ -861,6 +862,7 @@ function runAbortAwareFanoutOperation<T>(
   onDegraded?: (error: unknown) => void
 ): Promise<T> {
   return raceWithAbort(withTimeout(run(), timeoutMs, fallback), flow.signal, stage).catch((error) => {
+    if (isLocalRetrievalBudgetError(error)) throw error;
     if (isRetrievalFlowAborted(flow)) {
       throw error;
     }
@@ -937,13 +939,17 @@ function buildExpandedQueries(query: string, options: NormalizedRetrievalOptions
   return expanded;
 }
 
-function isOfflineLocalNativeClient(serviceClient: ContextServiceClient): boolean {
-  const offlineFlag = process.env.CONTEXT_ENGINE_OFFLINE_ONLY?.toLowerCase();
-  if (offlineFlag !== '1' && offlineFlag !== 'true' && offlineFlag !== 'yes' && offlineFlag !== 'on') {
+function shouldSkipLocalNativeSemanticFanout(serviceClient: ContextServiceClient): boolean {
+  if (typeof serviceClient.getActiveRetrievalProviderId !== 'function'
+    || serviceClient.getActiveRetrievalProviderId() !== 'local_native') {
     return false;
   }
-  return typeof serviceClient.getActiveRetrievalProviderId === 'function'
-    && serviceClient.getActiveRetrievalProviderId() === 'local_native';
+  // Repaired local retrieval must not launch an AI provider just because global
+  // offline mode is unset. Explicit AI tools and semantic-only requests retain
+  // their own provider path; the caller also requires an available lexical backend.
+  if (featureEnabled('retrieval_local_repair_v1')) return true;
+  const offlineFlag = process.env.CONTEXT_ENGINE_OFFLINE_ONLY?.toLowerCase();
+  return offlineFlag === '1' || offlineFlag === 'true' || offlineFlag === 'yes' || offlineFlag === 'on';
 }
 
 function resolveFusionWeights(
@@ -1147,10 +1153,10 @@ export async function retrieve(
           }
         ) => Promise<SearchResult[]>;
       }).localKeywordSearch;
-      const offlineLocalNative = isOfflineLocalNativeClient(serviceClient);
       const canUseLexical = settings.enableLexical && typeof localKeywordSearch === 'function';
-      const enabledBackends: FanoutBackend[] = offlineLocalNative && canUseLexical ? ['lexical'] : ['semantic'];
-      if (!offlineLocalNative && canUseLexical) {
+      const skipSemanticFanout = canUseLexical && shouldSkipLocalNativeSemanticFanout(serviceClient);
+      const enabledBackends: FanoutBackend[] = skipSemanticFanout ? ['lexical'] : ['semantic'];
+      if (!skipSemanticFanout && canUseLexical) {
         enabledBackends.push('lexical');
       }
       if (settings.enableDense && denseProvider) {
@@ -1237,7 +1243,7 @@ export async function retrieve(
         async () => Promise.all(
           expandedQueries.map(async (variant) => {
             assertRetrievalFlowActive(flow, `variant:${variant.index}`);
-            const semanticPromise = offlineLocalNative && canUseLexical
+            const semanticPromise = skipSemanticFanout
               ? Promise.resolve([] as SearchResult[])
               : runFanoutSearch(
                   'semantic',
@@ -1266,7 +1272,7 @@ export async function retrieve(
                   () => runAbortAwareFanoutOperation(
                     flow,
                     `variant:${variant.index}:lexical`,
-                    () => localKeywordSearch(variant.query, settings.perQueryTopK, {
+                    () => localKeywordSearch.call(serviceClient, variant.query, settings.perQueryTopK, {
                       includePaths: settings.includePaths,
                       excludePaths: settings.excludePaths,
                       bypassCache: settings.bypassCache,

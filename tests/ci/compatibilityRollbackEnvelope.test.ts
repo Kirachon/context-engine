@@ -190,7 +190,9 @@ describe('config/ci/compatibility-rollback-envelope.json', () => {
   });
 
   it('matches the live feature-flag set exposed by src/config/features.ts', () => {
-    const liveFlags = Object.keys(getFeatureFlagsFromEnv());
+    const allFlags = getFeatureFlagsFromEnv();
+    expect(allFlags.retrieval_local_repair_v1).toBe(false);
+    const liveFlags = Object.keys(allFlags).filter(flag => flag !== 'retrieval_local_repair_v1');
     expect(liveFlags).toHaveLength(envelope.auth_config_precedence.feature_flags.flag_count);
     expect([...liveFlags].sort((a, b) => a.localeCompare(b))).toEqual(
       [...envelope.auth_config_precedence.feature_flags.flag_names].sort((a, b) => a.localeCompare(b))

@@ -4060,6 +4060,8 @@ describe('ContextServiceClient', () => {
 
     it('should skip startup auto-index for healthy workspaces', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-healthy-'));
+      fs.mkdirSync(path.join(tempDir, 'src'));
+      fs.writeFileSync(path.join(tempDir, 'src/a.ts'), 'export const value = 1;');
       fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       fs.writeFileSync(
         path.join(tempDir, '.context-engine-index-state.json'),
@@ -4127,6 +4129,8 @@ describe('ContextServiceClient', () => {
 
     it('should start startup auto-index for stale workspaces', async () => {
       const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-startup-stale-'));
+      fs.mkdirSync(path.join(tempDir, 'src'));
+      fs.writeFileSync(path.join(tempDir, 'src/a.ts'), 'export const value = 1;');
       fs.writeFileSync(path.join(tempDir, '.context-engine-context-state.json'), '{}', 'utf-8');
       fs.writeFileSync(
         path.join(tempDir, '.context-engine-index-state.json'),

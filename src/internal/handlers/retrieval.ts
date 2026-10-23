@@ -20,7 +20,9 @@ import type {
   RetrievalRankingFallbackReason,
   RetrievalRerankGateState,
 } from './types.js';
-import { getInternalCache } from './performance.js';
+import { buildScopedCacheKey, getResultCacheScope } from './cacheScope.js';
+import { getInternalCache, isInternalCacheEnabled } from './performance.js';
+import { isLocalRetrievalBudgetError } from '../retrieval/localRepairBudget.js';
 
 const RETRIEVE_CACHE_KEY_VERSION = 'v2';
 
@@ -72,22 +74,29 @@ function stableValue(input: unknown): unknown {
 function buildRetrieveCacheKey(
   query: string,
   serviceClient: ContextServiceClient,
+  scope: string | null,
   options?: InternalRetrieveOptions
-): string {
+): string | null {
   const normalizedScope = normalizePathScopeInput({
     includePaths: options?.includePaths,
     excludePaths: options?.excludePaths,
   });
-  const stableOptions = stableValue({
-    ...(options ?? {}),
-    includePaths: normalizedScope.includePaths,
-    excludePaths: normalizedScope.excludePaths,
+  if (!featureEnabled('retrieval_local_repair_v1')) {
+    const stableOptions = stableValue({ ...(options ?? {}),
+      includePaths: normalizedScope.includePaths, excludePaths: normalizedScope.excludePaths });
+    const workspace = typeof serviceClient.getWorkspacePath === 'function'
+      ? serviceClient.getWorkspacePath() : 'unknown-workspace';
+    return `retrieve:${RETRIEVE_CACHE_KEY_VERSION}:${workspace}:${query}:${JSON.stringify(stableOptions)}`;
+  }
+  const { bypassCache: _bypassCache, signal: _signal, ...resultOptions } = options ?? {};
+  return buildScopedCacheKey(scope, `internal-retrieve-${RETRIEVE_CACHE_KEY_VERSION}`, {
+    query,
+    options: {
+      ...resultOptions,
+      includePaths: normalizedScope.includePaths,
+      excludePaths: normalizedScope.excludePaths,
+    },
   });
-  const workspaceScope =
-    typeof (serviceClient as { getWorkspacePath?: unknown }).getWorkspacePath === 'function'
-      ? (serviceClient as { getWorkspacePath: () => string }).getWorkspacePath()
-      : 'unknown-workspace';
-  return `retrieve:${RETRIEVE_CACHE_KEY_VERSION}:${workspaceScope}:${query}:${JSON.stringify(stableOptions)}`;
 }
 
 function stripFlowMetadata(result: InternalRetrieveResult): InternalRetrieveResult {
@@ -271,7 +280,16 @@ export async function internalRetrieveCode(
     });
     let fallbackState: InternalRetrieveResult['fallbackState'] = 'inactive';
 
-    if (qualityGuardEnabled && shouldTriggerQualityGuardFallback(results)) {
+    // Fusion scores are not calibrated absolute relevance. Repeating a successful
+    // identical local-only search cannot add another source of evidence.
+    const completedSameLocalSearch = featureEnabled('retrieval_local_repair_v1')
+      && flow.metadata.fanoutBackendCount === 1
+      && Array.isArray(flow.metadata.fanoutBackends) && flow.metadata.fanoutBackends[0] === 'lexical'
+      && flow.metadata.fanoutVariantCount === 1 && flow.metadata.fanoutCompletedTasks === 1
+      && (normalizedOptions?.perQueryTopK ?? normalizedOptions?.topK ?? 10) === (normalizedOptions?.topK ?? 10)
+      && results.length > 0 && (results as Array<{ retrievalSource?: string; queryVariant?: string }>).every(result => result.retrievalSource === 'lexical'
+        && result.queryVariant?.trim() === query.trim());
+    if (qualityGuardEnabled && !completedSameLocalSearch && shouldTriggerQualityGuardFallback(results)) {
       try {
         const fallbackResults = typeof serviceClient.localKeywordSearch === 'function'
           ? await serviceClient.localKeywordSearch(query, normalizedOptions?.topK ?? 10, {
@@ -297,7 +315,8 @@ export async function internalRetrieveCode(
           normalizedOptions?.topK ?? 10
         );
         fallbackState = 'active';
-      } catch {
+      } catch (error) {
+        if (isLocalRetrievalBudgetError(error)) throw error;
         // Fail open: keep original retrieval output.
       }
     }
@@ -353,13 +372,15 @@ export async function internalRetrieveCode(
     };
   };
 
-  if (normalizedOptions?.bypassCache) {
+  if (normalizedOptions?.bypassCache || !isInternalCacheEnabled()) {
     return resolveResultWithOptionalFallback();
   }
 
   const cache = getInternalCache();
-  const cacheKey = buildRetrieveCacheKey(query, serviceClient, normalizedOptions);
-  const cached = cache.get<InternalRetrieveResult>(cacheKey);
+  const requireFreshScope = featureEnabled('retrieval_local_repair_v1');
+  const scope = requireFreshScope ? await getResultCacheScope(serviceClient, normalizedOptions?.signal) : null;
+  const cacheKey = buildRetrieveCacheKey(query, serviceClient, scope, normalizedOptions);
+  const cached = cacheKey ? cache.get<InternalRetrieveResult>(cacheKey) : undefined;
   if (cached) {
     const cacheFlow = createRetrievalFlowContext(query, {
       signal: normalizedOptions?.signal,
@@ -408,7 +429,8 @@ export async function internalRetrieveCode(
   // an aborted signal is only a narrow tail race -- but skip the cache
   // publication defensively rather than rely solely on that upstream
   // rejection.
-  if (options?.signal?.aborted !== true) {
+  const currentScope = cacheKey && requireFreshScope ? await getResultCacheScope(serviceClient, normalizedOptions?.signal) : null;
+  if (cacheKey && (!requireFreshScope || currentScope === scope) && options?.signal?.aborted !== true) {
     cache.set(cacheKey, stripFlowMetadata(output));
   }
   return output;

@@ -43,6 +43,13 @@ describe('codebase_retrieval Tool', () => {
       handleCodebaseRetrieval({ query: '' } as any, mockServiceClient as any)
     ).rejects.toThrow(/invalid query/i);
   });
+  it('uses the asynchronous fresh-status path when the service supplies it', async () => {
+    mockServiceClient.semanticSearch.mockResolvedValue([]);
+    const status=mockServiceClient.getIndexStatus();
+    mockServiceClient.getIndexStatusAsync=jest.fn(async()=>status);
+    await handleCodebaseRetrieval({query:'cache implementation',profile:'fast'},mockServiceClient);
+    expect(mockServiceClient.getIndexStatusAsync).toHaveBeenCalledWith(undefined);
+  });
 
   it('rejects whitespace-only query', async () => {
     await expect(

@@ -639,6 +639,11 @@ export function getInternalCache(): InternalCache {
   return cache;
 }
 
+/** Custom injected caches remain enabled even when environment defaults are off. */
+export function isInternalCacheEnabled(): boolean {
+  return cache !== disabledCache;
+}
+
 export function getInternalBatcher(): InternalBatcher {
   return batcher;
 }

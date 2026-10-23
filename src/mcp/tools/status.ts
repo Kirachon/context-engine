@@ -17,6 +17,8 @@ export interface IndexStatusArgs {
 }
 
 export type IndexStatusStructuredContent = {
+  indexAvailability?: IndexStatus['indexAvailability'];
+  retrieval?: IndexStatus['retrieval'];
   schema_version: 1;
   status: {
     workspace: string;
@@ -100,6 +102,8 @@ export function buildIndexStatusStructuredContent(status: IndexStatus): IndexSta
   const freshness = evaluateIndexFreshness(status);
   return {
     schema_version: 1,
+    ...(status.indexAvailability ? { indexAvailability: status.indexAvailability } : {}),
+    ...(status.retrieval ? { retrieval: status.retrieval } : {}),
     status: {
       workspace: status.workspace,
       state: status.status,
@@ -156,6 +160,9 @@ export function formatIndexStatusText(status: IndexStatus): string {
   if (status.staleCauses && status.staleCauses.length > 0) {
     output += `| **Stale Causes** | ${status.staleCauses.join(', ')} |\n`;
   }
+  if (status.indexAvailability) output += `| **Index Availability** | ${status.indexAvailability} |\n`;
+  if (status.retrieval) output += `| **Last Local Backend** | ${status.retrieval.lastExecutedBackend ?? 'not executed'} |\n` +
+    `| **Local Repair** | ${status.retrieval.repairEnabled ? 'enabled' : 'disabled'} (${status.retrieval.scorerVersion}) |\n`;
   if (status.indexedGenerationFingerprint) {
     output += `| **Indexed Generation** | \`${status.indexedGenerationFingerprint.slice(0, 12)}…\` |\n`;
   }

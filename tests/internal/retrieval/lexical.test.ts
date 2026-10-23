@@ -1,6 +1,20 @@
 import { scoreLexicalCandidates } from '../../../src/internal/retrieval/lexical.js';
+import { tokenizeLocalSearch } from '../../../src/internal/retrieval/searchHeuristics.js';
 
 describe('scoreLexicalCandidates', () => {
+  it('reuses token frequencies without changing normalized BM25 scores', () => {
+    const documents = [
+      { path: 'src/cacheKeys.ts', content: 'cacheKeys cache keys résumé données résumé', lines: '4-7' },
+      { path: 'src/other.ts', content: 'const cache = "données";', lines: '1-1' },
+    ];
+    const options = { query: 'cache keys résumé données', queryVariant: 'q', variantIndex: 0, variantWeight: 1,
+      queryTokens: tokenizeLocalSearch('cache keys résumé données'), exactMatchWeight: .15 };
+    const previous = scoreLexicalCandidates(documents, { ...options,
+      normalizeText: text => tokenizeLocalSearch(text).join(' ') });
+    const analyzed = scoreLexicalCandidates(documents, { ...options,
+      documentTokens: new Map(documents.map(doc => [doc.path, tokenizeLocalSearch(`${doc.path}\n${doc.content}`)])) });
+    expect(analyzed).toEqual(previous);
+  });
   it('scores and ranks lexical matches using query tokens', () => {
     const results = scoreLexicalCandidates(
       [

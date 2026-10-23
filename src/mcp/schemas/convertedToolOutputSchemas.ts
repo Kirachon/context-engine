@@ -23,6 +23,16 @@ export const indexStatusOutputSchema: JsonSchema = {
   additionalProperties: false,
   required: ['schema_version', 'status', 'freshness', 'guidance', 'embeddingRuntime'],
   properties: {
+    indexAvailability: { type: 'string', enum: ['empty_workspace', 'uninitialized', 'available'] },
+    retrieval: {
+      type: 'object', additionalProperties: false,
+      required: ['lastExecutedBackend', 'repairEnabled', 'scorerVersion', 'sqliteEnabled', 'chunkEnabled', 'embeddingsEnabled'],
+      properties: {
+        lastExecutedBackend: { type: ['string', 'null'], enum: ['file-scan', 'sqlite-fts5', 'chunk-index', 'sqlite-chunk-blend', null] },
+        repairEnabled: { type: 'boolean' }, scorerVersion: { type: 'string' },
+        sqliteEnabled: { type: 'boolean' }, chunkEnabled: { type: 'boolean' }, embeddingsEnabled: { type: 'boolean' },
+      },
+    },
     schema_version: { type: 'integer', const: 1 },
     status: {
       type: 'object',

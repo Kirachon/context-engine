@@ -20,6 +20,7 @@ const STOPWORDS = new Set([
   'at',
   'by',
 ]);
+const LOCAL_STOPWORDS = new Set([...STOPWORDS, 'does', 'can', 'which', 'have', 'has', 'into', 'using']);
 
 const TEST_HINT_TOKENS = new Set([
   'test',
@@ -55,6 +56,22 @@ export function splitIdentifierParts(input: string): string[] {
         .filter(Boolean)
     )
   );
+}
+
+/** Shared opt-in lexical analysis, retaining frequency for BM25 documents. */
+export function tokenizeLocalSearch(input: string): string[] {
+  return input
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1 $2')
+    .replace(/([\p{Ll}\p{N}])([\p{Lu}])/gu, '$1 $2')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(token => token.length >= 3 && !LOCAL_STOPWORDS.has(token))
+    .map(token => {
+      if (token.length > 4 && token.endsWith('ies')) return `${token.slice(0,-3)}y`;
+      if (token.length > 4 && /(?:ches|shes|sses|xes|zes)$/.test(token)) return token.slice(0,-2);
+      if (token.length > 3 && token.endsWith('s') && !/(?:ss|us|is)$/.test(token)) return token.slice(0,-1);
+      return token;
+    });
 }
 
 export function extractSymbolTokens(input: string): string[] {

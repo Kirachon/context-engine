@@ -56,6 +56,7 @@ export interface CompositeHealth {
 }
 
 export interface CorpusHealthInput {
+  indexAvailability?: 'empty_workspace' | 'uninitialized' | 'available';
   status: 'idle' | 'indexing' | 'error';
   isStale: boolean;
   lastIndexed: string | null;
@@ -119,6 +120,8 @@ export function assessCorpusComponent(input: CorpusHealthInput): HealthComponent
   if (input.status === 'indexing') {
     return component('degraded', true, 'indexing_in_progress');
   }
+  if (input.indexAvailability === 'empty_workspace') return component('unavailable', true, 'empty_workspace');
+  if (input.indexAvailability === 'uninitialized') return component('stale', true, 'unindexed');
   if (!input.lastIndexed) {
     return component('stale', true, 'unindexed');
   }

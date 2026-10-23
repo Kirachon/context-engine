@@ -83,13 +83,23 @@ export function assertPathInsideWorkspace(workspaceRoot: string, candidatePath: 
   }
 }
 
+function resolveRealPath(filePath: string): string {
+  try {
+    return fs.realpathSync.native(filePath);
+  } catch {
+    // Preserve compatibility where native realpath is unavailable (for
+    // example, musl without procfs). Resolve afresh; never cache link targets.
+    return fs.realpathSync(filePath);
+  }
+}
+
 export function resolveRealPathInsideWorkspace(
   workspacePath: string,
   candidatePath: string,
   fieldName = 'path'
 ): string {
-  const workspaceRealPath = fs.realpathSync(workspacePath);
-  const candidateRealPath = fs.realpathSync(candidatePath);
+  const workspaceRealPath = resolveRealPath(workspacePath);
+  const candidateRealPath = resolveRealPath(candidatePath);
   assertPathInsideWorkspace(workspaceRealPath, candidateRealPath, fieldName);
   return candidateRealPath;
 }

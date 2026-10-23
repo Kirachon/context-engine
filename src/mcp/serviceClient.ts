@@ -27,10 +27,12 @@ import { envInt, envMs } from '../config/env.js';
 import { incCounter, observeDurationMs, setGauge } from '../metrics/metrics.js';
 import { formatRequestLogPrefix } from '../telemetry/requestContext.js';
 import { assertPathInsideWorkspace, resolveRealPathInsideWorkspace } from '../workspace/pathValidation.js';
+import { openWorkspaceFile, readWorkspaceText, readBoundedText } from '../workspace/openWorkspaceFile.js';
 import type { RootsManager } from './roots/rootsManager.js';
 import type { ClientCapabilitiesManager } from './capabilities/clientCapabilities.js';
 import { evaluateStartupAutoIndex } from './tooling/indexFreshness.js';
 import {
+  canonicalizeIndexFiles,
   computeIndexGenerationFingerprint,
   evaluateCorpusFreshness,
   type IndexStaleCause,
@@ -76,6 +78,11 @@ import {
 } from '../retrieval/providers/semanticRuntime.js';
 import { describeEmbeddingRuntimeStatus, type EmbeddingRuntimeStatus } from '../internal/retrieval/embeddingRuntime.js';
 import { scoreLexicalCandidates } from '../internal/retrieval/lexical.js';
+import { LOCAL_REPAIR_SCORER_VERSION, rankLocalRepairDocuments, prepareLocalRepairDocument, LocalRepairDocumentBuffer, selectLocalSnippet } from '../internal/retrieval/localRepair.js';
+import { LocalRepairAnalysisCache } from '../internal/retrieval/localRepairAnalysis.js';
+import { isLocalRetrievalBudgetError } from '../internal/retrieval/localRepairBudget.js';
+import { tokenizeLocalSearch } from '../internal/retrieval/searchHeuristics.js';
+import { InternalLRUCache } from '../internal/cache/InternalLRUCache.js';
 import {
   snapshotRetrievalV2FeatureFlags,
   type RetrievalArtifactV2Metadata,
@@ -86,6 +93,11 @@ import {
   createConnectorRegistry,
   formatConnectorHint,
 } from '../internal/connectors/registry.js';
+import {
+  buildScopedCacheKey,
+  canonicalWorkspacePath,
+  createResultCacheScope,
+} from '../internal/handlers/cacheScope.js';
 import {
   createHeuristicChunkParser,
   type ChunkRecord,
@@ -135,6 +147,8 @@ export interface SearchResult {
 export type { IndexStaleCause };
 
 export interface IndexStatus {
+  indexAvailability?: 'empty_workspace' | 'uninitialized' | 'available';
+  retrieval?: LocalSearchDiagnostics;
   workspace: string;
   status: 'idle' | 'indexing' | 'error';
   lastIndexed: string | null;
@@ -776,6 +790,15 @@ export interface RetrievalRuntimeMetadata {
   };
 }
 
+export interface LocalSearchDiagnostics {
+  lastExecutedBackend: 'file-scan' | 'sqlite-fts5' | 'chunk-index' | 'sqlite-chunk-blend' | null;
+  repairEnabled: boolean;
+  scorerVersion: string;
+  sqliteEnabled: boolean;
+  chunkEnabled: boolean;
+  embeddingsEnabled: boolean;
+}
+
 export interface RetrievalArtifactMetadataOptions {
   fallbackDomain?: RetrievalFallbackDomain;
   fallbackReason?: string | null;
@@ -799,6 +822,19 @@ export interface WorkspaceFileChange {
 
 /** Maximum file size to read (1MB per best practices - larger files typically are generated/data) */
 const MAX_FILE_SIZE = 1 * 1024 * 1024;
+const CACHE_CORPUS_SCAN_CONCURRENCY = 4;
+
+function throwIfAborted(signal?: AbortSignal): void {
+  if (!signal?.aborted) return;
+  if (signal.reason !== undefined) throw signal.reason;
+  const error = new Error('The operation was aborted.');
+  error.name = 'AbortError';
+  throw error;
+}
+
+function isAbortError(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'AbortError';
+}
 
 /** Special files to index by exact name (no extension-based matching) */
 const INDEXABLE_FILES_BY_NAME = new Set([
@@ -1739,6 +1775,8 @@ export class ContextServiceClient {
   /** Loaded ignore patterns (from .gitignore and .contextignore) */
   private ignorePatterns: string[] = [];
   private ignoreGlobMatchers = new Map<string, { direct: Minimatch; nested?: Minimatch }>();
+  private ignoreDecisionRules: readonly string[] | null = null;
+  private ignorePathDecisions = new InternalLRUCache({ maxEntries: 4096, defaultTtlMs: 0 });
 
   /** Flag to track if ignore patterns have been loaded */
   private ignorePatternsLoaded: boolean = false;
@@ -1792,6 +1830,7 @@ export class ContextServiceClient {
   private readonly connectorRegistry = createConnectorRegistry();
   private aiProvider: AIProvider | null = null;
   private lastSearchDiagnostics: SearchDiagnostics | null = null;
+  private lastLocalSearchBackend: LocalSearchDiagnostics['lastExecutedBackend'] = null;
   private lastSymbolNavigationDiagnostics: SymbolNavigationDiagnostics | null = null;
   private fallbackDiscoverFilesCache: {
     cacheKey: string;
@@ -1800,6 +1839,7 @@ export class ContextServiceClient {
   } | null = null;
   private fallbackDiscoverFilesInFlight: Promise<string[]> | null = null;
   private keywordFallbackSearchCacheGeneration = 0;
+  private readonly localRepairAnalysisCache = new LocalRepairAnalysisCache();
   private keywordFallbackSearchCache: Map<string, CacheEntry<SearchResult[]>> = new Map();
   private keywordFallbackSearchInFlight: Map<string, KeywordFallbackSearchInFlightRequest> = new Map();
 
@@ -1855,6 +1895,14 @@ export class ContextServiceClient {
 
   getRetrievalRuntimeMetadata(): RetrievalRuntimeMetadata {
     return this.retrievalAccess.getRuntimeMetadata();
+  }
+
+  private getLocalSearchDiagnostics(): LocalSearchDiagnostics {
+    const repairEnabled = featureEnabled('retrieval_local_repair_v1');
+    return { lastExecutedBackend: this.lastLocalSearchBackend, repairEnabled,
+      scorerVersion: repairEnabled ? LOCAL_REPAIR_SCORER_VERSION : 'legacy-file-scan',
+      sqliteEnabled: this.isLexicalSqliteSearchEnabled(), chunkEnabled: this.isChunkAwareExactSearchEnabled(),
+      embeddingsEnabled: featureEnabled('retrieval_lancedb_v1') && featureEnabled('retrieval_transformer_embeddings_v1') };
   }
 
   getRetrievalArtifactMetadata(
@@ -2001,9 +2049,12 @@ export class ContextServiceClient {
     return files;
   }
 
-  private async getFallbackSearchFileContent(filePath: string, bypassCache: boolean): Promise<string> {
+  private async getFallbackSearchFileContent(filePath: string, bypassCache: boolean, signal?: AbortSignal): Promise<string> {
     const workspacePath = path.resolve(this.workspacePath);
     const candidatePath = path.resolve(this.workspacePath, filePath);
+    if (featureEnabled('retrieval_local_repair_v1')) {
+      return readWorkspaceText(this.workspacePath, candidatePath, MAX_FILE_SIZE, signal);
+    }
 
     if (!bypassCache) {
       const cached = sharedFallbackFileContentCache.get(candidatePath);
@@ -2219,9 +2270,250 @@ export class ContextServiceClient {
     return this.filterPathsByClientRoots([...discovered]);
   }
 
+  private async collectLiveCacheCorpus(signal?: AbortSignal): Promise<{
+    files: Record<string, { hash: string }>;
+    indexingRoots: string[];
+    ignorePatterns: string[];
+    eligibleCount: number;
+  }> {
+    throwIfAborted(signal);
+    const workspacePath = canonicalWorkspacePath(this.workspacePath);
+    throwIfAborted(signal);
+    if (!workspacePath) {
+      throw new Error('Workspace path cannot be canonicalized for cache identity.');
+    }
+
+    this.loadIgnorePatterns(true, true);
+    throwIfAborted(signal);
+    const roots = this.rootsManager?.getIndexingRoots() ?? [this.workspacePath];
+    if (!Array.isArray(roots)) {
+      throw new Error('Indexing roots are unavailable for cache identity.');
+    }
+
+    const canonicalRoots: string[] = [];
+    const discovered = new Set<string>();
+    for (const root of roots) {
+      const canonicalRoot = canonicalWorkspacePath(root);
+      if (!canonicalRoot) {
+        throw new Error('An indexing root cannot be canonicalized for cache identity.');
+      }
+      const relativeRoot = path.relative(workspacePath, canonicalRoot);
+      if (relativeRoot === '..' || relativeRoot.startsWith(`..${path.sep}`) || path.isAbsolute(relativeRoot)) {
+        throw new Error('An indexing root is outside the canonical workspace.');
+      }
+      canonicalRoots.push(relativeRoot.replace(/\\/g, '/'));
+
+      const walk = async (directoryPath: string): Promise<void> => {
+        throwIfAborted(signal);
+        const entries = await fs.promises.readdir(directoryPath, { withFileTypes: true });
+        throwIfAborted(signal);
+        entries.sort((left, right) => left.name.localeCompare(right.name));
+        for (const entry of entries) {
+          throwIfAborted(signal);
+          const fullPath = path.join(directoryPath, entry.name);
+          const relativePath = path.relative(this.workspacePath, fullPath).replace(/\\/g, '/');
+          if (entry.name.startsWith('.') && !INDEXABLE_FILES_BY_NAME.has(entry.name)) continue;
+          if (entry.isDirectory() && DEFAULT_EXCLUDED_DIRS.has(entry.name)) continue;
+          if (this.shouldIgnorePath(relativePath)) continue;
+          if (entry.isDirectory()) {
+            await walk(fullPath);
+          } else if (entry.isFile() && this.shouldIndexFile(entry.name)) {
+            discovered.add(relativePath);
+          }
+        }
+      };
+
+      await walk(root);
+    }
+
+    throwIfAborted(signal);
+    const relativePaths = this.filterPathsByClientRoots([...discovered]).sort();
+    const fileHashes: Array<string | null> = new Array(relativePaths.length).fill(null);
+    let nextFileIndex = 0;
+    let scanFailed = false;
+    let scanFailure: unknown;
+
+    const readFileHash = async (relativePath: string): Promise<string | null> => {
+      throwIfAborted(signal);
+      const fullPath = path.join(this.workspacePath, relativePath);
+      const handle = await openWorkspaceFile(this.workspacePath, fullPath, signal);
+      let closed: Promise<void> | undefined;
+      const close = () => closed ??= handle.close();
+      const onAbort = () => { void close().catch(() => undefined); };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      try {
+        throwIfAborted(signal);
+        const stats = await handle.stat();
+        let indexedContent: string | null;
+        if (stats.size > MAX_FILE_SIZE) {
+          const probe = Buffer.alloc(Math.min(8192, stats.size));
+          const { bytesRead } = await handle.read(probe, 0, probe.length, 0);
+          throwIfAborted(signal);
+          indexedContent = this.isLikelyBinaryBuffer(probe.subarray(0, bytesRead))
+            ? null : this.buildLargeFileMetadataSummary(relativePath, stats.size, stats.mtimeMs);
+        } else {
+          const content = await readBoundedText(handle, MAX_FILE_SIZE, signal);
+          throwIfAborted(signal);
+          indexedContent = this.isBinaryContent(content) ? null : content;
+        }
+        return indexedContent === null ? null : this.hashContent(indexedContent);
+      } finally {
+        signal?.removeEventListener('abort', onAbort);
+        await close();
+      }
+    };
+
+    const scanWorker = async (): Promise<void> => {
+      while (!scanFailed) {
+        try {
+          throwIfAborted(signal);
+          const fileIndex = nextFileIndex++;
+          if (fileIndex >= relativePaths.length) return;
+          fileHashes[fileIndex] = await readFileHash(relativePaths[fileIndex]);
+        } catch (error) {
+          scanFailure = error;
+          scanFailed = true;
+          return;
+        }
+      }
+    };
+
+    const workerCount = Math.min(CACHE_CORPUS_SCAN_CONCURRENCY, relativePaths.length);
+    await Promise.all(Array.from({ length: workerCount }, () => scanWorker()));
+    throwIfAborted(signal);
+    if (scanFailed) throw scanFailure;
+
+    const files: Record<string, { hash: string }> = {};
+    for (let index = 0; index < relativePaths.length; index += 1) {
+      throwIfAborted(signal);
+      const hash = fileHashes[index];
+      if (hash !== null) {
+        files[relativePaths[index].replace(/\\/g, '/')] = { hash };
+      }
+    }
+
+    return {
+      files,
+      indexingRoots: canonicalRoots.sort(),
+      ignorePatterns: [...this.ignorePatterns],
+      eligibleCount: relativePaths.length,
+    };
+  }
+
+  private markCacheScopeUnavailable(): void {
+    if (this.indexStatus.status === 'indexing') return;
+    this.indexStatus = {
+      ...this.indexStatus,
+      isStale: true,
+      staleCauses: undefined,
+      currentGenerationFingerprint: null,
+    };
+  }
+
+  /**
+   * Return a reusable result-cache namespace only when the persisted index is
+   * proven to match a complete, live scan of the currently eligible corpus.
+   * Index-state generation alone is not a content identity: watcher-disabled
+   * workspaces must be hashed before every cache lookup.
+   */
+  async getResultCacheScope(signal?: AbortSignal): Promise<string | null> {
+    return (await this.getValidatedCacheCorpus(signal))?.scope ?? null;
+  }
+
+  private async getValidatedCacheCorpus(signal?: AbortSignal): Promise<{ scope: string | null; eligibleCount: number } | null> {
+    if (signal?.aborted) return null;
+    if (this.indexStatus.status === 'indexing') return null;
+    const store = this.getIndexStateStore();
+    if (!store) return null;
+
+    try {
+      throwIfAborted(signal);
+      const loaded = store.loadWithMetadata();
+      throwIfAborted(signal);
+      this.warnIndexStateLoadMetadata(loaded.metadata);
+      const state = loaded.state;
+      if (
+        loaded.metadata.unsupported_schema_version !== undefined
+        || state.schema_version !== 2
+        || state.provider_id !== this.getActiveRetrievalProviderId()
+        || state.workspace_fingerprint !== this.getCurrentIndexStateWorkspaceFingerprint()
+        || state.feature_flags_snapshot !== this.getCurrentIndexStateFeatureFlagsSnapshot()
+        || typeof state.generation_fingerprint !== 'string'
+      ) {
+        throwIfAborted(signal);
+        this.markCacheScopeUnavailable();
+        return null;
+      }
+
+      const corpus = await this.collectLiveCacheCorpus(signal);
+      throwIfAborted(signal);
+      const indexedFiles: Record<string, { hash: string }> = {};
+      for (const [rawPath, entry] of Object.entries(state.files ?? {})) {
+        if (!entry || typeof entry.hash !== 'string' || !entry.hash) {
+          throwIfAborted(signal);
+          this.markCacheScopeUnavailable();
+          return null;
+        }
+        indexedFiles[rawPath] = { hash: entry.hash };
+      }
+      const indexedGeneration = computeIndexGenerationFingerprint(indexedFiles);
+      if (indexedGeneration !== state.generation_fingerprint) {
+        throwIfAborted(signal);
+        this.markCacheScopeUnavailable();
+        return null;
+      }
+
+      const lastIndexed = this.indexStatus.lastIndexed ?? state.updated_at ?? null;
+      const assessment = evaluateCorpusFreshness({
+        lastIndexed,
+        ageIsStale: this.computeAgeIsStale(lastIndexed),
+        indexedGenerationFingerprint: indexedGeneration,
+        indexedFiles: canonicalizeIndexFiles(indexedFiles),
+        currentFiles: corpus.files,
+      });
+      throwIfAborted(signal);
+      this.indexStatus = {
+        ...this.indexStatus,
+        fileCount: Object.keys(corpus.files).length,
+        isStale: assessment.isStale,
+        staleCauses: assessment.staleCauses.length > 0 ? assessment.staleCauses : undefined,
+        indexedGenerationFingerprint: assessment.indexedGenerationFingerprint,
+        currentGenerationFingerprint: assessment.currentGenerationFingerprint,
+      };
+      if (assessment.isStale || !assessment.currentGenerationFingerprint) {
+        return { scope: null, eligibleCount: corpus.eligibleCount };
+      }
+
+      const scope = createResultCacheScope({
+        workspacePath: this.workspacePath,
+        liveCorpusFingerprint: assessment.currentGenerationFingerprint,
+        providerRuntime: {
+          retrievalProvider: this.getActiveRetrievalProviderId(),
+          retrievalRuntime: this.retrievalAccess.getRuntimeMetadata(),
+          localRepair: featureEnabled('retrieval_local_repair_v1') ? LOCAL_REPAIR_SCORER_VERSION : 'legacy',
+          aiProvider: this.getActiveAIProviderId(),
+          retrievalFeatureFlags: snapshotRetrievalV2FeatureFlags(),
+        },
+        indexState: {
+          schemaVersion: state.schema_version,
+          providerId: state.provider_id,
+          generationFingerprint: indexedGeneration,
+          featureFlagsSnapshot: state.feature_flags_snapshot,
+          indexingRoots: corpus.indexingRoots,
+          ignorePatterns: corpus.ignorePatterns,
+        },
+      });
+      return scope ? { scope, eligibleCount: corpus.eligibleCount } : null;
+    } catch {
+      if (signal?.aborted) return null;
+      this.markCacheScopeUnavailable();
+      return null;
+    }
+  }
+
   private hashWorkspaceFileSync(relativePath: string): string | null {
     try {
-      const absolutePath = path.join(this.workspacePath, relativePath);
+      const absolutePath = resolveRealPathInsideWorkspace(this.workspacePath, path.join(this.workspacePath, relativePath));
       if (!fs.existsSync(absolutePath) || !fs.statSync(absolutePath).isFile()) {
         return null;
       }
@@ -2236,7 +2528,7 @@ export class ContextServiceClient {
    * R4 — compare index-state generation/content against the live eligible corpus
    * without relying on mtimes or lastIndexed age alone.
    */
-  private refreshCorpusFreshness(): void {
+  private refreshCorpusFreshness(): number | undefined {
     if (this.indexStatus.status === 'indexing') {
       return;
     }
@@ -2260,6 +2552,7 @@ export class ContextServiceClient {
     let indexedState: IndexStateFile;
     try {
       indexedState = this.loadIndexStateForActiveProvider(store);
+      canonicalizeIndexFiles(indexedState.files ?? {});
     } catch {
       this.indexStatus = {
         ...this.indexStatus,
@@ -2277,7 +2570,8 @@ export class ContextServiceClient {
       indexedFiles[normalizedPath] = { hash: entry.hash };
     }
     const currentFiles: Record<string, { hash: string }> = {};
-    for (const relativePath of this.discoverWorkspaceFilesSync()) {
+    const eligibleFiles = this.discoverWorkspaceFilesSync();
+    for (const relativePath of eligibleFiles) {
       const hash = this.hashWorkspaceFileSync(relativePath);
       if (hash) {
         currentFiles[relativePath.replace(/\\/g, '/')] = { hash };
@@ -2301,6 +2595,7 @@ export class ContextServiceClient {
       indexedGenerationFingerprint: assessment.indexedGenerationFingerprint,
       currentGenerationFingerprint: assessment.currentGenerationFingerprint,
     };
+    return eligibleFiles.length;
   }
 
   /**
@@ -2372,43 +2667,58 @@ export class ContextServiceClient {
   /**
    * Load ignore patterns from .gitignore and .contextignore files
    */
-  private loadIgnorePatterns(): void {
-    if (this.ignorePatternsLoaded) return;
+  private loadIgnorePatterns(force = false, failClosed = false): void {
+    if (this.ignorePatternsLoaded && !force) return;
 
+    const previousPatterns = this.ignorePatterns;
     this.ignorePatterns = [...DEFAULT_EXCLUDED_PATTERNS];
-    this.ignoreGlobMatchers.clear();
     const debugIndex = process.env.CE_DEBUG_INDEX === 'true';
 
-    // Try to load .gitignore
-    const gitignorePath = path.join(this.workspacePath, '.gitignore');
-    if (fs.existsSync(gitignorePath)) {
-      try {
-        const content = fs.readFileSync(gitignorePath, 'utf-8');
-        const patterns = this.parseIgnoreFile(content);
+    const loadIgnoreFile = (ignoreFileName: string): void => {
+      const ignorePath = path.join(this.workspacePath, ignoreFileName);
+      if (failClosed) {
+        let stats: fs.Stats;
+        try {
+          stats = fs.lstatSync(ignorePath);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException)?.code === 'ENOENT') return;
+          throw error;
+        }
+        if (!stats.isFile()) {
+          throw new Error(`Ignore path is not a regular file: ${ignoreFileName}`);
+        }
+        const patterns = this.parseIgnoreFile(fs.readFileSync(ignorePath, 'utf-8'));
         this.ignorePatterns.push(...patterns);
         if (debugIndex) {
-          console.error(`Loaded ${patterns.length} patterns from .gitignore`);
+          console.error(`Loaded ${patterns.length} patterns from ${ignoreFileName}`);
+        }
+        return;
+      }
+
+      if (!fs.existsSync(ignorePath)) return;
+      try {
+        const patterns = this.parseIgnoreFile(fs.readFileSync(ignorePath, 'utf-8'));
+        this.ignorePatterns.push(...patterns);
+        if (debugIndex) {
+          console.error(`Loaded ${patterns.length} patterns from ${ignoreFileName}`);
         }
       } catch (error) {
-        console.error('Error loading .gitignore:', error);
+        console.error(`Error loading ${ignoreFileName}:`, error);
       }
-    }
+    };
+
+    loadIgnoreFile('.gitignore');
 
     // Try to load context ignore files (.contextignore plus the legacy compatibility alias)
     for (const ignoreFileName of CONTEXT_IGNORE_FILES) {
-      const contextIgnorePath = path.join(this.workspacePath, ignoreFileName);
-      if (fs.existsSync(contextIgnorePath)) {
-        try {
-          const content = fs.readFileSync(contextIgnorePath, 'utf-8');
-          const patterns = this.parseIgnoreFile(content);
-          this.ignorePatterns.push(...patterns);
-          if (debugIndex) {
-            console.error(`Loaded ${patterns.length} patterns from ${ignoreFileName}`);
-          }
-        } catch (error) {
-          console.error(`Error loading ${ignoreFileName}:`, error);
-        }
-      }
+      loadIgnoreFile(ignoreFileName);
+    }
+
+    if (previousPatterns.length === this.ignorePatterns.length
+      && previousPatterns.every((pattern, index) => pattern === this.ignorePatterns[index])) {
+      this.ignorePatterns = previousPatterns;
+    } else {
+      this.ignoreGlobMatchers.clear();
     }
 
     if (debugIndex) {
@@ -2465,6 +2775,22 @@ export class ContextServiceClient {
    * - Other patterns match anywhere in the path
    */
   private shouldIgnorePath(relativePath: string): boolean {
+    if (!featureEnabled('retrieval_local_repair_v1') || relativePath.length > 2048) {
+      return this.computeShouldIgnorePath(relativePath);
+    }
+    if (this.ignoreDecisionRules !== this.ignorePatterns) {
+      this.ignorePathDecisions = new InternalLRUCache({ maxEntries: 4096, defaultTtlMs: 0 });
+      this.ignoreDecisionRules = this.ignorePatterns;
+    }
+    const key = relativePath.replace(/\\/g, '/');
+    const cached = this.ignorePathDecisions.get<boolean>(key);
+    if (cached !== undefined) return cached;
+    const decision = this.computeShouldIgnorePath(relativePath);
+    this.ignorePathDecisions.set(key, decision);
+    return decision;
+  }
+
+  private computeShouldIgnorePath(relativePath: string): boolean {
     // Normalize path separators
     const normalizedPath = relativePath.replace(/\\/g, '/');
     if (isMemorySuggestionPath(normalizedPath)) {
@@ -2990,6 +3316,9 @@ export class ContextServiceClient {
    * Clear the search cache
    */
   clearCache(): void {
+    this.localRepairAnalysisCache.clear();
+    this.ignorePathDecisions = new InternalLRUCache({ maxEntries: 4096, defaultTtlMs: 0 });
+    this.ignoreDecisionRules = null;
     this.searchCache.clear();
     this.semanticSearchCacheGeneration += 1;
     this.semanticSearchInFlight.clear();
@@ -3724,7 +4053,7 @@ export class ContextServiceClient {
     maxOutputLength?: number
   ): string {
     const retrievalProvider = providerId ?? this.getActiveRetrievalProviderId();
-    return serializeSemanticSearchCacheIdentity({
+    const legacyKey = serializeSemanticSearchCacheIdentity({
       keyVersion: SEMANTIC_SEARCH_CACHE_KEY_VERSION,
       retrievalProvider,
       query,
@@ -3735,6 +4064,7 @@ export class ContextServiceClient {
         ? this.currentCommitHash.substring(0, 12)
         : undefined,
     });
+    return featureEnabled('retrieval_local_repair_v1') ? `${legacyKey}:repair=${LOCAL_REPAIR_SCORER_VERSION}` : legacyKey;
   }
 
   /**
@@ -3754,7 +4084,8 @@ export class ContextServiceClient {
   }
 
   private getKeywordFallbackSearchCacheKey(query: string, topK: number, scope?: PathScopeOptions): string {
-    const baseKey = `keyword:${query}:${topK}:${this.getPathScopeCacheFragment(scope)}`;
+    const legacyKey = `keyword:${query}:${topK}:${this.getPathScopeCacheFragment(scope)}`;
+    const baseKey = featureEnabled('retrieval_local_repair_v1') ? `${legacyKey}:repair=${LOCAL_REPAIR_SCORER_VERSION}` : legacyKey;
     if (this.commitCacheEnabled && this.currentCommitHash) {
       return `${this.currentCommitHash.substring(0, 12)}:${baseKey}`;
     }
@@ -4271,7 +4602,32 @@ export class ContextServiceClient {
     this.hydrateIndexStatusFromDisk();
     // Refresh age + corpus/generation staleness (R4).
     this.updateIndexStatus({});
-    this.refreshCorpusFreshness();
+    const eligibleCount = this.refreshCorpusFreshness() ?? this.discoverWorkspaceFilesSync().length;
+    return this.buildIndexStatus(eligibleCount, options);
+  }
+
+  /** A fresh bounded scan for async retrieval callers; never reuse a prior scan.
+   * A stale scan can report status but never authorize a result-cache hit.
+   * Unavailable validation falls back to the complete synchronous status path. */
+  async getIndexStatusAsync(signal?: AbortSignal): Promise<IndexStatus> {
+    throwIfAborted(signal);
+    if (featureEnabled('retrieval_local_repair_v1')) {
+      this.hydrateIndexStatusFromDisk();
+      this.updateIndexStatus({});
+      const corpus = await this.getValidatedCacheCorpus(signal);
+      throwIfAborted(signal);
+      if (corpus) return this.buildIndexStatus(corpus.eligibleCount);
+    }
+    return this.getIndexStatus();
+  }
+
+  private buildIndexStatus(eligibleCount: number, options?: { session?: SessionHealthInput }): IndexStatus {
+    const indexAvailability = eligibleCount === 0 ? 'empty_workspace'
+      : this.indexStatus.lastIndexed && this.indexStatus.fileCount > 0 ? 'available' : 'uninitialized';
+    if (indexAvailability === 'uninitialized') {
+      this.indexStatus = { ...this.indexStatus, isStale: true, staleCauses: [...new Set([...(this.indexStatus.staleCauses ?? []), 'unindexed' as const])] };
+    }
+    this.indexStatus = { ...this.indexStatus, indexAvailability };
     const embeddingRuntime = describeEmbeddingRuntimeStatus(featureEnabled('retrieval_lancedb_v1'));
     const base: IndexStatus =
       embeddingRuntime && embeddingRuntime.state !== 'uninitialized'
@@ -4280,6 +4636,8 @@ export class ContextServiceClient {
             embeddingRuntime,
           }
         : { ...this.indexStatus };
+    base.indexAvailability = indexAvailability;
+    base.retrieval = this.getLocalSearchDiagnostics();
     const composite = this.buildCompositeHealthForStatus(base, options?.session);
     return {
       ...base,
@@ -4327,6 +4685,7 @@ export class ContextServiceClient {
         isStale: status.isStale,
         lastIndexed: status.lastIndexed,
         staleCauses: status.staleCauses,
+        indexAvailability: status.indexAvailability,
       },
       lexical: {
         featureEnabled: this.isLexicalSqliteSearchEnabled(),
@@ -4531,6 +4890,7 @@ export class ContextServiceClient {
       signal?: AbortSignal;
     }
   ): Promise<SearchResult[]> {
+    throwIfAborted(options?.signal);
     const metricsStart = Date.now();
     const debugSearch = process.env.CE_DEBUG_SEARCH === 'true';
     const bypassCache = options?.bypassCache ?? false;
@@ -4538,18 +4898,25 @@ export class ContextServiceClient {
     const retrievalProvider = this.getActiveRetrievalProviderId();
     this.setLastSearchDiagnostics(null);
 
-    // Use commit-aware cache key when reactive mode is enabled. maxOutputLength is
-    // result-affecting (it truncates/limits returned content) so it MUST be part of
-    // the identity here, not just the in-flight dedup key -- see SemanticSearchCacheIdentity.
-    const memoryCacheKey = this.getCommitAwareCacheKey(
+    const requireFreshScope = featureEnabled('retrieval_local_repair_v1');
+    const resultCacheScope = !requireFreshScope || bypassCache ? null : await this.getResultCacheScope(options?.signal);
+    throwIfAborted(options?.signal);
+    const cacheable = !bypassCache && (!requireFreshScope || resultCacheScope !== null);
+    // Use one fully scoped identity for memory, disk, and in-flight reuse.
+    // maxOutputLength and normalized include/exclude paths remain part of the
+    // request identity; workspace, corpus, provider, and runtime are in scope.
+    const requestCacheIdentity = this.getCommitAwareCacheKey(
       query,
       topK,
       retrievalProvider,
       normalizedScope,
       options?.maxOutputLength
     );
+    const memoryCacheKey = resultCacheScope
+      ? buildScopedCacheKey(resultCacheScope, 'semantic-search', { requestCacheIdentity })
+      : !requireFreshScope ? requestCacheIdentity : null;
 
-    if (!bypassCache) {
+    if (cacheable && memoryCacheKey) {
       const cached = this.getCachedSearch(memoryCacheKey);
       if (cached) {
         this.cacheHits++;
@@ -4576,12 +4943,12 @@ export class ContextServiceClient {
       }
     }
 
-    const indexFingerprint = this.getIndexFingerprint();
-    const persistentCacheKey = (indexFingerprint !== 'no-state' && indexFingerprint !== 'unknown')
+    const indexFingerprint = cacheable ? this.getIndexFingerprint() : 'unknown';
+    const persistentCacheKey = (cacheable && memoryCacheKey && indexFingerprint !== 'no-state' && indexFingerprint !== 'unknown')
       ? `${indexFingerprint}:${memoryCacheKey}`
       : null;
 
-    if (!bypassCache && persistentCacheKey) {
+    if (cacheable && persistentCacheKey) {
       const persistent = this.getPersistentSearch(persistentCacheKey);
       if (persistent) {
         this.cacheHits++;
@@ -4601,17 +4968,11 @@ export class ContextServiceClient {
       }
     }
 
-    const inFlightKey = this.getSemanticSearchInFlightKey(
-      query,
-      topK,
-      retrievalProvider,
-      options?.maxOutputLength,
-      normalizedScope
-    );
-    const inFlightRequest = this.semanticSearchInFlight.get(inFlightKey);
+    const inFlightKey = memoryCacheKey ?? `uncacheable:${crypto.randomUUID()}`;
+    const inFlightRequest = !requireFreshScope || cacheable ? this.semanticSearchInFlight.get(inFlightKey) : undefined;
     if (inFlightRequest) {
       if (inFlightRequest.generation === this.semanticSearchCacheGeneration) {
-        inFlightRequest.shouldCache = inFlightRequest.shouldCache || !bypassCache;
+        inFlightRequest.shouldCache = inFlightRequest.shouldCache || cacheable;
         this.cacheHits++;
         incCounter(
           'context_engine_semantic_search_total',
@@ -4620,6 +4981,7 @@ export class ContextServiceClient {
           'Total semanticSearch calls labeled by cache path.'
         );
         const searchResults = await inFlightRequest.promise;
+        throwIfAborted(options?.signal);
         observeDurationMs(
           'context_engine_semantic_search_duration_seconds',
           { cache: 'inflight', bypass: bypassCache ? 'true' : 'false' },
@@ -4635,26 +4997,31 @@ export class ContextServiceClient {
     const currentSearchGeneration = this.semanticSearchCacheGeneration;
     const sharedRequest: SemanticSearchInFlightRequest = {
       generation: currentSearchGeneration,
-      shouldCache: !bypassCache,
+      shouldCache: cacheable,
       promise: Promise.resolve().then(async () => {
         try {
           const searchResults = this.filterSearchResultsByScope(
             await this.retrievalProvider.search(query, topK, options),
             normalizedScope
           );
+          // A completed provider result remains useful if the caller aborts at
+          // the completion boundary; the cache guard below still prevents
+          // publishing it after cancellation.
 
           if (
             sharedRequest.generation === this.semanticSearchCacheGeneration &&
             sharedRequest.shouldCache &&
             options?.signal?.aborted !== true
           ) {
-            // Cache results. R1b: the aborted check above only suppresses
-            // publication for the call that actually created this shared
-            // request -- other in-flight callers that share this promise
-            // via cache-dedup are unaffected and unaware of this signal.
-            this.setCachedSearch(memoryCacheKey, searchResults);
-            if (persistentCacheKey) {
-              this.setPersistentSearch(persistentCacheKey, searchResults);
+            const currentScope = requireFreshScope ? await this.getResultCacheScope(options?.signal) : null;
+            throwIfAborted(options?.signal);
+            if ((!requireFreshScope || currentScope === resultCacheScope) && memoryCacheKey
+              && sharedRequest.generation === this.semanticSearchCacheGeneration
+              && sharedRequest.shouldCache && !Boolean(options?.signal?.aborted)) {
+              this.setCachedSearch(memoryCacheKey, searchResults);
+              if (persistentCacheKey) {
+                this.setPersistentSearch(persistentCacheKey, searchResults);
+              }
             }
           }
           this.maybeRunRetrievalShadowCompare(query, topK, searchResults);
@@ -4673,6 +5040,8 @@ export class ContextServiceClient {
           );
           return searchResults;
         } catch (error) {
+          if (isLocalRetrievalBudgetError(error)) throw error;
+          if (options?.signal?.aborted || isAbortError(error)) throw error;
           console.error(formatScopedLog('Search failed:'), error);
           this.cacheMisses++;
           incCounter(
@@ -4689,11 +5058,14 @@ export class ContextServiceClient {
           );
           try {
             return await this.keywordFallbackSearch(query, topK, {
-              bypassCache,
+              bypassCache: bypassCache || !cacheable,
               includePaths: normalizedScope?.includePaths,
               excludePaths: normalizedScope?.excludePaths,
+              signal: options?.signal,
             });
-          } catch {
+          } catch (fallbackError) {
+            if (isLocalRetrievalBudgetError(fallbackError)) throw fallbackError;
+            if (options?.signal?.aborted || isAbortError(fallbackError)) throw fallbackError;
             return [];
           }
         } finally {
@@ -4703,7 +5075,9 @@ export class ContextServiceClient {
         }
       }),
     };
-    this.semanticSearchInFlight.set(inFlightKey, sharedRequest);
+    if (!requireFreshScope || cacheable) {
+      this.semanticSearchInFlight.set(inFlightKey, sharedRequest);
+    }
 
     try {
       return await sharedRequest.promise;
@@ -5856,8 +6230,10 @@ export class ContextServiceClient {
     primaryResults: SearchResult[],
     normalizedScope: NormalizedPathScope | undefined,
     bypassCache: boolean,
-    priority: ContextOptions['priority']
+    priority: ContextOptions['priority'],
+    signal?: AbortSignal
   ): Promise<ContextRoutingShadowCompareReceipt | undefined> {
+    throwIfAborted(signal);
     const shadowCompare = this.getConfiguredShadowCompareState();
     if (!shadowCompare.enabled) {
       return undefined;
@@ -5883,19 +6259,21 @@ export class ContextServiceClient {
 
     const semanticSearch = (q: string, k: number) =>
       bypassCache
-        ? this.semanticSearch(q, k, { bypassCache: true, priority, ...normalizedScope })
-        : this.semanticSearch(q, k, { priority, ...normalizedScope });
+        ? this.semanticSearch(q, k, { bypassCache: true, priority, ...normalizedScope, signal })
+        : this.semanticSearch(q, k, { priority, ...normalizedScope, signal });
 
     const previousDiagnostics = this.getLastSearchDiagnostics();
     try {
       const shadowResults = await semanticSearch(query, topK);
+      throwIfAborted(signal);
       return this.buildContextRoutingShadowCompareReceipt(
         primaryRoute,
         primaryResults,
         shadowResults,
         shadowCompare.sampleRate
       );
-    } catch {
+    } catch (error) {
+      if (signal?.aborted || isAbortError(error)) throw error;
       return {
         enabled: true,
         executed: false,
@@ -5981,10 +6359,23 @@ export class ContextServiceClient {
       signal?: AbortSignal;
     }
   ): Promise<SearchResult[]> {
-    const bypassCache = options?.bypassCache === true;
+    // Preserve the existing fail-open contract for a caller that has already
+    // stopped waiting, while preventing that request from reading or writing
+    // shared cache state. A signal aborted during this scan still cancels it.
+    const callerAlreadyAborted = options?.signal?.aborted === true;
+    const signal = callerAlreadyAborted ? undefined : options?.signal;
+    const bypassCache = options?.bypassCache === true || callerAlreadyAborted;
+    const requireFreshScope = featureEnabled('retrieval_local_repair_v1');
+    const resultCacheScope = !requireFreshScope || bypassCache ? null : await this.getResultCacheScope(signal);
+    throwIfAborted(signal);
+    const cacheable = !bypassCache && (!requireFreshScope || resultCacheScope !== null);
     const normalizedScope = this.normalizePathScopeOptions(options);
-    const cacheKey = this.getKeywordFallbackSearchCacheKey(query, topK, normalizedScope);
-    if (!bypassCache) {
+    const cacheKey = resultCacheScope
+      ? buildScopedCacheKey(resultCacheScope, 'keyword-fallback-search', {
+          requestCacheIdentity: this.getKeywordFallbackSearchCacheKey(query, topK, normalizedScope),
+        })
+      : !requireFreshScope ? this.getKeywordFallbackSearchCacheKey(query, topK, normalizedScope) : null;
+    if (cacheable && cacheKey) {
       const cached = this.getCachedKeywordFallbackSearch(cacheKey);
       if (cached) {
         this.cacheHits++;
@@ -5993,9 +6384,11 @@ export class ContextServiceClient {
 
       const inFlightRequest = this.keywordFallbackSearchInFlight.get(cacheKey);
       if (inFlightRequest && inFlightRequest.generation === this.keywordFallbackSearchCacheGeneration) {
-        inFlightRequest.shouldCache = inFlightRequest.shouldCache || !bypassCache;
+        inFlightRequest.shouldCache = inFlightRequest.shouldCache || cacheable;
         this.cacheHits++;
-        return inFlightRequest.promise;
+        const results = await inFlightRequest.promise;
+        throwIfAborted(signal);
+        return results;
       }
     }
 
@@ -6016,7 +6409,9 @@ export class ContextServiceClient {
           .filter((token) => token.length >= 3 && !stopwords.has(token))
       )
     );
-    if (queryTokens.length === 0) return [];
+    // The opt-in analyzer accepts Unicode terms that the legacy ASCII guard drops.
+    if (queryTokens.length === 0 && (!featureEnabled('retrieval_local_repair_v1')
+      || tokenizeLocalSearch(cleanedQuery).length === 0)) return [];
 
     const symbolTokens = Array.from(
       new Set(
@@ -6078,8 +6473,9 @@ export class ContextServiceClient {
       if (!chunkSearchEngine) {
         return [];
       }
+      throwIfAborted(signal);
       const chunkResults = await chunkSearchEngine.search(rawQuery, topK, {
-        bypassCache,
+        bypassCache: requireFreshScope || bypassCache,
         workspacePath: this.workspacePath,
         includeArtifacts,
         includeDocs,
@@ -6090,6 +6486,7 @@ export class ContextServiceClient {
         opsEvidenceIntent,
         normalizedQuery,
       });
+      throwIfAborted(signal);
       return this.filterSearchResultsByScope(chunkResults, normalizedScope);
     };
 
@@ -6100,7 +6497,7 @@ export class ContextServiceClient {
           const indexStatePath = path.join(this.workspacePath, '.context-engine-index-state.json');
           const sqliteIndexPath = path.join(this.workspacePath, '.context-engine-lexical-index.sqlite');
           const lexicalResults = await lexicalSearchEngine.search(rawQuery, topK, {
-            bypassCache,
+            bypassCache: requireFreshScope || bypassCache,
             workspacePath: this.workspacePath,
             indexStatePath,
             sqliteIndexPath,
@@ -6113,6 +6510,7 @@ export class ContextServiceClient {
             opsEvidenceIntent,
             normalizedQuery,
           });
+          throwIfAborted(signal);
           const scopedLexicalResults = this.filterSearchResultsByScope(lexicalResults, normalizedScope);
           if (scopedLexicalResults.length > 0) {
             if (shouldBlendChunkSearch) {
@@ -6120,11 +6518,14 @@ export class ContextServiceClient {
               try {
                 scopedChunkResults = await runChunkSearch();
               } catch (error) {
+                if (isLocalRetrievalBudgetError(error)) throw error;
+                throwIfAborted(signal);
                 if (process.env.CE_DEBUG_SEARCH === 'true') {
                   console.error('[chunkSearch] Helper search failed during lexical blend, keeping SQLite results:', error);
                 }
               }
               if (scopedChunkResults.length > 0) {
+                this.lastLocalSearchBackend = 'sqlite-chunk-blend';
                 const mergedResults = mergeKeywordFallbackResults(scopedChunkResults, scopedLexicalResults);
                 this.setLastSearchDiagnostics({
                   filters_applied: normalizedScope ? ['scope:lexical', 'scope:chunk'] : [],
@@ -6142,9 +6543,12 @@ export class ContextServiceClient {
               filtered_paths_count: Math.max(0, lexicalResults.length - scopedLexicalResults.length),
               second_pass_used: false,
             });
+            this.lastLocalSearchBackend = 'sqlite-fts5';
             return shouldBlendChunkSearch ? rerankKeywordFallbackResults(scopedLexicalResults) : scopedLexicalResults;
           }
         } catch (error) {
+          if (isLocalRetrievalBudgetError(error)) throw error;
+          throwIfAborted(signal);
           if (process.env.CE_DEBUG_SEARCH === 'true') {
             console.error('[lexicalSearch] SQLite helper search failed, falling back to chunk/file scan:', error);
           }
@@ -6156,6 +6560,7 @@ export class ContextServiceClient {
       try {
         const scopedChunkResults = await runChunkSearch();
         if (scopedChunkResults.length > 0) {
+          this.lastLocalSearchBackend = 'chunk-index';
           this.setLastSearchDiagnostics({
             filters_applied: normalizedScope ? ['scope:chunk'] : [],
             filtered_paths_count: 0,
@@ -6164,6 +6569,8 @@ export class ContextServiceClient {
           return shouldBlendChunkSearch ? rerankKeywordFallbackResults(scopedChunkResults) : scopedChunkResults;
         }
       } catch (error) {
+        if (isLocalRetrievalBudgetError(error)) throw error;
+        throwIfAborted(signal);
         if (process.env.CE_DEBUG_SEARCH === 'true') {
           console.error('[chunkSearch] Helper search failed, falling back to file scan:', error);
         }
@@ -6171,7 +6578,9 @@ export class ContextServiceClient {
     }
 
     const computeKeywordFallbackSearch = async (): Promise<SearchResult[]> => {
-      const allFiles = await this.getCachedFallbackFiles(options);
+      this.lastLocalSearchBackend = 'file-scan';
+      if (featureEnabled('retrieval_local_repair_v1')) this.loadIgnorePatterns(true, true);
+      const allFiles = await this.getCachedFallbackFiles({ bypassCache: requireFreshScope || bypassCache });
       const files = this.filterPathsByScope(allFiles, normalizedScope);
       if (files.length === 0) return [];
       const filtersApplied: string[] = [];
@@ -6181,6 +6590,74 @@ export class ContextServiceClient {
       if (pureCodeIntent && !includeArtifacts) filtersApplied.push('exclude:artifacts');
       if (codeIntent && !includeDocs) filtersApplied.push('deprioritize:docs');
       if (codeIntent && !includeJson) filtersApplied.push('deprioritize:json');
+
+      if (featureEnabled('retrieval_local_repair_v1')) {
+        const eligible = files.filter(file => !(pureCodeIntent && !includeArtifacts && file.replace(/\\/g, '/').toLowerCase().startsWith('artifacts/')));
+        const buffer = new LocalRepairDocumentBuffer();
+        const documents = buffer.documents;
+        const addDocument = (document: {path:string;content:string}) => {
+          const compact = prepareLocalRepairDocument(document,cleanedQuery,this.localRepairAnalysisCache,signal);
+          if (compact) buffer.add(compact);
+        };
+        // Preserve the legacy artifact-only second pass without discarding scoped files.
+        const candidates = eligible.length ? eligible : files;
+        for (let index = 0; index < candidates.length; index += FALLBACK_SEARCH_READ_CONCURRENCY) {
+          throwIfAborted(signal);
+          const batch = await Promise.all(candidates.slice(index, index + FALLBACK_SEARCH_READ_CONCURRENCY).map(async file => {
+            try {
+              const content = await this.getFallbackSearchFileContent(file, true, signal);
+              throwIfAborted(signal);
+              return { path: file.replace(/\\/g, '/'), content };
+            } catch {
+              throwIfAborted(signal);
+              return null;
+            }
+          }));
+          for (const document of batch) if (document) addDocument(document);
+        }
+        const rankingPolicy = { deprioritizeDocs: codeIntent && !includeDocs, deprioritizeJson: codeIntent && !includeJson,
+          preferImplementation: !(includeDocs || includeJson || includeArtifacts) };
+        let results = rankLocalRepairDocuments(documents, cleanedQuery, documents.length, undefined, signal, rankingPolicy, this.localRepairAnalysisCache);
+        let secondPassUsed = eligible.length === 0 && files.length > 0;
+        if (!results.length && eligible.length > 0 && eligible.length < files.length) {
+          secondPassUsed = true;
+          const excluded = files.filter(file => !eligible.includes(file));
+          for (let index = 0; index < excluded.length; index += FALLBACK_SEARCH_READ_CONCURRENCY) {
+            throwIfAborted(signal);
+            const batch = await Promise.all(excluded.slice(index, index + FALLBACK_SEARCH_READ_CONCURRENCY).map(async file => {
+              try { return { path: file.replace(/\\/g, '/'), content: await this.getFallbackSearchFileContent(file, true, signal) }; }
+              catch { throwIfAborted(signal); return null; }
+            }));
+            for (const document of batch) if (document) addDocument(document);
+          }
+          results = rankLocalRepairDocuments(documents, cleanedQuery, documents.length, undefined, signal, rankingPolicy, this.localRepairAnalysisCache);
+        }
+        throwIfAborted(signal);
+        this.setLastSearchDiagnostics({ filters_applied: filtersApplied,
+          filtered_paths_count: scopeFilteredPathsCount + files.length - eligible.length,
+          second_pass_used: secondPassUsed });
+        const selected: SearchResult[] = [];
+        const queryTerms = new Set(tokenizeLocalSearch(cleanedQuery));
+        for (const result of results) {
+          throwIfAborted(signal);
+          try {
+            const content = await this.getFallbackSearchFileContent(result.path,true,signal);
+            const analysis = this.localRepairAnalysisCache.get(result.path,content,signal);
+            if (![...queryTerms].some(term=>analysis.frequencies.has(term))) continue;
+            const snippet = selectLocalSnippet(content,cleanedQuery,analysis);
+            const prefix = content.split('\n').slice(0,8).join('\n').slice(0,1600);
+            selected.push({...result,content:snippet?.content ?? prefix,
+              lines:snippet?.lines ?? `1-${prefix.split('\n').length}`});
+            if (selected.length >= topK) break;
+          } catch (error) {
+            if (isLocalRetrievalBudgetError(error)) throw error;
+            throwIfAborted(signal);
+            // A selected path may disappear, grow or become unsafe after scoring.
+          }
+        }
+        throwIfAborted(signal);
+        return selected;
+      }
 
       const runPass = async (allowHardExclusions: boolean): Promise<{
         rankedResults: Array<SearchResult & { __score: number }>;
@@ -6234,7 +6711,9 @@ export class ContextServiceClient {
           candidate: { filePath: string; score: number }
         ): Promise<(SearchResult & { __score: number }) | null> => {
           try {
-            const content = await this.getFallbackSearchFileContent(candidate.filePath, bypassCache);
+            throwIfAborted(signal);
+            const content = await this.getFallbackSearchFileContent(candidate.filePath, requireFreshScope || bypassCache, signal);
+            throwIfAborted(signal);
             const lowerContent = content.toLowerCase();
             let matchIndex = lowerContent.indexOf(normalizedQuery);
             if (matchIndex === -1) {
@@ -6310,6 +6789,7 @@ export class ContextServiceClient {
               __score: finalScore,
             };
           } catch {
+            throwIfAborted(options?.signal);
             // Skip files that cannot be read in fallback mode.
             return null;
           }
@@ -6366,30 +6846,41 @@ export class ContextServiceClient {
     };
 
     const currentGeneration = this.keywordFallbackSearchCacheGeneration;
+    const inFlightKey = cacheKey ?? `uncacheable:${crypto.randomUUID()}`;
     const sharedRequest: KeywordFallbackSearchInFlightRequest = {
       generation: currentGeneration,
-      shouldCache: !bypassCache,
+      shouldCache: cacheable,
       promise: Promise.resolve().then(async () => {
         const rankedResults = await computeKeywordFallbackSearch();
+        throwIfAborted(signal);
         if (
           sharedRequest.generation === this.keywordFallbackSearchCacheGeneration &&
           sharedRequest.shouldCache &&
-          options?.signal?.aborted !== true
+          options?.signal?.aborted !== true &&
+          cacheKey
         ) {
-          this.setCachedKeywordFallbackSearch(cacheKey, rankedResults);
+          const currentScope = requireFreshScope ? await this.getResultCacheScope(signal) : null;
+          throwIfAborted(signal);
+          if ((!requireFreshScope || currentScope === resultCacheScope)
+            && sharedRequest.generation === this.keywordFallbackSearchCacheGeneration
+            && sharedRequest.shouldCache && !Boolean(options?.signal?.aborted)) {
+            this.setCachedKeywordFallbackSearch(cacheKey, rankedResults);
+          }
         }
         return rankedResults;
       }),
     };
-    if (!bypassCache) {
-      this.keywordFallbackSearchInFlight.set(cacheKey, sharedRequest);
+    if (!requireFreshScope || cacheable) {
+      this.keywordFallbackSearchInFlight.set(inFlightKey, sharedRequest);
     }
 
     try {
-      return await sharedRequest.promise;
+      const results = await sharedRequest.promise;
+      throwIfAborted(signal);
+      return results;
     } finally {
-      if (this.keywordFallbackSearchInFlight.get(cacheKey) === sharedRequest) {
-        this.keywordFallbackSearchInFlight.delete(cacheKey);
+      if (this.keywordFallbackSearchInFlight.get(inFlightKey) === sharedRequest) {
+        this.keywordFallbackSearchInFlight.delete(inFlightKey);
       }
     }
   }

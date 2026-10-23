@@ -11,6 +11,13 @@ const { ContextServiceClient } = await import('../../src/mcp/serviceClient.js');
 const { FEATURE_FLAGS } = await import('../../src/config/features.js');
 
 describe('corpusFreshness (R4)', () => {
+  it('uses one generation identity for Windows and portable separators', () => {
+    expect(computeIndexGenerationFingerprint({ 'src\\cache.ts': { hash: 'content' } }))
+      .toBe(computeIndexGenerationFingerprint({ 'src/cache.ts': { hash: 'content' } }));
+    expect(() => computeIndexGenerationFingerprint({
+      'src\\cache.ts': { hash: 'same' }, 'src/cache.ts': { hash: 'same' },
+    })).toThrow(/ambiguous/i);
+  });
   it('classifies generation/content/add/delete causes without using age', () => {
     const indexed = {
       'a.ts': { hash: 'aaa' },

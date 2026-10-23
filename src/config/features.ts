@@ -1,6 +1,8 @@
 import { envBool, envPerfProfile, type ParsedPerfProfile } from './env.js';
 
 export interface FeatureFlags {
+  /** Experimental local candidate discovery/ranking repair; never enabled by a profile. */
+  retrieval_local_repair_v1: boolean;
   /** Global rollout kill switch for retrieval pipeline optimizations. */
   rollout_kill_switch: boolean;
   /** Enable draft-first memory suggestion detection and review flows. */
@@ -59,6 +61,7 @@ export type PerfProfile = ParsedPerfProfile;
 type FeatureFlagName = keyof FeatureFlags;
 
 const FEATURE_FLAG_ENV_VARS = {
+  retrieval_local_repair_v1: 'CE_RETRIEVAL_LOCAL_REPAIR_V1',
   rollout_kill_switch: 'CE_ROLLOUT_KILL_SWITCH',
   memory_suggestions_v1: 'CE_MEMORY_SUGGESTIONS_V1',
   memory_draft_retrieval_v1: 'CE_MEMORY_DRAFT_RETRIEVAL_V1',

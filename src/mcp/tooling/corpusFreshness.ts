@@ -37,10 +37,25 @@ export interface CorpusFreshnessAssessment {
   filesContentChanged: number;
 }
 
+/** Canonicalize separators without silently merging distinct indexed entries. */
+export function canonicalizeIndexFiles(
+  files: Record<string, { hash: string }>
+): Record<string, { hash: string }> {
+  const canonical: Record<string, { hash: string }> = Object.create(null);
+  for (const [rawPath, entry] of Object.entries(files)) {
+    const normalized = rawPath.replace(/\\/g, '/');
+    if (Object.hasOwn(canonical, normalized)) {
+      throw new Error('Ambiguous index paths after separator normalization');
+    }
+    canonical[normalized] = { hash: entry.hash };
+  }
+  return canonical;
+}
+
 function sortedPathHashEntries(
   files: Record<string, { hash: string }>
 ): Array<{ path: string; hash: string }> {
-  return Object.entries(files)
+  return Object.entries(canonicalizeIndexFiles(files))
     .map(([path, entry]) => ({ path, hash: entry.hash }))
     .sort((left, right) => left.path.localeCompare(right.path));
 }
